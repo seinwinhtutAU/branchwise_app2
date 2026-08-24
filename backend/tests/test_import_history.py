@@ -1,0 +1,196 @@
+import io
+
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from app.models.branch import Branch
+from app.models.import_batch import ImportBatch, ImportBatchStatus
+from app.models.sale import Sale, SaleLine
+from app.models.user import User, UserRole
+
+SALE_CSV = (
+    "﻿Printed : 8/21/2026  7:10:05PM,Aung Thit Sar,,,,,,,,,,\r\n"
+    "Other Code,Stock Code,Description,Location,Price,Qty,UOM,Discount Amount,Amount,Net Amount,,\r\n"
+    "Date,:,8/21/2026,,,,,,,,,\r\n"
+    "Slip Number,:,2,Time,:,13:55:22,Counter,:,Counter1,UserID,:,Admin\r\n"
+    ',U16085,Maldini,Aung Thit Sar,"72,500.00",1.00,Each,0.00,"72,500.00","72,500.00",,\r\n'
+    '1.00,0.00,"72,500.00","72,500.00",,,,,,,,\r\n'
+)
+
+
+def _make_user(db_session: Session, *, branch_name: str | None) -> Branch | None:
+    branch = None
+    if branch_name is not None:
+        branch = Branch(name=branch_name, phone_number="000", address="TBD")
+        db_session.add(branch)
+        db_session.flush()
+
+    db_session.add(
+        User(
+            id="test-user-id",
+            name="Test User",
+            email="test@example.com",
+            role=UserRole.RETAIL if branch else UserRole.ADMIN,
+            branch_id=branch.id if branch else None,
+        )
+    )
+    db_session.commit()
+    return branch
+
+
+def _confirm_sale(authed_client: TestClient) -> dict:
+    response = authed_client.post(
+        "/api/imports/sales/confirm",
+        files={"file": ("sale.csv", io.BytesIO(SALE_CSV.encode()), "text/csv")},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_confirm_creates_linked_batch(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+
+    batch = db_session.get(ImportBatch, summary["batch_id"])
+    assert batch is not None
+    assert batch.status == ImportBatchStatus.COMPLETED
+    assert batch.summary["sales_created"] == 1
+
+    sale = db_session.query(Sale).one()
+    assert sale.import_batch_id == batch.id
+
+
+def test_history_lists_own_branch_only(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    _confirm_sale(authed_client)
+
+    response = authed_client.get("/api/imports/history")
+    assert response.status_code == 200
+    rows = response.json()
+    assert len(rows) == 1
+    assert rows[0]["import_type"] == "sales"
+    assert rows[0]["branch_name"] == "Retail 1"
+    assert rows[0]["status"] == "completed"
+
+
+def test_admin_sees_all_branches(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    _confirm_sale(authed_client)
+
+    # swap the same account to admin (no branch) to check the "see everything" path
+    db_session.query(User).filter(User.id == "test-user-id").update(
+        {"branch_id": None, "role": UserRole.ADMIN}
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/imports/history")
+    assert len(response.json()) == 1
+
+
+def test_history_detail_returns_origin_and_clean_data(
+    authed_client: TestClient, db_session: Session
+):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+    batch_id = summary["batch_id"]
+
+    response = authed_client.get(f"/api/imports/history/{batch_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["import_type"] == "sales"
+    assert body["summary"]["sales_created"] == 1
+    assert body["clean"]["columns"]
+    assert len(body["clean"]["rows"]) == 1
+    assert body["clean"]["rows"][0]["StockCode"] == "U16085"
+    assert len(body["origin"]["rows"]) > 0
+
+
+def test_history_detail_unknown_batch_404(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    response = authed_client.get("/api/imports/history/does-not-exist")
+    assert response.status_code == 404
+
+
+def test_history_detail_other_branch_404(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+    batch_id = summary["batch_id"]
+
+    other_branch = Branch(name="Retail 2", phone_number="000", address="TBD")
+    db_session.add(other_branch)
+    db_session.flush()
+    db_session.query(User).filter(User.id == "test-user-id").update(
+        {"branch_id": other_branch.id}
+    )
+    db_session.commit()
+
+    response = authed_client.get(f"/api/imports/history/{batch_id}")
+    assert response.status_code == 404
+
+
+def test_revert_deletes_data_but_keeps_batch(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+    batch_id = summary["batch_id"]
+
+    response = authed_client.post(f"/api/imports/history/{batch_id}/revert")
+    assert response.status_code == 200
+    assert response.json()["status"] == "reverted"
+
+    assert db_session.query(Sale).count() == 0
+    assert db_session.query(SaleLine).count() == 0
+
+    batch = db_session.get(ImportBatch, batch_id)
+    assert batch is not None
+    assert batch.status == ImportBatchStatus.REVERTED
+    assert batch.reverted_at is not None
+    assert batch.reverted_by == "test-user-id"
+
+
+def test_revert_twice_conflicts(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+    batch_id = summary["batch_id"]
+
+    authed_client.post(f"/api/imports/history/{batch_id}/revert")
+    response = authed_client.post(f"/api/imports/history/{batch_id}/revert")
+    assert response.status_code == 409
+
+
+def test_revert_unknown_batch_404(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    response = authed_client.post("/api/imports/history/does-not-exist/revert")
+    assert response.status_code == 404
+
+
+def test_non_admin_cannot_revert_other_branch_batch(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+    batch_id = summary["batch_id"]
+
+    # move the same account to a different branch — it should no longer see/revert this batch
+    other_branch = Branch(name="Retail 2", phone_number="000", address="TBD")
+    db_session.add(other_branch)
+    db_session.flush()
+    db_session.query(User).filter(User.id == "test-user-id").update(
+        {"branch_id": other_branch.id}
+    )
+    db_session.commit()
+
+    list_response = authed_client.get("/api/imports/history")
+    assert list_response.json() == []
+
+    revert_response = authed_client.post(f"/api/imports/history/{batch_id}/revert")
+    assert revert_response.status_code == 404
+
+
+def test_reverted_slip_can_be_reimported(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+    batch_id = summary["batch_id"]
+
+    authed_client.post(f"/api/imports/history/{batch_id}/revert")
+
+    second = _confirm_sale(authed_client)
+    assert second["sales_created"] == 1
+    assert second["sales_skipped_duplicate"] == 0

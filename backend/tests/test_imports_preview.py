@@ -1,0 +1,94 @@
+import io
+
+from fastapi.testclient import TestClient
+
+# Sales: one good row (Qty=1), one bad row (Qty=0 — below the minimum of 1)
+SALE_CSV = (
+    "﻿Printed : 8/21/2026  7:10:05PM,Aung Thit Sar,,,,,,,,,,\r\n"
+    "Other Code,Stock Code,Description,Location,Price,Qty,UOM,Discount Amount,Amount,Net Amount,,\r\n"
+    "Date,:,8/21/2026,,,,,,,,,\r\n"
+    "Slip Number,:,2,Time,:,13:55:22,Counter,:,Counter1,UserID,:,Admin\r\n"
+    ',U16085,Maldini,Aung Thit Sar,"72,500.00",1.00,Each,0.00,"72,500.00","72,500.00",,\r\n'
+    '1.00,0.00,"72,500.00","72,500.00",,,,,,,,\r\n'
+    "Slip Number,:,3,Time,:,14:00:00,Counter,:,Counter1,UserID,:,Admin\r\n"
+    ',U16086,BadRow,Aung Thit Sar,"1,000.00",0.00,Each,0.00,"0.00","0.00",,\r\n'
+    '0.00,0.00,"0.00","0.00",,,,,,,,\r\n'
+)
+
+# Purchase: one good row, one bad row (negative Buying_Price)
+PURCHASE_CSV = (
+    "Stock Code,Description,Location,Bin,Quantity,UOM,Unit Cost\r\n"
+    "Crocs,Crocs,Aung Thit Sar,,6,Each,20050\r\n"
+    "Bad,Bad,Aung Thit Sar,,1,Each,-5\r\n"
+)
+
+# Inventory: one good row, one bad row (negative On Hand Qty)
+INVENTORY_CSV = (
+    "﻿Printed : 8/21/2026  7:07:11PM,Aung Thit Sar,,,,,,,,,,,,,,\r\n"
+    'Stk. Code,Other Code,Description,Location,Bin,Category,Group,Brand,"On Hand \n'
+    'Qty","POS Sales\n'
+    ' Qty","Outstanding \n'
+    'Qty",Total Qty,Cost,Price,Price Amount,Cost Amount\r\n'
+    '020-724000A,,Fashion,Aung Thit Sar,,,Lady,,4.00,0.00,0.00,4.00,"25,400.00","34,500.00","138,000.00","101,600.00"\r\n'
+    '020-724001A,,Bad,Aung Thit Sar,,,Lady,,-1.00,0.00,0.00,-1.00,"25,400.00","34,500.00","0.00","0.00"\r\n'
+)
+
+
+def test_sales_preview_flags_bad_qty(authed_client: TestClient):
+    response = authed_client.post(
+        "/api/imports/sales",
+        files={"file": ("sale.csv", io.BytesIO(SALE_CSV.encode()), "text/csv")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+
+    clean_issues = body["clean"]["row_issues"]
+    assert clean_issues[0] == []
+    assert clean_issues[1] == [{"column": "Qty", "message": "Quantity can't be zero — enter at least 1"}]
+
+    origin = body["origin"]
+    assert len(origin["row_issues"]) == len(origin["rows"])
+    bad_rows = [i for i, issues in enumerate(origin["row_issues"]) if issues]
+    assert len(bad_rows) == 1
+    assert origin["rows"][bad_rows[0]][1] == "U16086"
+    assert origin["row_issues"][bad_rows[0]] == clean_issues[1]
+
+
+def test_purchase_preview_flags_negative_price(authed_client: TestClient):
+    response = authed_client.post(
+        "/api/imports/purchase",
+        files={"file": ("purchase.csv", io.BytesIO(PURCHASE_CSV.encode()), "text/csv")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+
+    clean_issues = body["clean"]["row_issues"]
+    assert clean_issues[0] == []
+    assert clean_issues[1] == [
+        {"column": "Buying_Price", "message": "Buying Price can't be a negative number"}
+    ]
+
+    origin = body["origin"]
+    bad_rows = [i for i, issues in enumerate(origin["row_issues"]) if issues]
+    assert len(bad_rows) == 1
+    assert origin["rows"][bad_rows[0]][0] == "Bad"
+
+
+def test_inventory_preview_flags_negative_qty(authed_client: TestClient):
+    response = authed_client.post(
+        "/api/imports/inventory",
+        files={"file": ("inventory.csv", io.BytesIO(INVENTORY_CSV.encode()), "text/csv")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+
+    clean_issues = body["clean"]["row_issues"]
+    assert clean_issues[0] == []
+    assert clean_issues[1] == [
+        {"column": "On_Hand_Qty", "message": "Stock Quantity can't be a negative number"}
+    ]
+
+    origin = body["origin"]
+    bad_rows = [i for i, issues in enumerate(origin["row_issues"]) if issues]
+    assert len(bad_rows) == 1
+    assert origin["rows"][bad_rows[0]][0] == "020-724001A"

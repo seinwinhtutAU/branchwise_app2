@@ -1,0 +1,24 @@
+node_modules
+dist
+out
+.DS_Store
+*.log*
+.eslintcache
+*.tsbuildinfo
+
+# Python
+backend/.venv
+backend/__pycache__
+backend/**/__pycache__
+backend/*.egg-info
+backend/app.db
+app.db
+backend/.pytest_cache
+*.pyc
+
+# env files (never commit real secrets)
+.env
+backend/.env
+
+# real business data exports (not code, not for repo history)
+retail_data/

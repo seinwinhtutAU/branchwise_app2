@@ -1,0 +1,57 @@
+import enum
+import uuid
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+from sqlalchemy import JSON, DateTime, Enum, ForeignKey, String, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.models.branch import Branch
+    from app.models.user import User
+
+
+class ImportType(str, enum.Enum):
+    SALES = "sales"
+    INVENTORY = "inventory"
+    PURCHASE = "purchase"
+
+
+class ImportBatchStatus(str, enum.Enum):
+    COMPLETED = "completed"
+    REVERTED = "reverted"
+
+
+class ImportBatch(Base):
+    __tablename__ = "import_batches"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    import_type: Mapped[ImportType] = mapped_column(
+        Enum(ImportType, values_callable=lambda enum_cls: [member.value for member in enum_cls]),
+        nullable=False,
+    )
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True)
+    uploaded_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[ImportBatchStatus] = mapped_column(
+        Enum(ImportBatchStatus, values_callable=lambda enum_cls: [member.value for member in enum_cls]),
+        nullable=False,
+        default=ImportBatchStatus.COMPLETED,
+    )
+    summary: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # Snapshot of the origin/clean grids shown at confirm time (same shape as the
+    # preview endpoints' response) — the persisted Sale/PurchaseLine/StockLevel rows
+    # don't preserve the original file layout or row-level validation notes, so this
+    # is what backs the "view this past import" history detail page.
+    preview_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    reverted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reverted_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    branch: Mapped["Branch | None"] = relationship(
+        back_populates="import_batches", foreign_keys=[branch_id]
+    )
+    uploaded_by_user: Mapped["User | None"] = relationship(foreign_keys=[uploaded_by])
+    reverted_by_user: Mapped["User | None"] = relationship(foreign_keys=[reverted_by])

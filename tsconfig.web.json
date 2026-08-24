@@ -1,0 +1,15 @@
+{
+  "extends": "@electron-toolkit/tsconfig/tsconfig.web.json",
+  "include": [
+    "frontend/renderer/src/env.d.ts",
+    "frontend/renderer/src/**/*",
+    "frontend/preload/*.d.ts"
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "baseUrl": ".",
+    "paths": {
+      "@renderer/*": ["frontend/renderer/src/*"]
+    }
+  }
+}
