@@ -16,6 +16,7 @@
     "backend:dev": "uv run --directory backend uvicorn app.main:app --reload --port 8000",
     "dev:all": "concurrently -k -n backend,frontend -c green,blue \"npm:backend:dev\" \"npm:dev\"",
     "build": "npm run typecheck && electron-vite build",
+    "build:web": "vite build --config vite.web.config.ts",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
