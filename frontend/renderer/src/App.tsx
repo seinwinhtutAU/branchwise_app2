@@ -10,6 +10,8 @@ import ImportHistoryTable from '@renderer/components/features/ImportHistoryTable
 import ImportHistoryDetailPage from '@renderer/components/features/ImportHistoryDetailPage'
 import ImportOverviewPage from '@renderer/components/features/ImportOverviewPage'
 import DataOverviewTable from '@renderer/components/features/DataOverviewTable'
+import CustomerOrdersPage from '@renderer/components/features/CustomerOrdersPage'
+import FactoryVouchersPage from '@renderer/components/features/FactoryVouchersPage'
 import {
   SimpleDataTable,
   type DataTableColumn,
@@ -17,7 +19,7 @@ import {
 } from '@renderer/components/features/SimpleDataTable'
 import type { PendingImport, Profile } from '@renderer/components/features/types'
 import { useBranches } from '@renderer/lib/useBranches'
-import { EmptyState } from '@renderer/components/ui/EmptyState'
+import { Spinner } from '@renderer/components/ui/Spinner'
 import {
   UploadIcon,
   HistoryIcon,
@@ -26,10 +28,20 @@ import {
   SalesIcon,
   InventoryIcon,
   PurchaseIcon,
-  ConstructionIcon
+  ClipboardIcon,
+  FactoryIcon
 } from '@renderer/components/ui/icons'
 
-type Section = 'import' | 'history' | 'importOverview' | 'overview' | 'sales' | 'inventory' | 'purchase'
+type Section =
+  | 'import'
+  | 'history'
+  | 'importOverview'
+  | 'overview'
+  | 'sales'
+  | 'inventory'
+  | 'purchase'
+  | 'orders'
+  | 'vouchers'
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'import', label: 'Import', icon: <UploadIcon /> },
@@ -41,6 +53,11 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'purchase', label: 'Purchase', icon: <PurchaseIcon /> }
 ]
 
+const WHOLESALE_NAV_ITEMS: NavItem[] = [
+  { id: 'orders', label: 'Customer Orders', icon: <ClipboardIcon /> },
+  { id: 'vouchers', label: 'Factory Vouchers', icon: <FactoryIcon /> }
+]
+
 const SECTION_TITLES: Record<Section, string> = {
   import: 'Import data',
   history: 'Import history',
@@ -48,7 +65,9 @@ const SECTION_TITLES: Record<Section, string> = {
   overview: 'Data overview',
   sales: 'Sale',
   inventory: 'Inventory',
-  purchase: 'Purchase'
+  purchase: 'Purchase',
+  orders: 'Customer orders',
+  vouchers: 'Factory vouchers'
 }
 
 interface SaleRow {
@@ -153,7 +172,8 @@ function App(): React.JSX.Element {
   const showToast = useToast()
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [section, setSection] = useState<Section>('import')
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [rawSection, setSection] = useState<Section>('import')
   const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -176,14 +196,17 @@ function App(): React.JSX.Element {
   useEffect(() => {
     if (!session) {
       setProfile(null)
+      setProfileLoading(false)
       return
     }
+    setProfileLoading(true)
     fetch(`${apiBaseUrl}/api/me`, {
       headers: { Authorization: `Bearer ${session.access_token}` }
     })
       .then((r) => (r.ok ? r.json() : null))
       .then(setProfile)
       .catch(() => setProfile(null))
+      .finally(() => setProfileLoading(false))
   }, [session])
 
   // Admin accounts (no fixed branch_id) see every branch's data merged, so their filter
@@ -192,10 +215,17 @@ function App(): React.JSX.Element {
   // for them; SimpleDataTable/ImportHistoryTable/DataOverviewTable fall back to deriving
   // options from loaded rows, which naturally hides a pointless single-branch filter.
   const isAdmin = profile !== null && profile.branch_id === null
-  // Wholesale runs on a different workflow than retail and doesn't have its own UI yet —
-  // none of the import/sale/inventory/purchase/history/overview screens apply to it, so a
-  // wholesale account just sees a placeholder instead of retail-shaped empty tables.
+  // Wholesale runs on a completely separate workflow than retail (its own product codes,
+  // customer orders, factory vouchers) — none of the import/sale/inventory/purchase/
+  // history/overview screens apply to it, so a wholesale account only sees the wholesale
+  // nav. Admin sees both, since admin already sees every branch's data elsewhere.
   const isWholesale = profile !== null && profile.role === 'wholesale'
+  // A wholesale-only account has no use for the retail-shaped default landing section — its
+  // nav never offers 'import' to click into, so 'import' here can only mean "still on the
+  // untouched initial value," and we substitute its own nav's first item instead. Derived
+  // at render time (not corrected after the fact via an effect) so there's no frame where
+  // the wrong section's UI briefly renders before a correction catches up.
+  const section: Section = rawSection === 'import' && isWholesale ? 'orders' : rawSection
   const branchOptions = useBranches(isAdmin ? session : null)
 
   const saleFilters: DataTableFilter<SaleRow>[] = useMemo(
@@ -302,9 +332,22 @@ function App(): React.JSX.Element {
     )
   }
 
+  // Which nav/section a signed-in account sees depends on its role (retail vs. wholesale vs.
+  // admin), known only once /api/me resolves. Rendering the shell before that would default
+  // to the retail nav/section for every role — including wholesale — producing a visible
+  // flash of retail UI right after sign-in. Waiting here instead means the shell only ever
+  // renders once with the correct role-specific nav.
+  if (profileLoading) {
+    return (
+      <div className="min-h-screen bg-bg-subtle flex items-center justify-center">
+        <Spinner className="w-6 h-6 text-text-muted" />
+      </div>
+    )
+  }
+
   return (
     <AppShell
-      navItems={isWholesale ? [] : NAV_ITEMS}
+      navItems={isWholesale ? WHOLESALE_NAV_ITEMS : isAdmin ? [...NAV_ITEMS, ...WHOLESALE_NAV_ITEMS] : NAV_ITEMS}
       activeSection={section}
       onSectionChange={handleSectionChange}
       email={session.user.email}
@@ -313,13 +356,7 @@ function App(): React.JSX.Element {
       debugAction={import.meta.env.DEV ? { label: 'Call /api/me', onClick: callMe } : undefined}
       debugResult={me}
     >
-      {isWholesale ? (
-        <EmptyState
-          icon={<ConstructionIcon />}
-          title="Wholesale is on the way"
-          description="This part of the app isn't built yet — check back soon."
-        />
-      ) : pendingImport ? (
+      {pendingImport ? (
         <ImportReviewPage
           session={session}
           profile={profile}
@@ -424,6 +461,8 @@ function App(): React.JSX.Element {
               emptyDescription="Import a purchase file to see it here."
             />
           )}
+          {section === 'orders' && <CustomerOrdersPage session={session} profile={profile} />}
+          {section === 'vouchers' && <FactoryVouchersPage session={session} profile={profile} />}
         </>
       )}
     </AppShell>

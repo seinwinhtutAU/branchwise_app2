@@ -38,3 +38,34 @@ export function useBranches(session: Session | null): string[] {
 
   return names
 }
+
+// id+name pairs (not just display names) for a branch picker whose selection is actually
+// submitted somewhere — e.g. an admin account choosing which wholesale branch a new
+// customer order/factory voucher belongs to. Pass `null` to skip fetching.
+export function useWholesaleBranchOptions(session: Session | null): BranchOption[] {
+  const [options, setOptions] = useState<BranchOption[]>([])
+
+  useEffect(() => {
+    if (!session) {
+      setOptions([])
+      return
+    }
+    let cancelled = false
+    fetch(`${apiBaseUrl}/api/branches?kind=wholesale`, {
+      headers: { Authorization: `Bearer ${session.access_token}` }
+    })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((branches: BranchOption[]) => {
+        if (!cancelled) setOptions(branches)
+      })
+      .catch(() => {
+        if (!cancelled) setOptions([])
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.access_token])
+
+  return options
+}

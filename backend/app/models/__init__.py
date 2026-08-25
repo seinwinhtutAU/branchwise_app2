@@ -5,12 +5,16 @@ from app.models.purchase import Purchase, PurchaseLine
 from app.models.sale import Sale, SaleLine
 from app.models.stock_level import StockLevel
 from app.models.user import User, UserRole
+from app.models.wholesale import CustomerOrder, FactoryVoucher, OrderStatus
 
 __all__ = [
     "Branch",
+    "CustomerOrder",
+    "FactoryVoucher",
     "ImportBatch",
     "ImportBatchStatus",
     "ImportType",
+    "OrderStatus",
     "Product",
     "Purchase",
     "PurchaseLine",
