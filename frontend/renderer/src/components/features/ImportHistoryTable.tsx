@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
 import { useToast } from '@renderer/lib/toast'
+import { cn } from '@renderer/lib/utils'
 import { Button } from '@renderer/components/ui/Button'
 import { Badge } from '@renderer/components/ui/Badge'
 import { CardHeader } from '@renderer/components/ui/Card'
@@ -11,10 +12,19 @@ import { Select } from '@renderer/components/ui/Select'
 import { TableSkeleton } from '@renderer/components/ui/Skeleton'
 import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
 import { Pagination } from '@renderer/components/ui/Pagination'
-import { HistoryIcon } from '@renderer/components/ui/icons'
+import { HistoryIcon, TrashIcon } from '@renderer/components/ui/icons'
 import { useStickyAbove } from '@renderer/lib/useStickyAbove'
 import { distinctValues, inDateRange } from '@renderer/lib/filters'
 import { usePagination } from '@renderer/lib/usePagination'
+import type { Profile } from '@renderer/components/features/types'
+
+const RETAIL_REVERT_WINDOW_MS = 24 * 60 * 60 * 1000
+
+function isRetailRevertLocked(row: ImportBatchRow, profile: Profile | null): boolean {
+  return (
+    profile?.role === 'retail' && Date.now() - new Date(row.created_at).getTime() > RETAIL_REVERT_WINDOW_MS
+  )
+}
 
 interface ImportBatchRow {
   id: string
@@ -32,6 +42,10 @@ interface Props {
   session: Session
   onViewBatch: (batchId: string) => void
   branchOptions: string[]
+  profile: Profile | null
+  // Set when arriving here from a Warning row's "Source Import" link — scrolls that
+  // exact row into view and rings it so it's obvious which one to revert.
+  highlightBatchId?: string | null
 }
 
 function formatDate(iso: string): string {
@@ -41,13 +55,20 @@ function formatDate(iso: string): string {
   })
 }
 
-function ImportHistoryTable({ session, onViewBatch, branchOptions }: Props): React.JSX.Element {
+function ImportHistoryTable({
+  session,
+  onViewBatch,
+  branchOptions,
+  profile,
+  highlightBatchId
+}: Props): React.JSX.Element {
   const showToast = useToast()
   const [rows, setRows] = useState<ImportBatchRow[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
   const [revertingId, setRevertingId] = useState<string | null>(null)
   const { aboveRef, containerStyle } = useStickyAbove()
+  const highlightRowRef = useRef<HTMLTableRowElement | null>(null)
 
   const [typeFilter, setTypeFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -80,6 +101,15 @@ function ImportHistoryTable({ session, onViewBatch, branchOptions }: Props): Rea
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.access_token])
+
+  // Only scrolls the row into view if it's on the current (default, unfiltered) page —
+  // a highlight from Warnings always arrives with filters cleared and page 1, so this
+  // covers the case it's meant for without needing to hunt across pages/filters.
+  useEffect(() => {
+    if (highlightBatchId && highlightRowRef.current) {
+      highlightRowRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [highlightBatchId, rows])
 
   const hasActiveFilters =
     typeFilter !== '' || statusFilter !== '' || branchFilter !== '' || dateFrom !== '' || dateTo !== ''
@@ -266,8 +296,12 @@ function ImportHistoryTable({ session, onViewBatch, branchOptions }: Props): Rea
               {pageItems.map((row) => (
                 <Tr
                   key={row.id}
+                  ref={row.id === highlightBatchId ? highlightRowRef : undefined}
                   onClick={() => onViewBatch(row.id)}
-                  className="cursor-pointer"
+                  className={cn(
+                    'cursor-pointer',
+                    row.id === highlightBatchId && 'ring-2 ring-inset ring-brand bg-brand-subtle'
+                  )}
                 >
                   <Td className="capitalize">{row.import_type}</Td>
                   <Td className="max-w-[12rem] truncate">{row.filename ?? '—'}</Td>
@@ -280,19 +314,29 @@ function ImportHistoryTable({ session, onViewBatch, branchOptions }: Props): Rea
                   </Td>
                   <Td className="text-text-muted whitespace-nowrap">{formatDate(row.created_at)}</Td>
                   <Td>
-                    {row.status === 'completed' && (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleRevert(row.id)
-                        }}
-                        loading={revertingId === row.id}
-                      >
-                        Revert
-                      </Button>
-                    )}
+                    {row.status === 'completed' &&
+                      (isRetailRevertLocked(row, profile) ? (
+                        <span
+                          className="text-xs text-text-muted"
+                          title="Retail accounts can only revert an import within 1 day of importing it"
+                        >
+                          Locked
+                        </span>
+                      ) : (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          aria-label="Revert import"
+                          title="Revert import"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleRevert(row.id)
+                          }}
+                          loading={revertingId === row.id}
+                        >
+                          <TrashIcon className="w-4 h-4" />
+                        </Button>
+                      ))}
                   </Td>
                 </Tr>
               ))}

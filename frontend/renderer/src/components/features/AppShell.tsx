@@ -8,6 +8,8 @@ export interface NavItem {
   id: string
   label: string
   icon: ReactNode
+  dotColor?: string
+  badgeCount?: number
 }
 
 interface AppShellProps {
@@ -62,14 +64,25 @@ export function AppShell({
                 setMobileOpen(false)
               }}
               aria-current={active ? 'page' : undefined}
-              className={`flex items-center gap-3 h-10 px-3 rounded-md text-sm font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base ${
+              className={`relative flex items-center gap-3 h-10 px-3 rounded-md text-sm font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base ${
                 active
                   ? 'bg-brand-subtle text-brand'
                   : 'text-text-secondary hover:bg-bg-raised hover:text-text-primary'
               }`}
             >
+              {item.dotColor && (
+                <span
+                  className={`absolute left-0 top-1.5 bottom-1.5 w-1 rounded-full ${item.dotColor}`}
+                  aria-hidden="true"
+                />
+              )}
               <span className="shrink-0">{item.icon}</span>
-              {item.label}
+              <span className="flex-1 text-left">{item.label}</span>
+              {!!item.badgeCount && (
+                <Badge variant="error" className="shrink-0">
+                  {item.badgeCount}
+                </Badge>
+              )}
             </button>
           )
         })}

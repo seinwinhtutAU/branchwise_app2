@@ -18,15 +18,18 @@ def persist_purchases(
     source_file: str | None,
     uploaded_by: str | None = None,
     preview_data: dict | None = None,
+    purchase_date: datetime.date | None = None,
 ) -> dict:
     """Persist a purchase import as one new Purchase batch per call.
 
     purchase.csv has no natural batch/date key in the source data, so every
-    confirmed import creates a fresh Purchase header (purchase_date = today,
-    as a placeholder until real purchase-order dates are available) with a
-    PurchaseLine per row. Known limitation: re-confirming the same file
-    twice creates duplicate purchase records — there's no source data to
-    detect that with yet.
+    confirmed import creates a fresh Purchase header with a PurchaseLine per
+    row. purchase_date applies to the whole batch (there's no per-line date
+    in the source data either) — it defaults to today but the confirm
+    endpoint lets the importer override it, e.g. when uploading a file for a
+    purchase that happened on an earlier day. Known limitation: re-confirming
+    the same file twice creates duplicate purchase records — there's no
+    source data to detect that with yet.
     """
     batch = ImportBatch(
         id=str(uuid.uuid4()),
@@ -64,7 +67,7 @@ def persist_purchases(
         branch_id=branch_id,
         import_batch_id=batch.id,
         location_raw=location_raw,
-        purchase_date=datetime.date.today(),
+        purchase_date=purchase_date or datetime.date.today(),
         source_file=source_file,
     )
     db.add(purchase)

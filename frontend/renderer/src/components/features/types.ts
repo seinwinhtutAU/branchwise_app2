@@ -38,15 +38,12 @@ export interface ColorQty {
 
 export type OrderStatus = 'not_start' | 'waiting' | 'complete'
 
-export interface CustomerOrder {
+export interface CustomerOrderLine {
   id: string
-  order_no: number
-  branch_id: string | null
-  branch_name: string | null
-  order_date: string
+  order_id: string
   product_code: string
+  description: string | null
   factory_name: string | null
-  customer_name: string
   first_commit_qty: number | null
   second_commit_qty: number | null
   colors: ColorQty[]
@@ -57,8 +54,28 @@ export interface CustomerOrder {
   status: OrderStatus
   matched_voucher_id: string | null
   matched_voucher_no: number | null
+}
+
+export interface CustomerOrder {
+  id: string
+  order_no: number
+  branch_id: string | null
+  branch_name: string | null
+  order_date: string
+  customer_name: string
   remark: string | null
   created_at: string
+  lines: CustomerOrderLine[]
+}
+
+export interface FactoryVoucherLine {
+  id: string
+  voucher_id: string
+  product_code: string
+  qty: number
+  buying_price: number
+  colors: ColorQty[]
+  discount_per_set: number | null
 }
 
 export interface FactoryVoucher {
@@ -68,13 +85,9 @@ export interface FactoryVoucher {
   branch_name: string | null
   voucher_date: string
   factory_name: string | null
-  product_code: string
-  qty: number
-  buying_price: number
-  colors: ColorQty[]
-  discount_per_set: number | null
   remark: string | null
   created_at: string
+  lines: FactoryVoucherLine[]
 }
 
 export interface ImportHistoryDetail {

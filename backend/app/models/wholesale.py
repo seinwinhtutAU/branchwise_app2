@@ -19,11 +19,9 @@ class OrderStatus(str, enum.Enum):
 
 
 class CustomerOrder(Base):
-    """A wholesale customer's order for a product, priced once a matching FactoryVoucher exists.
-
-    Wholesale runs entirely separate from retail: product_code here is free text in its
-    own namespace, not a foreign key into the retail-only `products` table (which is keyed
-    by POS stock_code and shared across sale/purchase/inventory imports).
+    """A wholesale customer's order — a header shared by every product the customer ordered
+    on that occasion. Each product is its own CustomerOrderLine, priced independently once a
+    matching FactoryVoucherLine exists.
     """
 
     __tablename__ = "customer_orders"
@@ -32,9 +30,32 @@ class CustomerOrder(Base):
     order_no: Mapped[int] = mapped_column(nullable=False)
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True)
     order_date: Mapped[date] = mapped_column(Date, nullable=False)
-    product_code: Mapped[str] = mapped_column(String(100), nullable=False)
-    factory_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     customer_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    remark: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    branch: Mapped["Branch | None"] = relationship()
+    lines: Mapped[list["CustomerOrderLine"]] = relationship(
+        back_populates="order", cascade="all, delete-orphan", order_by="CustomerOrderLine.created_at"
+    )
+
+
+class CustomerOrderLine(Base):
+    """One product within a CustomerOrder.
+
+    Wholesale runs entirely separate from retail: product_code here is free text in its own
+    namespace, not a foreign key into the retail-only `products` table (which is keyed by POS
+    stock_code and shared across sale/purchase/inventory imports).
+    """
+
+    __tablename__ = "customer_order_lines"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    order_id: Mapped[str] = mapped_column(ForeignKey("customer_orders.id", ondelete="CASCADE"), nullable=False)
+    product_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    factory_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Customer's initial requested qty (first_commit_qty) vs. the internally-approved qty
     # that's cleared to actually place with the factory (second_commit_qty) — informational,
     # neither drives total_qty or the voucher match.
@@ -52,25 +73,27 @@ class CustomerOrder(Base):
         nullable=False,
         default=OrderStatus.NOT_START,
     )
-    # Which FactoryVoucher last priced this order, so a price/qty/color mismatch between what
-    # the factory actually sent and what the customer ordered is traceable rather than implicit.
+    # Which FactoryVoucherLine last priced this line, so a price/qty/color mismatch between
+    # what the factory actually sent and what the customer ordered is traceable rather than
+    # implicit.
     matched_voucher_id: Mapped[str | None] = mapped_column(
-        ForeignKey("factory_vouchers.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("factory_voucher_lines.id", ondelete="SET NULL"), nullable=True
     )
-    remark: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    branch: Mapped["Branch | None"] = relationship()
-    matched_voucher: Mapped["FactoryVoucher | None"] = relationship(foreign_keys=[matched_voucher_id])
+    order: Mapped["CustomerOrder"] = relationship(back_populates="lines")
+    matched_voucher_line: Mapped["FactoryVoucherLine | None"] = relationship(foreign_keys=[matched_voucher_id])
 
 
 class FactoryVoucher(Base):
-    """A purchase voucher from a factory — supplies the buying price for matching CustomerOrders.
+    """A purchase voucher from a factory — a header shared by every product on that voucher.
+    Each product is its own FactoryVoucherLine, which supplies the buying price for matching
+    CustomerOrderLines.
 
-    Matched to CustomerOrder rows by (branch_id, product_code): one voucher commonly fulfills
-    several customer orders for the same product at once (that's how wholesale MOQs work), so
-    this is deliberately a one-to-many match, not a picked single order.
+    Matched to CustomerOrderLine rows by (branch_id, product_code): a voucher line commonly
+    fulfills several customer order lines for the same product at once (that's how wholesale
+    MOQs work), so this is deliberately a one-to-many match, not a picked single order.
     """
 
     __tablename__ = "factory_vouchers"
@@ -80,12 +103,27 @@ class FactoryVoucher(Base):
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True)
     voucher_date: Mapped[date] = mapped_column(Date, nullable=False)
     factory_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    remark: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    branch: Mapped["Branch | None"] = relationship()
+    lines: Mapped[list["FactoryVoucherLine"]] = relationship(
+        back_populates="voucher", cascade="all, delete-orphan", order_by="FactoryVoucherLine.created_at"
+    )
+
+
+class FactoryVoucherLine(Base):
+    """One product within a FactoryVoucher."""
+
+    __tablename__ = "factory_voucher_lines"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    voucher_id: Mapped[str] = mapped_column(ForeignKey("factory_vouchers.id", ondelete="CASCADE"), nullable=False)
     product_code: Mapped[str] = mapped_column(String(100), nullable=False)
     qty: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     buying_price: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
     colors: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     discount_per_set: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
-    remark: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
-    branch: Mapped["Branch | None"] = relationship()
+    voucher: Mapped["FactoryVoucher"] = relationship(back_populates="lines")

@@ -1,3 +1,5 @@
+import datetime
+
 import pandas as pd
 from sqlalchemy.orm import Session
 
@@ -39,6 +41,20 @@ def test_creates_purchase_header_and_lines(db_session: Session):
     assert summary["products_created"] == 2
     assert db_session.query(Purchase).count() == 1
     assert db_session.query(PurchaseLine).count() == 2
+    assert db_session.query(Purchase).one().purchase_date == datetime.date.today()
+
+
+def test_purchase_date_override_is_used_instead_of_today(db_session: Session):
+    summary = persist_purchases(
+        db_session,
+        PURCHASE_DF,
+        branch_id=None,
+        location_raw="Aung Thit Sar",
+        source_file="purchase.csv",
+        purchase_date=datetime.date(2026, 1, 15),
+    )
+    purchase = db_session.query(Purchase).filter(Purchase.id == summary["purchase_id"]).one()
+    assert purchase.purchase_date == datetime.date(2026, 1, 15)
 
 
 def test_reimporting_creates_a_new_batch_each_time(db_session: Session):

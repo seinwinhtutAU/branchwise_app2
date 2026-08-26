@@ -13,7 +13,7 @@ from app.models.import_batch import ImportBatch, ImportBatchStatus, ImportType
 from app.models.purchase import Purchase, PurchaseLine
 from app.models.sale import Sale, SaleLine
 from app.models.stock_level import StockLevel
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.services.branches import list_retail_branches
 from app.services.import_common import SUPPORTED_EXTENSIONS, validate_rows
 from app.services.inventory_import import OUTPUT_COLUMNS as INVENTORY_OUTPUT_COLUMNS
@@ -214,11 +214,19 @@ async def import_purchase_file(
 async def confirm_purchase_file(
     file: UploadFile = File(...),
     branch_id: str | None = Form(None),
+    purchase_date: str | None = Form(None),
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
     _check_extension(file.filename)
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
+
+    resolved_purchase_date = None
+    if purchase_date:
+        try:
+            resolved_purchase_date = datetime.date.fromisoformat(purchase_date)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "purchase_date must be YYYY-MM-DD") from exc
 
     contents = await file.read()
     try:
@@ -237,6 +245,7 @@ async def confirm_purchase_file(
         source_file=file.filename,
         uploaded_by=user.id,
         preview_data=preview_data,
+        purchase_date=resolved_purchase_date,
     )
 
 
@@ -347,6 +356,13 @@ def revert_import_batch(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
     if batch.status == ImportBatchStatus.REVERTED:
         raise HTTPException(status.HTTP_409_CONFLICT, "This import was already reverted")
+    if user.role == UserRole.RETAIL and datetime.datetime.now() - batch.created_at > datetime.timedelta(
+        days=1
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Retail accounts can only revert an import within 1 day of importing it.",
+        )
 
     if batch.import_type.value == "sales":
         sale_ids = [s.id for s in db.query(Sale.id).filter(Sale.import_batch_id == batch_id)]

@@ -189,6 +189,89 @@ export function ClipboardIcon({ className = 'w-5 h-5' }: { className?: string })
   )
 }
 
+export function TrashIcon({ className = 'w-5 h-5' }: { className?: string }): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path
+        d="M4 7h16M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3m3 0l-.8 12.1a2 2 0 01-2 1.9H8.8a2 2 0 01-2-1.9L6 7h12zM10 11v6M14 11v6"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+export function WarningIcon({ className = 'w-5 h-5' }: { className?: string }): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path
+        d="M12 3l10 18H2L12 3z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M12 9v5M12 17h.01" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function SunIcon({ className = 'w-5 h-5' }: { className?: string }): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path
+        d="M12 3v2M12 19v2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M3 12h2M19 12h2M5.6 18.4L7 17M17 7l1.4-1.4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  )
+}
+
+export function MoonIcon({ className = 'w-5 h-5' }: { className?: string }): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path
+        d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+export function MonitorIcon({ className = 'w-5 h-5' }: { className?: string }): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M8 20h8M12 16v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function SettingsIcon({ className = 'w-5 h-5' }: { className?: string }): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path
+        d="M4 6h6M14 6h6M4 12h10M18 12h2M4 18h6M14 18h6"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <circle cx="12" cy="6" r="2" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="16" cy="12" r="2" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="10" cy="18" r="2" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  )
+}
+
 export function FactoryIcon({ className = 'w-5 h-5' }: { className?: string }): React.JSX.Element {
   return (
     <svg {...base} className={className}>

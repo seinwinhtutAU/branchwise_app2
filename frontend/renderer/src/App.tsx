@@ -12,6 +12,8 @@ import ImportOverviewPage from '@renderer/components/features/ImportOverviewPage
 import DataOverviewTable from '@renderer/components/features/DataOverviewTable'
 import CustomerOrdersPage from '@renderer/components/features/CustomerOrdersPage'
 import FactoryVouchersPage from '@renderer/components/features/FactoryVouchersPage'
+import WarningsPage from '@renderer/components/features/WarningsPage'
+import SettingsPage from '@renderer/components/features/SettingsPage'
 import {
   SimpleDataTable,
   type DataTableColumn,
@@ -19,6 +21,7 @@ import {
 } from '@renderer/components/features/SimpleDataTable'
 import type { PendingImport, Profile } from '@renderer/components/features/types'
 import { useBranches } from '@renderer/lib/useBranches'
+import { useWarningWindowDays } from '@renderer/lib/warningWindow'
 import { Spinner } from '@renderer/components/ui/Spinner'
 import {
   UploadIcon,
@@ -29,7 +32,9 @@ import {
   InventoryIcon,
   PurchaseIcon,
   ClipboardIcon,
-  FactoryIcon
+  FactoryIcon,
+  WarningIcon,
+  SettingsIcon
 } from '@renderer/components/ui/icons'
 
 type Section =
@@ -40,23 +45,30 @@ type Section =
   | 'sales'
   | 'inventory'
   | 'purchase'
+  | 'warnings'
   | 'orders'
   | 'vouchers'
+  | 'settings'
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'import', label: 'Import', icon: <UploadIcon /> },
   { id: 'history', label: 'Import History', icon: <HistoryIcon /> },
   { id: 'importOverview', label: 'Import Overview', icon: <CalendarCheckIcon /> },
   { id: 'overview', label: 'Data Overview', icon: <OverviewIcon /> },
-  { id: 'sales', label: 'Sale', icon: <SalesIcon /> },
-  { id: 'inventory', label: 'Inventory', icon: <InventoryIcon /> },
-  { id: 'purchase', label: 'Purchase', icon: <PurchaseIcon /> }
+  { id: 'sales', label: 'Sale', icon: <SalesIcon />, dotColor: 'bg-emerald-400' },
+  { id: 'inventory', label: 'Inventory', icon: <InventoryIcon />, dotColor: 'bg-sky-400' },
+  { id: 'purchase', label: 'Purchase', icon: <PurchaseIcon />, dotColor: 'bg-pink-400' },
+  { id: 'warnings', label: 'Warning', icon: <WarningIcon /> }
 ]
 
 const WHOLESALE_NAV_ITEMS: NavItem[] = [
   { id: 'orders', label: 'Customer Orders', icon: <ClipboardIcon /> },
   { id: 'vouchers', label: 'Factory Vouchers', icon: <FactoryIcon /> }
 ]
+
+// Every role sees Settings — the theme switcher living there applies universally, even
+// though the daily-check-window section on that page only applies to non-wholesale.
+const SETTINGS_NAV_ITEM: NavItem = { id: 'settings', label: 'Settings', icon: <SettingsIcon /> }
 
 const SECTION_TITLES: Record<Section, string> = {
   import: 'Import data',
@@ -66,8 +78,10 @@ const SECTION_TITLES: Record<Section, string> = {
   sales: 'Sale',
   inventory: 'Inventory',
   purchase: 'Purchase',
+  warnings: 'Warning',
   orders: 'Customer orders',
-  vouchers: 'Factory vouchers'
+  vouchers: 'Factory vouchers',
+  settings: 'Settings'
 }
 
 interface SaleRow {
@@ -182,6 +196,9 @@ function App(): React.JSX.Element {
 
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null)
   const [viewingBatchId, setViewingBatchId] = useState<string | null>(null)
+  const [highlightBatchId, setHighlightBatchId] = useState<string | null>(null)
+  const [warningCount, setWarningCount] = useState(0)
+  const [warningWindowDays, setWarningWindowDays] = useWarningWindowDays()
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
@@ -227,6 +244,39 @@ function App(): React.JSX.Element {
   // the wrong section's UI briefly renders before a correction catches up.
   const section: Section = rawSection === 'import' && isWholesale ? 'orders' : rawSection
   const branchOptions = useBranches(isAdmin ? session : null)
+
+  async function refreshWarningCount(): Promise<void> {
+    if (!session) return
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/warnings?days=${warningWindowDays}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      })
+      if (!response.ok) return
+      const body = await response.json()
+      const total = (body.sections as { rows: unknown[] }[]).reduce((sum, s) => sum + s.rows.length, 0)
+      setWarningCount(total)
+    } catch {
+      // Sidebar badge is a convenience, not a source of truth — the Warning page itself
+      // shows a proper error state if the backend is unreachable, so a failed refresh
+      // here just leaves the last-known count in place.
+    }
+  }
+
+  // Wholesale accounts never see the Warning nav item, so there's nothing to count for
+  // them. Re-runs whenever the check window changes (e.g. from Settings) so the badge
+  // doesn't sit stale until the next sign-in.
+  useEffect(() => {
+    if (!session || isWholesale) return
+    refreshWarningCount()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, isWholesale, warningWindowDays])
+
+  const navItems = useMemo(() => {
+    const base = isWholesale ? WHOLESALE_NAV_ITEMS : isAdmin ? [...NAV_ITEMS, ...WHOLESALE_NAV_ITEMS] : NAV_ITEMS
+    return [...base, SETTINGS_NAV_ITEM].map((item) =>
+      item.id === 'warnings' ? { ...item, badgeCount: warningCount } : item
+    )
+  }, [isWholesale, isAdmin, warningCount])
 
   const saleFilters: DataTableFilter<SaleRow>[] = useMemo(
     () => [
@@ -303,6 +353,7 @@ function App(): React.JSX.Element {
   function handleSectionChange(id: string): void {
     setPendingImport(null)
     setViewingBatchId(null)
+    setHighlightBatchId(null)
     setSection(id as Section)
   }
 
@@ -310,9 +361,20 @@ function App(): React.JSX.Element {
     setPendingImport(pending)
   }
 
+  // Jumps from a Warning row's "Source Import" link to that exact batch's row in Import
+  // History — the list, not the read-only detail view, since Revert lives on the row
+  // itself. Highlighting it saves hunting through the list for the right one to revert.
+  function handleViewImportBatch(batchId: string): void {
+    setPendingImport(null)
+    setViewingBatchId(null)
+    setHighlightBatchId(batchId)
+    setSection('history')
+  }
+
   function handleImportConfirmed(): void {
     showToast('success', `${pendingImport?.importLabel} imported successfully`)
     setPendingImport(null)
+    refreshWarningCount()
   }
 
   if (!session) {
@@ -347,7 +409,7 @@ function App(): React.JSX.Element {
 
   return (
     <AppShell
-      navItems={isWholesale ? WHOLESALE_NAV_ITEMS : isAdmin ? [...NAV_ITEMS, ...WHOLESALE_NAV_ITEMS] : NAV_ITEMS}
+      navItems={navItems}
       activeSection={section}
       onSectionChange={handleSectionChange}
       email={session.user.email}
@@ -415,7 +477,13 @@ function App(): React.JSX.Element {
           )}
 
           {section === 'history' && (
-            <ImportHistoryTable session={session} onViewBatch={setViewingBatchId} branchOptions={branchOptions} />
+            <ImportHistoryTable
+              session={session}
+              onViewBatch={setViewingBatchId}
+              branchOptions={branchOptions}
+              profile={profile}
+              highlightBatchId={highlightBatchId}
+            />
           )}
           {section === 'importOverview' && <ImportOverviewPage session={session} />}
           {section === 'overview' && <DataOverviewTable session={session} branchOptions={branchOptions} />}
@@ -461,8 +529,23 @@ function App(): React.JSX.Element {
               emptyDescription="Import a purchase file to see it here."
             />
           )}
+          {section === 'warnings' && (
+            <WarningsPage
+              session={session}
+              onCountChange={setWarningCount}
+              warningWindowDays={warningWindowDays}
+              onViewImportBatch={handleViewImportBatch}
+            />
+          )}
           {section === 'orders' && <CustomerOrdersPage session={session} profile={profile} />}
           {section === 'vouchers' && <FactoryVouchersPage session={session} profile={profile} />}
+          {section === 'settings' && (
+            <SettingsPage
+              profile={profile}
+              warningWindowDays={warningWindowDays}
+              onWarningWindowDaysChange={setWarningWindowDays}
+            />
+          )}
         </>
       )}
     </AppShell>

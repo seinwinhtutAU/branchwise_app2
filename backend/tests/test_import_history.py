@@ -1,4 +1,5 @@
 import io
+from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -182,6 +183,54 @@ def test_non_admin_cannot_revert_other_branch_batch(authed_client: TestClient, d
 
     revert_response = authed_client.post(f"/api/imports/history/{batch_id}/revert")
     assert revert_response.status_code == 404
+
+
+def test_retail_can_revert_within_one_day(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+    batch_id = summary["batch_id"]
+
+    db_session.query(ImportBatch).filter(ImportBatch.id == batch_id).update(
+        {"created_at": datetime.now() - timedelta(hours=23)}
+    )
+    db_session.commit()
+
+    response = authed_client.post(f"/api/imports/history/{batch_id}/revert")
+    assert response.status_code == 200
+
+
+def test_retail_cannot_revert_after_one_day(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+    batch_id = summary["batch_id"]
+
+    db_session.query(ImportBatch).filter(ImportBatch.id == batch_id).update(
+        {"created_at": datetime.now() - timedelta(days=1, minutes=1)}
+    )
+    db_session.commit()
+
+    response = authed_client.post(f"/api/imports/history/{batch_id}/revert")
+    assert response.status_code == 403
+
+    batch = db_session.get(ImportBatch, batch_id)
+    assert batch.status == ImportBatchStatus.COMPLETED
+
+
+def test_admin_can_revert_after_one_day(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+    batch_id = summary["batch_id"]
+
+    db_session.query(ImportBatch).filter(ImportBatch.id == batch_id).update(
+        {"created_at": datetime.now() - timedelta(days=30)}
+    )
+    db_session.query(User).filter(User.id == "test-user-id").update(
+        {"branch_id": None, "role": UserRole.ADMIN}
+    )
+    db_session.commit()
+
+    response = authed_client.post(f"/api/imports/history/{batch_id}/revert")
+    assert response.status_code == 200
 
 
 def test_reverted_slip_can_be_reimported(authed_client: TestClient, db_session: Session):

@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
 import { useToast } from '@renderer/lib/toast'
 import { Button } from '@renderer/components/ui/Button'
+import { Input } from '@renderer/components/ui/Input'
 import { Select } from '@renderer/components/ui/Select'
 import { ImportDataView } from './ImportDataView'
 import type { PendingImport, Profile } from './types'
@@ -29,6 +30,12 @@ function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Pr
   const needsBranchSelection = profile !== null && profile.branch_id === null
   const [branchRequiredError, setBranchRequiredError] = useState(false)
 
+  // Purchase batches have no per-line date in the source file, so the backend defaults
+  // to today's date — this lets the importer override that, e.g. when uploading a file
+  // for a purchase that actually happened on an earlier day.
+  const isPurchaseImport = endpoint === '/api/imports/purchase'
+  const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().slice(0, 10))
+
   const [confirming, setConfirming] = useState(false)
 
   useEffect(() => {
@@ -54,6 +61,7 @@ function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Pr
       const formData = new FormData()
       formData.append('file', file)
       if (needsBranchSelection) formData.append('branch_id', selectedBranchId)
+      if (isPurchaseImport && purchaseDate) formData.append('purchase_date', purchaseDate)
 
       const response = await fetch(`${apiBaseUrl}${endpoint}/confirm`, {
         method: 'POST',
@@ -106,6 +114,16 @@ function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Pr
         origin={result.origin}
         controls={
           <div className="flex items-end gap-3 flex-wrap">
+            {isPurchaseImport && (
+              <div className="w-48">
+                <Input
+                  type="date"
+                  label="Purchase date"
+                  value={purchaseDate}
+                  onChange={(e) => setPurchaseDate(e.target.value)}
+                />
+              </div>
+            )}
             {needsBranchSelection && (
               <div className="w-48">
                 <Select

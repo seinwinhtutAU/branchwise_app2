@@ -1,8 +1,9 @@
-import { useEffect, useState, type FocusEvent, type KeyboardEvent } from 'react'
+import { Fragment, useEffect, useState, type FocusEvent, type KeyboardEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
 import { useToast } from '@renderer/lib/toast'
 import { useWholesaleBranchOptions } from '@renderer/lib/useBranches'
+import { cn } from '@renderer/lib/utils'
 import { parseColorShorthand, formatColorShorthand, colorShorthandTotal } from '@renderer/lib/colorShorthand'
 import { Button } from '@renderer/components/ui/Button'
 import { CardHeader } from '@renderer/components/ui/Card'
@@ -13,39 +14,57 @@ import { Textarea } from '@renderer/components/ui/Textarea'
 import { TableSkeleton } from '@renderer/components/ui/Skeleton'
 import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
 import { FactoryIcon } from '@renderer/components/ui/icons'
-import type { FactoryVoucher, Profile } from '@renderer/components/features/types'
+import type { FactoryVoucher, FactoryVoucherLine, Profile } from '@renderer/components/features/types'
 
 interface Props {
   session: Session
   profile: Profile | null
 }
 
-const cellInputClass =
-  'h-8 border-transparent bg-transparent hover:border-border focus:bg-bg-base ' +
+const noSpinnerClass =
   '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+// Existing rows: transparent until hovered/focused, reads as a clean spreadsheet.
+const cellInputClass = `h-8 border-transparent bg-transparent hover:border-border focus:bg-bg-base ${noSpinnerClass}`
+// The "New" draft row instead: a visible border by default, so it reads as an empty form
+// waiting to be filled rather than blank space.
+const draftCellInputClass = `h-8 border-border bg-bg-base hover:border-border-strong focus:border-brand ${noSpinnerClass}`
 const qtyColClass = 'min-w-[6rem]'
 
-interface DraftState {
-  voucher_date: string
+// The two fields commitDraft() actually requires — everything else is optional. Tints
+// the border red once a submit attempt has failed because this cell is still empty, not
+// the instant the row opens — the column header carries the "required" hint otherwise.
+function requiredDraftClass(value: string, attempted: boolean): string {
+  return attempted && value.trim() === '' ? 'border-error focus:border-error' : ''
+}
+
+interface LineDraftState {
   product_code: string
-  factory_name: string
-  qty: string
   buying_price: string
   colorsText: string
   discount_per_set: string
+}
+
+function emptyLineDraft(): LineDraftState {
+  return {
+    product_code: '',
+    buying_price: '',
+    colorsText: '',
+    discount_per_set: ''
+  }
+}
+
+interface DraftState extends LineDraftState {
+  voucher_date: string
+  factory_name: string
   remark: string
   branch_id: string
 }
 
 function emptyDraft(): DraftState {
   return {
+    ...emptyLineDraft(),
     voucher_date: new Date().toISOString().slice(0, 10),
-    product_code: '',
     factory_name: '',
-    qty: '',
-    buying_price: '',
-    colorsText: '',
-    discount_per_set: '',
     remark: '',
     branch_id: ''
   }
@@ -57,10 +76,17 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
   const [loading, setLoading] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
   const [isAdding, setIsAdding] = useState(false)
+  const [attemptedSubmit, setAttemptedSubmit] = useState(false)
   const [draft, setDraft] = useState<DraftState>(emptyDraft())
   const [creating, setCreating] = useState(false)
-  const [savingId, setSavingId] = useState<string | null>(null)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [savingVoucherId, setSavingVoucherId] = useState<string | null>(null)
+  const [savingLineId, setSavingLineId] = useState<string | null>(null)
+  const [deletingVoucherId, setDeletingVoucherId] = useState<string | null>(null)
+  const [deletingLineId, setDeletingLineId] = useState<string | null>(null)
+  const [addingLineVoucherId, setAddingLineVoucherId] = useState<string | null>(null)
+  const [lineAttemptedSubmit, setLineAttemptedSubmit] = useState(false)
+  const [lineDraft, setLineDraft] = useState<LineDraftState>(emptyLineDraft())
+  const [creatingLine, setCreatingLine] = useState(false)
 
   const needsBranch = profile !== null && profile.branch_id === null
   const branchOptions = useWholesaleBranchOptions(needsBranch ? session : null)
@@ -93,11 +119,13 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
 
   function openAdd(): void {
     setDraft(emptyDraft())
+    setAttemptedSubmit(false)
     setIsAdding(true)
   }
 
   function closeAdd(): void {
     setIsAdding(false)
+    setAttemptedSubmit(false)
     setDraft(emptyDraft())
   }
 
@@ -108,11 +136,13 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
   }
 
   async function commitDraft(opts?: { silent?: boolean }): Promise<void> {
-    if (!draft.product_code.trim() || !draft.qty || !draft.buying_price) {
-      if (!opts?.silent) showToast('error', 'Product code, qty, and buying price are required')
+    if (!draft.product_code.trim() || !draft.buying_price) {
+      setAttemptedSubmit(true)
+      if (!opts?.silent) showToast('error', 'Product code and buying price are required')
       return
     }
     if (needsBranch && !draft.branch_id) {
+      setAttemptedSubmit(true)
       if (!opts?.silent) showToast('error', 'Choose which branch this voucher belongs to')
       return
     }
@@ -120,14 +150,15 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
     try {
       const body = {
         voucher_date: draft.voucher_date,
-        product_code: draft.product_code.trim(),
         factory_name: draft.factory_name.trim() || null,
-        qty: Number(draft.qty),
-        buying_price: Number(draft.buying_price),
-        colors: parseColorShorthand(draft.colorsText),
-        discount_per_set: draft.discount_per_set === '' ? null : Number(draft.discount_per_set),
         remark: draft.remark.trim() || null,
-        branch_id: needsBranch ? draft.branch_id : null
+        branch_id: needsBranch ? draft.branch_id : null,
+        line: {
+          product_code: draft.product_code.trim(),
+          buying_price: Number(draft.buying_price),
+          colors: parseColorShorthand(draft.colorsText),
+          discount_per_set: draft.discount_per_set === '' ? null : Number(draft.discount_per_set)
+        }
       }
       const response = await fetch(`${apiBaseUrl}/api/factory-vouchers`, {
         method: 'POST',
@@ -144,7 +175,7 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
       }
       showToast('success', `Voucher #${responseBody.voucher.voucher_no} added`)
       announceUpdatedOrders(responseBody.updated_order_count ?? 0)
-      setDraft(emptyDraft())
+      closeAdd()
       await load()
     } catch {
       showToast('error', 'Add failed — is the backend running?')
@@ -155,7 +186,7 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
 
   function handleDraftRowBlur(e: FocusEvent<HTMLTableRowElement>): void {
     if (e.currentTarget.contains(e.relatedTarget as Node)) return
-    const hasContent = draft.product_code.trim() || draft.qty || draft.buying_price
+    const hasContent = draft.product_code.trim() || draft.colorsText.trim() || draft.buying_price
     if (hasContent) commitDraft({ silent: true })
   }
 
@@ -167,9 +198,37 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
   }
 
   async function patchVoucher(voucher: FactoryVoucher, patch: Record<string, unknown>): Promise<void> {
-    setSavingId(voucher.id)
+    setSavingVoucherId(voucher.id)
     try {
       const response = await fetch(`${apiBaseUrl}/api/factory-vouchers/${voucher.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify(patch)
+      })
+      const responseBody = await response.json().catch(() => null)
+      if (!response.ok) {
+        showToast('error', responseBody?.detail ?? `Update failed: ${response.status}`)
+        return
+      }
+      await load()
+    } catch {
+      showToast('error', 'Update failed — is the backend running?')
+    } finally {
+      setSavingVoucherId(null)
+    }
+  }
+
+  async function patchLine(
+    voucher: FactoryVoucher,
+    line: FactoryVoucherLine,
+    patch: Record<string, unknown>
+  ): Promise<void> {
+    setSavingLineId(line.id)
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/factory-vouchers/${voucher.id}/lines/${line.id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -187,13 +246,13 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
     } catch {
       showToast('error', 'Update failed — is the backend running?')
     } finally {
-      setSavingId(null)
+      setSavingLineId(null)
     }
   }
 
-  async function handleDelete(voucher: FactoryVoucher): Promise<void> {
-    if (!window.confirm(`Delete voucher #${voucher.voucher_no} for ${voucher.product_code}?`)) return
-    setDeletingId(voucher.id)
+  async function handleDeleteVoucher(voucher: FactoryVoucher): Promise<void> {
+    if (!window.confirm(`Delete voucher #${voucher.voucher_no} and all its products?`)) return
+    setDeletingVoucherId(voucher.id)
     try {
       const response = await fetch(`${apiBaseUrl}/api/factory-vouchers/${voucher.id}`, {
         method: 'DELETE',
@@ -207,11 +266,98 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
     } catch {
       showToast('error', 'Delete failed — is the backend running?')
     } finally {
-      setDeletingId(null)
+      setDeletingVoucherId(null)
+    }
+  }
+
+  async function handleDeleteLine(voucher: FactoryVoucher, line: FactoryVoucherLine): Promise<void> {
+    const message =
+      voucher.lines.length === 1
+        ? `Delete voucher #${voucher.voucher_no}? It has only this one product.`
+        : `Delete product ${line.product_code} from voucher #${voucher.voucher_no}?`
+    if (!window.confirm(message)) return
+    setDeletingLineId(line.id)
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/factory-vouchers/${voucher.id}/lines/${line.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      })
+      if (!response.ok && response.status !== 204) {
+        showToast('error', `Delete failed: ${response.status}`)
+        return
+      }
+      await load()
+    } catch {
+      showToast('error', 'Delete failed — is the backend running?')
+    } finally {
+      setDeletingLineId(null)
+    }
+  }
+
+  function openAddLine(voucherId: string): void {
+    setLineDraft(emptyLineDraft())
+    setLineAttemptedSubmit(false)
+    setAddingLineVoucherId(voucherId)
+  }
+
+  function closeAddLine(): void {
+    setAddingLineVoucherId(null)
+    setLineAttemptedSubmit(false)
+    setLineDraft(emptyLineDraft())
+  }
+
+  async function commitLineDraft(voucher: FactoryVoucher, opts?: { silent?: boolean }): Promise<void> {
+    if (!lineDraft.product_code.trim() || !lineDraft.buying_price) {
+      setLineAttemptedSubmit(true)
+      if (!opts?.silent) showToast('error', 'Product code and buying price are required')
+      return
+    }
+    setCreatingLine(true)
+    try {
+      const body = {
+        product_code: lineDraft.product_code.trim(),
+        buying_price: Number(lineDraft.buying_price),
+        colors: parseColorShorthand(lineDraft.colorsText),
+        discount_per_set: lineDraft.discount_per_set === '' ? null : Number(lineDraft.discount_per_set)
+      }
+      const response = await fetch(`${apiBaseUrl}/api/factory-vouchers/${voucher.id}/lines`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify(body)
+      })
+      const responseBody = await response.json().catch(() => null)
+      if (!response.ok) {
+        showToast('error', responseBody?.detail ?? `Add failed: ${response.status}`)
+        return
+      }
+      announceUpdatedOrders(responseBody.updated_order_count ?? 0)
+      closeAddLine()
+      await load()
+    } catch {
+      showToast('error', 'Add failed — is the backend running?')
+    } finally {
+      setCreatingLine(false)
+    }
+  }
+
+  function handleLineDraftRowBlur(voucher: FactoryVoucher, e: FocusEvent<HTMLTableRowElement>): void {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return
+    const hasContent = lineDraft.product_code.trim() || lineDraft.colorsText.trim() || lineDraft.buying_price
+    if (hasContent) commitLineDraft(voucher, { silent: true })
+  }
+
+  function handleLineDraftKeyDown(voucher: FactoryVoucher, e: KeyboardEvent<HTMLTableRowElement>): void {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      commitLineDraft(voucher)
     }
   }
 
   const draftTotal = colorShorthandTotal(draft.colorsText)
+  const lineDraftTotal = colorShorthandTotal(lineDraft.colorsText)
   const colCount = needsBranch ? 11 : 10
 
   return (
@@ -220,8 +366,8 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
         title="Factory vouchers"
         description={
           <>
-            Matches customer orders by product code. Colors as{' '}
-            <span className="font-mono">black10+pink20</span>.
+            One voucher can list several products. Matches customer orders by product code.
+            Colors as <span className="font-mono">black10+pink20</span>.
           </>
         }
         action={
@@ -249,19 +395,19 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
       )}
 
       {vouchers !== null && (
-        <TableContainer>
+        <TableContainer className="pb-4">
           <Thead>
             <Tr>
               <Th>No.</Th>
               <Th>Date</Th>
-              <Th>Product code</Th>
               <Th>Factory</Th>
+              <Th>{isAdding ? 'Product code *' : 'Product code'}</Th>
               <Th>Colors</Th>
               <Th className={qtyColClass + ' text-right'}>Qty</Th>
-              <Th className="text-right">Buying price</Th>
+              <Th className="text-right">{isAdding ? 'Buying price *' : 'Buying price'}</Th>
               <Th className="text-right">Discount / set</Th>
               <Th>Remark</Th>
-              {needsBranch && <Th>Branch</Th>}
+              {needsBranch && <Th>{isAdding ? 'Branch *' : 'Branch'}</Th>}
               <Th />
             </Tr>
           </Thead>
@@ -272,50 +418,52 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
                 <Td>
                   <Input
                     type="date"
-                    className={cellInputClass}
+                    className={draftCellInputClass}
                     value={draft.voucher_date}
                     onChange={(e) => setDraft({ ...draft, voucher_date: e.target.value })}
                   />
                 </Td>
                 <Td>
-                  <Input
-                    placeholder="Product code"
-                    className={cellInputClass + ' min-w-[8rem]'}
-                    value={draft.product_code}
-                    onChange={(e) => setDraft({ ...draft, product_code: e.target.value })}
-                  />
-                </Td>
-                <Td>
                   <Textarea
                     placeholder="Factory"
-                    className={cellInputClass + ' min-w-[10rem]'}
+                    className={draftCellInputClass + ' min-w-[10rem]'}
                     value={draft.factory_name}
                     onChange={(e) => setDraft({ ...draft, factory_name: e.target.value })}
                   />
                 </Td>
                 <Td>
                   <Input
+                    placeholder="Product code"
+                    className={cn(
+                      draftCellInputClass,
+                      'min-w-[8rem]',
+                      requiredDraftClass(draft.product_code, attemptedSubmit)
+                    )}
+                    value={draft.product_code}
+                    onChange={(e) => setDraft({ ...draft, product_code: e.target.value })}
+                  />
+                </Td>
+                <Td>
+                  <Input
                     placeholder="black10+pink20"
-                    className={cellInputClass + ' font-mono min-w-[9rem]'}
+                    className={draftCellInputClass + ' font-mono min-w-[9rem]'}
                     value={draft.colorsText}
                     onChange={(e) => setDraft({ ...draft, colorsText: e.target.value })}
                   />
-                  {draftTotal > 0 && <span className="text-xs text-text-muted ml-1">= {draftTotal}</span>}
                 </Td>
-                <Td className={qtyColClass}>
-                  <Input
-                    type="number"
-                    min={0}
-                    className={cellInputClass + ' text-right'}
-                    value={draft.qty}
-                    onChange={(e) => setDraft({ ...draft, qty: e.target.value })}
-                  />
+                <Td className={qtyColClass + ' text-right tabular-nums text-text-muted'}>
+                  {draftTotal || '—'}
                 </Td>
                 <Td className="text-right">
                   <Input
                     type="number"
                     min={0}
-                    className={cellInputClass + ' w-24 text-right'}
+                    placeholder="Price"
+                    className={cn(
+                      draftCellInputClass,
+                      'w-24 text-right',
+                      requiredDraftClass(draft.buying_price, attemptedSubmit)
+                    )}
                     value={draft.buying_price}
                     onChange={(e) => setDraft({ ...draft, buying_price: e.target.value })}
                   />
@@ -324,7 +472,7 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
                   <Input
                     type="number"
                     min={0}
-                    className={cellInputClass + ' w-20 text-right'}
+                    className={draftCellInputClass + ' w-20 text-right'}
                     value={draft.discount_per_set}
                     onChange={(e) => setDraft({ ...draft, discount_per_set: e.target.value })}
                   />
@@ -332,7 +480,7 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
                 <Td>
                   <Textarea
                     placeholder="Remark"
-                    className={cellInputClass + ' min-w-[12rem]'}
+                    className={draftCellInputClass + ' min-w-[12rem]'}
                     value={draft.remark}
                     onChange={(e) => setDraft({ ...draft, remark: e.target.value })}
                   />
@@ -340,7 +488,7 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
                 {needsBranch && (
                   <Td>
                     <Select
-                      className="h-8 py-0"
+                      className={cn('h-8 py-0', attemptedSubmit && !draft.branch_id && 'border-error')}
                       value={draft.branch_id}
                       onChange={(e) => setDraft({ ...draft, branch_id: e.target.value })}
                     >
@@ -379,132 +527,233 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
             )}
 
             {vouchers.map((voucher) => (
-              <Tr key={voucher.id}>
-                <Td>{voucher.voucher_no}</Td>
-                <Td>
-                  <Input
-                    key={voucher.voucher_date}
-                    type="date"
-                    className={cellInputClass}
-                    disabled={savingId === voucher.id}
-                    defaultValue={voucher.voucher_date}
-                    onBlur={(e) => {
-                      if (e.target.value && e.target.value !== voucher.voucher_date) {
-                        patchVoucher(voucher, { voucher_date: e.target.value })
-                      }
-                    }}
-                  />
-                </Td>
-                <Td>
-                  <Input
-                    key={voucher.product_code}
-                    className={cellInputClass + ' min-w-[8rem]'}
-                    disabled={savingId === voucher.id}
-                    defaultValue={voucher.product_code}
-                    onBlur={(e) => {
-                      if (e.target.value.trim() && e.target.value !== voucher.product_code) {
-                        patchVoucher(voucher, { product_code: e.target.value.trim() })
-                      }
-                    }}
-                  />
-                </Td>
-                <Td>
-                  <Textarea
-                    key={voucher.factory_name ?? ''}
-                    className={cellInputClass + ' min-w-[10rem]'}
-                    disabled={savingId === voucher.id}
-                    defaultValue={voucher.factory_name ?? ''}
-                    onBlur={(e) => {
-                      if (e.target.value !== (voucher.factory_name ?? '')) {
-                        patchVoucher(voucher, { factory_name: e.target.value || null })
-                      }
-                    }}
-                  />
-                </Td>
-                <Td>
-                  <Input
-                    key={formatColorShorthand(voucher.colors)}
-                    className={cellInputClass + ' font-mono min-w-[9rem]'}
-                    placeholder="black10+pink20"
-                    disabled={savingId === voucher.id}
-                    defaultValue={formatColorShorthand(voucher.colors)}
-                    onBlur={(e) => {
-                      if (e.target.value !== formatColorShorthand(voucher.colors)) {
-                        patchVoucher(voucher, { colors: parseColorShorthand(e.target.value) })
-                      }
-                    }}
-                  />
-                </Td>
-                <Td className={qtyColClass}>
-                  <Input
-                    key={voucher.qty}
-                    type="number"
-                    min={0}
-                    className={cellInputClass + ' text-right'}
-                    disabled={savingId === voucher.id}
-                    defaultValue={voucher.qty}
-                    onBlur={(e) => {
-                      const next = Number(e.target.value)
-                      if (next !== voucher.qty) patchVoucher(voucher, { qty: next })
-                    }}
-                  />
-                </Td>
-                <Td className="text-right">
-                  <Input
-                    key={voucher.buying_price}
-                    type="number"
-                    min={0}
-                    className={cellInputClass + ' w-24 text-right'}
-                    disabled={savingId === voucher.id}
-                    defaultValue={voucher.buying_price}
-                    onBlur={(e) => {
-                      const next = Number(e.target.value)
-                      if (next !== voucher.buying_price) patchVoucher(voucher, { buying_price: next })
-                    }}
-                  />
-                </Td>
-                <Td className="text-right">
-                  <Input
-                    key={voucher.discount_per_set ?? ''}
-                    type="number"
-                    min={0}
-                    className={cellInputClass + ' w-20 text-right'}
-                    disabled={savingId === voucher.id}
-                    defaultValue={voucher.discount_per_set ?? ''}
-                    onBlur={(e) => {
-                      const raw = e.target.value
-                      const current = voucher.discount_per_set ?? ''
-                      if (String(raw) !== String(current)) {
-                        patchVoucher(voucher, { discount_per_set: raw === '' ? null : Number(raw) })
-                      }
-                    }}
-                  />
-                </Td>
-                <Td>
-                  <Textarea
-                    key={voucher.remark ?? ''}
-                    className={cellInputClass + ' min-w-[12rem]'}
-                    disabled={savingId === voucher.id}
-                    defaultValue={voucher.remark ?? ''}
-                    onBlur={(e) => {
-                      if (e.target.value !== (voucher.remark ?? '')) {
-                        patchVoucher(voucher, { remark: e.target.value || null })
-                      }
-                    }}
-                  />
-                </Td>
-                {needsBranch && <Td className="text-text-muted">{voucher.branch_name ?? '—'}</Td>}
-                <Td>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleDelete(voucher)}
-                    loading={deletingId === voucher.id}
+              <Fragment key={voucher.id}>
+                {voucher.lines.map((line, lineIndex) => (
+                  <Tr key={line.id}>
+                    {lineIndex === 0 && (
+                      <>
+                        <Td rowSpan={voucher.lines.length} className="align-top">
+                          <div className="flex items-center gap-1.5">
+                            <span>{voucher.voucher_no}</span>
+                            <button
+                              type="button"
+                              title="Delete voucher"
+                              className="text-text-muted hover:text-error disabled:opacity-50"
+                              disabled={deletingVoucherId === voucher.id}
+                              onClick={() => handleDeleteVoucher(voucher)}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        </Td>
+                        <Td rowSpan={voucher.lines.length} className="align-top">
+                          <Input
+                            key={voucher.voucher_date}
+                            type="date"
+                            className={cellInputClass}
+                            disabled={savingVoucherId === voucher.id}
+                            defaultValue={voucher.voucher_date}
+                            onBlur={(e) => {
+                              if (e.target.value && e.target.value !== voucher.voucher_date) {
+                                patchVoucher(voucher, { voucher_date: e.target.value })
+                              }
+                            }}
+                          />
+                        </Td>
+                        <Td rowSpan={voucher.lines.length} className="align-top">
+                          <Textarea
+                            key={voucher.factory_name ?? ''}
+                            className={cellInputClass + ' min-w-[10rem]'}
+                            disabled={savingVoucherId === voucher.id}
+                            defaultValue={voucher.factory_name ?? ''}
+                            onBlur={(e) => {
+                              if (e.target.value !== (voucher.factory_name ?? '')) {
+                                patchVoucher(voucher, { factory_name: e.target.value || null })
+                              }
+                            }}
+                          />
+                        </Td>
+                      </>
+                    )}
+                    <Td>
+                      <Input
+                        key={line.product_code}
+                        className={cellInputClass + ' min-w-[8rem]'}
+                        disabled={savingLineId === line.id}
+                        defaultValue={line.product_code}
+                        onBlur={(e) => {
+                          if (e.target.value.trim() && e.target.value !== line.product_code) {
+                            patchLine(voucher, line, { product_code: e.target.value.trim() })
+                          }
+                        }}
+                      />
+                    </Td>
+                    <Td>
+                      <Input
+                        key={formatColorShorthand(line.colors)}
+                        className={cellInputClass + ' font-mono min-w-[9rem]'}
+                        placeholder="black10+pink20"
+                        disabled={savingLineId === line.id}
+                        defaultValue={formatColorShorthand(line.colors)}
+                        onBlur={(e) => {
+                          if (e.target.value !== formatColorShorthand(line.colors)) {
+                            patchLine(voucher, line, { colors: parseColorShorthand(e.target.value) })
+                          }
+                        }}
+                      />
+                    </Td>
+                    <Td className={qtyColClass + ' text-right tabular-nums'}>{line.qty}</Td>
+                    <Td className="text-right">
+                      <Input
+                        key={line.buying_price}
+                        type="number"
+                        min={0}
+                        className={cellInputClass + ' w-24 text-right'}
+                        disabled={savingLineId === line.id}
+                        defaultValue={line.buying_price}
+                        onBlur={(e) => {
+                          const next = Number(e.target.value)
+                          if (next !== line.buying_price) patchLine(voucher, line, { buying_price: next })
+                        }}
+                      />
+                    </Td>
+                    <Td className="text-right">
+                      <Input
+                        key={line.discount_per_set ?? ''}
+                        type="number"
+                        min={0}
+                        className={cellInputClass + ' w-20 text-right'}
+                        disabled={savingLineId === line.id}
+                        defaultValue={line.discount_per_set ?? ''}
+                        onBlur={(e) => {
+                          const raw = e.target.value
+                          const current = line.discount_per_set ?? ''
+                          if (String(raw) !== String(current)) {
+                            patchLine(voucher, line, { discount_per_set: raw === '' ? null : Number(raw) })
+                          }
+                        }}
+                      />
+                    </Td>
+                    {lineIndex === 0 && (
+                      <Td rowSpan={voucher.lines.length} className="align-top">
+                        <Textarea
+                          key={voucher.remark ?? ''}
+                          className={cellInputClass + ' min-w-[12rem]'}
+                          disabled={savingVoucherId === voucher.id}
+                          defaultValue={voucher.remark ?? ''}
+                          onBlur={(e) => {
+                            if (e.target.value !== (voucher.remark ?? '')) {
+                              patchVoucher(voucher, { remark: e.target.value || null })
+                            }
+                          }}
+                        />
+                      </Td>
+                    )}
+                    {needsBranch && lineIndex === 0 && (
+                      <Td rowSpan={voucher.lines.length} className="align-top text-text-muted">
+                        {voucher.branch_name ?? '—'}
+                      </Td>
+                    )}
+                    <Td>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDeleteLine(voucher, line)}
+                        loading={deletingLineId === line.id}
+                      >
+                        Delete
+                      </Button>
+                    </Td>
+                  </Tr>
+                ))}
+
+                {addingLineVoucherId === voucher.id ? (
+                  <Tr
+                    className="bg-brand-subtle/40"
+                    onBlur={(e) => handleLineDraftRowBlur(voucher, e)}
+                    onKeyDown={(e) => handleLineDraftKeyDown(voucher, e)}
                   >
-                    Delete
-                  </Button>
-                </Td>
-              </Tr>
+                    <Td className="text-text-muted text-center">↳</Td>
+                    <Td className="text-text-muted">—</Td>
+                    <Td className="text-text-muted">—</Td>
+                    <Td>
+                      <Input
+                        placeholder="Product code"
+                        className={cn(
+                          draftCellInputClass,
+                          'min-w-[8rem]',
+                          requiredDraftClass(lineDraft.product_code, lineAttemptedSubmit)
+                        )}
+                        value={lineDraft.product_code}
+                        onChange={(e) => setLineDraft({ ...lineDraft, product_code: e.target.value })}
+                      />
+                    </Td>
+                    <Td>
+                      <Input
+                        placeholder="black10+pink20"
+                        className={draftCellInputClass + ' font-mono min-w-[9rem]'}
+                        value={lineDraft.colorsText}
+                        onChange={(e) => setLineDraft({ ...lineDraft, colorsText: e.target.value })}
+                      />
+                    </Td>
+                    <Td className={qtyColClass + ' text-right tabular-nums text-text-muted'}>
+                      {lineDraftTotal || '—'}
+                    </Td>
+                    <Td className="text-right">
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder="Price"
+                        className={cn(
+                          draftCellInputClass,
+                          'w-24 text-right',
+                          requiredDraftClass(lineDraft.buying_price, lineAttemptedSubmit)
+                        )}
+                        value={lineDraft.buying_price}
+                        onChange={(e) => setLineDraft({ ...lineDraft, buying_price: e.target.value })}
+                      />
+                    </Td>
+                    <Td className="text-right">
+                      <Input
+                        type="number"
+                        min={0}
+                        className={draftCellInputClass + ' w-20 text-right'}
+                        value={lineDraft.discount_per_set}
+                        onChange={(e) => setLineDraft({ ...lineDraft, discount_per_set: e.target.value })}
+                      />
+                    </Td>
+                    <Td className="text-text-muted">—</Td>
+                    {needsBranch && <Td className="text-text-muted">—</Td>}
+                    <Td>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          loading={creatingLine}
+                          onClick={() => commitLineDraft(voucher)}
+                        >
+                          Add
+                        </Button>
+                        <Button type="button" variant="ghost" size="sm" onClick={closeAddLine}>
+                          Close
+                        </Button>
+                      </div>
+                    </Td>
+                  </Tr>
+                ) : (
+                  <Tr>
+                    <Td colSpan={colCount} className="border-r-0 py-1.5">
+                      <button
+                        type="button"
+                        className="text-brand text-xs underline underline-offset-2"
+                        onClick={() => openAddLine(voucher.id)}
+                      >
+                        + Add product
+                      </button>
+                    </Td>
+                  </Tr>
+                )}
+              </Fragment>
             ))}
           </Tbody>
         </TableContainer>
