@@ -80,7 +80,7 @@ One `Purchase` batch per **confirmed import** (not per real purchase order — t
 | branch_id | uuid, nullable | FK → branches |
 | import_batch_id | uuid, nullable | FK → import_batches |
 | location_raw | string, nullable | |
-| purchase_date | date | **placeholder**: set to the import date, not a real purchase date — see [known-limitations.md](./known-limitations.md) |
+| purchase_date | date | defaults to the import date, but confirm accepts an optional `purchase_date` form field to override it — see [known-limitations.md](./known-limitations.md) |
 | source_file | string, nullable | |
 | created_at | datetime | |
 
@@ -112,6 +112,66 @@ Append-only snapshots — every confirmed inventory import adds new rows, it nev
 | snapshot_at | datetime | when this snapshot was imported |
 | source_file | string, nullable | |
 
+## Wholesale: `customer_orders` + `customer_order_lines`, `factory_vouchers` + `factory_voucher_lines`
+
+A separate data model for the wholesale-only workflow (`app/models/wholesale.py`) — entered inline in the UI, not imported from a file, and unrelated to `products`/`sales`/`purchases`/`stock_levels` above. Line items reference products by a free-text `product_code` in their own namespace, not a FK into `products`.
+
+**customer_orders** — one header per customer order occasion.
+
+| column | type | notes |
+|---|---|---|
+| id | uuid | PK |
+| order_no | int | |
+| branch_id | uuid, nullable | FK → branches |
+| order_date | date | |
+| customer_name | string | |
+| remark | string, nullable | |
+| created_at / updated_at | datetime | |
+
+**customer_order_lines** (indexed on `order_id`) — one product within a customer order.
+
+| column | type | notes |
+|---|---|---|
+| id | uuid | PK |
+| order_id | uuid | FK → customer_orders, `ondelete=CASCADE` |
+| product_code | string | free text, not a FK into `products` |
+| description | string, nullable | |
+| factory_name | string, nullable | |
+| first_commit_qty / second_commit_qty | numeric(12,2), nullable | customer's initial request vs. internally-approved qty — informational only, neither drives `total_qty` |
+| colors | JSON | `list[{"color": str, "qty": number}]` |
+| total_qty | numeric(12,2) | recomputed server-side from `colors` on every write, never trusted from the client |
+| received_qty | numeric(12,2) | |
+| unit | string | default `"Set"` |
+| buying_price | numeric(14,2), nullable | set once a matching `FactoryVoucherLine` prices this line |
+| status | enum | `not_start` \| `waiting` \| `complete` |
+| matched_voucher_id | uuid, nullable | FK → factory_voucher_lines, `ondelete=SET NULL` — which voucher line last priced this row |
+| created_at / updated_at | datetime | |
+
+**factory_vouchers** — one header per factory voucher.
+
+| column | type | notes |
+|---|---|---|
+| id | uuid | PK |
+| voucher_no | int | |
+| branch_id | uuid, nullable | FK → branches |
+| voucher_date | date | |
+| factory_name | string, nullable | |
+| remark | string, nullable | |
+| created_at | datetime | |
+
+**factory_voucher_lines** (indexed on `voucher_id`) — one product within a voucher.
+
+| column | type | notes |
+|---|---|---|
+| id | uuid | PK |
+| voucher_id | uuid | FK → factory_vouchers, `ondelete=CASCADE` |
+| product_code | string | free text, matched against `customer_order_lines.product_code` within the same branch |
+| qty | numeric(12,2) | |
+| buying_price | numeric(14,2) | auto-prices every open (`not_start`) matching `CustomerOrderLine` and flips it to `waiting`; a `complete` line is never repriced |
+| colors | JSON | `list[{"color": str, "qty": number}]` |
+| discount_per_set | numeric(14,2), nullable | |
+| created_at | datetime | |
+
 ## `import_batches`
 
 One row per confirmed upload (regardless of type) — what makes import history and revert possible. See [data-import.md](./data-import.md#import-history--revert) for the full behavior.
@@ -140,8 +200,12 @@ Branch ──< Sale ──< SaleLine >── Product
 Branch ──< Purchase ──< PurchaseLine >── Product
 Branch ──< StockLevel >── Product
 Branch ──< ImportBatch >── Sale / Purchase / StockLevel   (one batch, many rows of one type)
+
+Branch ──< CustomerOrder ──< CustomerOrderLine
+Branch ──< FactoryVoucher ──< FactoryVoucherLine
+CustomerOrderLine >── FactoryVoucherLine   (matched_voucher_id, by branch_id + product_code — not a schema-level FK match)
 ```
 
 ## Not yet built
 
-"Current stock" is available (`GET /api/inventory` — latest `stock_levels` snapshot per product+branch), but it's only as fresh as the last inventory import; it does *not* net out purchases/sales that happened since that snapshot. A truly live figure (last snapshot + purchases − sales since) is intentionally left as a query/service to build when something actually needs it. "Current cost" (latest purchase price) is similarly not built yet. See [known-limitations.md](./known-limitations.md).
+"Current stock" is available (`GET /api/inventory` — latest `stock_levels` snapshot per product+branch), but it's only as fresh as the last inventory import; it does *not* net out purchases/sales that happened since that snapshot as a live query. `app/services/data_quality.py` (`GET /api/warnings`) does compute exactly that movement math — `previous snapshot + purchases − sales` since then — but only to flag a *mismatch* against the latest snapshot, not to expose it as a general-purpose "current stock" figure elsewhere in the app. "Current cost" (latest purchase price) is similarly not exposed as its own query, though `latest_purchase_buying_prices`/`latest_stock_level_buying_prices` (`app/services/pricing.py`) compute the per-product version of it for the Sale/Data Overview profit columns. See [known-limitations.md](./known-limitations.md).

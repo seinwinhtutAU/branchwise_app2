@@ -155,10 +155,12 @@ def test_sale_missing_product_in_inventory(db_session: Session):
     )
     db_session.commit()
 
-    rows = data_quality.sale_missing_product_warnings(db_session, user)
+    rows = data_quality.missing_product_warnings(db_session, user)
     assert len(rows) == 1
-    # The note is a standalone action — the row's own fields carry the identity.
-    assert "inventory system" in rows[0]["note"]
+    # The note names the actual activity, not just a generic "add it" line.
+    assert rows[0]["note"] == (
+        "Sold 1 time on 2026-08-20 but no inventory record — add this stock code to your inventory system."
+    )
     assert {"label": "Stock Code", "value": "SKU-2"} in rows[0]["fields"]
     assert rows[0]["highlight"] == []  # an absence, not a bad value — nothing to highlight
     assert rows[0]["source_import"] is None  # can span several imports — no single batch to point at
@@ -173,7 +175,7 @@ def test_sale_missing_product_not_flagged_when_inventory_exists(db_session: Sess
     db_session.add(StockLevel(branch_id=branch.id, product_id=product.id, on_hand_qty=5))
     db_session.commit()
 
-    assert data_quality.sale_missing_product_warnings(db_session, user) == []
+    assert data_quality.missing_product_warnings(db_session, user) == []
 
 
 def test_purchase_missing_product_in_inventory(db_session: Session):
@@ -184,10 +186,50 @@ def test_purchase_missing_product_in_inventory(db_session: Session):
     )
     db_session.commit()
 
-    rows = data_quality.purchase_missing_product_warnings(db_session, user)
+    rows = data_quality.missing_product_warnings(db_session, user)
     assert len(rows) == 1
-    assert "inventory system" in rows[0]["note"]
+    assert rows[0]["note"] == (
+        "Purchased 1 time on 2026-08-20 but no inventory record — add this stock code to your inventory system."
+    )
     assert {"label": "Stock Code", "value": "SKU-6"} in rows[0]["fields"]
+
+
+def test_missing_product_merges_sale_and_purchase_into_one_row(db_session: Session):
+    branch, user = _make_branch_and_user(db_session)
+    product = _make_product(db_session, "SKU-6b")
+    _make_sale_line(
+        db_session, branch=branch, product=product, slip_id="slip-6b", qty=2, sale_date=datetime.date(2026, 8, 20)
+    )
+    _make_purchase_line(
+        db_session, branch=branch, product=product, qty=4, purchase_date=datetime.date(2026, 8, 19)
+    )
+    db_session.commit()
+
+    rows = data_quality.missing_product_warnings(db_session, user)
+    assert len(rows) == 1  # one row, not two, even though it's missing from both checks
+    assert rows[0]["note"] == (
+        "Sold 1 time and purchased 1 time but no inventory record — add this stock code to your inventory system."
+    )
+    assert {"label": "Times Sold", "value": "1"} in rows[0]["fields"]
+    assert {"label": "Times Purchased", "value": "1"} in rows[0]["fields"]
+
+
+def test_missing_product_pluralizes_multiple_occurrences(db_session: Session):
+    branch, user = _make_branch_and_user(db_session)
+    product = _make_product(db_session, "SKU-6c")
+    _make_sale_line(
+        db_session, branch=branch, product=product, slip_id="slip-6c-1", qty=1, sale_date=datetime.date(2026, 8, 18)
+    )
+    _make_sale_line(
+        db_session, branch=branch, product=product, slip_id="slip-6c-2", qty=1, sale_date=datetime.date(2026, 8, 20)
+    )
+    db_session.commit()
+
+    rows = data_quality.missing_product_warnings(db_session, user)
+    assert len(rows) == 1
+    assert rows[0]["note"] == (
+        "Sold 2 times (last on 2026-08-20) but no inventory record — add this stock code to your inventory system."
+    )
 
 
 def test_reconciliation_flags_mismatch(db_session: Session):
@@ -222,12 +264,111 @@ def test_reconciliation_flags_mismatch(db_session: Session):
 
     mismatches, uom_notices = data_quality.inventory_reconciliation_warnings(db_session, user)
     assert len(mismatches) == 1
-    assert "20" in mismatches[0]["note"]  # actual
-    assert "12" in mismatches[0]["note"]  # expected
+    assert "should be about 12" in mismatches[0]["note"]  # expected — there was purchase/sale activity
     assert {"label": "Stock Code", "value": "SKU-4"} in mismatches[0]["fields"]
+    assert {"label": "Actual Qty", "value": "20.00"} in mismatches[0]["fields"]
     assert mismatches[0]["highlight"] == ["Expected Qty", "Actual Qty", "Difference"]
     assert {"label": "Until", "value": "2026-08-02"} in mismatches[0]["fields"]
     assert uom_notices == []
+
+
+def test_reconciliation_ignores_small_difference(db_session: Session):
+    branch, user = _make_branch_and_user(db_session)
+    product = _make_product(db_session, "SKU-4b")
+
+    db_session.add(
+        StockLevel(
+            branch_id=branch.id,
+            product_id=product.id,
+            on_hand_qty=10,
+            snapshot_at=datetime.datetime(2026, 8, 1, 8, 0, 0),
+        )
+    )
+    db_session.flush()
+    _make_purchase_line(
+        db_session, branch=branch, product=product, qty=5, purchase_date=datetime.date(2026, 8, 2)
+    )
+    _make_sale_line(
+        db_session, branch=branch, product=product, slip_id="slip-4b", qty=3, sale_date=datetime.date(2026, 8, 2)
+    )
+    # Expected = 10 + 5 - 3 = 12, actual is 13 — a 1-unit gap, below the noise threshold.
+    db_session.add(
+        StockLevel(
+            branch_id=branch.id,
+            product_id=product.id,
+            on_hand_qty=13,
+            snapshot_at=datetime.datetime(2026, 8, 2, 8, 0, 0),
+        )
+    )
+    db_session.commit()
+
+    mismatches, _ = data_quality.inventory_reconciliation_warnings(db_session, user)
+    assert mismatches == []
+
+
+def test_reconciliation_flags_missing_import_when_no_activity(db_session: Session):
+    branch, user = _make_branch_and_user(db_session)
+    product = _make_product(db_session, "SKU-4c")
+
+    db_session.add(
+        StockLevel(
+            branch_id=branch.id,
+            product_id=product.id,
+            on_hand_qty=10,
+            snapshot_at=datetime.datetime(2026, 8, 1, 8, 0, 0),
+        )
+    )
+    db_session.flush()
+    # No purchases or sales recorded at all, yet the count changed by more than the
+    # noise threshold — most likely a purchase/sale file wasn't imported.
+    db_session.add(
+        StockLevel(
+            branch_id=branch.id,
+            product_id=product.id,
+            on_hand_qty=20,
+            snapshot_at=datetime.datetime(2026, 8, 2, 8, 0, 0),
+        )
+    )
+    db_session.commit()
+
+    mismatches, _ = data_quality.inventory_reconciliation_warnings(db_session, user)
+    assert len(mismatches) == 1
+    assert "check if a file's missing" in mismatches[0]["note"]
+    assert "should be about" not in mismatches[0]["note"]
+
+
+def test_reconciliation_explains_negative_expected(db_session: Session):
+    branch, user = _make_branch_and_user(db_session)
+    product = _make_product(db_session, "SKU-4d")
+
+    db_session.add(
+        StockLevel(
+            branch_id=branch.id,
+            product_id=product.id,
+            on_hand_qty=2,
+            snapshot_at=datetime.datetime(2026, 8, 1, 8, 0, 0),
+        )
+    )
+    db_session.flush()
+    _make_sale_line(
+        db_session, branch=branch, product=product, slip_id="slip-4d", qty=10, sale_date=datetime.date(2026, 8, 2)
+    )
+    # Expected = 2 prior + 0 purchased - 10 sold = -8, an impossible stock count.
+    db_session.add(
+        StockLevel(
+            branch_id=branch.id,
+            product_id=product.id,
+            on_hand_qty=3,
+            snapshot_at=datetime.datetime(2026, 8, 2, 8, 0, 0),
+        )
+    )
+    db_session.commit()
+
+    mismatches, _ = data_quality.inventory_reconciliation_warnings(db_session, user)
+    assert len(mismatches) == 1
+    assert "missing purchase import" in mismatches[0]["note"]
+    assert "-8" not in mismatches[0]["note"]  # no raw negative number shown to non-technical staff
+    assert {"label": "Expected Qty", "value": "-8.00"} in mismatches[0]["fields"]  # still available in Details
 
 
 def test_reconciliation_silent_when_correct(db_session: Session):
@@ -338,8 +479,7 @@ def test_warnings_endpoint_returns_all_sections(authed_client: TestClient, db_se
         "sale_numeric",
         "inventory_numeric",
         "purchase_numeric",
-        "sale_missing_product",
-        "purchase_missing_product",
+        "missing_product",
         "reconciliation_uom",
         "reconciliation_mismatch",
     }

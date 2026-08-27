@@ -48,7 +48,11 @@ Two states depending on viewport:
 
 Main content area: `padding: 32px 16–24px`, vertical stack (`gap-8`) of a page title + optional description, then the section's content.
 
-**Navigation items** (6 total, in order): Import, Import History, Data Overview, Sale, Inventory, Purchase. Only the first three are implemented; Sale/Inventory/Purchase currently render a generic "Coming soon" empty state (construction icon + "X is on the way").
+**Navigation items are role-dependent**, all implemented (no more "Coming soon" placeholders):
+- **Retail/admin** accounts see: Import, Import History, Import Overview, Data Overview, Sale, Inventory, Purchase, Warning (badge showing the open warning count).
+- **Wholesale** accounts see only: Customer Orders, Factory Vouchers — a fully separate workflow, not the retail list above.
+- **Admin** sees both sets combined (it already sees every branch's retail data elsewhere).
+- **Every role** additionally sees Settings, appended last.
 
 ## 3. Screens
 
@@ -119,6 +123,38 @@ These three nav sections each render a flat, unfiltered table of the correspondi
 
 Same open questions as Data Overview apply here (no pagination/filter/search, one flat table per section) — these are functional first passes, not a finished analytics UI.
 
+### 3.9 Import Overview (`ImportOverviewPage`)
+One table, one purpose: at-a-glance freshness of each branch's imports. Backed by `GET /api/imports/freshness`.
+
+- Header + description ("When sales, inventory, and purchase were each last imported per branch — files are expected daily.") + Refresh button. Same loading-skeleton / failure-empty-state / zero-rows-empty-state pattern as the other list screens.
+- Table columns: Branch, Sales, Inventory, Purchase — each cell a colored freshness badge (green "Today", amber "Yesterday", red "N days ago" or "Never imported") plus the exact localized timestamp underneath.
+
+### 3.10 Warning (`WarningsPage`)
+Data-quality issues found in already-imported retail data, backed by `GET /api/warnings`. Retail/admin only — not shown to wholesale accounts (no sale/inventory/purchase data to check).
+
+- Header + description, a 5-tab segmented control (**All** / **Daily check** / **Sale** / **Inventory** / **Purchase**) grouping the backend's individual checks into broader categories, and a sidebar nav badge (red pill, count of all open rows across every check) that updates on load and after any import is confirmed.
+- Each row: a severity badge (amber "Warning" or red "Critical" — the daily reconciliation mismatch check is the only critical one), Branch, Date (where applicable), Stock Code, Description, and a plain-English note describing the problem (e.g. "Buying Price can't be a negative number (currently -500.00)").
+- A row can expand (chevron toggle) into a bordered **Details** grid of every other field the check returned, with the offending field(s) visually called out; if the row is traceable to one confirmed import, the grid includes a "Source Import" link that jumps to Import History with that batch's row highlighted, ready to revert.
+- Checks covered: bad numeric values on sale/inventory/purchase lines; stock codes sold or purchased with no inventory record yet; and the daily inventory reconciliation (latest snapshot vs. previous snapshot + purchases − sales since then), split into a "recount these" (mismatch) and a separate "verify by hand" (mixed-unit, can't reliably auto-check) group.
+
+### 3.11 Customer Orders (`CustomerOrdersPage`) — wholesale
+Inline spreadsheet-style entry for wholesale customer orders, grouped by order (header: order number, date, customer name, remark) with one editable row per product line underneath.
+
+- Each line: product code, description, factory name, first/second commit qty (informational), a color/qty shorthand field (e.g. `5R/3B`, parsed and totaled automatically into `total_qty`), received qty, unit, buying price (read-only once set by a matching factory voucher), and a colored **status pill** (Not started / Waiting / Complete) that doubles as a native `<select>` when clicked.
+- Existing-row cells are borderless until hovered/focused (reads as a clean spreadsheet); a "New" draft row instead has a visible border by default so it reads as an empty form waiting to be filled. Only two fields are required to commit a new line; an incomplete required cell tints red only after a failed submit attempt, not on load.
+- A line's `buying_price`/`status` become read-only once a matching Factory Voucher line has priced it (matched by branch + product code) — editing then happens from the Factory Vouchers side.
+
+### 3.12 Factory Vouchers (`FactoryVouchersPage`) — wholesale
+Same inline spreadsheet pattern as Customer Orders, for factory vouchers (header: voucher number, date, factory name, remark; lines: product code, qty, buying price, color/qty shorthand, discount per set).
+
+- Adding a voucher line auto-prices and matches every open (`not_start`) Customer Order line with the same product code in the same branch, flipping those lines to `waiting` — this is the primary way Customer Order lines get priced, described further in [architecture.md](./architecture.md).
+
+### 3.13 Settings (`SettingsPage`)
+Personal, per-device preferences. Shown to every role.
+
+- **Appearance** card: the `ThemeSwitcher` — a 3-way segmented control (Light / Dark / System) with sun/moon/monitor icons, backed by `data-theme` + `prefers-color-scheme` (see [design tokens](#1-design-tokens-current) below — this is the toggle that section 5 used to say didn't exist).
+- **Daily check window** card (hidden for wholesale accounts, which have no Warning page): a single Select ("Check the last 1/3/7/14/30 days") controlling how far back the Warning page's Sale/Purchase checks look; Inventory always checks only the latest snapshot regardless of this setting.
+
 ## 4. Reusable UI primitives (`components/ui/`)
 
 - **Button** — variants `primary` (solid indigo), `secondary` (white/bordered), `ghost` (text-only), `destructive` (solid red); sizes sm/md/lg; supports a `loading` state that swaps in an inline spinner and disables the button; slight scale-down press animation.
@@ -130,7 +166,7 @@ Same open questions as Data Overview apply here (no pagination/filter/search, on
 - **Skeleton** / **TableSkeleton** — pulsing gray placeholder blocks for loading states.
 - **Spinner** — small inline SVG spinner (buttons, standalone loading screens).
 - **Toast** (`lib/toast.tsx`) — success/error/info variants, colored icon chip + message + dismiss button, slides up, presumably auto-stacks/auto-dismisses (see `lib/toast.tsx` for timing if needed).
-- **icons.tsx** — a small hand-rolled icon set (logo, menu/hamburger, upload, history, overview/grid, sales, inventory, purchase, construction) — simple 24×24 stroked line icons, no icon library dependency.
+- **icons.tsx** — a small hand-rolled icon set (logo, menu/hamburger, upload, history, calendar-check, overview/grid, sales, inventory, purchase, download, construction, chevrons, clipboard, trash, warning, sun/moon/monitor, settings, factory) — simple stroked line icons, no icon library dependency.
 
 ## 5. Cross-cutting UX notes worth flagging to a design collaborator
 
@@ -138,6 +174,7 @@ Same open questions as Data Overview apply here (no pagination/filter/search, on
 - **No pagination/search/filter** anywhere data tables appear (Import preview, History detail, Data Overview) — every table renders its full result set at once.
 - **Density is very high** by default — every table is a dense spreadsheet grid; there's no "card list" or summarized alternative view.
 - **Sale/Inventory/Purchase are functional first passes, not finished** — same dense unfiltered table pattern as Data Overview, so they're fair game for a real redesign rather than a from-scratch build.
-- **Dark mode exists at the token level** (`data-theme="dark"` + `prefers-color-scheme`) but there's no visible in-app toggle currently — worth deciding whether a redesign keeps/exposes this.
+- **Dark mode has a visible in-app toggle now** — the Settings page's Appearance card (Light/Dark/System), on top of the existing token-level support (`data-theme="dark"` + `prefers-color-scheme`).
 - **Role-based branch context** is a persistent bit of state (shown in the sidebar footer, and drives the branch-picker requirement on import) — any new layout should keep "who am I / which branch am I acting as" visible.
-- The whole app is effectively **one big data-import + review tool** today; there's no home/dashboard screen — first thing every user sees after login is the Import upload cards.
+- **There's still no home/dashboard screen for retail/admin** — first thing a retail/admin user sees after login is the Import upload cards. Wholesale accounts have no Import section at all (their nav has no `import` entry), so they land on Customer Orders instead.
+- **Wholesale is a second, mostly-disjoint app inside the same shell** — Customer Orders/Factory Vouchers share the visual language (cards, tables, badges) but not the underlying data model or nav with the retail import/reporting screens; a redesign should treat it as its own flow rather than assume every screen is reachable from every role.

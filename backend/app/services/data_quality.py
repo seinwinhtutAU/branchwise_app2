@@ -37,6 +37,12 @@ from app.services.pos_import import VALIDATION_RULES as SALES_VALIDATION_RULES
 from app.services.pricing import latest_purchase_buying_prices, latest_stock_level_buying_prices
 from app.services.purchase_import import VALIDATION_RULES as PURCHASE_VALIDATION_RULES
 
+# Below this many units of difference, treat it as routine noise (breakage, a
+# one-off miscount) rather than something worth interrupting staff over — the
+# reconciliation math is only ever an estimate (see inventory_reconciliation_warnings),
+# so flagging every nonzero gap produces far more noise than signal.
+RECONCILIATION_MISMATCH_THRESHOLD = Decimal("2")
+
 
 def _field(label: str, value: object) -> dict:
     return {"label": label, "value": "—" if value is None else str(value)}
@@ -63,6 +69,24 @@ def _fetch_import_batches(db: Session, batch_ids: set[str | None]) -> dict[str, 
     if not ids:
         return {}
     return {b.id: b for b in db.query(ImportBatch).filter(ImportBatch.id.in_(ids))}
+
+
+def _fetch_products(db: Session, product_ids: set[str]) -> dict[str, Product]:
+    """Batch-fetch by id rather than one `db.get(Product, ...)` per row — the same
+    per-row-round-trip mistake CLAUDE.md documents for import product lookups, which
+    turns into hundreds of remote-Postgres round trips once there are hundreds of
+    distinct products (e.g. a shop with 1000+ inventory rows)."""
+    if not product_ids:
+        return {}
+    return {p.id: p for p in db.query(Product).filter(Product.id.in_(product_ids))}
+
+
+def _fetch_branches(db: Session, branch_ids: set[str | None]) -> dict[str, Branch]:
+    """Batch-fetch by id — see _fetch_products."""
+    ids = {b for b in branch_ids if b}
+    if not ids:
+        return {}
+    return {b.id: b for b in db.query(Branch).filter(Branch.id.in_(ids))}
 
 
 def _numeric_warning_rows(
@@ -309,7 +333,10 @@ def purchase_numeric_warnings(db: Session, user: User, since: date | None = None
     return _numeric_warning_rows(records, PURCHASE_VALIDATION_RULES, fields, column_labels)
 
 
-def _missing_product_warnings(
+MissingProductOccurrence = tuple[int, date, date]  # (occurrences, first_date, last_date)
+
+
+def _missing_product_pairs(
     db: Session,
     user: User,
     *,
@@ -318,8 +345,7 @@ def _missing_product_warnings(
     header_id_fk,
     branch_column,
     date_column,
-    verb: str,
-) -> list[dict]:
+) -> dict[tuple[str | None, str], MissingProductOccurrence]:
     """Distinct (branch, product) pairs that appear in `line_model`/`header_model`
     but have zero StockLevel rows ever for that same branch+product."""
     inventory_pairs = db.query(StockLevel.branch_id, StockLevel.product_id).distinct().subquery()
@@ -343,24 +369,91 @@ def _missing_product_warnings(
     )
     query = _branch_filter(query, user, branch_column)
 
+    return {
+        (branch_id, product_id): (occurrences, first_date, last_date)
+        for branch_id, product_id, occurrences, first_date, last_date in query.all()
+    }
+
+
+def _occurrence_phrase(verb: str, occurrence: MissingProductOccurrence) -> str:
+    occurrences, _first_date, last_date = occurrence
+    if occurrences == 1:
+        return f"{verb} 1 time on {last_date.isoformat()}"
+    return f"{verb} {occurrences} times (last on {last_date.isoformat()})"
+
+
+def missing_product_warnings(db: Session, user: User) -> list[dict]:
+    """Stock codes sold and/or purchased at a branch with zero StockLevel rows there —
+    one row per (branch, product), even when it shows up in both Sale and Purchase
+    lines, so the fix ("add it to inventory") isn't duplicated across two rows."""
+    sale_pairs = _missing_product_pairs(
+        db,
+        user,
+        line_model=SaleLine,
+        header_model=Sale,
+        header_id_fk=SaleLine.sale_id,
+        branch_column=Sale.branch_id,
+        date_column=Sale.sale_date,
+    )
+    purchase_pairs = _missing_product_pairs(
+        db,
+        user,
+        line_model=PurchaseLine,
+        header_model=Purchase,
+        header_id_fk=PurchaseLine.purchase_id,
+        branch_column=Purchase.branch_id,
+        date_column=Purchase.purchase_date,
+    )
+
+    keys = sale_pairs.keys() | purchase_pairs.keys()
+    products = _fetch_products(db, {product_id for _, product_id in keys})
+    branches = _fetch_branches(db, {branch_id for branch_id, _ in keys})
+
     rows = []
-    for branch_id, product_id, occurrences, first_date, last_date in query.all():
-        product = db.get(Product, product_id)
-        branch = db.get(Branch, branch_id) if branch_id else None
+    for key in keys:
+        branch_id, product_id = key
+        product = products[product_id]
+        branch = branches.get(branch_id) if branch_id else None
+        sale = sale_pairs.get(key)
+        purchase = purchase_pairs.get(key)
+
+        fields = [
+            _field("Branch", branch.name if branch else None),
+            _field("Stock Code", product.stock_code),
+            _field("Description", product.description),
+        ]
+        if sale and purchase:
+            # No dates here — sale and purchase activity have separate date ranges,
+            # and squeezing both into one line reads worse than just naming the counts.
+            note = (
+                f"Sold {sale[0]} time{'s' if sale[0] != 1 else ''} and purchased "
+                f"{purchase[0]} time{'s' if purchase[0] != 1 else ''} but no inventory "
+                f"record — add this stock code to your inventory system."
+            )
+            fields += [
+                _field("Times Sold", sale[0]),
+                _field("Times Purchased", purchase[0]),
+            ]
+        elif sale:
+            note = f"{_occurrence_phrase('Sold', sale)} but no inventory record — add this stock code to your inventory system."
+            fields += [
+                _field("Times Sold", sale[0]),
+                _field("First Date", sale[1].isoformat()),
+                _field("Last Date", sale[2].isoformat()),
+            ]
+        else:
+            assert purchase is not None
+            note = f"{_occurrence_phrase('Purchased', purchase)} but no inventory record — add this stock code to your inventory system."
+            fields += [
+                _field("Times Purchased", purchase[0]),
+                _field("First Date", purchase[1].isoformat()),
+                _field("Last Date", purchase[2].isoformat()),
+            ]
+
         rows.append(
             {
-                # Branch/stock code aren't repeated here — the frontend shows them as
-                # their own columns next to this note, so the note stays a short,
-                # standalone action instead of restating the row's identity.
-                "note": "No inventory record for this stock code — add it in your inventory system.",
-                "fields": [
-                    _field("Branch", branch.name if branch else None),
-                    _field("Stock Code", product.stock_code),
-                    _field("Description", product.description),
-                    _field(f"Times {verb.capitalize()}", occurrences),
-                    _field("First Date", first_date.isoformat()),
-                    _field("Last Date", last_date.isoformat()),
-                ],
+                "note": note,
+                "fields": fields,
                 # Nothing to highlight — the problem is an absence, not a bad value.
                 "highlight": [],
                 # This can span several imports (it's "add this product to inventory",
@@ -369,32 +462,6 @@ def _missing_product_warnings(
             }
         )
     return rows
-
-
-def sale_missing_product_warnings(db: Session, user: User) -> list[dict]:
-    return _missing_product_warnings(
-        db,
-        user,
-        line_model=SaleLine,
-        header_model=Sale,
-        header_id_fk=SaleLine.sale_id,
-        branch_column=Sale.branch_id,
-        date_column=Sale.sale_date,
-        verb="sold",
-    )
-
-
-def purchase_missing_product_warnings(db: Session, user: User) -> list[dict]:
-    return _missing_product_warnings(
-        db,
-        user,
-        line_model=PurchaseLine,
-        header_model=Purchase,
-        header_id_fk=PurchaseLine.purchase_id,
-        branch_column=Purchase.branch_id,
-        date_column=Purchase.purchase_date,
-        verb="purchased",
-    )
 
 
 def inventory_reconciliation_warnings(db: Session, user: User) -> tuple[list[dict], list[dict]]:
@@ -501,8 +568,9 @@ def inventory_reconciliation_warnings(db: Session, user: User) -> tuple[list[dic
             if uom:
                 uoms_seen[product_id].add(uom)
 
+        products_by_id = _fetch_products(db, set(latest_snapshot.keys()))
         for product_id, stock_level in latest_snapshot.items():
-            product = db.get(Product, product_id)
+            product = products_by_id[product_id]
             prior_qty = Decimal(str(prior_snapshot.get(product_id) or 0))
             purchased_qty = purchased[product_id]
             sold_qty = sold[product_id]
@@ -537,15 +605,33 @@ def inventory_reconciliation_warnings(db: Session, user: User) -> tuple[list[dic
                     }
                 )
 
-            if expected != actual:
+            difference = actual - expected
+            if abs(difference) >= RECONCILIATION_MISMATCH_THRESHOLD:
+                # "Expected" is only as good as three inputs: the prior count, and every
+                # purchase/sale actually imported since — if any of those is wrong or
+                # missing, so is this number. Rather than always blaming the physical
+                # count, point at the most likely real cause:
+                had_activity = purchased_qty != 0 or sold_qty != 0
+                if not had_activity:
+                    # No purchases or sales at all in the window is the strongest signal
+                    # that a file is simply missing, not that the count itself is wrong.
+                    note = "No purchases or sales recorded for this item — check if a file's missing before recounting."
+                elif expected < 0:
+                    # A negative "expected" can never be a real stock count — showing it
+                    # as a target ("should be about -5") would only confuse non-technical
+                    # staff, so explain what it actually means instead.
+                    note = "Records show more sold than was in stock — check for a missing purchase import."
+                else:
+                    note = (
+                        f"Inventory shows {actual}, should be about {expected} — recount, "
+                        f"or check your imports if it's still off."
+                    )
                 mismatch_rows.append(
                     {
-                        "note": (
-                            f"Inventory shows {actual}, should be about {expected} — recount and "
-                            f"fix it in your inventory system."
-                        ),
+                        "note": note,
                         "fields": [
                             _field("Branch", branch.name),
+                            _field("Since", window_start.isoformat()),
                             _field("Until", window_end.isoformat()),
                             _field("Stock Code", product.stock_code),
                             _field("Description", product.description),
@@ -554,7 +640,7 @@ def inventory_reconciliation_warnings(db: Session, user: User) -> tuple[list[dic
                             _field("Sold", sold_qty),
                             _field("Expected Qty", expected),
                             _field("Actual Qty", actual),
-                            _field("Difference", actual - expected),
+                            _field("Difference", difference),
                         ],
                         "highlight": ["Expected Qty", "Actual Qty", "Difference"],
                         "source_import": source_import,

@@ -49,18 +49,11 @@ def get_warnings(
             "rows": data_quality.purchase_numeric_warnings(db, user, since=since),
         },
         {
-            "id": "sale_missing_product",
-            "title": "Inventory — add missing records (found via Sale)",
-            "description": "These stock codes have been sold but have no inventory record yet — add one so stock levels stay accurate.",
+            "id": "missing_product",
+            "title": "Inventory — add missing records",
+            "description": "These stock codes have been sold and/or purchased but have no inventory record yet — add one so stock levels stay accurate.",
             "severity": "warning",
-            "rows": data_quality.sale_missing_product_warnings(db, user),
-        },
-        {
-            "id": "purchase_missing_product",
-            "title": "Inventory — add missing records (found via Purchase)",
-            "description": "These stock codes have been purchased but have no inventory record yet — add one so stock levels stay accurate.",
-            "severity": "warning",
-            "rows": data_quality.purchase_missing_product_warnings(db, user),
+            "rows": data_quality.missing_product_warnings(db, user),
         },
         {
             "id": "reconciliation_uom",

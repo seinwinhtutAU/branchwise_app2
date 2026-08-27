@@ -23,6 +23,27 @@ function formatSummaryLabel(key: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+// Display only — the backend/DB status values are still 'completed'/'reverted'/
+// 'reimported' (see ImportBatchStatus).
+const STATUS_LABELS: Record<string, string> = {
+  completed: 'Completed',
+  reverted: 'Removed',
+  reimported: 'Reimported'
+}
+
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status
+}
+
+const STATUS_BADGE_VARIANT: Record<string, 'success' | 'info' | 'default'> = {
+  completed: 'success',
+  reimported: 'info'
+}
+
+function statusBadgeVariant(status: string): 'success' | 'info' | 'default' {
+  return STATUS_BADGE_VARIANT[status] ?? 'default'
+}
+
 function ImportHistoryDetailPage({ session, batchId, onBack }: Props): React.JSX.Element {
   const showToast = useToast()
   const [detail, setDetail] = useState<ImportHistoryDetail | null>(null)
@@ -100,7 +121,7 @@ function ImportHistoryDetailPage({ session, batchId, onBack }: Props): React.JSX
             <span>
               Date: <span className="text-text-primary">{formatDate(detail.created_at)}</span>
             </span>
-            <Badge variant={detail.status === 'completed' ? 'success' : 'default'}>{detail.status}</Badge>
+            <Badge variant={statusBadgeVariant(detail.status)}>{statusLabel(detail.status)}</Badge>
           </div>
 
           {Array.isArray(detail.summary.messages) ? (

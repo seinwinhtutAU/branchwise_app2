@@ -372,7 +372,12 @@ function App(): React.JSX.Element {
   }
 
   function handleImportConfirmed(): void {
-    showToast('success', `${pendingImport?.importLabel} imported successfully`)
+    showToast(
+      'success',
+      pendingImport?.revertBatchId
+        ? `${pendingImport.importLabel} reimported successfully`
+        : `${pendingImport?.importLabel} imported successfully`
+    )
     setPendingImport(null)
     refreshWarningCount()
   }
@@ -483,6 +488,7 @@ function App(): React.JSX.Element {
               branchOptions={branchOptions}
               profile={profile}
               highlightBatchId={highlightBatchId}
+              onFileReady={handleFileReady}
             />
           )}
           {section === 'importOverview' && <ImportOverviewPage session={session} />}
@@ -532,9 +538,11 @@ function App(): React.JSX.Element {
           {section === 'warnings' && (
             <WarningsPage
               session={session}
+              profile={profile}
               onCountChange={setWarningCount}
               warningWindowDays={warningWindowDays}
               onViewImportBatch={handleViewImportBatch}
+              onFileReady={handleFileReady}
             />
           )}
           {section === 'orders' && <CustomerOrdersPage session={session} profile={profile} />}

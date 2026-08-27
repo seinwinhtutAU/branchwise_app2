@@ -22,6 +22,11 @@ class ImportType(str, enum.Enum):
 class ImportBatchStatus(str, enum.Enum):
     COMPLETED = "completed"
     REVERTED = "reverted"
+    # Set instead of REVERTED when the revert happened as part of picking a corrected
+    # file to replace this batch (the Warning page's/Import History's "Reimport" flow),
+    # rather than a standalone removal with no replacement — see confirm_purchase_file
+    # and friends' `replaced` query param.
+    REIMPORTED = "reimported"
 
 
 class ImportBatch(Base):

@@ -17,14 +17,7 @@ interface Props {
 
 // Upload trigger only — the origin/clean preview + confirm step lives on
 // ImportReviewPage, reached after a file is picked and parsed here.
-function FileImportCard({
-  session,
-  label,
-  description,
-  endpoint,
-  icon,
-  onFileReady
-}: Props): React.JSX.Element {
+function FileImportCard({ session, label, description, endpoint, icon, onFileReady }: Props): React.JSX.Element {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const showToast = useToast()
@@ -97,10 +90,7 @@ function FileImportCard({
       {uploading && (
         <div className="flex flex-col gap-2 py-6" role="status" aria-label="Uploading">
           {[...Array(3)].map((_, i) => (
-            <div
-              key={i}
-              className="h-8 rounded-md bg-bg-raised animate-pulse motion-reduce:animate-none"
-            />
+            <div key={i} className="h-8 rounded-md bg-bg-raised animate-pulse motion-reduce:animate-none" />
           ))}
         </div>
       )}

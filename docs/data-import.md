@@ -35,7 +35,9 @@ Myanmar retail software historically used **Zawgyi**, a pre-2019, non-Unicode-co
 - `POST /api/imports/{sales,inventory,purchase}` — parses the upload and returns both the raw grid (`origin`) and the cleaned rows (`clean`), for the user to review. Nothing is written to the database.
 - `POST /api/imports/{sales,inventory,purchase}/confirm` — re-parses the same upload and persists it via the matching `*_persist.py` service.
 
-The frontend (`FileImport.tsx`) keeps the selected file in memory between the two steps so confirming doesn't require re-picking it.
+The frontend (`FileImportCard.tsx`) keeps the selected file in memory between the two steps so confirming doesn't require re-picking it.
+
+Purchase confirm additionally accepts an optional `purchase_date` form field (`YYYY-MM-DD`) to override the default of "the import date" — see `purchases.purchase_date` in [database-schema.md](./database-schema.md).
 
 ## Branch resolution on confirm
 

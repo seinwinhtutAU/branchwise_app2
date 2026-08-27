@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
 import { useToast } from '@renderer/lib/toast'
 import { cn } from '@renderer/lib/utils'
+import { useImportFilePicker } from '@renderer/lib/useImportFilePicker'
 import { Button } from '@renderer/components/ui/Button'
 import { Badge } from '@renderer/components/ui/Badge'
 import { CardHeader } from '@renderer/components/ui/Card'
@@ -12,11 +13,11 @@ import { Select } from '@renderer/components/ui/Select'
 import { TableSkeleton } from '@renderer/components/ui/Skeleton'
 import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
 import { Pagination } from '@renderer/components/ui/Pagination'
-import { HistoryIcon, TrashIcon } from '@renderer/components/ui/icons'
+import { HistoryIcon } from '@renderer/components/ui/icons'
 import { useStickyAbove } from '@renderer/lib/useStickyAbove'
 import { distinctValues, inDateRange } from '@renderer/lib/filters'
 import { usePagination } from '@renderer/lib/usePagination'
-import type { Profile } from '@renderer/components/features/types'
+import type { PendingImport, Profile } from '@renderer/components/features/types'
 
 const RETAIL_REVERT_WINDOW_MS = 24 * 60 * 60 * 1000
 
@@ -46,6 +47,9 @@ interface Props {
   // Set when arriving here from a Warning row's "Source Import" link — scrolls that
   // exact row into view and rings it so it's obvious which one to revert.
   highlightBatchId?: string | null
+  // Hands off a picked-and-parsed file to the app-level confirm flow — used by each
+  // row's "Reimport" button.
+  onFileReady?: (pending: PendingImport) => void
 }
 
 function formatDate(iso: string): string {
@@ -55,12 +59,43 @@ function formatDate(iso: string): string {
   })
 }
 
+// Display only — the backend/DB status values are still 'completed'/'reverted'/
+// 'reimported' (see ImportBatchStatus), this just gives the reader three unambiguous
+// words: Completed (still active), Removed (deleted, no replacement), Reimported
+// (replaced by a corrected file) — without touching the revert action, endpoint, or
+// audit columns (reverted_at/reverted_by) that still use the old names internally.
+const STATUS_LABELS: Record<string, string> = {
+  completed: 'Completed',
+  reverted: 'Removed',
+  reimported: 'Reimported'
+}
+
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status
+}
+
+const DEFAULT_STATUS_FILTER = 'completed'
+
+const STATUS_BADGE_VARIANT: Record<string, 'success' | 'info' | 'default'> = {
+  completed: 'success',
+  reimported: 'info'
+}
+
+function statusBadgeVariant(status: string): 'success' | 'info' | 'default' {
+  return STATUS_BADGE_VARIANT[status] ?? 'default'
+}
+
+function importTypeLabel(importType: string): string {
+  return importType.charAt(0).toUpperCase() + importType.slice(1)
+}
+
 function ImportHistoryTable({
   session,
   onViewBatch,
   branchOptions,
   profile,
-  highlightBatchId
+  highlightBatchId,
+  onFileReady
 }: Props): React.JSX.Element {
   const showToast = useToast()
   const [rows, setRows] = useState<ImportBatchRow[] | null>(null)
@@ -69,9 +104,21 @@ function ImportHistoryTable({
   const [revertingId, setRevertingId] = useState<string | null>(null)
   const { aboveRef, containerStyle } = useStickyAbove()
   const highlightRowRef = useRef<HTMLTableRowElement | null>(null)
+  const { trigger: triggerFilePicker, input: filePickerInput, picking } = useImportFilePicker(session, onFileReady)
+
+  function handleReimport(row: ImportBatchRow): void {
+    triggerFilePicker({
+      endpoint: `/api/imports/${row.import_type}`,
+      importLabel: importTypeLabel(row.import_type),
+      revertBatchId: row.id,
+      replacingFilename: row.filename
+    })
+  }
 
   const [typeFilter, setTypeFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
+  // Defaults to hiding Removed/Reimported rows — they're kept as an audit trail, not
+  // something worth seeing on every visit. Still reachable via the Status filter itself.
+  const [statusFilter, setStatusFilter] = useState(DEFAULT_STATUS_FILTER)
   const [branchFilter, setBranchFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -112,8 +159,16 @@ function ImportHistoryTable({
   }, [highlightBatchId, rows])
 
   const hasActiveFilters =
-    typeFilter !== '' || statusFilter !== '' || branchFilter !== '' || dateFrom !== '' || dateTo !== ''
+    typeFilter !== '' ||
+    statusFilter !== DEFAULT_STATUS_FILTER ||
+    branchFilter !== '' ||
+    dateFrom !== '' ||
+    dateTo !== ''
 
+  // Resets to genuinely unfiltered (Status included) rather than back to the Completed
+  // default — this doubles as the "no rows match your filters" empty state's escape
+  // hatch, which must always be able to reveal *something*, even if every row in
+  // history happens to be Removed/Reimported right now.
   function clearFilters(): void {
     setTypeFilter('')
     setStatusFilter('')
@@ -136,7 +191,7 @@ function ImportHistoryTable({
   const { page, setPage, totalPages, pageItems, pageSize } = usePagination(filteredRows)
 
   async function handleRevert(batchId: string): Promise<void> {
-    if (!window.confirm('Revert this import? This deletes the data it created.')) return
+    if (!window.confirm('Remove this import? This deletes the data it created.')) return
 
     setRevertingId(batchId)
     try {
@@ -159,10 +214,11 @@ function ImportHistoryTable({
 
   return (
     <div className="flex flex-col" style={containerStyle}>
+      {filePickerInput}
       <div ref={aboveRef} className="sticky top-14 lg:top-0 z-30 bg-bg-base">
         <CardHeader
           title="Import history"
-          description="Every confirmed upload, with the option to revert a mistaken one."
+          description="Every confirmed upload — reimport a corrected file to replace a mistaken one, or remove it outright."
           action={
             <Button variant="secondary" size="sm" onClick={load} loading={loading}>
               Refresh
@@ -196,7 +252,7 @@ function ImportHistoryTable({
                     <option value="">All</option>
                     {statusOptions.map((opt) => (
                       <option key={opt} value={opt}>
-                        {opt}
+                        {statusLabel(opt)}
                       </option>
                     ))}
                   </Select>
@@ -308,9 +364,7 @@ function ImportHistoryTable({
                   <Td>{row.branch_name ?? '—'}</Td>
                   <Td>{row.uploaded_by_name ?? '—'}</Td>
                   <Td>
-                    <Badge variant={row.status === 'completed' ? 'success' : 'default'}>
-                      {row.status}
-                    </Badge>
+                    <Badge variant={statusBadgeVariant(row.status)}>{statusLabel(row.status)}</Badge>
                   </Td>
                   <Td className="text-text-muted whitespace-nowrap">{formatDate(row.created_at)}</Td>
                   <Td>
@@ -318,24 +372,36 @@ function ImportHistoryTable({
                       (isRetailRevertLocked(row, profile) ? (
                         <span
                           className="text-xs text-text-muted"
-                          title="Retail accounts can only revert an import within 1 day of importing it"
+                          title="Retail accounts can only reimport or remove an import within 1 day of importing it"
                         >
                           Locked
                         </span>
                       ) : (
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          aria-label="Revert import"
-                          title="Revert import"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleRevert(row.id)
-                          }}
-                          loading={revertingId === row.id}
-                        >
-                          <TrashIcon className="w-4 h-4" />
-                        </Button>
+                        <div className="flex items-center gap-1.5 justify-end">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            title="Pick a corrected file to replace this import"
+                            disabled={picking}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleReimport(row)
+                            }}
+                          >
+                            Reimport
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleRevert(row.id)
+                            }}
+                            loading={revertingId === row.id}
+                          >
+                            Remove
+                          </Button>
+                        </div>
                       ))}
                   </Td>
                 </Tr>

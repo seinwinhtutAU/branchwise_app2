@@ -148,6 +148,30 @@ def test_revert_deletes_data_but_keeps_batch(authed_client: TestClient, db_sessi
     assert batch.reverted_by == "test-user-id"
 
 
+def test_revert_with_replaced_marks_reimported(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+    batch_id = summary["batch_id"]
+
+    response = authed_client.post(f"/api/imports/history/{batch_id}/revert?replaced=true")
+    assert response.status_code == 200
+    assert response.json()["status"] == "reimported"
+
+    batch = db_session.get(ImportBatch, batch_id)
+    assert batch is not None
+    assert batch.status == ImportBatchStatus.REIMPORTED
+
+
+def test_revert_after_reimported_conflicts(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+    batch_id = summary["batch_id"]
+
+    authed_client.post(f"/api/imports/history/{batch_id}/revert?replaced=true")
+    response = authed_client.post(f"/api/imports/history/{batch_id}/revert")
+    assert response.status_code == 409
+
+
 def test_revert_twice_conflicts(authed_client: TestClient, db_session: Session):
     _make_user(db_session, branch_name="Retail 1")
     summary = _confirm_sale(authed_client)

@@ -22,7 +22,7 @@ interface Props {
 }
 
 function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Props): React.JSX.Element {
-  const { importLabel, endpoint, file, result } = pending
+  const { importLabel, endpoint, file, result, revertBatchId, replacingFilename } = pending
   const showToast = useToast()
 
   const [branches, setBranches] = useState<BranchOption[]>([])
@@ -56,8 +56,28 @@ function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Pr
     setBranchRequiredError(false)
 
     setConfirming(true)
+    let removedPrevious = false
 
     try {
+      if (revertBatchId) {
+        // replaced=true marks the old batch REIMPORTED rather than REVERTED/"Removed" —
+        // see ImportBatchStatus. The inline note below (not a blocking confirm() popup)
+        // is the warning here; the user already chose to pick a replacement file.
+        const revertResponse = await fetch(
+          `${apiBaseUrl}/api/imports/history/${revertBatchId}/revert?replaced=true`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${session.access_token}` }
+          }
+        )
+        if (!revertResponse.ok) {
+          const revertBody = await revertResponse.json().catch(() => null)
+          showToast('error', revertBody?.detail ?? `Couldn't remove the previous import: ${revertResponse.status}`)
+          return
+        }
+        removedPrevious = true
+      }
+
       const formData = new FormData()
       formData.append('file', file)
       if (needsBranchSelection) formData.append('branch_id', selectedBranchId)
@@ -71,13 +91,23 @@ function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Pr
 
       const body = await response.json().catch(() => null)
       if (!response.ok) {
-        showToast('error', body?.detail ?? `Import failed: ${response.status}`)
+        showToast(
+          'error',
+          removedPrevious
+            ? `Removed the previous import, but saving the new file failed (${body?.detail ?? response.status}). Import it again from here.`
+            : (body?.detail ?? `Import failed: ${response.status}`)
+        )
         return
       }
 
       onConfirmed(body)
     } catch {
-      showToast('error', 'Import failed — is the backend running?')
+      showToast(
+        'error',
+        removedPrevious
+          ? "Removed the previous import, but saving the new file failed — is the backend running? Import it again from here."
+          : 'Import failed — is the backend running?'
+      )
     } finally {
       setConfirming(false)
     }
@@ -108,6 +138,13 @@ function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Pr
           <p className="text-sm text-text-muted truncate">{result.filename}</p>
         </div>
       </div>
+
+      {revertBatchId && (
+        <p className="text-sm text-warning bg-warning-subtle rounded-md px-3 py-2">
+          Confirming will remove <strong>{replacingFilename ?? 'the previous import'}</strong> and save this file
+          in its place.
+        </p>
+      )}
 
       <ImportDataView
         clean={result.clean}
@@ -145,7 +182,7 @@ function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Pr
               </div>
             )}
             <Button onClick={handleConfirm} loading={confirming}>
-              Confirm Import
+              {revertBatchId ? 'Confirm & Replace' : 'Confirm Import'}
             </Button>
             <Button variant="ghost" onClick={onBack}>
               Cancel

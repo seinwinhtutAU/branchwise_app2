@@ -346,6 +346,10 @@ def get_import_history_detail(
 @router.post("/history/{batch_id}/revert")
 def revert_import_batch(
     batch_id: str,
+    # True when this revert is the first half of a "Reimport" (a corrected file is about
+    # to be confirmed for the same slot) rather than a standalone removal — determines
+    # whether the batch ends up marked REVERTED ("Removed") or REIMPORTED.
+    replaced: bool = False,
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -354,8 +358,8 @@ def revert_import_batch(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
     if not _can_access_batch(user, batch):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
-    if batch.status == ImportBatchStatus.REVERTED:
-        raise HTTPException(status.HTTP_409_CONFLICT, "This import was already reverted")
+    if batch.status != ImportBatchStatus.COMPLETED:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This import was already removed or reimported")
     if user.role == UserRole.RETAIL and datetime.datetime.now() - batch.created_at > datetime.timedelta(
         days=1
     ):
@@ -383,7 +387,7 @@ def revert_import_batch(
             synchronize_session=False
         )
 
-    batch.status = ImportBatchStatus.REVERTED
+    batch.status = ImportBatchStatus.REIMPORTED if replaced else ImportBatchStatus.REVERTED
     batch.reverted_at = datetime.datetime.now()
     batch.reverted_by = user.id
     db.commit()

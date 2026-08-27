@@ -29,6 +29,10 @@ export interface PendingImport {
   endpoint: string
   file: File
   result: ImportPreviewResult
+  // When set, confirming this import first removes the batch it's replacing — see
+  // ImportReviewPage's handleConfirm and lib/useImportFilePicker.
+  revertBatchId?: string
+  replacingFilename?: string | null
 }
 
 export interface ColorQty {
