@@ -92,3 +92,33 @@ def test_inventory_preview_flags_negative_qty(authed_client: TestClient):
     bad_rows = [i for i, issues in enumerate(origin["row_issues"]) if issues]
     assert len(bad_rows) == 1
     assert origin["rows"][bad_rows[0]][0] == "020-724001A"
+
+
+def test_sales_endpoint_rejects_purchase_file(authed_client: TestClient):
+    response = authed_client.post(
+        "/api/imports/sales",
+        files={"file": ("purchase.csv", io.BytesIO(PURCHASE_CSV.encode()), "text/csv")},
+    )
+    assert response.status_code == 400
+    assert "Purchase file" in response.json()["detail"]
+    assert "Sale file" in response.json()["detail"]
+
+
+def test_purchase_endpoint_rejects_inventory_file(authed_client: TestClient):
+    response = authed_client.post(
+        "/api/imports/purchase",
+        files={"file": ("inventory.csv", io.BytesIO(INVENTORY_CSV.encode()), "text/csv")},
+    )
+    assert response.status_code == 400
+    assert "Inventory file" in response.json()["detail"]
+    assert "Purchase file" in response.json()["detail"]
+
+
+def test_inventory_endpoint_rejects_sale_file(authed_client: TestClient):
+    response = authed_client.post(
+        "/api/imports/inventory",
+        files={"file": ("sale.csv", io.BytesIO(SALE_CSV.encode()), "text/csv")},
+    )
+    assert response.status_code == 400
+    assert "Sale file" in response.json()["detail"]
+    assert "Inventory file" in response.json()["detail"]

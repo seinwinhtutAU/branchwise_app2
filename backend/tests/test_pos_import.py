@@ -73,6 +73,16 @@ def test_dmy_date_format_supported(tmp_path: Path):
     assert df.iloc[0]["Date"] == "2026-08-21"
 
 
+def test_xls_datetime_report_date_supported(tmp_path: Path):
+    # .xls/.xlsx report-date cells stored as real Excel dates come through
+    # read_raw_grid as a stringified pandas Timestamp, e.g. "2026-08-21 00:00:00".
+    datetime_sample = SAMPLE.replace("Date,:,8/21/2026", "Date,:,2026-08-21 00:00:00")
+    path = tmp_path / "sale.csv"
+    path.write_text(datetime_sample, encoding="utf-8")
+    df = parse_pos_sale_export(path)
+    assert df.iloc[0]["Date"] == "2026-08-21"
+
+
 ZAWGYI_SAMPLE = SAMPLE.replace("luofu", "ယုန္ျဖူ(က)ကတီပါ")
 
 

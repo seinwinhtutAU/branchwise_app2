@@ -69,6 +69,35 @@ def read_raw_grid(file_bytes: bytes, filename: str) -> list[list[str]]:
     raise ValueError(f"Unsupported file type: {ext or 'unknown'}")
 
 
+# Each report type's column-header row starts with a distinct label, e.g. a
+# sale export's header is "Other Code,Stock Code,Description,...", inventory's
+# is "Stk. Code,Other Code,...", and purchase's (which has no metadata line
+# before it) is "Stock Code,Description,...". Checked against the first few
+# rows of the raw grid, this tells a sale file apart from an inventory or
+# purchase file structurally, without needing the row to parse cleanly.
+_REPORT_TYPE_SIGNATURES: dict[str, str] = {
+    "Other Code": "sale",
+    "Stk. Code": "inventory",
+    "Stock Code": "purchase",
+}
+
+
+def detect_report_type(rows: list[list[str]]) -> str | None:
+    """Best-effort guess of which POS export type a raw grid is, from its
+    column-header row's first cell. Returns None when nothing in the first
+    few rows matches a known header, so unfamiliar files aren't blocked —
+    this is only meant to catch an obvious wrong-file upload (e.g. a
+    purchase export sent to the sale importer), not to validate the file.
+    """
+    for row in rows[:5]:
+        if not row:
+            continue
+        first = row[0].strip()
+        if first in _REPORT_TYPE_SIGNATURES:
+            return _REPORT_TYPE_SIGNATURES[first]
+    return None
+
+
 NumericRule = tuple[str, float | None]
 
 # Plain-English names for the columns validation can flag, since these

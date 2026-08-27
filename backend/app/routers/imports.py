@@ -15,7 +15,7 @@ from app.models.sale import Sale, SaleLine
 from app.models.stock_level import StockLevel
 from app.models.user import User, UserRole
 from app.services.branches import list_retail_branches
-from app.services.import_common import SUPPORTED_EXTENSIONS, validate_rows
+from app.services.import_common import SUPPORTED_EXTENSIONS, detect_report_type, validate_rows
 from app.services.inventory_import import OUTPUT_COLUMNS as INVENTORY_OUTPUT_COLUMNS
 from app.services.inventory_import import VALIDATION_RULES as INVENTORY_VALIDATION_RULES
 from app.services.inventory_import import parse_inventory_upload
@@ -38,6 +38,23 @@ def _check_extension(filename: str | None) -> None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             f"Unsupported file type '{ext or 'unknown'}' — expected .csv, .xls, or .xlsx",
+        )
+
+
+_REPORT_TYPE_LABELS = {"sale": "Sale", "inventory": "Inventory", "purchase": "Purchase"}
+
+
+def _check_report_type(origin_rows: list[list[str]], expected: str) -> None:
+    """Catch an obviously wrong file (e.g. a purchase export uploaded to the
+    sale importer) by its column-header row, before it silently produces an
+    empty or nonsensical preview. Only blocks on a confident mismatch — a
+    grid that doesn't match any known header is let through unchanged."""
+    detected = detect_report_type(origin_rows)
+    if detected is not None and detected != expected:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"This looks like a {_REPORT_TYPE_LABELS[detected]} file, not a "
+            f"{_REPORT_TYPE_LABELS[expected]} file — check you picked the right one.",
         )
 
 
@@ -112,6 +129,7 @@ async def import_sales_file(
         origin_rows, clean_df = parse_pos_sale_upload(contents, file.filename or "")
     except Exception as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
+    _check_report_type(origin_rows, "sale")
 
     return _build_preview(file.filename, origin_rows, clean_df, SALES_OUTPUT_COLUMNS, SALES_VALIDATION_RULES)
 
@@ -131,6 +149,7 @@ async def confirm_sales_file(
         origin_rows, clean_df = parse_pos_sale_upload(contents, file.filename or "")
     except Exception as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
+    _check_report_type(origin_rows, "sale")
 
     preview_data = _build_preview(
         file.filename, origin_rows, clean_df, SALES_OUTPUT_COLUMNS, SALES_VALIDATION_RULES
@@ -157,6 +176,7 @@ async def import_inventory_file(
         origin_rows, clean_df = parse_inventory_upload(contents, file.filename or "")
     except Exception as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
+    _check_report_type(origin_rows, "inventory")
 
     return _build_preview(
         file.filename, origin_rows, clean_df, INVENTORY_OUTPUT_COLUMNS, INVENTORY_VALIDATION_RULES
@@ -178,6 +198,7 @@ async def confirm_inventory_file(
         origin_rows, clean_df = parse_inventory_upload(contents, file.filename or "")
     except Exception as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
+    _check_report_type(origin_rows, "inventory")
 
     preview_data = _build_preview(
         file.filename, origin_rows, clean_df, INVENTORY_OUTPUT_COLUMNS, INVENTORY_VALIDATION_RULES
@@ -204,6 +225,7 @@ async def import_purchase_file(
         origin_rows, clean_df = parse_purchase_upload(contents, file.filename or "")
     except Exception as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
+    _check_report_type(origin_rows, "purchase")
 
     return _build_preview(
         file.filename, origin_rows, clean_df, PURCHASE_OUTPUT_COLUMNS, PURCHASE_VALIDATION_RULES
@@ -233,6 +255,7 @@ async def confirm_purchase_file(
         origin_rows, clean_df = parse_purchase_upload(contents, file.filename or "")
     except Exception as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
+    _check_report_type(origin_rows, "purchase")
 
     preview_data = _build_preview(
         file.filename, origin_rows, clean_df, PURCHASE_OUTPUT_COLUMNS, PURCHASE_VALIDATION_RULES

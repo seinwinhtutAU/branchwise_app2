@@ -48,6 +48,11 @@ _DATE_FORMATS = [
     "%d-%m-%Y",
     "%m/%d/%y",
     "%d/%m/%y",
+    # xls/xlsx report-date cells stored as real Excel dates come through
+    # read_raw_grid as a stringified pandas Timestamp, e.g. "2026-02-01 00:00:00".
+    "%Y-%m-%d %H:%M:%S",
+    "%m/%d/%Y %H:%M:%S",
+    "%d/%m/%Y %H:%M:%S",
 ]
 
 
