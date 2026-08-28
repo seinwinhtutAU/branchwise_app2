@@ -1,4 +1,5 @@
 import csv
+import functools
 import io
 import re
 import uuid
@@ -37,6 +38,7 @@ def is_zawgyi(text: str) -> bool:
     return label == "__label__zg"
 
 
+@functools.lru_cache(maxsize=50_000)
 def clean_text(value: str) -> str:
     """Collapse whitespace and normalize Zawgyi-encoded Myanmar text to Unicode.
 
@@ -47,6 +49,14 @@ def clean_text(value: str) -> str:
     Zawgyi text displays garbled unless converted — but converting text
     that's already proper Unicode corrupts it, so only convert when the
     text is actually detected as Zawgyi.
+
+    Cached because is_zawgyi() runs a fasttext model inference per call, and
+    the same Description/Location strings repeat across many rows of a
+    single import (e.g. Location is often identical on every row) — without
+    memoizing, a large file re-runs the model on identical text hundreds of
+    times. The result is a pure function of the input text, so caching is
+    safe; capped well above any realistic number of distinct strings seen
+    across the process's lifetime so it can't grow unbounded.
     """
     text = " ".join(value.split())
     if _MYANMAR_RANGE.search(text) and is_zawgyi(text):

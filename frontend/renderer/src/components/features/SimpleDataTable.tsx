@@ -28,7 +28,19 @@ export interface DataTableColumn<T> {
 export type DataTableFilter<T> =
   | { type: 'search'; keys: (keyof T)[]; placeholder?: string }
   | { type: 'select'; key: keyof T; label: string; options?: string[] }
-  | { type: 'dateRange'; key: keyof T; label: string }
+  | {
+      type: 'dateRange'
+      key: keyof T
+      label: string
+      /**
+       * When set, the date range is sent to the server as these query param
+       * names (e.g. `{ from: 'date_from', to: 'date_to' }`) instead of only
+       * filtering client-side — for endpoints whose backing table grows
+       * without bound (sales, purchases), so the browser isn't asked to load
+       * the entire history on every visit.
+       */
+      serverParam?: { from: string; to: string }
+    }
 
 interface Props<T extends object> {
   session: Session
@@ -82,11 +94,22 @@ export function SimpleDataTable<T extends object>({
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
 
+  const dateRangeFilter = filters?.find((f) => f.type === 'dateRange')
+  const serverParam = dateRangeFilter?.type === 'dateRange' ? dateRangeFilter.serverParam : undefined
+
   async function load(): Promise<void> {
     setLoading(true)
     setLoadFailed(false)
     try {
-      const response = await fetch(`${apiBaseUrl}${endpoint}`, {
+      let url = `${apiBaseUrl}${endpoint}`
+      if (serverParam) {
+        const params = new URLSearchParams()
+        if (dateFrom) params.set(serverParam.from, dateFrom)
+        if (dateTo) params.set(serverParam.to, dateTo)
+        const qs = params.toString()
+        if (qs) url += `?${qs}`
+      }
+      const response = await fetch(url, {
         headers: { Authorization: `Bearer ${session.access_token}` }
       })
       if (!response.ok) {
@@ -106,7 +129,7 @@ export function SimpleDataTable<T extends object>({
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.access_token, endpoint])
+  }, [session.access_token, endpoint, ...(serverParam ? [dateFrom, dateTo] : [])])
 
   const hasActiveFilters =
     search !== '' || dateFrom !== '' || dateTo !== '' || Object.values(selectValues).some(Boolean)
@@ -158,7 +181,7 @@ export function SimpleDataTable<T extends object>({
 
   return (
     <div className="flex flex-col" style={containerStyle}>
-      <div ref={aboveRef} className="sticky top-14 lg:top-0 z-30 bg-bg-base">
+      <div ref={aboveRef} className="sticky top-14 lg:top-0 z-30 bg-bg-subtle">
         <CardHeader
           title={title}
           description={description}

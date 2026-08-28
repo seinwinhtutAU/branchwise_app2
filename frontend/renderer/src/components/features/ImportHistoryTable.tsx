@@ -215,7 +215,7 @@ function ImportHistoryTable({
   return (
     <div className="flex flex-col" style={containerStyle}>
       {filePickerInput}
-      <div ref={aboveRef} className="sticky top-14 lg:top-0 z-30 bg-bg-base">
+      <div ref={aboveRef} className="sticky top-14 lg:top-0 z-30 bg-bg-subtle">
         <CardHeader
           title="Import history"
           description="Every confirmed upload — reimport a corrected file to replace a mistaken one, or remove it outright."

@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.security import get_current_app_user
 from app.db.session import get_db
 from app.models.branch import Branch
-from app.models.user import User
-from app.models.wholesale import CustomerOrder, CustomerOrderLine
+from app.models.user import User, UserRole
+from app.models.wholesale import CustomerOrder, CustomerOrderLine, FactoryVoucherLine
 from app.schemas.wholesale import (
     CustomerOrderCreate,
     CustomerOrderLineCreate,
@@ -75,7 +75,18 @@ def _get_owned_line(order_id: str, line_id: str, user: User, db: Session) -> tup
     return order, line
 
 
-def _new_line(payload: CustomerOrderLineCreate) -> CustomerOrderLine:
+def _check_second_commit_permission(user: User, is_editing_second_commit: bool) -> None:
+    """The second (firmer, factory-facing) commitment qty can only be set or changed by an
+    admin account — the UI shows it read-only for everyone else; this is the server-side
+    backstop for that, since a disabled input alone doesn't stop a direct API call."""
+    if is_editing_second_commit and user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Only an admin account can set the second commitment qty"
+        )
+
+
+def _new_line(payload: CustomerOrderLineCreate, user: User) -> CustomerOrderLine:
+    _check_second_commit_permission(user, payload.second_commit_qty is not None)
     colors = [c.model_dump() for c in payload.colors]
     total_qty = colors_total(colors)
     validate_received_qty(payload.received_qty, total_qty)
@@ -95,7 +106,15 @@ def _new_line(payload: CustomerOrderLineCreate) -> CustomerOrderLine:
 
 @router.get("")
 def list_orders(user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> list[CustomerOrderOut]:
-    query = db.query(CustomerOrder, Branch).outerjoin(Branch, CustomerOrder.branch_id == Branch.id)
+    query = (
+        db.query(CustomerOrder, Branch)
+        .outerjoin(Branch, CustomerOrder.branch_id == Branch.id)
+        .options(
+            selectinload(CustomerOrder.lines).joinedload(CustomerOrderLine.matched_voucher_line).joinedload(
+                FactoryVoucherLine.voucher
+            )
+        )
+    )
     if user.branch_id is not None:
         query = query.filter(CustomerOrder.branch_id == user.branch_id)
     query = query.order_by(CustomerOrder.order_no.desc())
@@ -118,7 +137,7 @@ def create_order(
         customer_name=payload.customer_name,
         remark=payload.remark,
     )
-    line = _new_line(payload.line)
+    line = _new_line(payload.line, user)
     order.lines.append(line)
     db.add(order)
     db.flush()
@@ -166,7 +185,7 @@ def add_order_line(
     db: Session = Depends(get_db),
 ) -> CustomerOrderOut:
     order = _get_owned_order(order_id, user, db)
-    line = _new_line(payload)
+    line = _new_line(payload, user)
     order.lines.append(line)
     db.flush()
     apply_existing_voucher_to_line(db, order, line)
@@ -187,6 +206,7 @@ def update_order_line(
 ) -> CustomerOrderOut:
     order, line = _get_owned_line(order_id, line_id, user, db)
     updates = payload.model_dump(exclude_unset=True)
+    _check_second_commit_permission(user, "second_commit_qty" in updates)
 
     if "colors" in updates:
         colors = [c if isinstance(c, dict) else c.model_dump() for c in updates.pop("colors")]

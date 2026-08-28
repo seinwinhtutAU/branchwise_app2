@@ -650,15 +650,17 @@ function WarningsPage({
   return (
     <div className="flex flex-col gap-4">
       {filePickerInput}
-      <CardHeader
-        title="Warning"
-        description={`Short, actionable data problems, grouped by area — open a row's Details for the full record. The Sale/Purchase "fix these numbers" checks cover the last ${warningWindowDays === 1 ? 'day' : `${warningWindowDays} days`} (change this in Settings); missing-inventory-record checks always show, regardless of date.`}
-        action={
-          <Button variant="secondary" size="sm" onClick={load} loading={loading}>
-            Refresh
-          </Button>
-        }
-      />
+      <div className="bg-bg-subtle overflow-hidden">
+        <CardHeader
+          title="Warning"
+          description={`Short, actionable data problems, grouped by area — open a row's Details for the full record. The Sale/Purchase "fix these numbers" checks cover the last ${warningWindowDays === 1 ? 'day' : `${warningWindowDays} days`} (change this in Settings); missing-inventory-record checks always show, regardless of date.`}
+          action={
+            <Button variant="secondary" size="sm" onClick={load} loading={loading}>
+              Refresh
+            </Button>
+          }
+        />
+      </div>
 
       {sections === null && loading && <TableSkeleton rows={4} cols={4} />}
 

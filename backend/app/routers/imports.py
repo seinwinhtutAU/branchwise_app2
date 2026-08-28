@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.security import get_current_app_user, get_current_user
 from app.db.session import get_db
@@ -321,7 +321,11 @@ def get_import_freshness(
 def list_import_history(
     user: User = Depends(get_current_app_user), db: Session = Depends(get_db)
 ) -> list[dict]:
-    query = db.query(ImportBatch).order_by(ImportBatch.created_at.desc())
+    query = (
+        db.query(ImportBatch)
+        .options(joinedload(ImportBatch.branch), joinedload(ImportBatch.uploaded_by_user))
+        .order_by(ImportBatch.created_at.desc())
+    )
     if user.branch_id is not None:
         query = query.filter(ImportBatch.branch_id == user.branch_id)
 

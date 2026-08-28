@@ -13,6 +13,7 @@ import { Select } from '@renderer/components/ui/Select'
 import { Textarea } from '@renderer/components/ui/Textarea'
 import { TableSkeleton } from '@renderer/components/ui/Skeleton'
 import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
+import { TrashIcon } from '@renderer/components/ui/icons'
 import { FactoryIcon } from '@renderer/components/ui/icons'
 import type { FactoryVoucher, FactoryVoucherLine, Profile } from '@renderer/components/features/types'
 
@@ -90,6 +91,10 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
 
   const needsBranch = profile !== null && profile.branch_id === null
   const branchOptions = useWholesaleBranchOptions(needsBranch ? session : null)
+  // Wholesale is structurally a single-branch operation (see CLAUDE.md) — with exactly one
+  // option there's nothing to actually choose, so it's auto-filled instead of shown as a
+  // picker. The picker only reappears if a second wholesale branch is ever added.
+  const showBranchColumn = needsBranch && branchOptions.length > 1
 
   async function load(): Promise<void> {
     setLoading(true)
@@ -141,7 +146,8 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
       if (!opts?.silent) showToast('error', 'Product code and buying price are required')
       return
     }
-    if (needsBranch && !draft.branch_id) {
+    const resolvedBranchId = draft.branch_id || (branchOptions.length === 1 ? branchOptions[0].id : '')
+    if (needsBranch && !resolvedBranchId) {
       setAttemptedSubmit(true)
       if (!opts?.silent) showToast('error', 'Choose which branch this voucher belongs to')
       return
@@ -152,7 +158,7 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
         voucher_date: draft.voucher_date,
         factory_name: draft.factory_name.trim() || null,
         remark: draft.remark.trim() || null,
-        branch_id: needsBranch ? draft.branch_id : null,
+        branch_id: needsBranch ? resolvedBranchId : null,
         line: {
           product_code: draft.product_code.trim(),
           buying_price: Number(draft.buying_price),
@@ -173,7 +179,7 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
         showToast('error', responseBody?.detail ?? `Add failed: ${response.status}`)
         return
       }
-      showToast('success', `Voucher #${responseBody.voucher.voucher_no} added`)
+      showToast('success', `Voucher FV-${responseBody.voucher.voucher_no} added`)
       announceUpdatedOrders(responseBody.updated_order_count ?? 0)
       closeAdd()
       await load()
@@ -251,7 +257,7 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
   }
 
   async function handleDeleteVoucher(voucher: FactoryVoucher): Promise<void> {
-    if (!window.confirm(`Delete voucher #${voucher.voucher_no} and all its products?`)) return
+    if (!window.confirm(`Delete voucher FV-${voucher.voucher_no} and all its products?`)) return
     setDeletingVoucherId(voucher.id)
     try {
       const response = await fetch(`${apiBaseUrl}/api/factory-vouchers/${voucher.id}`, {
@@ -273,8 +279,8 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
   async function handleDeleteLine(voucher: FactoryVoucher, line: FactoryVoucherLine): Promise<void> {
     const message =
       voucher.lines.length === 1
-        ? `Delete voucher #${voucher.voucher_no}? It has only this one product.`
-        : `Delete product ${line.product_code} from voucher #${voucher.voucher_no}?`
+        ? `Delete voucher FV-${voucher.voucher_no}? It has only this one product.`
+        : `Delete product ${line.product_code} from voucher FV-${voucher.voucher_no}?`
     if (!window.confirm(message)) return
     setDeletingLineId(line.id)
     try {
@@ -358,7 +364,7 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
 
   const draftTotal = colorShorthandTotal(draft.colorsText)
   const lineDraftTotal = colorShorthandTotal(lineDraft.colorsText)
-  const colCount = needsBranch ? 11 : 10
+  const colCount = showBranchColumn ? 11 : 10
 
   return (
     <div className="flex flex-col gap-4">
@@ -407,7 +413,7 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
               <Th className="text-right">{isAdding ? 'Buying price *' : 'Buying price'}</Th>
               <Th className="text-right">Discount / set</Th>
               <Th>Remark</Th>
-              {needsBranch && <Th>{isAdding ? 'Branch *' : 'Branch'}</Th>}
+              {showBranchColumn && <Th>{isAdding ? 'Branch *' : 'Branch'}</Th>}
               <Th />
             </Tr>
           </Thead>
@@ -485,7 +491,7 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
                     onChange={(e) => setDraft({ ...draft, remark: e.target.value })}
                   />
                 </Td>
-                {needsBranch && (
+                {showBranchColumn && (
                   <Td>
                     <Select
                       className={cn('h-8 py-0', attemptedSubmit && !draft.branch_id && 'border-error')}
@@ -533,16 +539,16 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
                     {lineIndex === 0 && (
                       <>
                         <Td rowSpan={voucher.lines.length} className="align-top">
-                          <div className="flex items-center gap-1.5">
-                            <span>{voucher.voucher_no}</span>
+                          <div className="flex flex-col items-start gap-1">
+                            <span className="whitespace-nowrap">FV-{voucher.voucher_no}</span>
                             <button
                               type="button"
                               title="Delete voucher"
-                              className="text-text-muted hover:text-error disabled:opacity-50"
+                              className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-error-subtle text-error hover:bg-error hover:text-white disabled:opacity-50 transition-colors"
                               disabled={deletingVoucherId === voucher.id}
                               onClick={() => handleDeleteVoucher(voucher)}
                             >
-                              ×
+                              <TrashIcon className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </Td>
@@ -649,14 +655,14 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
                         />
                       </Td>
                     )}
-                    {needsBranch && lineIndex === 0 && (
+                    {showBranchColumn && lineIndex === 0 && (
                       <Td rowSpan={voucher.lines.length} className="align-top text-text-muted">
                         {voucher.branch_name ?? '—'}
                       </Td>
                     )}
                     <Td>
                       <Button
-                        variant="ghost"
+                        variant="destructive"
                         size="sm"
                         onClick={() => handleDeleteLine(voucher, line)}
                         loading={deletingLineId === line.id}
@@ -723,7 +729,7 @@ export function FactoryVouchersPage({ session, profile }: Props): React.JSX.Elem
                       />
                     </Td>
                     <Td className="text-text-muted">—</Td>
-                    {needsBranch && <Td className="text-text-muted">—</Td>}
+                    {showBranchColumn && <Td className="text-text-muted">—</Td>}
                     <Td>
                       <div className="flex items-center gap-1">
                         <Button

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, String, func
+from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Index, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -31,6 +31,10 @@ class ImportBatchStatus(str, enum.Enum):
 
 class ImportBatch(Base):
     __tablename__ = "import_batches"
+    __table_args__ = (
+        # Serves GET /api/imports/history: filter by branch_id, order by created_at desc.
+        Index("ix_import_batches_branch_id_created_at", "branch_id", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     import_type: Mapped[ImportType] = mapped_column(

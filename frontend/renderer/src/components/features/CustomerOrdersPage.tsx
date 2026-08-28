@@ -13,6 +13,7 @@ import { Select } from '@renderer/components/ui/Select'
 import { Textarea } from '@renderer/components/ui/Textarea'
 import { TableSkeleton } from '@renderer/components/ui/Skeleton'
 import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
+import { TrashIcon } from '@renderer/components/ui/icons'
 import { ClipboardIcon } from '@renderer/components/ui/icons'
 import type { CustomerOrder, CustomerOrderLine, OrderStatus, Profile } from '@renderer/components/features/types'
 
@@ -155,8 +156,15 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
   const [lineDraft, setLineDraft] = useState<LineDraftState>(emptyLineDraft())
   const [creatingLine, setCreatingLine] = useState(false)
 
+  // The second commitment qty is the firmer, follow-up number sent to the factory after
+  // the customer's initial (first) commitment — only admin can set/change it.
+  const isAdmin = profile !== null && profile.role === 'admin'
   const needsBranch = profile !== null && profile.branch_id === null
   const branchOptions = useWholesaleBranchOptions(needsBranch ? session : null)
+  // Wholesale is structurally a single-branch operation (see CLAUDE.md) — with exactly one
+  // option there's nothing to actually choose, so it's auto-filled instead of shown as a
+  // picker. The picker only reappears if a second wholesale branch is ever added.
+  const showBranchColumn = needsBranch && branchOptions.length > 1
 
   async function load(): Promise<void> {
     setLoading(true)
@@ -202,7 +210,8 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
       if (!opts?.silent) showToast('error', 'Product code and customer name are required')
       return
     }
-    if (needsBranch && !draft.branch_id) {
+    const resolvedBranchId = draft.branch_id || (branchOptions.length === 1 ? branchOptions[0].id : '')
+    if (needsBranch && !resolvedBranchId) {
       setAttemptedSubmit(true)
       if (!opts?.silent) showToast('error', 'Choose which branch this order belongs to')
       return
@@ -213,7 +222,7 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
         order_date: draft.order_date,
         customer_name: draft.customer_name.trim(),
         remark: draft.remark.trim() || null,
-        branch_id: needsBranch ? draft.branch_id : null,
+        branch_id: needsBranch ? resolvedBranchId : null,
         line: {
           product_code: draft.product_code.trim(),
           description: draft.description.trim() || null,
@@ -239,7 +248,7 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
         showToast('error', responseBody?.detail ?? `Add failed: ${response.status}`)
         return
       }
-      showToast('success', `Order #${responseBody.order_no} added`)
+      showToast('success', `Order ORD-${responseBody.order_no} added`)
       closeAdd()
       await load()
     } catch {
@@ -311,7 +320,7 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
   }
 
   async function handleDeleteOrder(order: CustomerOrder): Promise<void> {
-    if (!window.confirm(`Delete order #${order.order_no} for ${order.customer_name} and all its products?`)) return
+    if (!window.confirm(`Delete order ORD-${order.order_no} for ${order.customer_name} and all its products?`)) return
     setDeletingOrderId(order.id)
     try {
       const response = await fetch(`${apiBaseUrl}/api/orders/${order.id}`, {
@@ -333,8 +342,8 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
   async function handleDeleteLine(order: CustomerOrder, line: CustomerOrderLine): Promise<void> {
     const message =
       order.lines.length === 1
-        ? `Delete order #${order.order_no}? It has only this one product.`
-        : `Delete product ${line.product_code} from order #${order.order_no}?`
+        ? `Delete order ORD-${order.order_no}? It has only this one product.`
+        : `Delete product ${line.product_code} from order ORD-${order.order_no}?`
     if (!window.confirm(message)) return
     setDeletingLineId(line.id)
     try {
@@ -422,7 +431,7 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
 
   const draftTotal = colorShorthandTotal(draft.colorsText)
   const lineDraftTotal = colorShorthandTotal(lineDraft.colorsText)
-  const colCount = needsBranch ? 18 : 17
+  const colCount = showBranchColumn ? 18 : 17
 
   return (
     <div className="flex flex-col gap-4">
@@ -468,8 +477,8 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
               <Th>{isAdding ? 'Product code *' : 'Product code'}</Th>
               <Th>Description</Th>
               <Th>Factory</Th>
-              <Th className={qtyColClass}>Ordered qty</Th>
-              <Th className={qtyColClass}>Approved qty</Th>
+              <Th className={qtyColClass}>First qty commitment</Th>
+              <Th className={qtyColClass}>Second qty commitment</Th>
               <Th>Colors</Th>
               <Th className={qtyColClass}>Total qty</Th>
               <Th className={qtyColClass}>Received qty</Th>
@@ -478,7 +487,7 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
               <Th>Matched voucher</Th>
               <Th>Status</Th>
               <Th>Remark</Th>
-              {needsBranch && <Th>{isAdding ? 'Branch *' : 'Branch'}</Th>}
+              {showBranchColumn && <Th>{isAdding ? 'Branch *' : 'Branch'}</Th>}
               <Th />
             </Tr>
           </Thead>
@@ -548,7 +557,8 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
                   <Input
                     type="number"
                     min={0}
-                    placeholder="Qty"
+                    placeholder={isAdmin ? 'Qty' : 'Admin only'}
+                    disabled={!isAdmin}
                     className={draftCellInputClass}
                     value={draft.second_commit_qty}
                     onChange={(e) => setDraft({ ...draft, second_commit_qty: e.target.value })}
@@ -589,7 +599,7 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
                     onChange={(e) => setDraft({ ...draft, remark: e.target.value })}
                   />
                 </Td>
-                {needsBranch && (
+                {showBranchColumn && (
                   <Td>
                     <Select
                       className={cn('h-8 py-0', attemptedSubmit && !draft.branch_id && 'border-error')}
@@ -637,16 +647,16 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
                     {lineIndex === 0 && (
                       <>
                         <Td rowSpan={order.lines.length} className="align-top">
-                          <div className="flex items-center gap-1.5">
-                            <span>{order.order_no}</span>
+                          <div className="flex flex-col items-start gap-1">
+                            <span className="whitespace-nowrap">ORD-{order.order_no}</span>
                             <button
                               type="button"
                               title="Delete order"
-                              className="text-text-muted hover:text-error disabled:opacity-50"
+                              className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-error-subtle text-error hover:bg-error hover:text-white disabled:opacity-50 transition-colors"
                               disabled={deletingOrderId === order.id}
                               onClick={() => handleDeleteOrder(order)}
                             >
-                              ×
+                              <TrashIcon className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </Td>
@@ -738,7 +748,8 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
                         type="number"
                         min={0}
                         className={cellInputClass}
-                        disabled={savingLineId === line.id}
+                        disabled={!isAdmin || savingLineId === line.id}
+                        title={isAdmin ? undefined : 'Only admin can change the second commitment qty'}
                         defaultValue={line.second_commit_qty ?? ''}
                         onBlur={(e) => {
                           const next = e.target.value === '' ? null : Number(e.target.value)
@@ -791,7 +802,7 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
                     </Td>
                     <Td className="text-right tabular-nums">{line.buying_price ?? '—'}</Td>
                     <Td className="text-text-muted">
-                      {line.matched_voucher_no ? `#${line.matched_voucher_no}` : '—'}
+                      {line.matched_voucher_no ? `FV-${line.matched_voucher_no}` : '—'}
                     </Td>
                     <Td>
                       <StatusPillSelect
@@ -815,14 +826,14 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
                         />
                       </Td>
                     )}
-                    {needsBranch && lineIndex === 0 && (
+                    {showBranchColumn && lineIndex === 0 && (
                       <Td rowSpan={order.lines.length} className="align-top text-text-muted">
                         {order.branch_name ?? '—'}
                       </Td>
                     )}
                     <Td>
                       <Button
-                        variant="ghost"
+                        variant="destructive"
                         size="sm"
                         onClick={() => handleDeleteLine(order, line)}
                         loading={deletingLineId === line.id}
@@ -884,7 +895,8 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
                       <Input
                         type="number"
                         min={0}
-                        placeholder="Qty"
+                        placeholder={isAdmin ? 'Qty' : 'Admin only'}
+                        disabled={!isAdmin}
                         className={draftCellInputClass}
                         value={lineDraft.second_commit_qty}
                         onChange={(e) => setLineDraft({ ...lineDraft, second_commit_qty: e.target.value })}
@@ -918,7 +930,7 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
                       />
                     </Td>
                     <Td className="text-text-muted">—</Td>
-                    {needsBranch && <Td className="text-text-muted">—</Td>}
+                    {showBranchColumn && <Td className="text-text-muted">—</Td>}
                     <Td>
                       <div className="flex items-center gap-1">
                         <Button

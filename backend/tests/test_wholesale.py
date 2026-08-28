@@ -28,11 +28,14 @@ def _make_branch(db_session: Session, name: str = "Wholesale") -> Branch:
 
 
 def _order_line_payload(**overrides) -> dict:
+    # second_commit_qty deliberately omitted here (defaults to None) — it can only be set
+    # by an admin account (see _check_second_commit_permission), and most of these fixtures
+    # use a branch-scoped wholesale user. Tests that specifically exercise second_commit_qty
+    # pass it explicitly with the right user role.
     payload = {
         "product_code": "WS-001",
         "factory_name": "Acme Factory",
         "first_commit_qty": 25,
-        "second_commit_qty": 30,
         "colors": [{"color": "black", "qty": 10}, {"color": "pink", "qty": 20}],
         "received_qty": 0,
         "unit": "Set",
@@ -269,3 +272,55 @@ def test_voucher_can_have_multiple_product_lines(authed_client: TestClient, db_s
     body = response.json()["voucher"]
     assert len(body["lines"]) == 2
     assert {line["product_code"] for line in body["lines"]} == {"WS-001", "WS-002"}
+
+
+def test_non_admin_cannot_set_second_commit_qty_on_create(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_user(db_session, branch=branch)  # branch-scoped -> wholesale, not admin
+
+    response = authed_client.post(
+        "/api/orders", json=_order_payload(line=_order_line_payload(second_commit_qty=30))
+    )
+    assert response.status_code == 403
+
+
+def test_non_admin_cannot_set_second_commit_qty_on_new_line(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_user(db_session, branch=branch)
+
+    order = authed_client.post("/api/orders", json=_order_payload()).json()
+    response = authed_client.post(
+        f"/api/orders/{order['id']}/lines",
+        json=_order_line_payload(product_code="WS-002", second_commit_qty=30),
+    )
+    assert response.status_code == 403
+
+
+def test_non_admin_cannot_update_second_commit_qty(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_user(db_session, branch=branch)
+
+    order = authed_client.post("/api/orders", json=_order_payload()).json()
+    line_id = order["lines"][0]["id"]
+    response = authed_client.patch(
+        f"/api/orders/{order['id']}/lines/{line_id}", json={"second_commit_qty": 30}
+    )
+    assert response.status_code == 403
+
+
+def test_admin_can_set_second_commit_qty(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_user(db_session, branch=None)  # admin: no fixed branch
+
+    order = authed_client.post(
+        "/api/orders",
+        json=_order_payload(branch_id=branch.id, line=_order_line_payload(second_commit_qty=30)),
+    ).json()
+    assert order["lines"][0]["second_commit_qty"] == 30
+
+    line_id = order["lines"][0]["id"]
+    update = authed_client.patch(
+        f"/api/orders/{order['id']}/lines/{line_id}", json={"second_commit_qty": 45}
+    )
+    assert update.status_code == 200
+    assert update.json()["lines"][0]["second_commit_qty"] == 45

@@ -82,15 +82,17 @@ function ImportOverviewPage({ session }: Props): React.JSX.Element {
 
   return (
     <div className="flex flex-col">
-      <CardHeader
-        title="Import overview"
-        description="When sales, inventory, and purchase were each last imported per branch — files are expected daily."
-        action={
-          <Button variant="secondary" size="sm" onClick={load} loading={loading}>
-            Refresh
-          </Button>
-        }
-      />
+      <div className="bg-bg-subtle overflow-hidden">
+        <CardHeader
+          title="Import overview"
+          description="When sales, inventory, and purchase were each last imported per branch — files are expected daily."
+          action={
+            <Button variant="secondary" size="sm" onClick={load} loading={loading}>
+              Refresh
+            </Button>
+          }
+        />
+      </div>
 
       {rows === null && loading && <TableSkeleton rows={4} cols={4} />}
 

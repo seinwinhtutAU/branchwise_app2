@@ -15,6 +15,12 @@ if TYPE_CHECKING:
 
 class Sale(Base):
     __tablename__ = "sales"
+    __table_args__ = (
+        # Serves GET /api/sales' branch + date-range filter and the reconciliation
+        # check's branch + date-range scan — both filter on this pair together.
+        Index("ix_sales_branch_id_sale_date", "branch_id", "sale_date"),
+        Index("ix_sales_import_batch_id", "import_batch_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True)

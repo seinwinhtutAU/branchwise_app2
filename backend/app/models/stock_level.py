@@ -17,6 +17,12 @@ class StockLevel(Base):
     __tablename__ = "stock_levels"
     __table_args__ = (
         Index("ix_stock_levels_product_branch_snapshot", "product_id", "branch_id", "snapshot_at"),
+        # The existing index above leads with product_id, so it doesn't help the
+        # branch-only + snapshot-date lookups the reconciliation check does (finding
+        # the latest/prior snapshot *timestamps* for a branch before joining back to
+        # product_id). This one serves those directly.
+        Index("ix_stock_levels_branch_id_snapshot_at", "branch_id", "snapshot_at"),
+        Index("ix_stock_levels_import_batch_id", "import_batch_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))

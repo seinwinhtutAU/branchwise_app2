@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.security import get_current_app_user
 from app.db.session import get_db
@@ -78,7 +78,11 @@ def _new_line(payload: FactoryVoucherLineCreate) -> FactoryVoucherLine:
 def list_vouchers(
     user: User = Depends(get_current_app_user), db: Session = Depends(get_db)
 ) -> list[FactoryVoucherOut]:
-    query = db.query(FactoryVoucher, Branch).outerjoin(Branch, FactoryVoucher.branch_id == Branch.id)
+    query = (
+        db.query(FactoryVoucher, Branch)
+        .outerjoin(Branch, FactoryVoucher.branch_id == Branch.id)
+        .options(selectinload(FactoryVoucher.lines))
+    )
     if user.branch_id is not None:
         query = query.filter(FactoryVoucher.branch_id == user.branch_id)
     query = query.order_by(FactoryVoucher.voucher_no.desc())
