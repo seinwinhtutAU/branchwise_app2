@@ -34,8 +34,14 @@ from app.services.branches import list_retail_branches
 from app.services.import_common import NumericRule, validate_rows
 from app.services.inventory_import import VALIDATION_RULES as INVENTORY_VALIDATION_RULES
 from app.services.pos_import import VALIDATION_RULES as SALES_VALIDATION_RULES
-from app.services.pricing import latest_purchase_buying_prices, latest_stock_level_buying_prices
+from app.services.pricing import (
+    compute_profit,
+    point_in_time_buying_price,
+    purchase_price_history,
+    stock_level_price_history,
+)
 from app.services.purchase_import import VALIDATION_RULES as PURCHASE_VALIDATION_RULES
+from app.services.settings import get_stock_forward_fallback_window_days
 
 # Below this many units of difference, treat it as routine noise (breakage, a
 # one-off miscount) rather than something worth interrupting staff over — the
@@ -48,7 +54,9 @@ def _field(label: str, value: object) -> dict:
     return {"label": label, "value": "—" if value is None else str(value)}
 
 
-def _source_import(batch_id: str | None, filename: str | None, created_at_iso: str | None) -> dict | None:
+def _source_import(
+    batch_id: str | None, filename: str | None, created_at_iso: str | None
+) -> dict | None:
     if batch_id is None:
         return None
     return {"id": batch_id, "filename": filename, "date": created_at_iso}
@@ -60,7 +68,9 @@ def _branch_filter(query, user: User, branch_column):
     return query
 
 
-def _fetch_import_batches(db: Session, batch_ids: set[str | None]) -> dict[str, ImportBatch]:
+def _fetch_import_batches(
+    db: Session, batch_ids: set[str | None]
+) -> dict[str, ImportBatch]:
     """Batch-fetch by id rather than joining ImportBatch into the main query — on this
     dataset that join badly confuses the query planner (a ~900-row inventory query
     went from ~1.5s to 90+s once ImportBatch was joined in), the same class of problem
@@ -90,7 +100,10 @@ def _fetch_branches(db: Session, branch_ids: set[str | None]) -> dict[str, Branc
 
 
 def _numeric_warning_rows(
-    records: list[dict], rules: list[NumericRule], field_builder, column_labels: dict[str, str]
+    records: list[dict],
+    rules: list[NumericRule],
+    field_builder,
+    column_labels: dict[str, str],
 ) -> list[dict]:
     if not records:
         return []
@@ -107,7 +120,11 @@ def _numeric_warning_rows(
             # Name the actual value so the one-liner is self-contained — "Buying Price
             # can't be a negative number (currently -500.00)" — rather than making
             # someone go find it themselves in the row's data.
-            parts.append(issue["message"] if unparseable else f"{issue['message']} (currently {value})")
+            parts.append(
+                issue["message"]
+                if unparseable
+                else f"{issue['message']} (currently {value})"
+            )
             highlight.append(column_labels[issue["column"]])
         rows.append(
             {
@@ -115,14 +132,18 @@ def _numeric_warning_rows(
                 "fields": field_builder(record),
                 "highlight": highlight,
                 "source_import": _source_import(
-                    record.get("_ImportBatchId"), record.get("_ImportBatchFilename"), record.get("_ImportBatchDate")
+                    record.get("_ImportBatchId"),
+                    record.get("_ImportBatchFilename"),
+                    record.get("_ImportBatchDate"),
                 ),
             }
         )
     return rows
 
 
-def sale_numeric_warnings(db: Session, user: User, since: date | None = None) -> list[dict]:
+def sale_numeric_warnings(
+    db: Session, user: User, since: date | None = None
+) -> list[dict]:
     query = (
         db.query(SaleLine, Sale, Product, Branch)
         .join(Sale, SaleLine.sale_id == Sale.id)
@@ -137,21 +158,26 @@ def sale_numeric_warnings(db: Session, user: User, since: date | None = None) ->
     # Same buying-price/profit lookup as GET /api/sales, so the detail view here matches
     # the Sale tab exactly rather than a trimmed-down version of it.
     product_ids = {product.id for _, _, product, _ in line_rows}
-    purchase_prices = latest_purchase_buying_prices(db, product_ids)
-    stock_level_prices = latest_stock_level_buying_prices(db, product_ids)
-    import_batches = _fetch_import_batches(db, {sale.import_batch_id for _, sale, _, _ in line_rows})
+    purchase_history = purchase_price_history(db, product_ids)
+    stock_history = stock_level_price_history(db, product_ids)
+    forward_fallback_window_days = get_stock_forward_fallback_window_days(db)
+    import_batches = _fetch_import_batches(
+        db, {sale.import_batch_id for _, sale, _, _ in line_rows}
+    )
 
     records = []
     for sale_line, sale, product, branch in line_rows:
         import_batch = import_batches.get(sale.import_batch_id)
-        buying_price = purchase_prices.get(product.id, stock_level_prices.get(product.id))
-        qty = sale_line.qty
-        net_amount = sale_line.net_amount
-        profit = None
-        profit_margin_pct = None
-        if buying_price is not None and qty is not None and net_amount is not None:
-            profit = round(float(net_amount) - float(buying_price) * float(qty), 2)
-            profit_margin_pct = round(profit / float(net_amount) * 100, 2) if net_amount else None
+        buying_price, buying_price_source = point_in_time_buying_price(
+            purchase_history,
+            stock_history,
+            product.id,
+            sale.sale_date,
+            forward_fallback_window_days,
+        )
+        profit, profit_margin_pct = compute_profit(
+            buying_price, sale_line.qty, sale_line.net_amount
+        )
 
         records.append(
             {
@@ -172,11 +198,14 @@ def sale_numeric_warnings(db: Session, user: User, since: date | None = None) ->
                 "_UOM": sale_line.uom,
                 "_Location": sale.location_raw,
                 "_BuyingPrice": buying_price,
+                "_BuyingPriceSource": buying_price_source,
                 "_Profit": profit,
                 "_ProfitMarginPct": profit_margin_pct,
                 "_ImportBatchId": import_batch.id if import_batch else None,
                 "_ImportBatchFilename": import_batch.filename if import_batch else None,
-                "_ImportBatchDate": import_batch.created_at.isoformat() if import_batch else None,
+                "_ImportBatchDate": import_batch.created_at.isoformat()
+                if import_batch
+                else None,
             }
         )
 
@@ -200,6 +229,7 @@ def sale_numeric_warnings(db: Session, user: User, since: date | None = None) ->
             _field("Net Amount", record["Net_Amount"]),
             _field("Location", record["_Location"]),
             _field("Buying Price", record["_BuyingPrice"]),
+            _field("Buying Price Source", record["_BuyingPriceSource"]),
             _field("Profit", record["_Profit"]),
             _field("Profit Margin Pct", record["_ProfitMarginPct"]),
         ]
@@ -240,7 +270,9 @@ def inventory_numeric_warnings(db: Session, user: User) -> list[dict]:
     )
     query = _branch_filter(query, user, StockLevel.branch_id)
     query_rows = query.all()
-    import_batches = _fetch_import_batches(db, {sl.import_batch_id for sl, _, _ in query_rows})
+    import_batches = _fetch_import_batches(
+        db, {sl.import_batch_id for sl, _, _ in query_rows}
+    )
 
     records = []
     for stock_level, product, branch in query_rows:
@@ -258,7 +290,9 @@ def inventory_numeric_warnings(db: Session, user: User) -> list[dict]:
                 "_Location": stock_level.location_raw,
                 "_ImportBatchId": import_batch.id if import_batch else None,
                 "_ImportBatchFilename": import_batch.filename if import_batch else None,
-                "_ImportBatchDate": import_batch.created_at.isoformat() if import_batch else None,
+                "_ImportBatchDate": import_batch.created_at.isoformat()
+                if import_batch
+                else None,
             }
         )
 
@@ -281,10 +315,14 @@ def inventory_numeric_warnings(db: Session, user: User) -> list[dict]:
         "Buying_Price": "Buying Price",
         "Selling_Price": "Selling Price",
     }
-    return _numeric_warning_rows(records, INVENTORY_VALIDATION_RULES, fields, column_labels)
+    return _numeric_warning_rows(
+        records, INVENTORY_VALIDATION_RULES, fields, column_labels
+    )
 
 
-def purchase_numeric_warnings(db: Session, user: User, since: date | None = None) -> list[dict]:
+def purchase_numeric_warnings(
+    db: Session, user: User, since: date | None = None
+) -> list[dict]:
     query = (
         db.query(PurchaseLine, Purchase, Product, Branch)
         .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
@@ -295,7 +333,9 @@ def purchase_numeric_warnings(db: Session, user: User, since: date | None = None
     if since is not None:
         query = query.filter(Purchase.purchase_date >= since)
     query_rows = query.all()
-    import_batches = _fetch_import_batches(db, {purchase.import_batch_id for _, purchase, _, _ in query_rows})
+    import_batches = _fetch_import_batches(
+        db, {purchase.import_batch_id for _, purchase, _, _ in query_rows}
+    )
 
     records = []
     for purchase_line, purchase, product, branch in query_rows:
@@ -312,7 +352,9 @@ def purchase_numeric_warnings(db: Session, user: User, since: date | None = None
                 "_Location": purchase.location_raw,
                 "_ImportBatchId": import_batch.id if import_batch else None,
                 "_ImportBatchFilename": import_batch.filename if import_batch else None,
-                "_ImportBatchDate": import_batch.created_at.isoformat() if import_batch else None,
+                "_ImportBatchDate": import_batch.created_at.isoformat()
+                if import_batch
+                else None,
             }
         )
 
@@ -330,10 +372,14 @@ def purchase_numeric_warnings(db: Session, user: User, since: date | None = None
         ]
 
     column_labels = {"Quantity": "Quantity", "Buying_Price": "Buying Price"}
-    return _numeric_warning_rows(records, PURCHASE_VALIDATION_RULES, fields, column_labels)
+    return _numeric_warning_rows(
+        records, PURCHASE_VALIDATION_RULES, fields, column_labels
+    )
 
 
-MissingProductOccurrence = tuple[int, date, date]  # (occurrences, first_date, last_date)
+MissingProductOccurrence = tuple[
+    int, date, date
+]  # (occurrences, first_date, last_date)
 
 
 def _missing_product_pairs(
@@ -348,7 +394,9 @@ def _missing_product_pairs(
 ) -> dict[tuple[str | None, str], MissingProductOccurrence]:
     """Distinct (branch, product) pairs that appear in `line_model`/`header_model`
     but have zero StockLevel rows ever for that same branch+product."""
-    inventory_pairs = db.query(StockLevel.branch_id, StockLevel.product_id).distinct().subquery()
+    inventory_pairs = (
+        db.query(StockLevel.branch_id, StockLevel.product_id).distinct().subquery()
+    )
 
     query = (
         db.query(
@@ -464,7 +512,9 @@ def missing_product_warnings(db: Session, user: User) -> list[dict]:
     return rows
 
 
-def inventory_reconciliation_warnings(db: Session, user: User) -> tuple[list[dict], list[dict]]:
+def inventory_reconciliation_warnings(
+    db: Session, user: User
+) -> tuple[list[dict], list[dict]]:
     """For each branch's latest inventory snapshot, compare it against what it
     should be: the previous snapshot plus purchases minus sales in between.
     Returns (mismatch_rows, uom_notice_rows). Only retail branches are
@@ -482,13 +532,17 @@ def inventory_reconciliation_warnings(db: Session, user: User) -> tuple[list[dic
 
     for branch in branches:
         latest_ts = (
-            db.query(func.max(StockLevel.snapshot_at)).filter(StockLevel.branch_id == branch.id).scalar()
+            db.query(func.max(StockLevel.snapshot_at))
+            .filter(StockLevel.branch_id == branch.id)
+            .scalar()
         )
         if latest_ts is None:
             continue
         prior_ts = (
             db.query(func.max(StockLevel.snapshot_at))
-            .filter(StockLevel.branch_id == branch.id, StockLevel.snapshot_at < latest_ts)
+            .filter(
+                StockLevel.branch_id == branch.id, StockLevel.snapshot_at < latest_ts
+            )
             .scalar()
         )
         if prior_ts is None:
@@ -513,9 +567,16 @@ def inventory_reconciliation_warnings(db: Session, user: User) -> tuple[list[dic
         # A mismatch or unit-mix warning is about the *latest* snapshot being wrong —
         # that's the one import worth pointing at, even though the check itself also
         # reads the prior snapshot and the purchases/sales in between.
-        batch_ids = {sl.import_batch_id for sl in latest_snapshot.values() if sl.import_batch_id}
+        batch_ids = {
+            sl.import_batch_id for sl in latest_snapshot.values() if sl.import_batch_id
+        }
         batches_by_id = (
-            {b.id: b for b in db.query(ImportBatch).filter(ImportBatch.id.in_(batch_ids))} if batch_ids else {}
+            {
+                b.id: b
+                for b in db.query(ImportBatch).filter(ImportBatch.id.in_(batch_ids))
+            }
+            if batch_ids
+            else {}
         )
 
         purchased: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
@@ -579,7 +640,11 @@ def inventory_reconciliation_warnings(db: Session, user: User) -> tuple[list[dic
 
             source_batch = batches_by_id.get(stock_level.import_batch_id)
             source_import = (
-                _source_import(source_batch.id, source_batch.filename, source_batch.created_at.isoformat())
+                _source_import(
+                    source_batch.id,
+                    source_batch.filename,
+                    source_batch.created_at.isoformat(),
+                )
                 if source_batch
                 else None
             )

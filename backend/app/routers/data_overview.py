@@ -7,7 +7,13 @@ from app.models.branch import Branch
 from app.models.product import Product
 from app.models.sale import Sale, SaleLine
 from app.models.user import User
-from app.services.pricing import latest_purchase_buying_prices, latest_stock_level_buying_prices
+from app.services.pricing import (
+    compute_profit,
+    point_in_time_buying_price,
+    purchase_price_history,
+    stock_level_price_history,
+)
+from app.services.settings import get_stock_forward_fallback_window_days
 
 router = APIRouter(prefix="/api/data-overview", tags=["data-overview"])
 
@@ -28,19 +34,22 @@ def get_data_overview(
 
     line_rows = query.all()
     product_ids = {product.id for _, _, product, _ in line_rows}
-    purchase_prices = latest_purchase_buying_prices(db, product_ids)
-    stock_level_prices = latest_stock_level_buying_prices(db, product_ids)
+    purchase_history = purchase_price_history(db, product_ids)
+    stock_history = stock_level_price_history(db, product_ids)
+    forward_fallback_window_days = get_stock_forward_fallback_window_days(db)
 
     result = []
     for sale_line, sale, product, branch in line_rows:
-        buying_price = purchase_prices.get(product.id, stock_level_prices.get(product.id))
-        qty = sale_line.qty
-        net_amount = sale_line.net_amount
-        profit = None
-        profit_margin_pct = None
-        if buying_price is not None and qty is not None and net_amount is not None:
-            profit = round(float(net_amount) - float(buying_price) * float(qty), 2)
-            profit_margin_pct = round(profit / float(net_amount) * 100, 2) if net_amount else None
+        buying_price, buying_price_source = point_in_time_buying_price(
+            purchase_history,
+            stock_history,
+            product.id,
+            sale.sale_date,
+            forward_fallback_window_days,
+        )
+        profit, profit_margin_pct = compute_profit(
+            buying_price, sale_line.qty, sale_line.net_amount
+        )
 
         result.append(
             {
@@ -61,6 +70,7 @@ def get_data_overview(
                 "Net_Amount": sale_line.net_amount,
                 "Time": sale.sale_time,
                 "Buying_Price": buying_price,
+                "Buying_Price_Source": buying_price_source,
                 "Group": product.group_name,
                 "profit": profit,
                 "profit_margin_pct": profit_margin_pct,

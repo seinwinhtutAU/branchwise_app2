@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
 import { useToast } from '@renderer/lib/toast'
 import { cn } from '@renderer/lib/utils'
+import { formatBuyingPriceSource } from '@renderer/lib/buyingPriceSource'
 import { downloadCsv } from '@renderer/lib/csv'
 import { downloadExcel } from '@renderer/lib/excel'
 import { Button } from '@renderer/components/ui/Button'
@@ -36,6 +37,7 @@ interface OverviewRow {
   Net_Amount: number | null
   Time: string | null
   Buying_Price: number | null
+  Buying_Price_Source: string | null
   Group: string | null
   profit: number | null
   profit_margin_pct: number | null
@@ -44,6 +46,7 @@ interface OverviewRow {
 interface Props {
   session: Session
   branchOptions: string[]
+  showBuyingPriceSource: boolean
 }
 
 // green = from sale.csv, blue = from inventory, pink = from purchase.
@@ -75,6 +78,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'Net_Amount', label: 'Net Amount', bands: ['sale'], align: 'right' },
   { key: 'Time', label: 'Time', bands: ['sale'] },
   { key: 'Buying_Price', label: 'Buying Price', bands: ['inventory', 'purchase'], align: 'right' },
+  { key: 'Buying_Price_Source', label: 'Buying Price Source', bands: [] },
   { key: 'Group', label: 'Group', bands: ['inventory'] },
   { key: 'profit', label: 'Profit', bands: [], align: 'right' },
   { key: 'profit_margin_pct', label: 'Profit Margin %', bands: [], align: 'right' }
@@ -121,19 +125,30 @@ function formatNumber(value: number | null): string {
 }
 
 function formatCell(col: ColumnDef, value: unknown): string {
+  if (col.key === 'Buying_Price_Source') return formatBuyingPriceSource(value as string | null)
   if (value === null || value === undefined || value === '') return '—'
   if (col.key === 'profit_margin_pct') return `${formatNumber(value as number)}%`
   if (
-    ['Selling_Price', 'Qty', 'Discount_Amount', 'Amount', 'Net_Amount', 'Buying_Price', 'profit'].includes(
-      col.key
-    )
+    [
+      'Selling_Price',
+      'Qty',
+      'Discount_Amount',
+      'Amount',
+      'Net_Amount',
+      'Buying_Price',
+      'profit'
+    ].includes(col.key)
   ) {
     return formatNumber(value as number)
   }
   return String(value)
 }
 
-function DataOverviewTable({ session, branchOptions }: Props): React.JSX.Element {
+function DataOverviewTable({
+  session,
+  branchOptions,
+  showBuyingPriceSource
+}: Props): React.JSX.Element {
   const showToast = useToast()
   const [rows, setRows] = useState<OverviewRow[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -145,6 +160,12 @@ function DataOverviewTable({ session, branchOptions }: Props): React.JSX.Element
   const [groupFilter, setGroupFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+
+  const visibleColumns = useMemo(
+    () =>
+      showBuyingPriceSource ? COLUMNS : COLUMNS.filter((col) => col.key !== 'Buying_Price_Source'),
+    [showBuyingPriceSource]
+  )
 
   async function load(): Promise<void> {
     setLoading(true)
@@ -187,7 +208,9 @@ function DataOverviewTable({ session, branchOptions }: Props): React.JSX.Element
     if (!rows) return null
     return rows.filter(
       (row) =>
-        (!search || matchesSearch(row.StockCode, search) || matchesSearch(row.Description, search)) &&
+        (!search ||
+          matchesSearch(row.StockCode, search) ||
+          matchesSearch(row.Description, search)) &&
         (!branchFilter || row.Branch === branchFilter) &&
         (!groupFilter || row.Group === groupFilter) &&
         inDateRange(row.Date, { from: dateFrom, to: dateTo })
@@ -198,7 +221,9 @@ function DataOverviewTable({ session, branchOptions }: Props): React.JSX.Element
 
   function overviewCsvRows(source: OverviewRow[]): string[][] {
     return source.map((row) =>
-      COLUMNS.map((col) => {
+      visibleColumns.map((col) => {
+        if (col.key === 'Buying_Price_Source')
+          return formatBuyingPriceSource(row[col.key] as string | null)
         const value = row[col.key]
         return value === null || value === undefined ? '' : String(value)
       })
@@ -207,7 +232,11 @@ function DataOverviewTable({ session, branchOptions }: Props): React.JSX.Element
 
   function handleDownloadCsv(): void {
     if (!filteredRows || filteredRows.length === 0) return
-    downloadCsv('data-overview.csv', COLUMNS.map((col) => col.label), overviewCsvRows(filteredRows))
+    downloadCsv(
+      'data-overview.csv',
+      visibleColumns.map((col) => col.label),
+      overviewCsvRows(filteredRows)
+    )
   }
 
   function handleDownloadExcel(): void {
@@ -215,14 +244,14 @@ function DataOverviewTable({ session, branchOptions }: Props): React.JSX.Element
     downloadExcel(
       'data-overview.xlsx',
       'Data overview',
-      COLUMNS.map((col) => col.label),
+      visibleColumns.map((col) => col.label),
       overviewCsvRows(filteredRows)
     )
   }
 
   return (
     <div className="flex flex-col" style={containerStyle}>
-      <div ref={aboveRef} className="sticky top-14 lg:top-0 z-30 bg-bg-base">
+      <div ref={aboveRef} className="sticky top-14 lg:top-0 z-30 bg-bg-subtle">
         <CardHeader
           title="Data overview"
           description="Sale line items merged with inventory and purchase data by stock code."
@@ -266,10 +295,15 @@ function DataOverviewTable({ session, branchOptions }: Props): React.JSX.Element
             />
 
             {(() => {
-              const options = branchOptions.length > 0 ? branchOptions : distinctValues(rows, 'Branch')
+              const options =
+                branchOptions.length > 0 ? branchOptions : distinctValues(rows, 'Branch')
               return options.length > 1 ? (
                 <div className="w-40">
-                  <Select label="Branch" value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}>
+                  <Select
+                    label="Branch"
+                    value={branchFilter}
+                    onChange={(e) => setBranchFilter(e.target.value)}
+                  >
                     <option value="">All</option>
                     {options.map((opt) => (
                       <option key={opt} value={opt}>
@@ -285,7 +319,11 @@ function DataOverviewTable({ session, branchOptions }: Props): React.JSX.Element
               const groupOptions = distinctValues(rows, 'Group')
               return groupOptions.length > 1 ? (
                 <div className="w-40">
-                  <Select label="Group" value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
+                  <Select
+                    label="Group"
+                    value={groupFilter}
+                    onChange={(e) => setGroupFilter(e.target.value)}
+                  >
                     <option value="">All</option>
                     {groupOptions.map((opt) => (
                       <option key={opt} value={opt}>
@@ -298,8 +336,18 @@ function DataOverviewTable({ session, branchOptions }: Props): React.JSX.Element
             })()}
 
             <div className="flex items-end gap-2">
-              <Input type="date" label="Date from" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-              <Input type="date" label="Date to" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              <Input
+                type="date"
+                label="Date from"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+              />
+              <Input
+                type="date"
+                label="Date to"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+              />
             </div>
 
             {hasActiveFilters && (
@@ -355,7 +403,7 @@ function DataOverviewTable({ session, branchOptions }: Props): React.JSX.Element
           >
             <Thead className="top-0">
               <Tr>
-                {COLUMNS.map((col) => (
+                {visibleColumns.map((col) => (
                   <Th key={col.key} className={col.align === 'right' ? 'text-right' : undefined}>
                     <SourceStrip bands={col.bands} />
                     {col.label}
@@ -366,10 +414,13 @@ function DataOverviewTable({ session, branchOptions }: Props): React.JSX.Element
             <Tbody>
               {pageItems.map((row) => (
                 <Tr key={row.LineID}>
-                  {COLUMNS.map((col) => (
+                  {visibleColumns.map((col) => (
                     <Td
                       key={col.key}
-                      className={cn('whitespace-nowrap', col.align === 'right' && 'text-right tabular-nums')}
+                      className={cn(
+                        'whitespace-nowrap',
+                        col.align === 'right' && 'text-right tabular-nums'
+                      )}
                     >
                       {formatCell(col, row[col.key])}
                     </Td>

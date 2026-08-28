@@ -1,3 +1,4 @@
+from app.models.app_settings import AppSetting
 from app.models.branch import Branch
 from app.models.import_batch import ImportBatch, ImportBatchStatus, ImportType
 from app.models.product import Product
@@ -14,6 +15,7 @@ from app.models.wholesale import (
 )
 
 __all__ = [
+    "AppSetting",
     "Branch",
     "CustomerOrder",
     "CustomerOrderLine",

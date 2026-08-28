@@ -1,19 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl, supabase } from '@renderer/lib/supabaseClient'
 import { useToast } from '@renderer/lib/toast'
 import { AuthScreen } from '@renderer/components/features/AuthScreen'
-import { AppShell, type NavItem } from '@renderer/components/features/AppShell'
+import { AppShell, type NavItem, type WorkspaceTab } from '@renderer/components/features/AppShell'
 import FileImportCard from '@renderer/components/features/FileImportCard'
-import ImportReviewPage from '@renderer/components/features/ImportReviewPage'
-import ImportHistoryTable from '@renderer/components/features/ImportHistoryTable'
-import ImportHistoryDetailPage from '@renderer/components/features/ImportHistoryDetailPage'
-import ImportOverviewPage from '@renderer/components/features/ImportOverviewPage'
-import DataOverviewTable from '@renderer/components/features/DataOverviewTable'
-import CustomerOrdersPage from '@renderer/components/features/CustomerOrdersPage'
-import FactoryVouchersPage from '@renderer/components/features/FactoryVouchersPage'
-import WarningsPage from '@renderer/components/features/WarningsPage'
-import SettingsPage from '@renderer/components/features/SettingsPage'
 import {
   SimpleDataTable,
   type DataTableColumn,
@@ -21,6 +12,7 @@ import {
 } from '@renderer/components/features/SimpleDataTable'
 import type { PendingImport, Profile } from '@renderer/components/features/types'
 import { useBranches } from '@renderer/lib/useBranches'
+import { formatBuyingPriceSource, useShowBuyingPriceSource } from '@renderer/lib/buyingPriceSource'
 import { useWarningWindowDays } from '@renderer/lib/warningWindow'
 import { Spinner } from '@renderer/components/ui/Spinner'
 import {
@@ -37,6 +29,22 @@ import {
   SettingsIcon
 } from '@renderer/components/ui/icons'
 
+// Lazy-loaded so a given account's bundle only pays for the sections it can actually
+// reach — e.g. a wholesale-only account never downloads the retail import/history/
+// overview/warnings code, and vice versa (see the Wholesale doc section in CLAUDE.md).
+// Rendered inside the <Suspense> boundary below.
+const ImportReviewPage = lazy(() => import('@renderer/components/features/ImportReviewPage'))
+const ImportHistoryTable = lazy(() => import('@renderer/components/features/ImportHistoryTable'))
+const ImportHistoryDetailPage = lazy(
+  () => import('@renderer/components/features/ImportHistoryDetailPage')
+)
+const ImportOverviewPage = lazy(() => import('@renderer/components/features/ImportOverviewPage'))
+const DataOverviewTable = lazy(() => import('@renderer/components/features/DataOverviewTable'))
+const CustomerOrdersPage = lazy(() => import('@renderer/components/features/CustomerOrdersPage'))
+const FactoryVouchersPage = lazy(() => import('@renderer/components/features/FactoryVouchersPage'))
+const WarningsPage = lazy(() => import('@renderer/components/features/WarningsPage'))
+const SettingsPage = lazy(() => import('@renderer/components/features/SettingsPage'))
+
 type Section =
   | 'import'
   | 'history'
@@ -50,14 +58,39 @@ type Section =
   | 'vouchers'
   | 'settings'
 
-const NAV_ITEMS: NavItem[] = [
+// Retail and Wholesale are two functionally separate products glued together for admin's
+// convenience (see the "Wholesale" doc section in CLAUDE.md) — an admin switches between
+// them via the workspace tabs in AppShell rather than seeing one merged nav list, so each
+// workspace's item count can keep growing without bloating the other's.
+type Workspace = 'retail' | 'wholesale'
+
+const RETAIL_NAV_ITEMS: NavItem[] = [
   { id: 'import', label: 'Import', icon: <UploadIcon /> },
   { id: 'history', label: 'Import History', icon: <HistoryIcon /> },
-  { id: 'importOverview', label: 'Import Overview', icon: <CalendarCheckIcon /> },
+  {
+    id: 'importOverview',
+    label: 'Import Overview',
+    icon: <CalendarCheckIcon />
+  },
   { id: 'overview', label: 'Data Overview', icon: <OverviewIcon /> },
-  { id: 'sales', label: 'Sale', icon: <SalesIcon />, dotColor: 'bg-emerald-400' },
-  { id: 'inventory', label: 'Inventory', icon: <InventoryIcon />, dotColor: 'bg-sky-400' },
-  { id: 'purchase', label: 'Purchase', icon: <PurchaseIcon />, dotColor: 'bg-pink-400' },
+  {
+    id: 'sales',
+    label: 'Sale',
+    icon: <SalesIcon />,
+    dotColor: 'bg-emerald-400'
+  },
+  {
+    id: 'inventory',
+    label: 'Inventory',
+    icon: <InventoryIcon />,
+    dotColor: 'bg-sky-400'
+  },
+  {
+    id: 'purchase',
+    label: 'Purchase',
+    icon: <PurchaseIcon />,
+    dotColor: 'bg-pink-400'
+  },
   { id: 'warnings', label: 'Warning', icon: <WarningIcon /> }
 ]
 
@@ -66,9 +99,42 @@ const WHOLESALE_NAV_ITEMS: NavItem[] = [
   { id: 'vouchers', label: 'Factory Vouchers', icon: <FactoryIcon /> }
 ]
 
+const WORKSPACE_NAV_ITEMS: Record<Workspace, NavItem[]> = {
+  retail: RETAIL_NAV_ITEMS,
+  wholesale: WHOLESALE_NAV_ITEMS
+}
+
+const WORKSPACE_LABELS: Record<Workspace, string> = {
+  retail: 'Retail',
+  wholesale: 'Wholesale'
+}
+
+// Matches roleBadgeVariant in AppShell (wholesale accounts already show an 'info' role
+// badge) so a workspace's active-tab color is consistent with its color elsewhere.
+const WORKSPACE_COLORS: Record<Workspace, 'brand' | 'info'> = {
+  retail: 'brand',
+  wholesale: 'info'
+}
+
+const WORKSPACE_SECTION_IDS: Record<Workspace, Set<string>> = {
+  retail: new Set(RETAIL_NAV_ITEMS.map((item) => item.id)),
+  wholesale: new Set(WHOLESALE_NAV_ITEMS.map((item) => item.id))
+}
+
+// Remembers which workspace an admin was last in, so they don't land back on Retail every
+// sign-in if they actually live in Wholesale.
+const WORKSPACE_STORAGE_KEY = 'branchwise:lastWorkspace'
+
 // Every role sees Settings — the theme switcher living there applies universally, even
-// though the daily-check-window section on that page only applies to non-wholesale.
-const SETTINGS_NAV_ITEM: NavItem = { id: 'settings', label: 'Settings', icon: <SettingsIcon /> }
+// though the daily-check-window section on that page only applies to non-wholesale. It's
+// pinned below the workspace-specific nav list rather than inside either workspace, since
+// it isn't scoped to one.
+const SETTINGS_NAV_ITEM: NavItem = {
+  id: 'settings',
+  label: 'Settings',
+  icon: <SettingsIcon />
+}
+const PINNED_NAV_ITEMS: NavItem[] = [SETTINGS_NAV_ITEM]
 
 const SECTION_TITLES: Record<Section, string> = {
   import: 'Import data',
@@ -102,6 +168,7 @@ interface SaleRow {
   Net_Amount: number | null
   Location: string | null
   Buying_Price: number | null
+  Buying_Price_Source: string | null
   Profit: number | null
   Profit_Margin_Pct: number | null
 }
@@ -124,6 +191,11 @@ const SALE_COLUMNS: DataTableColumn<SaleRow>[] = [
   { key: 'Net_Amount', label: 'Net Amount', align: 'right' },
   { key: 'Location', label: 'Location' },
   { key: 'Buying_Price', label: 'Buying Price', align: 'right' },
+  {
+    key: 'Buying_Price_Source',
+    label: 'Buying Price Source',
+    format: (value) => formatBuyingPriceSource(value as string | null)
+  },
   { key: 'Profit', label: 'Profit', align: 'right' },
   {
     key: 'Profit_Margin_Pct',
@@ -188,6 +260,10 @@ function App(): React.JSX.Element {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [profileLoading, setProfileLoading] = useState(false)
   const [rawSection, setSection] = useState<Section>('import')
+  const [workspace, setWorkspace] = useState<Workspace>(() => {
+    const stored = window.localStorage.getItem(WORKSPACE_STORAGE_KEY)
+    return stored === 'wholesale' ? 'wholesale' : 'retail'
+  })
   const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -199,6 +275,15 @@ function App(): React.JSX.Element {
   const [highlightBatchId, setHighlightBatchId] = useState<string | null>(null)
   const [warningCount, setWarningCount] = useState(0)
   const [warningWindowDays, setWarningWindowDays] = useWarningWindowDays()
+  const [showBuyingPriceSource, setShowBuyingPriceSource] = useShowBuyingPriceSource()
+
+  const saleColumns = useMemo(
+    () =>
+      showBuyingPriceSource
+        ? SALE_COLUMNS
+        : SALE_COLUMNS.filter((col) => col.key !== 'Buying_Price_Source'),
+    [showBuyingPriceSource]
+  )
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
@@ -237,12 +322,18 @@ function App(): React.JSX.Element {
   // history/overview screens apply to it, so a wholesale account only sees the wholesale
   // nav. Admin sees both, since admin already sees every branch's data elsewhere.
   const isWholesale = profile !== null && profile.role === 'wholesale'
-  // A wholesale-only account has no use for the retail-shaped default landing section — its
-  // nav never offers 'import' to click into, so 'import' here can only mean "still on the
-  // untouched initial value," and we substitute its own nav's first item instead. Derived
-  // at render time (not corrected after the fact via an effect) so there's no frame where
-  // the wrong section's UI briefly renders before a correction catches up.
-  const section: Section = rawSection === 'import' && isWholesale ? 'orders' : rawSection
+  // A role scoped to a single workspace is always in that workspace — only admin (who sees
+  // both) actually uses the switcher state below.
+  const effectiveWorkspace: Workspace = isWholesale ? 'wholesale' : !isAdmin ? 'retail' : workspace
+  // If the current section doesn't belong to the active workspace (first render before the
+  // workspace is known, or right after switching workspaces), fall back to that workspace's
+  // first item. Derived at render time (not corrected after the fact via an effect) so
+  // there's no frame where the wrong workspace's UI briefly renders before a correction
+  // catches up.
+  const section: Section =
+    rawSection === 'settings' || WORKSPACE_SECTION_IDS[effectiveWorkspace].has(rawSection)
+      ? rawSection
+      : (WORKSPACE_NAV_ITEMS[effectiveWorkspace][0].id as Section)
   const branchOptions = useBranches(isAdmin ? session : null)
 
   async function refreshWarningCount(): Promise<void> {
@@ -253,7 +344,10 @@ function App(): React.JSX.Element {
       })
       if (!response.ok) return
       const body = await response.json()
-      const total = (body.sections as { rows: unknown[] }[]).reduce((sum, s) => sum + s.rows.length, 0)
+      const total = (body.sections as { rows: unknown[] }[]).reduce(
+        (sum, s) => sum + s.rows.length,
+        0
+      )
       setWarningCount(total)
     } catch {
       // Sidebar badge is a convenience, not a source of truth — the Warning page itself
@@ -271,26 +365,76 @@ function App(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, isWholesale, warningWindowDays])
 
-  const navItems = useMemo(() => {
-    const base = isWholesale ? WHOLESALE_NAV_ITEMS : isAdmin ? [...NAV_ITEMS, ...WHOLESALE_NAV_ITEMS] : NAV_ITEMS
-    return [...base, SETTINGS_NAV_ITEM].map((item) =>
-      item.id === 'warnings' ? { ...item, badgeCount: warningCount } : item
-    )
-  }, [isWholesale, isAdmin, warningCount])
+  const navItems = useMemo(
+    () =>
+      WORKSPACE_NAV_ITEMS[effectiveWorkspace].map((item) =>
+        item.id === 'warnings' ? { ...item, badgeCount: warningCount } : item
+      ),
+    [effectiveWorkspace, warningCount]
+  )
+
+  // Only admin actually switches workspaces — a retail-only or wholesale-only account is
+  // permanently in its one workspace, so showing a switcher with a single option would be
+  // pointless (AppShell already hides it below two tabs).
+  const workspaceTabs: WorkspaceTab[] = useMemo(
+    () =>
+      isAdmin
+        ? (Object.keys(WORKSPACE_NAV_ITEMS) as Workspace[]).map((id) => ({
+            id,
+            label: WORKSPACE_LABELS[id],
+            color: WORKSPACE_COLORS[id],
+            badgeCount: id === 'retail' ? warningCount : undefined
+          }))
+        : [],
+    [isAdmin, warningCount]
+  )
+
+  function handleWorkspaceChange(id: string): void {
+    const next = id as Workspace
+    setPendingImport(null)
+    setViewingBatchId(null)
+    setHighlightBatchId(null)
+    setWorkspace(next)
+    window.localStorage.setItem(WORKSPACE_STORAGE_KEY, next)
+    setSection(WORKSPACE_NAV_ITEMS[next][0].id as Section)
+  }
 
   const saleFilters: DataTableFilter<SaleRow>[] = useMemo(
     () => [
-      { type: 'search', keys: ['StockCode', 'Description'], placeholder: 'Stock code or description' },
-      { type: 'select', key: 'Branch', label: 'Branch', options: branchOptions },
-      { type: 'dateRange', key: 'Date', label: 'Date' }
+      {
+        type: 'search',
+        keys: ['StockCode', 'Description'],
+        placeholder: 'Stock code or description'
+      },
+      {
+        type: 'select',
+        key: 'Branch',
+        label: 'Branch',
+        options: branchOptions
+      },
+      {
+        type: 'dateRange',
+        key: 'Date',
+        label: 'Date',
+        serverParam: { from: 'date_from', to: 'date_to' }
+      }
     ],
     [branchOptions]
   )
 
   const inventoryFilters: DataTableFilter<InventoryRow>[] = useMemo(
     () => [
-      { type: 'search', keys: ['StockCode', 'Description'], placeholder: 'Stock code or description' },
-      { type: 'select', key: 'Branch', label: 'Branch', options: branchOptions },
+      {
+        type: 'search',
+        keys: ['StockCode', 'Description'],
+        placeholder: 'Stock code or description'
+      },
+      {
+        type: 'select',
+        key: 'Branch',
+        label: 'Branch',
+        options: branchOptions
+      },
       { type: 'select', key: 'Group', label: 'Group' },
       { type: 'dateRange', key: 'Snapshot_At', label: 'Last Updated' }
     ],
@@ -299,9 +443,23 @@ function App(): React.JSX.Element {
 
   const purchaseFilters: DataTableFilter<PurchaseRow>[] = useMemo(
     () => [
-      { type: 'search', keys: ['StockCode', 'Description'], placeholder: 'Stock code or description' },
-      { type: 'select', key: 'Branch', label: 'Branch', options: branchOptions },
-      { type: 'dateRange', key: 'Date', label: 'Date' }
+      {
+        type: 'search',
+        keys: ['StockCode', 'Description'],
+        placeholder: 'Stock code or description'
+      },
+      {
+        type: 'select',
+        key: 'Branch',
+        label: 'Branch',
+        options: branchOptions
+      },
+      {
+        type: 'dateRange',
+        key: 'Date',
+        label: 'Date',
+        serverParam: { from: 'date_from', to: 'date_to' }
+      }
     ],
     [branchOptions]
   )
@@ -311,7 +469,10 @@ function App(): React.JSX.Element {
     setSubmitting(true)
     try {
       if (mode === 'sign-in') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password
+        })
         if (error) showToast('error', error.message)
       } else {
         const { data, error } = await supabase.auth.signUp({ email, password })
@@ -347,7 +508,9 @@ function App(): React.JSX.Element {
     const response = await fetch(`${apiBaseUrl}/api/me`, {
       headers: { Authorization: `Bearer ${session.access_token}` }
     })
-    setMe(response.ok ? JSON.stringify(await response.json(), null, 2) : `Error: ${response.status}`)
+    setMe(
+      response.ok ? JSON.stringify(await response.json(), null, 2) : `Error: ${response.status}`
+    )
   }
 
   function handleSectionChange(id: string): void {
@@ -417,145 +580,167 @@ function App(): React.JSX.Element {
       navItems={navItems}
       activeSection={section}
       onSectionChange={handleSectionChange}
+      workspaces={workspaceTabs}
+      activeWorkspace={effectiveWorkspace}
+      onWorkspaceChange={handleWorkspaceChange}
+      pinnedNavItems={PINNED_NAV_ITEMS}
       email={session.user.email}
       profile={profile}
       onSignOut={handleSignOut}
       debugAction={import.meta.env.DEV ? { label: 'Call /api/me', onClick: callMe } : undefined}
       debugResult={me}
     >
-      {pendingImport ? (
-        <ImportReviewPage
-          session={session}
-          profile={profile}
-          pending={pendingImport}
-          onBack={() => setPendingImport(null)}
-          onConfirmed={handleImportConfirmed}
-        />
-      ) : viewingBatchId ? (
-        <ImportHistoryDetailPage
-          session={session}
-          batchId={viewingBatchId}
-          onBack={() => setViewingBatchId(null)}
-        />
-      ) : (
-        <>
-          {section === 'import' && (
-            <div>
-              <h2 className="text-lg font-semibold text-text-primary tracking-tight mb-1">
-                {SECTION_TITLES[section]}
-              </h2>
-              <p className="text-sm text-text-muted mb-4">
-                Upload a POS export to preview the cleaned data before saving it.
-              </p>
-            </div>
-          )}
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center py-24">
+            <Spinner className="w-6 h-6 text-text-muted" />
+          </div>
+        }
+      >
+        {pendingImport ? (
+          <ImportReviewPage
+            session={session}
+            profile={profile}
+            pending={pendingImport}
+            onBack={() => setPendingImport(null)}
+            onConfirmed={handleImportConfirmed}
+          />
+        ) : viewingBatchId ? (
+          <ImportHistoryDetailPage
+            session={session}
+            batchId={viewingBatchId}
+            onBack={() => setViewingBatchId(null)}
+          />
+        ) : (
+          <>
+            {section === 'import' && (
+              <div>
+                <h2 className="text-lg font-semibold text-text-primary tracking-tight mb-1">
+                  {SECTION_TITLES[section]}
+                </h2>
+                <p className="text-sm text-text-muted mb-4">
+                  Upload a POS export to preview the cleaned data before saving it.
+                </p>
+              </div>
+            )}
 
-          {section === 'import' && (
-            <div className="flex flex-col gap-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {section === 'import' && (
+              <div className="flex flex-col gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <FileImportCard
+                    session={session}
+                    label="Sales"
+                    description="Daily sales slip exports"
+                    endpoint="/api/imports/sales"
+                    icon={<SalesIcon />}
+                    onFileReady={handleFileReady}
+                  />
+                  <FileImportCard
+                    session={session}
+                    label="Purchase"
+                    description="Stock purchase records"
+                    endpoint="/api/imports/purchase"
+                    icon={<PurchaseIcon />}
+                    onFileReady={handleFileReady}
+                  />
+                </div>
                 <FileImportCard
                   session={session}
-                  label="Sales"
-                  description="Daily sales slip exports"
-                  endpoint="/api/imports/sales"
-                  icon={<SalesIcon />}
-                  onFileReady={handleFileReady}
-                />
-                <FileImportCard
-                  session={session}
-                  label="Purchase"
-                  description="Stock purchase records"
-                  endpoint="/api/imports/purchase"
-                  icon={<PurchaseIcon />}
+                  label="Inventory"
+                  description="Monthly stock snapshots"
+                  endpoint="/api/imports/inventory"
+                  icon={<InventoryIcon />}
                   onFileReady={handleFileReady}
                 />
               </div>
-              <FileImportCard
+            )}
+
+            {section === 'history' && (
+              <ImportHistoryTable
                 session={session}
-                label="Inventory"
-                description="Monthly stock snapshots"
-                endpoint="/api/imports/inventory"
-                icon={<InventoryIcon />}
+                onViewBatch={setViewingBatchId}
+                branchOptions={branchOptions}
+                profile={profile}
+                highlightBatchId={highlightBatchId}
                 onFileReady={handleFileReady}
               />
-            </div>
-          )}
-
-          {section === 'history' && (
-            <ImportHistoryTable
-              session={session}
-              onViewBatch={setViewingBatchId}
-              branchOptions={branchOptions}
-              profile={profile}
-              highlightBatchId={highlightBatchId}
-              onFileReady={handleFileReady}
-            />
-          )}
-          {section === 'importOverview' && <ImportOverviewPage session={session} />}
-          {section === 'overview' && <DataOverviewTable session={session} branchOptions={branchOptions} />}
-          {section === 'sales' && (
-            <SimpleDataTable<SaleRow>
-              session={session}
-              endpoint="/api/sales"
-              title="Sale"
-              description="Every sale line, with profit and margin calculated from the latest known buying price."
-              icon={<SalesIcon />}
-              columns={SALE_COLUMNS}
-              filters={saleFilters}
-              rowKey={(row, i) => `${row.SlipNumber}-${i}`}
-              emptyTitle="No sales yet"
-              emptyDescription="Import a sales file to see it here."
-            />
-          )}
-          {section === 'inventory' && (
-            <SimpleDataTable<InventoryRow>
-              session={session}
-              endpoint="/api/inventory"
-              title="Inventory"
-              description="Current stock on hand, from each product's most recent inventory snapshot."
-              icon={<InventoryIcon />}
-              columns={INVENTORY_COLUMNS}
-              filters={inventoryFilters}
-              rowKey={(row, i) => `${row.StockCode}-${row.Branch}-${i}`}
-              emptyTitle="No inventory yet"
-              emptyDescription="Import an inventory file to see it here."
-            />
-          )}
-          {section === 'purchase' && (
-            <SimpleDataTable<PurchaseRow>
-              session={session}
-              endpoint="/api/purchases"
-              title="Purchase"
-              description="Every purchase line from confirmed purchase imports."
-              icon={<PurchaseIcon />}
-              columns={PURCHASE_COLUMNS}
-              filters={purchaseFilters}
-              rowKey={(row, i) => `${row.StockCode}-${row.Date}-${i}`}
-              emptyTitle="No purchases yet"
-              emptyDescription="Import a purchase file to see it here."
-            />
-          )}
-          {section === 'warnings' && (
-            <WarningsPage
-              session={session}
-              profile={profile}
-              onCountChange={setWarningCount}
-              warningWindowDays={warningWindowDays}
-              onViewImportBatch={handleViewImportBatch}
-              onFileReady={handleFileReady}
-            />
-          )}
-          {section === 'orders' && <CustomerOrdersPage session={session} profile={profile} />}
-          {section === 'vouchers' && <FactoryVouchersPage session={session} profile={profile} />}
-          {section === 'settings' && (
-            <SettingsPage
-              profile={profile}
-              warningWindowDays={warningWindowDays}
-              onWarningWindowDaysChange={setWarningWindowDays}
-            />
-          )}
-        </>
-      )}
+            )}
+            {section === 'importOverview' && <ImportOverviewPage session={session} />}
+            {section === 'overview' && (
+              <DataOverviewTable
+                session={session}
+                branchOptions={branchOptions}
+                showBuyingPriceSource={showBuyingPriceSource}
+              />
+            )}
+            {section === 'sales' && (
+              <SimpleDataTable<SaleRow>
+                session={session}
+                endpoint="/api/sales"
+                title="Sale"
+                description="Sale lines from the last 90 days, with profit and margin from the buying price on record as of each sale's own date. Set a date to look further back."
+                icon={<SalesIcon />}
+                columns={saleColumns}
+                filters={saleFilters}
+                rowKey={(row, i) => `${row.SlipNumber}-${i}`}
+                emptyTitle="No sales yet"
+                emptyDescription="Import a sales file to see it here."
+              />
+            )}
+            {section === 'inventory' && (
+              <SimpleDataTable<InventoryRow>
+                session={session}
+                endpoint="/api/inventory"
+                title="Inventory"
+                description="Current stock on hand, from each product's most recent inventory snapshot."
+                icon={<InventoryIcon />}
+                columns={INVENTORY_COLUMNS}
+                filters={inventoryFilters}
+                rowKey={(row, i) => `${row.StockCode}-${row.Branch}-${i}`}
+                emptyTitle="No inventory yet"
+                emptyDescription="Import an inventory file to see it here."
+              />
+            )}
+            {section === 'purchase' && (
+              <SimpleDataTable<PurchaseRow>
+                session={session}
+                endpoint="/api/purchases"
+                title="Purchase"
+                description="Purchase lines from the last 90 days. Set a date to look further back."
+                icon={<PurchaseIcon />}
+                columns={PURCHASE_COLUMNS}
+                filters={purchaseFilters}
+                rowKey={(row, i) => `${row.StockCode}-${row.Date}-${i}`}
+                emptyTitle="No purchases yet"
+                emptyDescription="Import a purchase file to see it here."
+              />
+            )}
+            {section === 'warnings' && (
+              <WarningsPage
+                session={session}
+                profile={profile}
+                onCountChange={setWarningCount}
+                warningWindowDays={warningWindowDays}
+                onViewImportBatch={handleViewImportBatch}
+                onFileReady={handleFileReady}
+              />
+            )}
+            {section === 'orders' && <CustomerOrdersPage session={session} profile={profile} />}
+            {section === 'vouchers' && <FactoryVouchersPage session={session} profile={profile} />}
+            {section === 'settings' && (
+              <SettingsPage
+                session={session}
+                profile={profile}
+                isAdmin={isAdmin}
+                warningWindowDays={warningWindowDays}
+                onWarningWindowDaysChange={setWarningWindowDays}
+                showBuyingPriceSource={showBuyingPriceSource}
+                onShowBuyingPriceSourceChange={setShowBuyingPriceSource}
+              />
+            )}
+          </>
+        )}
+      </Suspense>
     </AppShell>
   )
 }
