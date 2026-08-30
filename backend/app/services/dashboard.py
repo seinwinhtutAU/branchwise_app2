@@ -603,24 +603,21 @@ def _footfall_heatmap(db: Session, branch_id: str, start: date, end: date) -> li
     ]
 
 
-def _basket_value_trend(db: Session, branch_id: str, start: date, end: date) -> list[dict]:
+def _transaction_count_trend(db: Session, branch_id: str, start: date, end: date) -> list[dict]:
+    """Daily transaction (basket) count over the period — the day-by-day footfall trend
+    that complements the weekday x hour Busy Hours heatmap, which shows the recurring
+    pattern but not how the whole period actually moved day to day."""
     rows = (
-        db.query(
-            Sale.sale_date,
-            func.coalesce(func.sum(SaleLine.net_amount), 0),
-            func.count(func.distinct(Sale.id)),
-        )
-        .join(SaleLine, SaleLine.sale_id == Sale.id)
+        db.query(Sale.sale_date, func.count(func.distinct(Sale.id)))
         .filter(Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end)
         .group_by(Sale.sale_date)
         .all()
     )
-    by_date = {sale_date: (float(total), int(count)) for sale_date, total, count in rows}
+    by_date = {sale_date: int(count) for sale_date, count in rows}
     trend = []
     current = start
     while current <= end:
-        total, count = by_date.get(current, (0.0, 0))
-        trend.append({"date": current.isoformat(), "avg_basket_value": total / count if count else 0.0})
+        trend.append({"date": current.isoformat(), "transaction_count": by_date.get(current, 0)})
         current += timedelta(days=1)
     return trend
 
@@ -661,7 +658,7 @@ def build_customer_dashboard(
         "single_item_basket_share_pct": _kpi(single_share, prev_single_share),
         "busiest_hour": busiest_hour,
         "footfall_heatmap": footfall,
-        "basket_value_trend": _basket_value_trend(db, branch_id, period_range.start, period_range.end),
+        "transaction_count_trend": _transaction_count_trend(db, branch_id, period_range.start, period_range.end),
         "items_per_basket_histogram": [
             {"items": items, "count": count} for items, count in sorted(histogram.items())
         ],

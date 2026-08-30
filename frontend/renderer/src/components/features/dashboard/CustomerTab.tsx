@@ -14,7 +14,7 @@ import {
   WarningsTile,
   WEEKDAY_LABELS,
   WeekdayHourHeatmap,
-  formatMoney,
+  formatCount,
   formatPercent,
   periodQueryParams,
   previousPeriodLabel,
@@ -24,9 +24,9 @@ import {
   type SaleWarningRow
 } from './shared'
 
-interface BasketValuePoint {
+interface TransactionCountPoint {
   date: string
-  avg_basket_value: number
+  transaction_count: number
 }
 
 interface FootfallCell {
@@ -46,7 +46,7 @@ interface CustomerDashboardData {
   single_item_basket_share_pct: KpiValue
   busiest_hour: FootfallCell | null
   footfall_heatmap: FootfallCell[]
-  basket_value_trend: BasketValuePoint[]
+  transaction_count_trend: TransactionCountPoint[]
   items_per_basket_histogram: HistogramBucket[]
   sale_warnings: SaleWarningRow[]
 }
@@ -183,15 +183,15 @@ export function CustomerTab({ session, branchId, period, dateFrom, dateTo, canLo
 
       <Card>
         <CardHeader
-          title="Average sale value trend"
-          description="Average sale value per day — how much a typical transaction is worth, not total revenue."
+          title="Transaction trend"
+          description="Number of transactions per day — the day-by-day footfall trend behind the Busy Hours pattern below."
           action={<ChartViewToggle view={trendView} onChange={setTrendView} />}
         />
         <TrendChart
-          points={data.basket_value_trend}
-          getValue={(p) => p.avg_basket_value}
-          formatValue={formatMoney}
-          ariaLabel="Daily average sale value"
+          points={data.transaction_count_trend}
+          getValue={(p) => p.transaction_count}
+          formatValue={formatCount}
+          ariaLabel="Daily transaction count"
           view={trendView}
         />
       </Card>

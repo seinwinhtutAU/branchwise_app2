@@ -466,6 +466,30 @@ def test_customer_dashboard_basket_stats_and_histogram(
     histogram = {row["items"]: row["count"] for row in body["items_per_basket_histogram"]}
     assert histogram == {1: 1, 2: 1}
     assert body["busiest_hour"]["transaction_count"] == 1
+    # Both sales landed today — the transaction count trend should show 2 for today.
+    trend_by_date = {row["date"]: row["transaction_count"] for row in body["transaction_count_trend"]}
+    assert trend_by_date[today.isoformat()] == 2
+
+
+def test_customer_dashboard_transaction_trend_zero_fills_missing_days(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-1",
+        sale_date=today, sale_time="10:00", qty=1, net_amount=500,
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/customer?period=7d")
+    assert response.status_code == 200
+    trend = response.json()["transaction_count_trend"]
+    assert len(trend) == 7
+    assert trend[-1] == {"date": today.isoformat(), "transaction_count": 1}
+    assert all(point["transaction_count"] == 0 for point in trend[:-1])
 
 
 def test_resolve_period_custom_range_computes_matching_previous_range():
