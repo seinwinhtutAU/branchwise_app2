@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, func
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -20,13 +20,19 @@ class Sale(Base):
         # check's branch + date-range scan — both filter on this pair together.
         Index("ix_sales_branch_id_sale_date", "branch_id", "sale_date"),
         Index("ix_sales_import_batch_id", "import_batch_id"),
+        # slip_id is built from just the report date + slip number (see pos_import.py),
+        # and different branches/POS terminals number their own slips independently —
+        # so the same slip_id can legitimately occur at two different branches on the
+        # same day. Uniqueness (and therefore import dedup) must be scoped per branch,
+        # not on slip_id alone.
+        UniqueConstraint("branch_id", "slip_id", name="uq_sales_branch_id_slip_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True)
     import_batch_id: Mapped[str | None] = mapped_column(ForeignKey("import_batches.id"), nullable=True)
     location_raw: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    slip_id: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    slip_id: Mapped[str] = mapped_column(String(50), nullable=False)
     slip_number: Mapped[str] = mapped_column(String(20), nullable=False)
     sale_date: Mapped[date] = mapped_column(Date, nullable=False)
     sale_time: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -40,11 +46,17 @@ class Sale(Base):
 
 class SaleLine(Base):
     __tablename__ = "sale_lines"
-    __table_args__ = (Index("ix_sale_lines_sale_id", "sale_id"),)
+    __table_args__ = (
+        Index("ix_sale_lines_sale_id", "sale_id"),
+        # line_id is derived from the sale's slip_id (see pos_import.py), which is only
+        # unique per branch (see Sale.__table_args__) — so line_id must be scoped to
+        # its own sale rather than unique across the whole table.
+        UniqueConstraint("sale_id", "line_id", name="uq_sale_lines_sale_id_line_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     sale_id: Mapped[str] = mapped_column(ForeignKey("sales.id"), nullable=False)
-    line_id: Mapped[str] = mapped_column(String(60), nullable=False, unique=True)
+    line_id: Mapped[str] = mapped_column(String(60), nullable=False)
     line_no: Mapped[int] = mapped_column(Integer, nullable=False)
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False)
     selling_price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)

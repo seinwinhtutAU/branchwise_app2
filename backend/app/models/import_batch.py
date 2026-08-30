@@ -58,9 +58,18 @@ class ImportBatch(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     reverted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     reverted_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # Set when someone marks this batch's Import Health flag as handled — e.g. the
+    # batch is an old pre-fix incident whose data gap was already patched by a
+    # separate later batch, so the flag is historically accurate but no longer
+    # actionable. Distinct from `status`/`reverted_*`: dismissing doesn't touch the
+    # batch's data or its place in Import History, it only hides it from the
+    # "Batches to review" list (app/services/import_health.py).
+    health_dismissed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    health_dismissed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     branch: Mapped["Branch | None"] = relationship(
         back_populates="import_batches", foreign_keys=[branch_id]
     )
     uploaded_by_user: Mapped["User | None"] = relationship(foreign_keys=[uploaded_by])
     reverted_by_user: Mapped["User | None"] = relationship(foreign_keys=[reverted_by])
+    health_dismissed_by_user: Mapped["User | None"] = relationship(foreign_keys=[health_dismissed_by])

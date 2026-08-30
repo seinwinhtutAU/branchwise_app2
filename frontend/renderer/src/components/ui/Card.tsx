@@ -1,14 +1,14 @@
-import type { ReactNode } from 'react'
+import type { HTMLAttributes, ReactNode } from 'react'
 import { cn } from '@renderer/lib/utils'
 
-interface CardProps {
+interface CardProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode
   className?: string
   interactive?: boolean
 }
 
 // Layout wrapper — no skeleton/empty state (exempt per rubric).
-export function Card({ children, className, interactive }: CardProps): React.JSX.Element {
+export function Card({ children, className, interactive, ...props }: CardProps): React.JSX.Element {
   return (
     <div
       className={cn(
@@ -21,6 +21,7 @@ export function Card({ children, className, interactive }: CardProps): React.JSX
         ],
         className
       )}
+      {...props}
     >
       {children}
     </div>

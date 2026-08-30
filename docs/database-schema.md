@@ -49,7 +49,7 @@ One `Sale` per POS "slip" (receipt), with one or more `SaleLine`s. Sourced from 
 | branch_id | uuid, nullable | FK → branches, resolved at import time from the uploader's own branch |
 | import_batch_id | uuid, nullable | FK → import_batches — which upload created this row (see below) |
 | location_raw | string, nullable | the raw `Location` text from the source file, kept for audit even though branch_id is what's actually used |
-| slip_id | string | **unique** — synthetic id (`{date}-{slip_number}`, e.g. `20260821-002`); this is what makes sales import idempotent |
+| slip_id | string | **unique per branch_id** (not globally) — synthetic id (`{date}-{slip_number}`, e.g. `20260821-002`); this is what makes sales import idempotent. Scoped to branch because different branches/POS terminals number slips independently, so the same slip_id can legitimately occur at two branches on the same day |
 | slip_number | string | raw slip number from the POS (resets/repeats across dates, hence the synthetic slip_id) |
 | sale_date | date | |
 | sale_time | string, nullable | |
@@ -62,7 +62,7 @@ One `Sale` per POS "slip" (receipt), with one or more `SaleLine`s. Sourced from 
 |---|---|---|
 | id | uuid | PK |
 | sale_id | uuid | FK → sales |
-| line_id | string | **unique** — synthetic (`{slip_id}-{line_no}`) |
+| line_id | string | **unique per sale_id** (not globally, since slip_id is only unique per branch) — synthetic (`{slip_id}-{line_no}`) |
 | line_no | int | 1-based, per slip |
 | product_id | uuid | FK → products |
 | selling_price, qty, discount_amount, amount, net_amount | numeric(14,2) / numeric(12,2) | |

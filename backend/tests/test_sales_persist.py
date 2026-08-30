@@ -1,6 +1,7 @@
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from app.models.branch import Branch
 from app.models.product import Product
 from app.models.sale import Sale, SaleLine
 from app.services.sales_persist import persist_sales
@@ -75,6 +76,25 @@ def test_reimporting_same_slip_is_skipped(db_session: Session):
     assert summary["sales_skipped_duplicate"] == 1
     assert db_session.query(Sale).count() == 1
     assert db_session.query(SaleLine).count() == 2
+
+
+def test_same_slip_id_from_a_different_branch_is_not_skipped(db_session: Session):
+    """Different branches/POS terminals number their own slips independently, so the
+    same SlipID (report date + slip number) can legitimately show up at two branches
+    on the same day — that must not be treated as a re-import of the same sale."""
+    branch_a = Branch(name="Branch A", phone_number="000", address="TBD")
+    branch_b = Branch(name="Branch B", phone_number="000", address="TBD")
+    db_session.add_all([branch_a, branch_b])
+    db_session.flush()
+
+    persist_sales(db_session, SALE_DF, branch_id=branch_a.id, location_raw=None, source_file="a.csv")
+    summary = persist_sales(
+        db_session, SALE_DF, branch_id=branch_b.id, location_raw=None, source_file="b.csv"
+    )
+
+    assert summary["sales_created"] == 1
+    assert summary["sales_skipped_duplicate"] == 0
+    assert db_session.query(Sale).filter(Sale.slip_id == "20260821-002").count() == 2
 
 
 def test_product_upserted_not_duplicated_across_slips(db_session: Session):

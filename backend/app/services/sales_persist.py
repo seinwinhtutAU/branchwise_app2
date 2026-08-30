@@ -47,7 +47,10 @@ def persist_sales(
 
     slip_ids = df["SlipID"].unique().tolist()
     existing_slip_ids = {
-        row[0] for row in db.query(Sale.slip_id).filter(Sale.slip_id.in_(slip_ids)).all()
+        row[0]
+        for row in db.query(Sale.slip_id)
+        .filter(Sale.branch_id == branch_id, Sale.slip_id.in_(slip_ids))
+        .all()
     }
 
     products, created, updated = get_or_create_products(

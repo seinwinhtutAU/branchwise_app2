@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
 
-interface BranchOption {
+export interface BranchOption {
   id: string
   name: string
 }
@@ -52,6 +52,38 @@ export function useWholesaleBranchOptions(session: Session | null): BranchOption
     }
     let cancelled = false
     fetch(`${apiBaseUrl}/api/branches?kind=wholesale`, {
+      headers: { Authorization: `Bearer ${session.access_token}` }
+    })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((branches: BranchOption[]) => {
+        if (!cancelled) setOptions(branches)
+      })
+      .catch(() => {
+        if (!cancelled) setOptions([])
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.access_token])
+
+  return options
+}
+
+// The retail mirror of useWholesaleBranchOptions — id+name pairs for a picker whose
+// selection is submitted somewhere, e.g. an admin account choosing which retail branch's
+// Dashboard to view (the dashboard is always one branch at a time, never a cross-branch
+// rollup — see docs/retail_dashboard.md). Pass `null` to skip fetching.
+export function useRetailBranchOptions(session: Session | null): BranchOption[] {
+  const [options, setOptions] = useState<BranchOption[]>([])
+
+  useEffect(() => {
+    if (!session) {
+      setOptions([])
+      return
+    }
+    let cancelled = false
+    fetch(`${apiBaseUrl}/api/branches`, {
       headers: { Authorization: `Bearer ${session.access_token}` }
     })
       .then((r) => (r.ok ? r.json() : []))

@@ -11,15 +11,16 @@ import {
   type DataTableFilter
 } from '@renderer/components/features/SimpleDataTable'
 import type { PendingImport, Profile } from '@renderer/components/features/types'
-import { useBranches } from '@renderer/lib/useBranches'
+import { useBranches, useRetailBranchOptions } from '@renderer/lib/useBranches'
 import { formatBuyingPriceSource } from '@renderer/lib/buyingPriceSource'
 import { useAppSettings } from '@renderer/lib/appSettings'
 import { Spinner } from '@renderer/components/ui/Spinner'
 import {
   UploadIcon,
   HistoryIcon,
-  CalendarCheckIcon,
+  HeartPulseIcon,
   OverviewIcon,
+  DashboardIcon,
   SalesIcon,
   InventoryIcon,
   PurchaseIcon,
@@ -49,11 +50,13 @@ const FactoryVouchersPage = lazy(() => import('@renderer/components/features/Fac
 const WarehouseArrivalPage = lazy(() => import('@renderer/components/features/WarehouseArrivalPage'))
 const FactoryReceivingPage = lazy(() => import('@renderer/components/features/FactoryReceivingPage'))
 const WarningsPage = lazy(() => import('@renderer/components/features/WarningsPage'))
+const DashboardPage = lazy(() => import('@renderer/components/features/DashboardPage'))
 const ChatPage = lazy(() => import('@renderer/components/features/ChatPage'))
 const SettingsPage = lazy(() => import('@renderer/components/features/SettingsPage'))
 const HelpPage = lazy(() => import('@renderer/components/features/HelpPage'))
 
 type Section =
+  | 'dashboard'
   | 'import'
   | 'history'
   | 'importOverview'
@@ -77,12 +80,13 @@ type Section =
 type Workspace = 'retail' | 'wholesale'
 
 const RETAIL_NAV_ITEMS: NavItem[] = [
+  { id: 'dashboard', label: 'Dashboard', icon: <DashboardIcon /> },
   { id: 'import', label: 'Import', icon: <UploadIcon /> },
   { id: 'history', label: 'Import History', icon: <HistoryIcon /> },
   {
     id: 'importOverview',
     label: 'Import Overview',
-    icon: <CalendarCheckIcon />
+    icon: <HeartPulseIcon />
   },
   { id: 'overview', label: 'Data Overview', icon: <OverviewIcon /> },
   {
@@ -158,6 +162,7 @@ const HELP_NAV_ITEM: NavItem = {
 }
 
 const SECTION_TITLES: Record<Section, string> = {
+  dashboard: 'Dashboard',
   import: 'Import data',
   history: 'Import history',
   importOverview: 'Import overview',
@@ -369,6 +374,7 @@ function App(): React.JSX.Element {
       ? rawSection
       : (WORKSPACE_NAV_ITEMS[effectiveWorkspace][0].id as Section)
   const branchOptions = useBranches(isAdmin ? session : null)
+  const retailBranchOptions = useRetailBranchOptions(isAdmin ? session : null)
 
   // Help is admin-only (see docs discussion) — Settings stays visible to everyone, same
   // as before.
@@ -655,6 +661,15 @@ function App(): React.JSX.Element {
           />
         ) : (
           <>
+            {section === 'dashboard' && (
+              <DashboardPage
+                session={session}
+                profile={profile}
+                branchOptions={retailBranchOptions}
+                onViewWarnings={() => handleSectionChange('warnings')}
+              />
+            )}
+
             {section === 'import' && (
               <div>
                 <h2 className="text-lg font-semibold text-text-primary tracking-tight mb-1">
@@ -707,7 +722,9 @@ function App(): React.JSX.Element {
                 onFileReady={handleFileReady}
               />
             )}
-            {section === 'importOverview' && <ImportOverviewPage session={session} />}
+            {section === 'importOverview' && (
+              <ImportOverviewPage session={session} onViewImportBatch={handleViewImportBatch} />
+            )}
             {section === 'overview' && (
               <DataOverviewTable
                 session={session}

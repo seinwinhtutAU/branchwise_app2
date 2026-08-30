@@ -128,6 +128,10 @@ def _build_preview(
             "rows": clean_df.to_dict(orient="records"),
             "row_issues": row_issues,
         },
+        # Sales-only (empty for Inventory/Purchase) — see pos_import.py's subtotal_mismatches
+        # attr. Surfaced by Import Health's "slip-total mismatches" check rather than only
+        # reaching a server log, since it's already computed here and otherwise discarded.
+        "slip_subtotal_mismatches": clean_df.attrs.get("subtotal_mismatches", []),
     }
 
 

@@ -124,10 +124,12 @@ These three nav sections each render a flat, unfiltered table of the correspondi
 Same open questions as Data Overview apply here (no pagination/filter/search, one flat table per section) — these are functional first passes, not a finished analytics UI.
 
 ### 3.9 Import Overview (`ImportOverviewPage`)
-One table, one purpose: at-a-glance freshness of each branch's imports. Backed by `GET /api/imports/freshness`.
+One nav item, two tabs (`OverviewTabBar`, same pill visual as Dashboard's tab bar): **Import freshness** and **Import Health**. A single "Refresh" button above the tabs reloads both regardless of which is active. See `docs/import_health.md` for the full design rationale (that doc's title reflects the "Import Health" tab/feature specifically; "Import Overview" is the nav item both tabs share).
 
-- Header + description ("When sales, inventory, and purchase were each last imported per branch — files are expected daily.") + Refresh button. Same loading-skeleton / failure-empty-state / zero-rows-empty-state pattern as the other list screens.
-- Table columns: Branch, Sales, Inventory, Purchase — each cell a colored freshness badge (green "Today", amber "Yesterday", red "N days ago" or "Never imported") plus the exact localized timestamp underneath.
+- **Import freshness tab** — at-a-glance per-branch import recency (`GET /api/imports/freshness`): Branch, Sales, Inventory, Purchase, each cell a colored freshness badge (green "Today", amber "Yesterday", red "N days ago" or "Never imported") plus the exact localized timestamp underneath.
+- **Import Health tab** — checks whether the cleaning/confirm step itself behaved correctly for a given upload, not the data already saved (that's Warning, below). A "Period" select (7/30/90 days, pinned to the right end of the tab row, this tab only) plus 3 stat tiles (batches checked, batches flagged, slip-total mismatches) backed by `GET /api/imports/health?days=`.
+  - **Batches to review** — one table across all three import types, each with its own failure mode: Sales flags an anomalously high skip rate (its slip_id dedup is per-branch, so a spike means something's off); Purchase flags two same-branch batches with suspiciously matching totals (it has no dedup at all, so a re-upload silently double-counts); Inventory flags a batch whose stock-code count falls far below that branch's recent baseline (a sign of a partial/bad parse, since it intentionally keeps full snapshot history rather than deduping). Each row has "View in History →" (jumping to that batch, same as Warning's Source Import link) and "Dismiss" (marks the flag handled without touching the batch's data — for a historical flag whose gap was already patched by a separate batch).
+  - **Slip-total mismatches** (Sales only) — a slip whose line items don't sum to its own printed subtotal row; this was previously computed during parsing but only ever reached a server log, never a screen.
 
 ### 3.10 Warning (`WarningsPage`)
 Data-quality issues found in already-imported retail data, backed by `GET /api/warnings`. Retail/admin only — not shown to wholesale accounts (no sale/inventory/purchase data to check).

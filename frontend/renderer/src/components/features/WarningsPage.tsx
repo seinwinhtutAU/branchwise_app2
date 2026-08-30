@@ -592,7 +592,7 @@ function WarningTabBar({
             'flex items-center gap-1.5 h-8 px-3 rounded-md text-sm font-medium transition-all duration-150',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1',
             activeTab === tab
-              ? 'bg-bg-base text-text-primary shadow-sm'
+              ? 'bg-brand-subtle text-brand shadow-sm'
               : 'text-text-muted hover:text-text-secondary'
           )}
         >

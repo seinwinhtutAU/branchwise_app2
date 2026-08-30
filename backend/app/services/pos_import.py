@@ -149,6 +149,7 @@ def parse_pos_sale_export_from_grid(
     line_no = 0
     slip_line_total = 0.0
     slip_expected_total: float | None = None
+    subtotal_mismatches: list[dict] = []
 
     for row_idx, row in enumerate(rows):
         if not row or not any(cell.strip() for cell in row):
@@ -168,6 +169,16 @@ def parse_pos_sale_export_from_grid(
                 logger.warning(
                     "Slip %s: line items sum to %.2f but subtotal row says %.2f",
                     slip_id, slip_line_total, slip_expected_total,
+                )
+                subtotal_mismatches.append(
+                    {
+                        "SlipID": slip_id,
+                        "SlipNumber": slip_number,
+                        "Date": report_date,
+                        "LineTotal": round(slip_line_total, 2),
+                        "SubtotalOnSlip": round(slip_expected_total, 2),
+                        "Difference": round(slip_line_total - slip_expected_total, 2),
+                    }
                 )
             slip_number = row[2].strip()
             slip_time = row[5].strip()
@@ -214,9 +225,23 @@ def parse_pos_sale_export_from_grid(
             "Slip %s: line items sum to %.2f but subtotal row says %.2f",
             slip_id, slip_line_total, slip_expected_total,
         )
+        subtotal_mismatches.append(
+            {
+                "SlipID": slip_id,
+                "SlipNumber": slip_number,
+                "Date": report_date,
+                "LineTotal": round(slip_line_total, 2),
+                "SubtotalOnSlip": round(slip_expected_total, 2),
+                "Difference": round(slip_line_total - slip_expected_total, 2),
+            }
+        )
 
     df = pd.DataFrame.from_records(records, columns=OUTPUT_COLUMNS)
     df.attrs["origin_indices"] = origin_indices
+    # Surfaced by Import Health's "slip-total mismatches" check (app/services/import_health.py)
+    # — kept on the DataFrame the same way origin_indices is, since both are metadata about
+    # the parse rather than row data itself.
+    df.attrs["subtotal_mismatches"] = subtotal_mismatches
     return df
 
 

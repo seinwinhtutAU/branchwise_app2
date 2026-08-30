@@ -6,9 +6,11 @@ from app.routers import (
     auth,
     branches,
     chat,
+    dashboard,
     data_overview,
     factory_vouchers,
     health,
+    import_health,
     imports,
     inventory,
     orders,
@@ -36,6 +38,7 @@ def create_app() -> FastAPI:
     app.include_router(inventory.router)
     app.include_router(allocation.router)
     app.include_router(imports.router)
+    app.include_router(import_health.router)
     app.include_router(branches.router)
     app.include_router(data_overview.router)
     app.include_router(sales.router)
@@ -45,6 +48,7 @@ def create_app() -> FastAPI:
     app.include_router(warnings.router)
     app.include_router(settings.router)
     app.include_router(chat.router)
+    app.include_router(dashboard.router)
 
     return app
 

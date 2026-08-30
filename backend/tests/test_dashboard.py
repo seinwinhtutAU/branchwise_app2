@@ -1,0 +1,534 @@
+import datetime
+
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from app.models.branch import Branch
+from app.models.product import Product
+from app.models.purchase import Purchase, PurchaseLine
+from app.models.sale import Sale, SaleLine
+from app.models.stock_level import StockLevel
+from app.models.user import User, UserRole
+from app.services import dashboard as dashboard_service
+
+TODAY = datetime.date(2026, 8, 30)  # a Sunday
+
+
+def _make_branch(db_session: Session, name: str = "Retail 1") -> Branch:
+    branch = Branch(name=name, phone_number="000", address="TBD")
+    db_session.add(branch)
+    db_session.flush()
+    return branch
+
+
+def _make_retail_user(db_session: Session, branch: Branch, user_id: str = "test-user-id") -> User:
+    user = User(id=user_id, name="Tester", email=f"{user_id}@example.com", role=UserRole.RETAIL, branch_id=branch.id)
+    db_session.add(user)
+    return user
+
+
+def _make_admin_user(db_session: Session, user_id: str = "test-user-id") -> User:
+    user = User(id=user_id, name="Admin", email=f"{user_id}@example.com", role=UserRole.ADMIN)
+    db_session.add(user)
+    return user
+
+
+def _make_product(db_session: Session, stock_code: str, description: str = "Widget") -> Product:
+    product = Product(stock_code=stock_code, description=description)
+    db_session.add(product)
+    db_session.flush()
+    return product
+
+
+def _make_sale(
+    db_session: Session,
+    *,
+    branch: Branch,
+    product: Product,
+    slip_id: str,
+    sale_date: datetime.date,
+    sale_time: str,
+    qty: float,
+    net_amount: float,
+) -> None:
+    sale = Sale(branch_id=branch.id, slip_id=slip_id, slip_number=slip_id, sale_date=sale_date, sale_time=sale_time)
+    db_session.add(sale)
+    db_session.flush()
+    db_session.add(
+        SaleLine(
+            sale_id=sale.id,
+            line_id=f"{slip_id}-01",
+            line_no=1,
+            product_id=product.id,
+            selling_price=net_amount / qty if qty else 0,
+            qty=qty,
+            uom="Each",
+            discount_amount=0,
+            amount=net_amount,
+            net_amount=net_amount,
+        )
+    )
+
+
+def test_resolve_period_today_and_7d():
+    r = dashboard_service.resolve_period("today", today=TODAY)
+    assert r.start == r.end == TODAY
+    assert r.previous_start == r.previous_end == TODAY - datetime.timedelta(days=1)
+
+    r = dashboard_service.resolve_period("7d", today=TODAY)
+    assert r.start == TODAY - datetime.timedelta(days=6)
+    assert r.end == TODAY
+    assert r.previous_end == r.start - datetime.timedelta(days=1)
+    assert r.previous_start == r.previous_end - datetime.timedelta(days=6)
+
+
+def test_dashboard_endpoint_retail_account_uses_own_branch(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    _make_sale(
+        db_session,
+        branch=branch,
+        product=product,
+        slip_id="slip-1",
+        sale_date=datetime.date.today(),
+        sale_time="10:00",
+        qty=2,
+        net_amount=1000,
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/revenue?period=today")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["branch_id"] == branch.id
+    assert body["net_revenue"]["value"] == 1000
+    assert body["transaction_count"]["value"] == 1
+
+
+def test_dashboard_admin_requires_branch_id(authed_client: TestClient, db_session: Session):
+    _make_admin_user(db_session)
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/revenue?period=today")
+    assert response.status_code == 400
+
+
+def test_dashboard_rejects_wholesale_branch(authed_client: TestClient, db_session: Session):
+    admin = _make_admin_user(db_session)
+    wholesale_branch = _make_branch(db_session, "Wholesale")
+    db_session.add(
+        User(
+            id="wholesale-user",
+            name="Wholesale Staff",
+            email="wholesale-staff@example.com",
+            role=UserRole.WHOLESALE,
+            branch_id=wholesale_branch.id,
+        )
+    )
+    db_session.commit()
+
+    response = authed_client.get(f"/api/dashboard/revenue?period=today&branch_id={wholesale_branch.id}")
+    assert response.status_code == 400
+
+
+def test_dashboard_kpis_and_delta_vs_previous_period(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="today-1",
+        sale_date=today, sale_time="10:00", qty=2, net_amount=2000,
+    )
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="yesterday-1",
+        sale_date=today - datetime.timedelta(days=1), sale_time="10:00", qty=1, net_amount=1000,
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/revenue?period=today")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["net_revenue"] == {"value": 2000.0, "previous_value": 1000.0, "delta_pct": 100.0}
+    assert body["transaction_count"] == {"value": 1.0, "previous_value": 1.0, "delta_pct": 0.0}
+    assert body["avg_basket"]["value"] == 2000.0
+
+
+def test_dashboard_trend_zero_fills_missing_days(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-1",
+        sale_date=today, sale_time="10:00", qty=1, net_amount=500,
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/revenue?period=7d")
+    assert response.status_code == 200
+    trend = response.json()["trend"]
+    assert len(trend) == 7
+    assert trend[-1] == {"date": today.isoformat(), "net_revenue": 500.0}
+    assert all(point["net_revenue"] == 0.0 for point in trend[:-1])
+
+
+def test_dashboard_top_products_ordered_by_revenue(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product_a = _make_product(db_session, "SKU-A", "Product A")
+    product_b = _make_product(db_session, "SKU-B", "Product B")
+    today = datetime.date.today()
+    _make_sale(
+        db_session, branch=branch, product=product_a, slip_id="slip-a",
+        sale_date=today, sale_time="10:00", qty=1, net_amount=500,
+    )
+    _make_sale(
+        db_session, branch=branch, product=product_b, slip_id="slip-b",
+        sale_date=today, sale_time="10:00", qty=1, net_amount=1500,
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/revenue?period=today")
+    top_products = response.json()["top_products"]
+    assert [p["stock_code"] for p in top_products] == ["SKU-B", "SKU-A"]
+
+
+def test_dashboard_heatmap_buckets_by_weekday_and_hour_band(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-1",
+        sale_date=today, sale_time="10:15", qty=1, net_amount=300,
+    )
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-2",
+        sale_date=today, sale_time="10:45", qty=1, net_amount=200,
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/revenue?period=today")
+    heatmap = response.json()["heatmap"]
+    assert heatmap == [{"weekday": today.weekday(), "hour_band": "10-11", "net_revenue": 500.0}]
+
+
+def test_dashboard_heatmap_excludes_sales_outside_business_hours(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-late-night",
+        sale_date=today, sale_time="23:30", qty=1, net_amount=300,
+    )
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-early-morning",
+        sale_date=today, sale_time="03:00", qty=1, net_amount=200,
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/revenue?period=today")
+    assert response.json()["heatmap"] == []
+
+
+def test_dashboard_sale_warnings_scoped_to_selected_branch(
+    authed_client: TestClient, db_session: Session
+):
+    admin = _make_admin_user(db_session)
+    branch = _make_branch(db_session)
+    other_branch = _make_branch(db_session, "Other")
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-1",
+        sale_date=today, sale_time="10:00", qty=0, net_amount=0,
+    )
+    _make_sale(
+        db_session, branch=other_branch, product=product, slip_id="slip-2",
+        sale_date=today, sale_time="10:00", qty=0, net_amount=0,
+    )
+    db_session.commit()
+
+    response = authed_client.get(f"/api/dashboard/revenue?period=today&branch_id={branch.id}")
+    assert response.status_code == 200
+    warnings = response.json()["sale_warnings"]
+    assert len(warnings) == 1
+
+
+def _make_sale_with_lines(
+    db_session: Session,
+    *,
+    branch: Branch,
+    slip_id: str,
+    sale_date: datetime.date,
+    sale_time: str,
+    lines: list[tuple[Product, float, float]],
+) -> None:
+    """Like _make_sale but for a basket with more than one line item — each entry in
+    `lines` is (product, qty, net_amount)."""
+    sale = Sale(branch_id=branch.id, slip_id=slip_id, slip_number=slip_id, sale_date=sale_date, sale_time=sale_time)
+    db_session.add(sale)
+    db_session.flush()
+    for i, (product, qty, net_amount) in enumerate(lines, start=1):
+        db_session.add(
+            SaleLine(
+                sale_id=sale.id,
+                line_id=f"{slip_id}-{i:02d}",
+                line_no=i,
+                product_id=product.id,
+                selling_price=net_amount / qty if qty else 0,
+                qty=qty,
+                uom="Each",
+                discount_amount=0,
+                amount=net_amount,
+                net_amount=net_amount,
+            )
+        )
+
+
+def _make_purchase(
+    db_session: Session, *, branch: Branch, product: Product, purchase_date: datetime.date, qty: float, buying_price: float
+) -> None:
+    purchase = Purchase(branch_id=branch.id, purchase_date=purchase_date)
+    db_session.add(purchase)
+    db_session.flush()
+    db_session.add(
+        PurchaseLine(purchase_id=purchase.id, product_id=product.id, quantity=qty, buying_price=buying_price, uom="Each")
+    )
+
+
+def _make_stock_level(
+    db_session: Session,
+    *,
+    branch: Branch,
+    product: Product,
+    on_hand_qty: float,
+    buying_price: float | None,
+    snapshot_at: datetime.datetime,
+) -> None:
+    db_session.add(
+        StockLevel(
+            branch_id=branch.id,
+            product_id=product.id,
+            on_hand_qty=on_hand_qty,
+            buying_price=buying_price,
+            selling_price=None,
+            snapshot_at=snapshot_at,
+        )
+    )
+
+
+def test_cost_dashboard_uses_point_in_time_price_for_cogs_and_margin(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    _make_purchase(
+        db_session, branch=branch, product=product,
+        purchase_date=today - datetime.timedelta(days=1), qty=10, buying_price=100,
+    )
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-1",
+        sale_date=today, sale_time="10:00", qty=2, net_amount=300,
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/cost?period=today")
+    assert response.status_code == 200
+    body = response.json()
+    # Cost = 2 * 100 = 200; revenue 300; margin 100 -> 33.33%; margin per basket 100.
+    assert body["estimated_cogs"]["value"] == 200.0
+    assert round(body["estimated_gross_margin_pct"]["value"], 2) == 33.33
+    assert body["estimated_margin_per_basket"]["value"] == 100.0
+    assert body["products"][0]["stock_code"] == "SKU-1"
+    assert body["products"][0]["estimated_cost"] == 200.0
+    assert body["products"][0]["estimated_margin"] == 100.0
+
+
+def test_cost_dashboard_product_with_no_priced_lines_has_null_cost(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-1",
+        sale_date=today, sale_time="10:00", qty=1, net_amount=100,
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/cost?period=today")
+    body = response.json()
+    assert body["estimated_cogs"]["value"] == 0.0
+    assert body["products"][0]["estimated_cost"] is None
+    assert body["products"][0]["estimated_margin"] is None
+
+
+def test_cost_dashboard_purchase_warnings_scoped_to_period(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    _make_purchase(db_session, branch=branch, product=product, purchase_date=today, qty=0, buying_price=100)
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/cost?period=today")
+    assert response.status_code == 200
+    assert len(response.json()["purchase_warnings"]) == 1
+
+
+def test_inventory_dashboard_stock_value_and_low_stock_status(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product_a = _make_product(db_session, "SKU-A", "Fast mover")
+    product_a.group_name = "Snacks"
+    product_b = _make_product(db_session, "SKU-B", "Slow mover")
+    product_b.group_name = "Drinks"
+    now = datetime.datetime.now()
+
+    # SKU-A: on hand 3, sells 3/day over the trailing 30 days -> ~1 day left -> Critical.
+    _make_stock_level(db_session, branch=branch, product=product_a, on_hand_qty=3, buying_price=50, snapshot_at=now)
+    for day_offset in range(30):
+        _make_sale(
+            db_session, branch=branch, product=product_a, slip_id=f"velocity-{day_offset}",
+            sale_date=datetime.date.today() - datetime.timedelta(days=day_offset),
+            sale_time="10:00", qty=3, net_amount=300,
+        )
+
+    # SKU-B: on hand 100, no recent sales -> no computable days-left -> not "low stock".
+    _make_stock_level(db_session, branch=branch, product=product_b, on_hand_qty=100, buying_price=20, snapshot_at=now)
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/inventory")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sku_count"] == 2
+    assert body["estimated_stock_value"] == 3 * 50 + 100 * 20
+    assert body["critical_count"] == 1
+    categories = {row["category"]: row["value"] for row in body["stock_value_by_category"]}
+    assert categories == {"Snacks": 150.0, "Drinks": 2000.0}
+    low_stock_codes = {item["stock_code"] for item in body["low_stock_items"]}
+    assert low_stock_codes == {"SKU-A"}
+    assert body["low_stock_items"][0]["status"] == "Critical"
+
+
+def test_inventory_dashboard_requires_retail_branch_for_admin(
+    authed_client: TestClient, db_session: Session
+):
+    _make_admin_user(db_session)
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/inventory")
+    assert response.status_code == 400
+
+
+def test_customer_dashboard_basket_stats_and_histogram(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    # One single-item basket, one two-item basket.
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-1",
+        sale_date=today, sale_time="10:00", qty=1, net_amount=100,
+    )
+    _make_sale_with_lines(
+        db_session, branch=branch, slip_id="slip-2", sale_date=today, sale_time="14:00",
+        lines=[(product, 1, 50), (product, 1, 50)],
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/customer?period=today")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["avg_items_per_basket"]["value"] == 1.5
+    assert body["single_item_basket_share_pct"]["value"] == 50.0
+    histogram = {row["items"]: row["count"] for row in body["items_per_basket_histogram"]}
+    assert histogram == {1: 1, 2: 1}
+    assert body["busiest_hour"]["transaction_count"] == 1
+
+
+def test_resolve_period_custom_range_computes_matching_previous_range():
+    r = dashboard_service.resolve_period(
+        "today",  # ignored — date_from/date_to take over
+        date_from=datetime.date(2026, 8, 10),
+        date_to=datetime.date(2026, 8, 14),
+    )
+    assert r.start == datetime.date(2026, 8, 10)
+    assert r.end == datetime.date(2026, 8, 14)
+    # 5-day window -> previous 5-day window ending the day before date_from.
+    assert r.previous_end == datetime.date(2026, 8, 9)
+    assert r.previous_start == datetime.date(2026, 8, 5)
+
+
+def test_dashboard_custom_date_range_overrides_period(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-in-range",
+        sale_date=datetime.date(2026, 8, 12), sale_time="10:00", qty=1, net_amount=1000,
+    )
+    # Outside the custom range but would be inside "30d" — proves the custom range,
+    # not the (still-sent) period, is what actually won.
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-out-of-range",
+        sale_date=datetime.date.today(), sale_time="10:00", qty=1, net_amount=5000,
+    )
+    db_session.commit()
+
+    response = authed_client.get(
+        "/api/dashboard/revenue?period=30d&date_from=2026-08-10&date_to=2026-08-14"
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["period"] == "custom"
+    assert body["date_from"] == "2026-08-10"
+    assert body["date_to"] == "2026-08-14"
+    assert body["net_revenue"]["value"] == 1000.0
+
+
+def test_dashboard_rejects_one_sided_custom_range(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/revenue?date_from=2026-08-10")
+    assert response.status_code == 400
+
+
+def test_dashboard_rejects_inverted_custom_range(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    db_session.commit()
+
+    response = authed_client.get(
+        "/api/dashboard/revenue?date_from=2026-08-14&date_to=2026-08-10"
+    )
+    assert response.status_code == 400

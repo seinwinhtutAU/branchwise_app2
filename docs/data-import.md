@@ -49,7 +49,7 @@ Every row references a `Product`, upserted by `stock_code` (see [database-schema
 
 ## Idempotency differs by type
 
-- **Sales**: idempotent per slip. `sales.slip_id` is unique; re-confirming the same file skips slips already imported (reported in the response as `sales_skipped_duplicate`).
+- **Sales**: idempotent per slip, scoped to branch. `sales.slip_id` is unique per `branch_id` (not globally) — `slip_id` is built from just the report date + slip number, and different branches/POS terminals number their own slips independently, so the same `slip_id` can legitimately occur at two branches on the same day. Re-confirming the same file skips slips already imported for that branch (reported in the response as `sales_skipped_duplicate`).
 - **Purchases**: **not** idempotent. `purchase.csv` has no natural batch/date key, so every confirm creates a new `Purchase` batch — re-uploading the same file double-counts.
 - **Inventory**: intentionally not deduplicated — every confirm adds a new snapshot batch by design (see `stock_levels` in [database-schema.md](./database-schema.md)).
 
