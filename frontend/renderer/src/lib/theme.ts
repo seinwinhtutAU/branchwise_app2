@@ -1,19 +1,29 @@
-import { useEffect, useState } from 'react'
-
 export type ThemeMode = 'light' | 'dark' | 'system'
 
-const STORAGE_KEY = 'branchwise-theme'
+const CACHE_KEY = 'branchwise-theme-cache'
 
 function isThemeMode(value: string | null): value is ThemeMode {
   return value === 'light' || value === 'dark' || value === 'system'
 }
 
-export function getStoredTheme(): ThemeMode {
+// Theme is a business-wide setting now (see lib/appSettings.ts) — this cache is NOT the
+// source of truth, just the last value fetched from GET /api/settings, kept in
+// localStorage so main.tsx can apply it synchronously before that fetch resolves,
+// avoiding a flash of the wrong theme while the app boots.
+export function getCachedTheme(): ThemeMode {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY)
+    const stored = localStorage.getItem(CACHE_KEY)
     return isThemeMode(stored) ? stored : 'system'
   } catch {
     return 'system'
+  }
+}
+
+export function cacheTheme(theme: ThemeMode): void {
+  try {
+    localStorage.setItem(CACHE_KEY, theme)
+  } catch {
+    // Best-effort — only affects how quickly the correct theme appears on next boot.
   }
 }
 
@@ -26,23 +36,4 @@ export function applyTheme(theme: ThemeMode): void {
   } else {
     document.documentElement.setAttribute('data-theme', theme)
   }
-}
-
-export function useTheme(): [ThemeMode, (theme: ThemeMode) => void] {
-  const [theme, setThemeState] = useState<ThemeMode>(getStoredTheme)
-
-  useEffect(() => {
-    applyTheme(theme)
-  }, [theme])
-
-  function setTheme(next: ThemeMode): void {
-    setThemeState(next)
-    try {
-      localStorage.setItem(STORAGE_KEY, next)
-    } catch {
-      // Best-effort — the theme still applies for this session even if storage is unavailable.
-    }
-  }
-
-  return [theme, setTheme]
 }

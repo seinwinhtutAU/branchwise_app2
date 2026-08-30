@@ -12,6 +12,7 @@ from app.models.wholesale import (
     FactoryVoucher,
     FactoryVoucherLine,
     OrderStatus,
+    WarehouseReceipt,
 )
 
 __all__ = [
@@ -33,4 +34,5 @@ __all__ = [
     "StockLevel",
     "User",
     "UserRole",
+    "WarehouseReceipt",
 ]

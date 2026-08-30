@@ -66,6 +66,24 @@ def test_printed_at_none_when_metadata_line_missing(tmp_path: Path):
     assert df.attrs["printed_at"] is None
 
 
+def test_printed_at_respects_dmy_date_format_setting(tmp_path: Path):
+    # A single "Printed" timestamp is never decisive the way a sale export's many
+    # Date lines can be, so this has to be an explicit setting rather than detected —
+    # "21/08/2026" only makes sense as day-first (there's no month 21).
+    dmy_sample = SAMPLE.replace("Printed : 8/21/2026", "Printed : 21/08/2026")
+    path = tmp_path / "inventory.csv"
+    path.write_text(dmy_sample, encoding="utf-8")
+
+    df = parse_inventory_export(path, date_format="DMY")
+    assert df.attrs["printed_at"] == dt.datetime(2026, 8, 21, 19, 7, 11)
+
+    # Parsing that same DMY line under the MDY default fails outright (month 21 is
+    # invalid), rather than silently misreading it — confirming the setting, not luck,
+    # is what made the DMY case above work.
+    default_df = parse_inventory_export(path)
+    assert default_df.attrs["printed_at"] is None
+
+
 ZAWGYI_SAMPLE = SAMPLE.replace("Fashion", "ျကိုးျကာနီမသာ‌ေ ရ", 1)
 
 

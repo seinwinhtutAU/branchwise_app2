@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -19,6 +19,15 @@ class AppSettingsUpdate(BaseModel):
     # defeat the whole point of "as of," which is to avoid pricing a sale from data that's
     # clearly from a different point in time.
     stock_forward_fallback_window_days: int | None = Field(default=None, ge=0, le=365)
+    purchase_lookback_window_days: int | None = Field(default=None, ge=0, le=365)
+    stock_lookback_window_days: int | None = Field(default=None, ge=0, le=365)
+    # Business-wide UI preferences (see app_settings.py's DEFAULT_SETTINGS comment).
+    theme: Literal["light", "dark", "system"] | None = None
+    sale_warning_window_days: int | None = Field(default=None, ge=1, le=365)
+    purchase_warning_window_days: int | None = Field(default=None, ge=1, le=365)
+    sale_list_window_days: int | None = Field(default=None, ge=1, le=365)
+    purchase_list_window_days: int | None = Field(default=None, ge=1, le=365)
+    show_buying_price_source: bool | None = None
 
 
 @router.get("")
@@ -34,9 +43,9 @@ def update_settings(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    # Business-wide, not per-device — unlike the Warning page's check-window preference,
-    # these feed calculations everyone sees the same result for, so only an admin
-    # account can change them (mirrors orders.py's second-commit-qty restriction).
+    # Business-wide, not per-device — every account (and every device) sees the same
+    # value for all of these, so only an admin account can change them (mirrors
+    # orders.py's second-commit-qty restriction).
     if user.role != UserRole.ADMIN:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,

@@ -17,6 +17,8 @@ dependencies = [
   "xlrd>=2.0",
   "python-multipart>=0.0.9",
   "pyidaungsu>=0.1.4",
+  "langgraph>=0.2.60",
+  "langchain-openai>=0.2.14",
 ]
 
 [dependency-groups]

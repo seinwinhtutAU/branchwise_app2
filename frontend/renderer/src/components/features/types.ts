@@ -76,7 +76,9 @@ export interface FactoryVoucherLine {
   id: string
   voucher_id: string
   product_code: string
+  description: string | null
   qty: number
+  received_qty: number
   buying_price: number
   colors: ColorQty[]
   discount_per_set: number | null
@@ -92,6 +94,19 @@ export interface FactoryVoucher {
   remark: string | null
   created_at: string
   lines: FactoryVoucherLine[]
+}
+
+export interface WarehouseReceipt {
+  id: string
+  voucher_id: string
+  voucher_no: number
+  voucher_line_id: string
+  product_code: string
+  description: string | null
+  warehouse: string
+  qty_received: number
+  received_date: string
+  created_at: string
 }
 
 export interface ImportHistoryDetail {

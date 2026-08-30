@@ -40,9 +40,13 @@ VALIDATION_RULES: list[NumericRule] = [
     ("Net_Amount", None),
 ]
 
-_DATE_FORMATS = [
-    "%m/%d/%Y",
-    "%d/%m/%Y",
+# The two ambiguous 4-digit-year slash formats are handled separately from
+# _OTHER_DATE_FORMATS below — see _detect_slash_date_order for why.
+_MDY = "%m/%d/%Y"
+_DMY = "%d/%m/%Y"
+_SLASH_FORMATS_BY_CODE = {"MDY": _MDY, "DMY": _DMY}
+
+_OTHER_DATE_FORMATS = [
     "%Y-%m-%d",
     "%m-%d-%Y",
     "%d-%m-%Y",
@@ -56,9 +60,49 @@ _DATE_FORMATS = [
 ]
 
 
-def _parse_report_date(raw: str) -> str:
+def _fits(raw: str, fmt: str) -> bool:
+    try:
+        datetime.strptime(raw, fmt)
+        return True
+    except ValueError:
+        return False
+
+
+def _detect_slash_date_order(
+    raw_dates: list[str], fallback: str = "MDY"
+) -> tuple[str, str]:
+    """Picks which of %m/%d/%Y or %d/%m/%Y to try first for this file's whole set of
+    Date lines, rather than guessing per-row — a single POS export never mixes date
+    locales row to row, but many raw dates (e.g. "09/02/2025") are valid under either
+    reading, so trying a fixed order per row silently picks the wrong one for a file
+    whose real convention is the other order. As soon as one raw date is decisive
+    (valid under only one of the two — e.g. "31/01/2026", where month 31 is
+    impossible), that settles the convention for every date in the file, ambiguous
+    ones included.
+
+    Different branches/POS terminals can (and, in this business, do) use different
+    conventions — so this per-file detection stays authoritative whenever a file
+    itself gives decisive evidence. `fallback` ("MDY" or "DMY", the admin-configurable
+    `sale_date_format_fallback` business setting) only decides files with no decisive
+    date at all — e.g. a single-day export whose one date happens to be ambiguous.
+    """
+    fallback_fmt = _SLASH_FORMATS_BY_CODE[fallback]
+    fallback_other = _DMY if fallback_fmt == _MDY else _MDY
+
+    for raw in raw_dates:
+        raw = raw.strip()
+        mdy_ok = _fits(raw, _MDY)
+        dmy_ok = _fits(raw, _DMY)
+        if mdy_ok and not dmy_ok:
+            return (_MDY, _DMY)
+        if dmy_ok and not mdy_ok:
+            return (_DMY, _MDY)
+    return (fallback_fmt, fallback_other)
+
+
+def _parse_report_date(raw: str, slash_order: tuple[str, str] = (_MDY, _DMY)) -> str:
     raw = raw.strip()
-    for fmt in _DATE_FORMATS:
+    for fmt in (*slash_order, *_OTHER_DATE_FORMATS):
         try:
             return datetime.strptime(raw, fmt).date().isoformat()
         except ValueError:
@@ -75,7 +119,9 @@ def _is_line_item_row(row: list[str]) -> bool:
     return bool(stock_code) and price is not None and qty is not None
 
 
-def parse_pos_sale_export_from_grid(rows: list[list[str]]) -> pd.DataFrame:
+def parse_pos_sale_export_from_grid(
+    rows: list[list[str]], fallback_date_format: str = "MDY"
+) -> pd.DataFrame:
     """Parse a raw POS "sale" report grid into a clean, flat line-item table.
 
     The source is a printed-report format, not a plain table: a metadata line,
@@ -84,9 +130,17 @@ def parse_pos_sale_export_from_grid(rows: list[list[str]]) -> pd.DataFrame:
     followed by a grand-total row and a page footer. Row type is determined
     structurally so this keeps working on future exports in the same format,
     regardless of whether it arrived as CSV, XLS, or XLSX.
+
+    `fallback_date_format` ("MDY" or "DMY") only matters when this file's own dates
+    give no decisive evidence either way — see _detect_slash_date_order.
     """
     records: list[dict] = []
     origin_indices: list[int] = []
+
+    slash_order = _detect_slash_date_order(
+        [row[2] for row in rows if len(row) > 2 and row[0].strip() == "Date"],
+        fallback=fallback_date_format,
+    )
 
     report_date: str | None = None
     slip_number: str | None = None
@@ -106,7 +160,7 @@ def parse_pos_sale_export_from_grid(rows: list[list[str]]) -> pd.DataFrame:
             continue
 
         if first == "Date":
-            report_date = _parse_report_date(row[2])
+            report_date = _parse_report_date(row[2], slash_order)
             continue
 
         if first == "Slip Number":
@@ -166,13 +220,15 @@ def parse_pos_sale_export_from_grid(rows: list[list[str]]) -> pd.DataFrame:
     return df
 
 
-def parse_pos_sale_export(path: Path) -> pd.DataFrame:
+def parse_pos_sale_export(path: Path, fallback_date_format: str = "MDY") -> pd.DataFrame:
     """Parse a POS sale export file on disk (csv/xls/xlsx) into a clean line-item table."""
     rows = read_raw_grid(path.read_bytes(), path.name)
-    return parse_pos_sale_export_from_grid(rows)
+    return parse_pos_sale_export_from_grid(rows, fallback_date_format)
 
 
-def parse_pos_sale_upload(file_bytes: bytes, filename: str) -> tuple[list[list[str]], pd.DataFrame]:
+def parse_pos_sale_upload(
+    file_bytes: bytes, filename: str, fallback_date_format: str = "MDY"
+) -> tuple[list[list[str]], pd.DataFrame]:
     """Parse an uploaded POS sale export, returning both the raw grid and the cleaned table."""
     rows = read_raw_grid(file_bytes, filename)
-    return rows, parse_pos_sale_export_from_grid(rows)
+    return rows, parse_pos_sale_export_from_grid(rows, fallback_date_format)

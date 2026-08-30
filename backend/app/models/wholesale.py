@@ -120,10 +120,43 @@ class FactoryVoucherLine(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     voucher_id: Mapped[str] = mapped_column(ForeignKey("factory_vouchers.id", ondelete="CASCADE"), nullable=False)
     product_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     qty: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    # Buying qty is `qty` above. Receiving qty accumulates from WarehouseReceipt rows created
+    # against this line (see record_warehouse_receipt in services/wholesale.py) — never set
+    # directly by a client. Remaining qty (qty - received_qty) is derived, not stored.
+    received_qty: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     buying_price: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
     colors: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     discount_per_set: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     voucher: Mapped["FactoryVoucher"] = relationship(back_populates="lines")
+    receipts: Mapped[list["WarehouseReceipt"]] = relationship(
+        back_populates="voucher_line", cascade="all, delete-orphan"
+    )
+
+
+class WarehouseReceipt(Base):
+    """One arrival log entry: some qty of a stock code physically showed up at a warehouse.
+
+    Deliberately flat, not a header+lines structure — unlike FactoryVoucher/CustomerOrder,
+    there's no shared header data to factor out (warehouse and date can differ row to row),
+    and the warehouse floor staff recording this don't know or care which factory voucher a
+    stock code belongs to. `voucher_line_id` is resolved server-side by matching product_code
+    against open voucher lines (see find_voucher_line_for_arrival), never chosen by the caller.
+    """
+
+    __tablename__ = "warehouse_receipts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    voucher_line_id: Mapped[str] = mapped_column(
+        ForeignKey("factory_voucher_lines.id", ondelete="CASCADE"), nullable=False
+    )
+    product_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    warehouse: Mapped[str] = mapped_column(String(255), nullable=False)
+    qty_received: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    received_date: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    voucher_line: Mapped["FactoryVoucherLine"] = relationship(back_populates="receipts")

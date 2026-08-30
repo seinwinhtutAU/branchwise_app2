@@ -12,6 +12,12 @@ class Settings(BaseSettings):
 
     supabase_url: str = ""
 
+    # Powers the retail chatbot (app/services/chat_agent.py). Left blank, the chat
+    # endpoint responds with a clear "not configured" error instead of failing deep
+    # inside the OpenAI SDK.
+    openai_api_key: str = ""
+    openai_chat_model: str = "gpt-4o-mini"
+
 
 @lru_cache
 def get_settings() -> Settings:

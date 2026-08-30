@@ -6,7 +6,7 @@ import { Button } from '@renderer/components/ui/Button'
 import { Input } from '@renderer/components/ui/Input'
 import { Select } from '@renderer/components/ui/Select'
 import { ImportDataView } from './ImportDataView'
-import type { PendingImport, Profile } from './types'
+import type { ImportPreviewResult, PendingImport, Profile } from './types'
 
 interface BranchOption {
   id: string
@@ -30,6 +30,17 @@ function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Pr
   const needsBranchSelection = profile !== null && profile.branch_id === null
   const [branchRequiredError, setBranchRequiredError] = useState(false)
 
+  // Sale and Inventory dates are cleaned using the branch's own date-format setting
+  // (see backend app.routers.imports) — for an admin account, that branch isn't known
+  // until picked above, so the very first preview (before any pick) can only guess.
+  // Once a branch is picked, re-run preview with it so what's shown here always
+  // matches what actually gets saved on Confirm, rather than only fixing itself
+  // silently after the fact. Purchase has no per-line date in the source file at all,
+  // so it has nothing to re-preview.
+  const needsDateFormatRepreview = endpoint === '/api/imports/sales' || endpoint === '/api/imports/inventory'
+  const [displayResult, setDisplayResult] = useState<ImportPreviewResult>(result)
+  const [repreviewing, setRepreviewing] = useState(false)
+
   // Purchase batches have no per-line date in the source file, so the backend defaults
   // to today's date — this lets the importer override that, e.g. when uploading a file
   // for a purchase that actually happened on an earlier day.
@@ -47,6 +58,39 @@ function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Pr
       .then(setBranches)
       .catch(() => setBranches([]))
   }, [needsBranchSelection, session.access_token])
+
+  useEffect(() => {
+    if (!needsBranchSelection || !needsDateFormatRepreview || !selectedBranchId) return
+    let cancelled = false
+    setRepreviewing(true)
+
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('branch_id', selectedBranchId)
+
+    fetch(`${apiBaseUrl}${endpoint}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+      body: formData
+    })
+      .then(async (r) => (r.ok ? ((await r.json()) as ImportPreviewResult) : null))
+      .then((body) => {
+        if (cancelled || !body) return
+        setDisplayResult(body)
+      })
+      .catch(() => {
+        // Leaves the prior preview showing — Confirm still re-parses server-side with
+        // the now-known branch regardless, so this only affects what's displayed here.
+      })
+      .finally(() => {
+        if (!cancelled) setRepreviewing(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBranchId, needsBranchSelection, needsDateFormatRepreview])
 
   async function handleConfirm(): Promise<void> {
     if (needsBranchSelection && !selectedBranchId) {
@@ -147,8 +191,8 @@ function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Pr
       )}
 
       <ImportDataView
-        clean={result.clean}
-        origin={result.origin}
+        clean={displayResult.clean}
+        origin={displayResult.origin}
         controls={
           <div className="flex items-end gap-3 flex-wrap">
             {isPurchaseImport && (
@@ -181,7 +225,7 @@ function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Pr
                 </Select>
               </div>
             )}
-            <Button onClick={handleConfirm} loading={confirming}>
+            <Button onClick={handleConfirm} loading={confirming} disabled={repreviewing}>
               {revertBatchId ? 'Confirm & Replace' : 'Confirm Import'}
             </Button>
             <Button variant="ghost" onClick={onBack}>

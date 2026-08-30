@@ -15,14 +15,14 @@ from app.services.pricing import (
     purchase_price_history,
     stock_level_price_history,
 )
-from app.services.settings import get_stock_forward_fallback_window_days
+from app.services.settings import (
+    get_purchase_lookback_window_days,
+    get_sale_list_window_days,
+    get_stock_forward_fallback_window_days,
+    get_stock_lookback_window_days,
+)
 
 router = APIRouter(prefix="/api/sales", tags=["sales"])
-
-# Sale history only ever grows (daily imports across 4 branches), so an unbounded
-# "select everything" would get slower every day. Bound the default query to a
-# recent window; an explicit date_from widens or removes this bound.
-DEFAULT_WINDOW_DAYS = 90
 
 
 @router.get("")
@@ -37,7 +37,11 @@ def list_sales(
     db: Session = Depends(get_db),
 ) -> list[dict]:
     if date_from is None:
-        date_from = (date_to or date.today()) - timedelta(days=DEFAULT_WINDOW_DAYS - 1)
+        # Sale history only ever grows (daily imports across 4 branches), so an unbounded
+        # "select everything" would get slower every day. Bound the default query to the
+        # business-wide sale_list_window_days setting; an explicit date_from widens or
+        # removes this bound.
+        date_from = (date_to or date.today()) - timedelta(days=get_sale_list_window_days(db) - 1)
 
     query = (
         db.query(SaleLine, Sale, Product, Branch)
@@ -57,6 +61,8 @@ def list_sales(
     purchase_history = purchase_price_history(db, product_ids)
     stock_history = stock_level_price_history(db, product_ids)
     forward_fallback_window_days = get_stock_forward_fallback_window_days(db)
+    purchase_lookback_window_days = get_purchase_lookback_window_days(db)
+    stock_lookback_window_days = get_stock_lookback_window_days(db)
 
     result = []
     for sale_line, sale, product, branch in line_rows:
@@ -66,6 +72,8 @@ def list_sales(
             product.id,
             sale.sale_date,
             forward_fallback_window_days,
+            purchase_lookback_window_days,
+            stock_lookback_window_days,
         )
         profit, profit_margin_pct = compute_profit(
             buying_price, sale_line.qty, sale_line.net_amount

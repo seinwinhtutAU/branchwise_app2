@@ -73,6 +73,53 @@ def test_dmy_date_format_supported(tmp_path: Path):
     assert df.iloc[0]["Date"] == "2026-08-21"
 
 
+def test_ambiguous_date_follows_file_wide_dmy_convention(tmp_path: Path):
+    # A multi-day export like a real POS "sale detail" report: one Date line is
+    # decisively DD/MM (month 31 can't be a month), the other is ambiguous under
+    # either reading ("09/02/2026" could be Sep 2 or Feb 9). Real POS exports never
+    # mix date locales row to row, so the decisive line should settle the ambiguous
+    # one as DD/MM too — this is the exact bug seen on a real multi-day export where
+    # ambiguous dates were silently parsed as month-first instead.
+    multi_day_sample = (
+        "﻿Printed : 31/01/2026  7:10:05PM,Aung Thit Sar,,,,,,,,,,\r\n"
+        "Other Code,Stock Code,Description,Location,Price,Qty,UOM,Discount Amount,Amount,Net Amount,,\r\n"
+        "Date,:,31/01/2026,,,,,,,,,\r\n"
+        "Slip Number,:,1,Time,:,10:00:00,Counter,:,Counter1,UserID,:,Admin\r\n"
+        ',U16085,Maldini,Aung Thit Sar,"72,500.00",1.00,Each,0.00,"72,500.00","72,500.00",,\r\n'
+        '1.00,0.00,"72,500.00","72,500.00",,,,,,,,\r\n'
+        "Date,:,09/02/2026,,,,,,,,,\r\n"
+        "Slip Number,:,2,Time,:,11:00:00,Counter,:,Counter1,UserID,:,Admin\r\n"
+        ',71642,Multi,Aung Thit Sar,"15,500.00",1.00,Each,0.00,"15,500.00","15,500.00",,\r\n'
+        '1.00,0.00,"15,500.00","15,500.00",,,,,,,,\r\n'
+        'Total ,:,2,(Slips),2.00,0.00,"88,000.00","88,000.00",,,,\r\n'
+        ",Page -1 of 1,,,,,,,,,,\r\n"
+    )
+    path = tmp_path / "sale.csv"
+    path.write_text(multi_day_sample, encoding="utf-8")
+    df = parse_pos_sale_export(path)
+
+    assert df.iloc[0]["Date"] == "2026-01-31"
+    assert df.iloc[1]["Date"] == "2026-02-09"  # not 2026-09-02
+
+
+def test_ambiguous_date_defaults_to_month_first_when_file_has_no_decisive_date(tmp_path: Path):
+    mdy_sample = SAMPLE.replace("Date,:,8/21/2026", "Date,:,05/06/2026")
+    path = tmp_path / "sale.csv"
+    path.write_text(mdy_sample, encoding="utf-8")
+    df = parse_pos_sale_export(path)
+
+    assert df.iloc[0]["Date"] == "2026-05-06"  # month-first: May 6, not June 5
+
+
+def test_ambiguous_date_respects_dmy_fallback_setting_when_no_decisive_date(tmp_path: Path):
+    ambiguous_sample = SAMPLE.replace("Date,:,8/21/2026", "Date,:,05/06/2026")
+    path = tmp_path / "sale.csv"
+    path.write_text(ambiguous_sample, encoding="utf-8")
+
+    df = parse_pos_sale_export(path, fallback_date_format="DMY")
+    assert df.iloc[0]["Date"] == "2026-06-05"  # day-first: 5 June, not May 6
+
+
 def test_xls_datetime_report_date_supported(tmp_path: Path):
     # .xls/.xlsx report-date cells stored as real Excel dates come through
     # read_raw_grid as a stringified pandas Timestamp, e.g. "2026-08-21 00:00:00".

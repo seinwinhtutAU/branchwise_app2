@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
 import { useToast } from '@renderer/lib/toast'
@@ -8,6 +8,7 @@ import { Button } from '@renderer/components/ui/Button'
 import { Badge } from '@renderer/components/ui/Badge'
 import { CardHeader } from '@renderer/components/ui/Card'
 import { EmptyState } from '@renderer/components/ui/EmptyState'
+import { Select } from '@renderer/components/ui/Select'
 import { TableSkeleton } from '@renderer/components/ui/Skeleton'
 import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
 import { WarningIcon, ChevronDownIcon, ChevronUpIcon } from '@renderer/components/ui/icons'
@@ -48,7 +49,15 @@ interface Props {
   session: Session
   profile: Profile | null
   onCountChange?: (count: number) => void
-  warningWindowDays: number
+  saleWindowDays: number
+  purchaseWindowDays: number
+  // Every real branch, for the Branch filter dropdown — admin accounts see every
+  // branch's rows merged together (retail and wholesale, though wholesale never has any
+  // sale/inventory/purchase data to warn about), so admin is the only role that can
+  // usefully narrow down to one. A branch-scoped account already only ever sees its own
+  // branch's rows, so passing an empty list here (as App.tsx does for non-admin) hides
+  // the filter entirely rather than showing a pointless single-option dropdown.
+  branchOptions: string[]
   onViewImportBatch?: (batchId: string) => void
   // Hands off a picked-and-parsed file to the app-level confirm flow — used by every
   // "Reimport to fix" button below.
@@ -132,6 +141,29 @@ const DATE_LABELS = ['Date', 'Last Updated', 'Last Date']
 
 function fieldValue(fields: WarningField[], label: string): string {
   return fields.find((f) => f.label === label)?.value ?? '—'
+}
+
+function distinctBranches(sections: WarningSection[] | null): string[] {
+  if (!sections) return []
+  const values = new Set<string>()
+  for (const section of sections) {
+    for (const row of section.rows) {
+      const branch = fieldValue(row.fields, 'Branch')
+      if (branch && branch !== '—') values.add(branch)
+    }
+  }
+  return Array.from(values).sort()
+}
+
+function filterSectionsByBranch(
+  sections: WarningSection[] | null,
+  branch: string
+): WarningSection[] | null {
+  if (!sections || !branch) return sections
+  return sections.map((section) => ({
+    ...section,
+    rows: section.rows.filter((row) => fieldValue(row.fields, 'Branch') === branch)
+  }))
 }
 
 function dateFieldLabel(fields: WarningField[]): string | undefined {
@@ -576,7 +608,9 @@ function WarningsPage({
   session,
   profile,
   onCountChange,
-  warningWindowDays,
+  saleWindowDays,
+  purchaseWindowDays,
+  branchOptions,
   onViewImportBatch,
   onFileReady
 }: Props): React.JSX.Element {
@@ -585,15 +619,27 @@ function WarningsPage({
   const [loading, setLoading] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('All')
+  const [branchFilter, setBranchFilter] = useState('')
   const { trigger: triggerFilePicker, input: filePickerInput, picking } = useImportFilePicker(session, onFileReady)
+
+  // Rows are always fetched for every branch this account can see; the Branch filter
+  // only narrows what's displayed/counted below — it never triggers a re-fetch, and it
+  // never touches onCountChange's total (that badge stays a business-wide count
+  // regardless of which branch is selected here).
+  const displaySections = useMemo(
+    () => filterSectionsByBranch(sections, branchFilter),
+    [sections, branchFilter]
+  )
+  const branchFilterOptions = branchOptions.length > 0 ? branchOptions : distinctBranches(sections)
 
   async function load(): Promise<void> {
     setLoading(true)
     setLoadFailed(false)
     try {
-      const response = await fetch(`${apiBaseUrl}/api/warnings?days=${warningWindowDays}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` }
-      })
+      const response = await fetch(
+        `${apiBaseUrl}/api/warnings?sale_days=${saleWindowDays}&purchase_days=${purchaseWindowDays}`,
+        { headers: { Authorization: `Bearer ${session.access_token}` } }
+      )
       if (!response.ok) {
         setLoadFailed(true)
         showToast('error', `Failed to load warnings: ${response.status}`)
@@ -615,7 +661,7 @@ function WarningsPage({
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.access_token, warningWindowDays])
+  }, [session.access_token, saleWindowDays, purchaseWindowDays])
 
   // Opens the file picker right here on the Warning page — batchId/filename tag the
   // resulting PendingImport so confirming it also removes that batch first (see
@@ -629,11 +675,11 @@ function WarningsPage({
     })
   }
 
-  const totalIssues = sections?.reduce((sum, section) => sum + section.rows.length, 0) ?? 0
+  const totalIssues = displaySections?.reduce((sum, section) => sum + section.rows.length, 0) ?? 0
 
   function categoryCount(category: Category): number {
     return (
-      sections
+      displaySections
         ?.filter((s) => SECTION_CATEGORY[s.id] === category)
         .reduce((sum, s) => sum + s.rows.length, 0) ?? 0
     )
@@ -653,7 +699,7 @@ function WarningsPage({
       <div className="bg-bg-subtle overflow-hidden">
         <CardHeader
           title="Warning"
-          description={`Short, actionable data problems, grouped by area — open a row's Details for the full record. The Sale/Purchase "fix these numbers" checks cover the last ${warningWindowDays === 1 ? 'day' : `${warningWindowDays} days`} (change this in Settings); missing-inventory-record checks always show, regardless of date.`}
+          description={`Short, actionable data problems, grouped by area — open a row's Details for the full record. The Sale "fix these numbers" check (and the missing-inventory-record check's sale side) covers the last ${saleWindowDays === 1 ? 'day' : `${saleWindowDays} days`}; Purchase (and its purchase side) covers the last ${purchaseWindowDays === 1 ? 'day' : `${purchaseWindowDays} days`} (business-wide — an admin can change these in Settings).`}
           action={
             <Button variant="secondary" size="sm" onClick={load} loading={loading}>
               Refresh
@@ -677,11 +723,28 @@ function WarningsPage({
         />
       )}
 
+      {sections !== null && branchFilterOptions.length > 1 && (
+        <div className="w-48">
+          <Select label="Branch" value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}>
+            <option value="">All retail branches</option>
+            {branchFilterOptions.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
+
       {sections !== null && totalIssues === 0 && (
         <EmptyState
           icon={<WarningIcon />}
           title="All clear"
-          description="No data-quality warnings right now."
+          description={
+            branchFilter
+              ? `No data-quality warnings for ${branchFilter} right now.`
+              : 'No data-quality warnings right now.'
+          }
         />
       )}
 
@@ -690,7 +753,7 @@ function WarningsPage({
           <WarningTabBar activeTab={activeTab} onSelect={setActiveTab} counts={tabCounts} />
           <div className="flex flex-col gap-6">
             {(activeTab === 'All' ? ALL_TAB_ORDER : [activeTab]).map((category) => {
-              const categorySections = sections.filter(
+              const categorySections = (displaySections ?? []).filter(
                 (s) => SECTION_CATEGORY[s.id] === category && s.rows.length > 0
               )
               if (categorySections.length === 0) {

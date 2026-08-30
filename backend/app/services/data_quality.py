@@ -16,7 +16,7 @@ single batch to point at.
 """
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pandas as pd
@@ -41,7 +41,11 @@ from app.services.pricing import (
     stock_level_price_history,
 )
 from app.services.purchase_import import VALIDATION_RULES as PURCHASE_VALIDATION_RULES
-from app.services.settings import get_stock_forward_fallback_window_days
+from app.services.settings import (
+    get_purchase_lookback_window_days,
+    get_stock_forward_fallback_window_days,
+    get_stock_lookback_window_days,
+)
 
 # Below this many units of difference, treat it as routine noise (breakage, a
 # one-off miscount) rather than something worth interrupting staff over — the
@@ -161,6 +165,8 @@ def sale_numeric_warnings(
     purchase_history = purchase_price_history(db, product_ids)
     stock_history = stock_level_price_history(db, product_ids)
     forward_fallback_window_days = get_stock_forward_fallback_window_days(db)
+    purchase_lookback_window_days = get_purchase_lookback_window_days(db)
+    stock_lookback_window_days = get_stock_lookback_window_days(db)
     import_batches = _fetch_import_batches(
         db, {sale.import_batch_id for _, sale, _, _ in line_rows}
     )
@@ -174,6 +180,8 @@ def sale_numeric_warnings(
             product.id,
             sale.sale_date,
             forward_fallback_window_days,
+            purchase_lookback_window_days,
+            stock_lookback_window_days,
         )
         profit, profit_margin_pct = compute_profit(
             buying_price, sale_line.qty, sale_line.net_amount
@@ -391,9 +399,18 @@ def _missing_product_pairs(
     header_id_fk,
     branch_column,
     date_column,
+    since: date | None = None,
 ) -> dict[tuple[str | None, str], MissingProductOccurrence]:
     """Distinct (branch, product) pairs that appear in `line_model`/`header_model`
-    but have zero StockLevel rows ever for that same branch+product."""
+    but have zero StockLevel rows ever for that same branch+product.
+
+    `since`, when given, bounds which sale/purchase rows count toward this — the same
+    scoping the numeric checks apply, to keep this aggregate query from re-scanning
+    every sale/purchase line ever imported on every Warning-page load. This does mean
+    a product missing an inventory record whose only sale/purchase activity is older
+    than `since` stops being flagged until it's sold/purchased again — a real
+    trade-off for staying fast, not a correctness improvement.
+    """
     inventory_pairs = (
         db.query(StockLevel.branch_id, StockLevel.product_id).distinct().subquery()
     )
@@ -415,6 +432,8 @@ def _missing_product_pairs(
         .filter(inventory_pairs.c.product_id.is_(None))
         .group_by(branch_column, line_model.product_id)
     )
+    if since is not None:
+        query = query.filter(date_column >= since)
     query = _branch_filter(query, user, branch_column)
 
     return {
@@ -430,10 +449,19 @@ def _occurrence_phrase(verb: str, occurrence: MissingProductOccurrence) -> str:
     return f"{verb} {occurrences} times (last on {last_date.isoformat()})"
 
 
-def missing_product_warnings(db: Session, user: User) -> list[dict]:
+def missing_product_warnings(
+    db: Session,
+    user: User,
+    *,
+    sale_since: date | None = None,
+    purchase_since: date | None = None,
+) -> list[dict]:
     """Stock codes sold and/or purchased at a branch with zero StockLevel rows there —
     one row per (branch, product), even when it shows up in both Sale and Purchase
-    lines, so the fix ("add it to inventory") isn't duplicated across two rows."""
+    lines, so the fix ("add it to inventory") isn't duplicated across two rows.
+    `sale_since`/`purchase_since` reuse the same Sale/Purchase check windows as the
+    numeric checks — see _missing_product_pairs for the trade-off that bounding
+    implies."""
     sale_pairs = _missing_product_pairs(
         db,
         user,
@@ -442,6 +470,7 @@ def missing_product_warnings(db: Session, user: User) -> list[dict]:
         header_id_fk=SaleLine.sale_id,
         branch_column=Sale.branch_id,
         date_column=Sale.sale_date,
+        since=sale_since,
     )
     purchase_pairs = _missing_product_pairs(
         db,
@@ -451,6 +480,7 @@ def missing_product_warnings(db: Session, user: User) -> list[dict]:
         header_id_fk=PurchaseLine.purchase_id,
         branch_column=Purchase.branch_id,
         date_column=Purchase.purchase_date,
+        since=purchase_since,
     )
 
     keys = sale_pairs.keys() | purchase_pairs.keys()
@@ -713,3 +743,77 @@ def inventory_reconciliation_warnings(
                 )
 
     return mismatch_rows, uom_rows
+
+
+def build_warning_sections(
+    db: Session, user: User, sale_days: int, purchase_days: int
+) -> list[dict]:
+    """Assembles every check above into the section list GET /api/warnings returns —
+    shared with the chatbot's get_data_quality_warnings tool so both surface identical
+    results. `sale_days`/`purchase_days` are independent — Sale and Purchase numeric
+    checks each look back their own number of days — since the two imports run on
+    separate cadences and a mismatch in one shouldn't force widening the other's window.
+    The missing-product check reuses these same two windows (see missing_product_warnings)
+    so it doesn't have to re-scan every sale/purchase line ever imported on every page
+    load. Inventory-numeric has no equivalent window: it always validates only the latest
+    snapshot per branch+product (see inventory_numeric_warnings), so there's nothing to
+    widen.
+    """
+    sale_since = date.today() - timedelta(days=sale_days - 1)
+    purchase_since = date.today() - timedelta(days=purchase_days - 1)
+    reconciliation_mismatch, reconciliation_uom = inventory_reconciliation_warnings(db, user)
+
+    return [
+        {
+            "id": "sale_numeric",
+            "title": "Sale — fix these numbers",
+            "description": "A price, quantity, or amount looks wrong on these sale lines — check the slip and re-import if needed.",
+            "severity": "warning",
+            "rows": sale_numeric_warnings(db, user, since=sale_since),
+        },
+        {
+            "id": "inventory_numeric",
+            "title": "Inventory — fix these numbers",
+            "description": (
+                "A quantity or price looks wrong on the latest stock snapshot for these — recount or re-import the corrected file."
+            ),
+            "severity": "warning",
+            "rows": inventory_numeric_warnings(db, user),
+        },
+        {
+            "id": "purchase_numeric",
+            "title": "Purchase — fix these numbers",
+            "description": "A quantity or price looks wrong on these purchase lines — check the invoice and re-import if needed.",
+            "severity": "warning",
+            "rows": purchase_numeric_warnings(db, user, since=purchase_since),
+        },
+        {
+            "id": "missing_product",
+            "title": "Inventory — add missing records",
+            "description": "These stock codes were sold and/or purchased within the Sale/Purchase check windows above but have no inventory record yet — add one so stock levels stay accurate.",
+            "severity": "warning",
+            "rows": missing_product_warnings(
+                db, user, sale_since=sale_since, purchase_since=purchase_since
+            ),
+        },
+        {
+            "id": "reconciliation_uom",
+            "title": "Daily inventory check — verify by hand",
+            "description": (
+                "These were sold or purchased in more than one unit since the last inventory snapshot, "
+                "so the automatic mismatch check may not be reliable for them — worth a manual look."
+            ),
+            "severity": "warning",
+            "rows": reconciliation_uom,
+        },
+        {
+            "id": "reconciliation_mismatch",
+            "title": "Daily inventory check — recount these",
+            "description": (
+                "The latest inventory snapshot doesn't match what it should be (previous snapshot + "
+                "purchases − sales since then) — recount the stock or check for a missing import."
+            ),
+            "severity": "critical",
+            "rows": reconciliation_mismatch,
+        },
+    ]

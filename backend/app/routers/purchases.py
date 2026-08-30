@@ -9,12 +9,9 @@ from app.models.branch import Branch
 from app.models.product import Product
 from app.models.purchase import Purchase, PurchaseLine
 from app.models.user import User
+from app.services.settings import get_purchase_list_window_days
 
 router = APIRouter(prefix="/api/purchases", tags=["purchases"])
-
-# Mirrors sales.py's DEFAULT_WINDOW_DAYS: purchase history only ever grows, so bound
-# the default query to a recent window; an explicit date_from widens or removes it.
-DEFAULT_WINDOW_DAYS = 90
 
 
 @router.get("")
@@ -25,7 +22,10 @@ def list_purchases(
     db: Session = Depends(get_db),
 ) -> list[dict]:
     if date_from is None:
-        date_from = (date_to or date.today()) - timedelta(days=DEFAULT_WINDOW_DAYS - 1)
+        # Mirrors sales.py: purchase history only ever grows, so bound the default query
+        # to the business-wide purchase_list_window_days setting; an explicit date_from
+        # widens or removes this bound.
+        date_from = (date_to or date.today()) - timedelta(days=get_purchase_list_window_days(db) - 1)
 
     query = (
         db.query(PurchaseLine, Purchase, Product, Branch)

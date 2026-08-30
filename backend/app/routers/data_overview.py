@@ -13,7 +13,11 @@ from app.services.pricing import (
     purchase_price_history,
     stock_level_price_history,
 )
-from app.services.settings import get_stock_forward_fallback_window_days
+from app.services.settings import (
+    get_purchase_lookback_window_days,
+    get_stock_forward_fallback_window_days,
+    get_stock_lookback_window_days,
+)
 
 router = APIRouter(prefix="/api/data-overview", tags=["data-overview"])
 
@@ -37,6 +41,8 @@ def get_data_overview(
     purchase_history = purchase_price_history(db, product_ids)
     stock_history = stock_level_price_history(db, product_ids)
     forward_fallback_window_days = get_stock_forward_fallback_window_days(db)
+    purchase_lookback_window_days = get_purchase_lookback_window_days(db)
+    stock_lookback_window_days = get_stock_lookback_window_days(db)
 
     result = []
     for sale_line, sale, product, branch in line_rows:
@@ -46,6 +52,8 @@ def get_data_overview(
             product.id,
             sale.sale_date,
             forward_fallback_window_days,
+            purchase_lookback_window_days,
+            stock_lookback_window_days,
         )
         profit, profit_margin_pct = compute_profit(
             buying_price, sale_line.qty, sale_line.net_amount

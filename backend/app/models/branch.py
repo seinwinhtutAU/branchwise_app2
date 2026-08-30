@@ -21,6 +21,16 @@ class Branch(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     phone_number: Mapped[str] = mapped_column(String(50), nullable=False)
     address: Mapped[str] = mapped_column(String(500), nullable=False)
+    # "MDY" (month first) or "DMY" (day first) — each branch's own POS terminal can use
+    # a different date convention (confirmed in practice: one branch's Sale export is
+    # unambiguously day-first while the reference sample is unambiguously month-first),
+    # so this is per-branch rather than a single business-wide setting. Sale still
+    # auto-detects per file first (app.services.pos_import._detect_slash_date_order) —
+    # this only decides a file with no decisive date of its own. Inventory has no
+    # per-file detection (a single, rarely-decisive "Printed" timestamp), so this is
+    # authoritative for it.
+    sale_date_format: Mapped[str] = mapped_column(String(3), nullable=False, default="MDY")
+    inventory_date_format: Mapped[str] = mapped_column(String(3), nullable=False, default="MDY")
 
     users: Mapped[list["User"]] = relationship(back_populates="branch")
     sales: Mapped[list["Sale"]] = relationship(back_populates="branch")

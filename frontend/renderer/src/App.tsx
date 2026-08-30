@@ -12,8 +12,8 @@ import {
 } from '@renderer/components/features/SimpleDataTable'
 import type { PendingImport, Profile } from '@renderer/components/features/types'
 import { useBranches } from '@renderer/lib/useBranches'
-import { formatBuyingPriceSource, useShowBuyingPriceSource } from '@renderer/lib/buyingPriceSource'
-import { useWarningWindowDays } from '@renderer/lib/warningWindow'
+import { formatBuyingPriceSource } from '@renderer/lib/buyingPriceSource'
+import { useAppSettings } from '@renderer/lib/appSettings'
 import { Spinner } from '@renderer/components/ui/Spinner'
 import {
   UploadIcon,
@@ -25,8 +25,12 @@ import {
   PurchaseIcon,
   ClipboardIcon,
   FactoryIcon,
+  WarehouseIcon,
+  ReceivingIcon,
   WarningIcon,
-  SettingsIcon
+  SettingsIcon,
+  HelpIcon,
+  ChatIcon
 } from '@renderer/components/ui/icons'
 
 // Lazy-loaded so a given account's bundle only pays for the sections it can actually
@@ -42,8 +46,12 @@ const ImportOverviewPage = lazy(() => import('@renderer/components/features/Impo
 const DataOverviewTable = lazy(() => import('@renderer/components/features/DataOverviewTable'))
 const CustomerOrdersPage = lazy(() => import('@renderer/components/features/CustomerOrdersPage'))
 const FactoryVouchersPage = lazy(() => import('@renderer/components/features/FactoryVouchersPage'))
+const WarehouseArrivalPage = lazy(() => import('@renderer/components/features/WarehouseArrivalPage'))
+const FactoryReceivingPage = lazy(() => import('@renderer/components/features/FactoryReceivingPage'))
 const WarningsPage = lazy(() => import('@renderer/components/features/WarningsPage'))
+const ChatPage = lazy(() => import('@renderer/components/features/ChatPage'))
 const SettingsPage = lazy(() => import('@renderer/components/features/SettingsPage'))
+const HelpPage = lazy(() => import('@renderer/components/features/HelpPage'))
 
 type Section =
   | 'import'
@@ -54,9 +62,13 @@ type Section =
   | 'inventory'
   | 'purchase'
   | 'warnings'
+  | 'chat'
   | 'orders'
   | 'vouchers'
+  | 'warehouseArrival'
+  | 'factoryReceiving'
   | 'settings'
+  | 'help'
 
 // Retail and Wholesale are two functionally separate products glued together for admin's
 // convenience (see the "Wholesale" doc section in CLAUDE.md) — an admin switches between
@@ -91,12 +103,15 @@ const RETAIL_NAV_ITEMS: NavItem[] = [
     icon: <PurchaseIcon />,
     dotColor: 'bg-pink-400'
   },
-  { id: 'warnings', label: 'Warning', icon: <WarningIcon /> }
+  { id: 'warnings', label: 'Warning', icon: <WarningIcon /> },
+  { id: 'chat', label: 'Chat', icon: <ChatIcon /> }
 ]
 
 const WHOLESALE_NAV_ITEMS: NavItem[] = [
   { id: 'orders', label: 'Customer Orders', icon: <ClipboardIcon /> },
-  { id: 'vouchers', label: 'Factory Vouchers', icon: <FactoryIcon /> }
+  { id: 'vouchers', label: 'Factory Vouchers', icon: <FactoryIcon /> },
+  { id: 'warehouseArrival', label: 'Warehouse Arrival', icon: <WarehouseIcon /> },
+  { id: 'factoryReceiving', label: 'Factory Receiving', icon: <ReceivingIcon /> }
 ]
 
 const WORKSPACE_NAV_ITEMS: Record<Workspace, NavItem[]> = {
@@ -134,7 +149,13 @@ const SETTINGS_NAV_ITEM: NavItem = {
   label: 'Settings',
   icon: <SettingsIcon />
 }
-const PINNED_NAV_ITEMS: NavItem[] = [SETTINGS_NAV_ITEM]
+// Admin-only for now (see docs discussion) — a plain-language reference for what the
+// system is doing, not something a branch/wholesale account needs day to day.
+const HELP_NAV_ITEM: NavItem = {
+  id: 'help',
+  label: 'Help',
+  icon: <HelpIcon />
+}
 
 const SECTION_TITLES: Record<Section, string> = {
   import: 'Import data',
@@ -145,9 +166,13 @@ const SECTION_TITLES: Record<Section, string> = {
   inventory: 'Inventory',
   purchase: 'Purchase',
   warnings: 'Warning',
+  chat: 'Chat',
   orders: 'Customer orders',
   vouchers: 'Factory vouchers',
-  settings: 'Settings'
+  warehouseArrival: 'Warehouse arrival',
+  factoryReceiving: 'Factory voucher receiving',
+  settings: 'Settings',
+  help: 'Help'
 }
 
 interface SaleRow {
@@ -274,8 +299,15 @@ function App(): React.JSX.Element {
   const [viewingBatchId, setViewingBatchId] = useState<string | null>(null)
   const [highlightBatchId, setHighlightBatchId] = useState<string | null>(null)
   const [warningCount, setWarningCount] = useState(0)
-  const [warningWindowDays, setWarningWindowDays] = useWarningWindowDays()
-  const [showBuyingPriceSource, setShowBuyingPriceSource] = useShowBuyingPriceSource()
+  // Business-wide (app_settings table) — same values for every account and device.
+  // `settings` is null until the fetch resolves, so every read below falls back to the
+  // backend's own DEFAULT_SETTINGS value for that key.
+  const { settings, updateSettings } = useAppSettings(session)
+  const saleWindowDays = settings?.sale_warning_window_days ?? 1
+  const purchaseWindowDays = settings?.purchase_warning_window_days ?? 1
+  const saleListWindowDays = settings?.sale_list_window_days ?? 90
+  const purchaseListWindowDays = settings?.purchase_list_window_days ?? 90
+  const showBuyingPriceSource = settings?.show_buying_price_source ?? true
 
   const saleColumns = useMemo(
     () =>
@@ -331,17 +363,27 @@ function App(): React.JSX.Element {
   // there's no frame where the wrong workspace's UI briefly renders before a correction
   // catches up.
   const section: Section =
-    rawSection === 'settings' || WORKSPACE_SECTION_IDS[effectiveWorkspace].has(rawSection)
+    rawSection === 'settings' ||
+    (rawSection === 'help' && isAdmin) ||
+    WORKSPACE_SECTION_IDS[effectiveWorkspace].has(rawSection)
       ? rawSection
       : (WORKSPACE_NAV_ITEMS[effectiveWorkspace][0].id as Section)
   const branchOptions = useBranches(isAdmin ? session : null)
 
+  // Help is admin-only (see docs discussion) — Settings stays visible to everyone, same
+  // as before.
+  const pinnedNavItems = useMemo(
+    () => (isAdmin ? [SETTINGS_NAV_ITEM, HELP_NAV_ITEM] : [SETTINGS_NAV_ITEM]),
+    [isAdmin]
+  )
+
   async function refreshWarningCount(): Promise<void> {
     if (!session) return
     try {
-      const response = await fetch(`${apiBaseUrl}/api/warnings?days=${warningWindowDays}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` }
-      })
+      const response = await fetch(
+        `${apiBaseUrl}/api/warnings?sale_days=${saleWindowDays}&purchase_days=${purchaseWindowDays}`,
+        { headers: { Authorization: `Bearer ${session.access_token}` } }
+      )
       if (!response.ok) return
       const body = await response.json()
       const total = (body.sections as { rows: unknown[] }[]).reduce(
@@ -357,13 +399,13 @@ function App(): React.JSX.Element {
   }
 
   // Wholesale accounts never see the Warning nav item, so there's nothing to count for
-  // them. Re-runs whenever the check window changes (e.g. from Settings) so the badge
+  // them. Re-runs whenever either check window changes (e.g. from Settings) so the badge
   // doesn't sit stale until the next sign-in.
   useEffect(() => {
     if (!session || isWholesale) return
     refreshWarningCount()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, isWholesale, warningWindowDays])
+  }, [session, isWholesale, saleWindowDays, purchaseWindowDays])
 
   const navItems = useMemo(
     () =>
@@ -583,7 +625,7 @@ function App(): React.JSX.Element {
       workspaces={workspaceTabs}
       activeWorkspace={effectiveWorkspace}
       onWorkspaceChange={handleWorkspaceChange}
-      pinnedNavItems={PINNED_NAV_ITEMS}
+      pinnedNavItems={pinnedNavItems}
       email={session.user.email}
       profile={profile}
       onSignOut={handleSignOut}
@@ -685,6 +727,7 @@ function App(): React.JSX.Element {
                 rowKey={(row, i) => `${row.SlipNumber}-${i}`}
                 emptyTitle="No sales yet"
                 emptyDescription="Import a sales file to see it here."
+                defaultWindowDays={saleListWindowDays}
               />
             )}
             {section === 'inventory' && (
@@ -713,6 +756,7 @@ function App(): React.JSX.Element {
                 rowKey={(row, i) => `${row.StockCode}-${row.Date}-${i}`}
                 emptyTitle="No purchases yet"
                 emptyDescription="Import a purchase file to see it here."
+                defaultWindowDays={purchaseListWindowDays}
               />
             )}
             {section === 'warnings' && (
@@ -720,24 +764,32 @@ function App(): React.JSX.Element {
                 session={session}
                 profile={profile}
                 onCountChange={setWarningCount}
-                warningWindowDays={warningWindowDays}
+                saleWindowDays={saleWindowDays}
+                purchaseWindowDays={purchaseWindowDays}
+                branchOptions={branchOptions}
                 onViewImportBatch={handleViewImportBatch}
                 onFileReady={handleFileReady}
               />
             )}
+            {section === 'chat' && <ChatPage session={session} profile={profile} />}
             {section === 'orders' && <CustomerOrdersPage session={session} profile={profile} />}
             {section === 'vouchers' && <FactoryVouchersPage session={session} profile={profile} />}
+            {section === 'warehouseArrival' && (
+              <WarehouseArrivalPage session={session} profile={profile} />
+            )}
+            {section === 'factoryReceiving' && (
+              <FactoryReceivingPage session={session} profile={profile} />
+            )}
             {section === 'settings' && (
               <SettingsPage
                 session={session}
                 profile={profile}
                 isAdmin={isAdmin}
-                warningWindowDays={warningWindowDays}
-                onWarningWindowDaysChange={setWarningWindowDays}
-                showBuyingPriceSource={showBuyingPriceSource}
-                onShowBuyingPriceSourceChange={setShowBuyingPriceSource}
+                settings={settings}
+                onUpdateSettings={updateSettings}
               />
             )}
+            {section === 'help' && <HelpPage />}
           </>
         )}
       </Suspense>

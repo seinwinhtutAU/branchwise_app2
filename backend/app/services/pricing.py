@@ -14,13 +14,15 @@ PriceHistory = dict[str, list[tuple[date, float]]]
 # transaction the way a purchase is — so a recount often lands a few days or weeks
 # after the sales it would otherwise price. Purchase price has no equivalent forward
 # fallback below since it's timely enough that "as of" the sale date is trustworthy.
-# This default only applies when a caller doesn't pass its own window_days (tests,
-# scripts, or any code not going through app.services.settings.get_stock_forward_fallback_window_days)
-# — real request paths fetch the business-wide, admin-configurable value from the
-# AppSetting store instead of relying on this constant.
+# These defaults only apply when a caller doesn't pass its own window (tests, scripts,
+# or any code not going through the matching app.services.settings getter) — real
+# request paths fetch the business-wide, admin-configurable value from the AppSetting
+# store instead of relying on these constants.
 STOCK_FORWARD_FALLBACK_WINDOW_DAYS = DEFAULT_SETTINGS[
     "stock_forward_fallback_window_days"
 ]
+PURCHASE_LOOKBACK_WINDOW_DAYS = DEFAULT_SETTINGS["purchase_lookback_window_days"]
+STOCK_LOOKBACK_WINDOW_DAYS = DEFAULT_SETTINGS["stock_lookback_window_days"]
 
 
 def purchase_price_history(db: Session, product_ids: set[str]) -> PriceHistory:
@@ -70,17 +72,26 @@ def stock_level_price_history(db: Session, product_ids: set[str]) -> PriceHistor
     return history
 
 
-def price_as_of(history: PriceHistory, product_id: str, as_of: date) -> float | None:
+def price_as_of(
+    history: PriceHistory, product_id: str, as_of: date, window_days: int
+) -> float | None:
     """The most recent price on record for a product that was already known by `as_of`
-    — never a price recorded after that date. Each product's list is sorted ascending by
-    date, so this is a binary search rather than a scan; comparing against (as_of, inf)
-    finds the cutoff after every entry dated exactly `as_of` too, not just before it.
+    — never a price recorded after that date, and only if it's no older than
+    `window_days` — a price from further back is treated as too stale to trust rather
+    than used anyway. Each product's list is sorted ascending by date, so this is a
+    binary search rather than a scan; comparing against (as_of, inf) finds the cutoff
+    after every entry dated exactly `as_of` too, not just before it.
     """
     events = history.get(product_id)
     if not events:
         return None
     idx = bisect_right(events, (as_of, float("inf"))) - 1
-    return events[idx][1] if idx >= 0 else None
+    if idx < 0:
+        return None
+    event_date, price = events[idx]
+    if (as_of - event_date).days > window_days:
+        return None
+    return price
 
 
 def _stock_price_soon_after(
@@ -117,6 +128,8 @@ def point_in_time_buying_price(
     product_id: str,
     as_of: date,
     stock_forward_fallback_window_days: int = STOCK_FORWARD_FALLBACK_WINDOW_DAYS,
+    purchase_lookback_window_days: int = PURCHASE_LOOKBACK_WINDOW_DAYS,
+    stock_lookback_window_days: int = STOCK_LOOKBACK_WINDOW_DAYS,
 ) -> tuple[float | None, BuyingPriceSource | None]:
     """The buying price that was actually in effect on `as_of` (a sale's own date), not
     whatever the latest price happens to be today — using "latest" for every historical
@@ -124,21 +137,28 @@ def point_in_time_buying_price(
     margin trend over time. Purchase price is preferred over a stock-snapshot price when
     both are known as of the same date, matching the old latest_buying_prices preference.
 
-    If neither source has a price on record by `as_of`, falls back to a stock-level price
-    recorded shortly *after* — bounded by `stock_forward_fallback_window_days` (an
-    admin-configurable business setting; see app.services.settings.get_stock_forward_fallback_window_days) —
-    since a missing-stock-code fix is usually "recount it," and that recount is often the
-    only cost this product will ever get for sales just before it. Purchase price gets no
+    Each backward-looking source only counts if it's no older than its own lookback
+    window (`purchase_lookback_window_days`, `stock_lookback_window_days`) — a price
+    that's technically on record but far older than the sale is treated the same as no
+    price at all, rather than used anyway, so it falls through to the next source (and
+    ultimately to `(None, None)`) instead of pricing a sale off stale data.
+
+    If neither backward source has a usably-recent price by `as_of`, falls back to a
+    stock-level price recorded shortly *after* — bounded by
+    `stock_forward_fallback_window_days` (an admin-configurable business setting; see
+    app.services.settings.get_stock_forward_fallback_window_days) — since a
+    missing-stock-code fix is usually "recount it," and that recount is often the only
+    cost this product will ever get for sales just before it. Purchase price gets no
     such forward look: it's timely enough that reaching into the future would only
     reintroduce the distortion this function exists to avoid.
 
     Returns `(price, source)` rather than just `price` so callers can tell a forward-filled
     estimate apart from an exact point-in-time match instead of the two looking identical.
     """
-    price = price_as_of(purchase_history, product_id, as_of)
+    price = price_as_of(purchase_history, product_id, as_of, purchase_lookback_window_days)
     if price is not None:
         return price, "purchase"
-    price = price_as_of(stock_history, product_id, as_of)
+    price = price_as_of(stock_history, product_id, as_of, stock_lookback_window_days)
     if price is not None:
         return price, "stock"
     price = _stock_price_soon_after(

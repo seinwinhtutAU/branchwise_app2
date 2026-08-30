@@ -11,6 +11,17 @@ from app.db.base import Base
 # and reading it via app.services.settings.get_setting; no schema migration needed.
 DEFAULT_SETTINGS: dict[str, Any] = {
     "stock_forward_fallback_window_days": 30,
+    "purchase_lookback_window_days": 14,
+    "stock_lookback_window_days": 7,
+    # Business-wide UI preferences — previously per-device localStorage values, moved
+    # here so every account (and every device) sees the same theme, check windows, list
+    # windows, and column visibility rather than each picking their own.
+    "theme": "system",
+    "sale_warning_window_days": 1,
+    "purchase_warning_window_days": 1,
+    "sale_list_window_days": 90,
+    "purchase_list_window_days": 90,
+    "show_buying_price_source": True,
 }
 
 

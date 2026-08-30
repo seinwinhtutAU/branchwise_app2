@@ -27,7 +27,9 @@ def _line_to_out(line: FactoryVoucherLine) -> FactoryVoucherLineOut:
         id=line.id,
         voucher_id=line.voucher_id,
         product_code=line.product_code,
+        description=line.description,
         qty=line.qty,
+        received_qty=line.received_qty,
         buying_price=line.buying_price,
         colors=line.colors,
         discount_per_set=line.discount_per_set,
@@ -67,6 +69,7 @@ def _new_line(payload: FactoryVoucherLineCreate) -> FactoryVoucherLine:
     colors = [c.model_dump() for c in payload.colors]
     return FactoryVoucherLine(
         product_code=payload.product_code,
+        description=payload.description,
         qty=colors_total(colors),
         buying_price=payload.buying_price,
         colors=colors,

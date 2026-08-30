@@ -5,6 +5,7 @@ from app.routers import (
     allocation,
     auth,
     branches,
+    chat,
     data_overview,
     factory_vouchers,
     health,
@@ -14,6 +15,7 @@ from app.routers import (
     purchases,
     sales,
     settings,
+    warehouse_receipts,
     warnings,
 )
 
@@ -39,8 +41,10 @@ def create_app() -> FastAPI:
     app.include_router(sales.router)
     app.include_router(purchases.router)
     app.include_router(factory_vouchers.router)
+    app.include_router(warehouse_receipts.router)
     app.include_router(warnings.router)
     app.include_router(settings.router)
+    app.include_router(chat.router)
 
     return app
 

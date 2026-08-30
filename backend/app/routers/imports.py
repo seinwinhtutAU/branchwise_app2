@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, defer, joinedload
 
 from app.core.security import get_current_app_user, get_current_user
 from app.db.session import get_db
@@ -72,6 +72,25 @@ def _resolve_branch_id(user: User, branch_id: str | None, db: Session) -> str | 
     return branch_id
 
 
+def _resolve_branch_for_preview(user: User, branch_id: str | None, db: Session) -> Branch | None:
+    """Like _resolve_branch_id, but tolerates the branch being unknown rather than
+    erroring — an admin's very first preview call happens before they've picked a
+    branch on the review screen (the picker only appears there, and its value is only
+    sent once chosen; see ImportReviewPage.tsx). A retail account's own branch is
+    always known already. Returns None only when neither the account nor the request
+    supplies one, meaning "use the universal MDY default for this one preview" — the
+    frontend re-previews with a real branch_id as soon as one is picked, so this only
+    ever affects the very first render of an admin's review screen.
+    """
+    resolved_id = user.branch_id or branch_id
+    if resolved_id is None:
+        return None
+    branch = db.get(Branch, resolved_id)
+    if branch is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown branch_id: {branch_id}")
+    return branch
+
+
 def _location_raw(df: pd.DataFrame) -> str | None:
     if "Location" not in df.columns or df.empty:
         return None
@@ -120,13 +139,19 @@ def _can_access_batch(user: User, batch: ImportBatch) -> bool:
 
 @router.post("/sales")
 async def import_sales_file(
-    file: UploadFile = File(...), user=Depends(get_current_user)
+    file: UploadFile = File(...),
+    branch_id: str | None = Form(None),
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
 ) -> dict:
     _check_extension(file.filename)
+    branch = _resolve_branch_for_preview(user, branch_id, db)
 
     contents = await file.read()
     try:
-        origin_rows, clean_df = parse_pos_sale_upload(contents, file.filename or "")
+        origin_rows, clean_df = parse_pos_sale_upload(
+            contents, file.filename or "", branch.sale_date_format if branch else "MDY"
+        )
     except Exception as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
     _check_report_type(origin_rows, "sale")
@@ -143,10 +168,13 @@ async def confirm_sales_file(
 ) -> dict:
     _check_extension(file.filename)
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
+    branch = db.get(Branch, resolved_branch_id)
 
     contents = await file.read()
     try:
-        origin_rows, clean_df = parse_pos_sale_upload(contents, file.filename or "")
+        origin_rows, clean_df = parse_pos_sale_upload(
+            contents, file.filename or "", branch.sale_date_format if branch else "MDY"
+        )
     except Exception as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
     _check_report_type(origin_rows, "sale")
@@ -167,13 +195,19 @@ async def confirm_sales_file(
 
 @router.post("/inventory")
 async def import_inventory_file(
-    file: UploadFile = File(...), user=Depends(get_current_user)
+    file: UploadFile = File(...),
+    branch_id: str | None = Form(None),
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
 ) -> dict:
     _check_extension(file.filename)
+    branch = _resolve_branch_for_preview(user, branch_id, db)
 
     contents = await file.read()
     try:
-        origin_rows, clean_df = parse_inventory_upload(contents, file.filename or "")
+        origin_rows, clean_df = parse_inventory_upload(
+            contents, file.filename or "", branch.inventory_date_format if branch else "MDY"
+        )
     except Exception as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
     _check_report_type(origin_rows, "inventory")
@@ -192,10 +226,13 @@ async def confirm_inventory_file(
 ) -> dict:
     _check_extension(file.filename)
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
+    branch = db.get(Branch, resolved_branch_id)
 
     contents = await file.read()
     try:
-        origin_rows, clean_df = parse_inventory_upload(contents, file.filename or "")
+        origin_rows, clean_df = parse_inventory_upload(
+            contents, file.filename or "", branch.inventory_date_format if branch else "MDY"
+        )
     except Exception as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
     _check_report_type(origin_rows, "inventory")
@@ -319,15 +356,28 @@ def get_import_freshness(
 
 @router.get("/history")
 def list_import_history(
-    user: User = Depends(get_current_app_user), db: Session = Depends(get_db)
+    limit: int | None = None,
+    offset: int = 0,
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
 ) -> list[dict]:
+    # preview_data holds the full origin/clean row grids from the original import (same
+    # shape as the preview endpoints) — often the single biggest column on this table.
+    # The list view never needs it (only GET /history/{batch_id} does), so it's deferred
+    # here to avoid transferring and JSON-parsing every batch's full grid on every load.
     query = (
         db.query(ImportBatch)
-        .options(joinedload(ImportBatch.branch), joinedload(ImportBatch.uploaded_by_user))
+        .options(
+            joinedload(ImportBatch.branch),
+            joinedload(ImportBatch.uploaded_by_user),
+            defer(ImportBatch.preview_data),
+        )
         .order_by(ImportBatch.created_at.desc())
     )
     if user.branch_id is not None:
         query = query.filter(ImportBatch.branch_id == user.branch_id)
+    if limit is not None:
+        query = query.limit(limit).offset(offset)
 
     return [
         {

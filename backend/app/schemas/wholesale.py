@@ -82,6 +82,7 @@ class CustomerOrderOut(BaseModel):
 
 class FactoryVoucherLineCreate(BaseModel):
     product_code: str
+    description: str | None = None
     buying_price: float
     colors: list[ColorQty] = []
     discount_per_set: float | None = None
@@ -89,6 +90,7 @@ class FactoryVoucherLineCreate(BaseModel):
 
 class FactoryVoucherLineUpdate(BaseModel):
     product_code: str | None = None
+    description: str | None = None
     buying_price: float | None = None
     colors: list[ColorQty] | None = None
     discount_per_set: float | None = None
@@ -98,7 +100,9 @@ class FactoryVoucherLineOut(BaseModel):
     id: str
     voucher_id: str
     product_code: str
+    description: str | None
     qty: float
+    received_qty: float
     buying_price: float
     colors: list[ColorQty]
     discount_per_set: float | None
@@ -138,3 +142,25 @@ class FactoryVoucherCreateResult(BaseModel):
 class FactoryVoucherUpdateResult(BaseModel):
     voucher: FactoryVoucherOut
     updated_order_count: int
+
+
+class WarehouseReceiptCreate(BaseModel):
+    product_code: str
+    warehouse: str
+    qty_received: float
+    received_date: date
+    # Only used when the creating account has no fixed branch (admin) — ignored otherwise.
+    branch_id: str | None = None
+
+
+class WarehouseReceiptOut(BaseModel):
+    id: str
+    voucher_id: str
+    voucher_no: int
+    voucher_line_id: str
+    product_code: str
+    description: str | None
+    warehouse: str
+    qty_received: float
+    received_date: date
+    created_at: datetime

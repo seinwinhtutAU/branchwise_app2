@@ -53,6 +53,13 @@ interface Props<T extends object> {
   rowKey: (row: T, index: number) => string
   emptyTitle: string
   emptyDescription: string
+  /**
+   * Pre-fills the dateRange filter's "from" field on first load, for endpoints that
+   * default to a recent window server-side when no date_from is sent (see the
+   * `serverParam` doc on DataTableFilter). Purely a starting point — the user can still
+   * clear or widen it same as any other filter value.
+   */
+  defaultWindowDays?: number
 }
 
 function defaultFormat(value: unknown): string {
@@ -71,6 +78,14 @@ function slugify(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 }
 
+// Matches the backend's own "date_from = today - (days - 1)" so the pre-filled date
+// picker reflects exactly what an unfiltered request would already return.
+function daysAgoIso(days: number): string {
+  const date = new Date()
+  date.setDate(date.getDate() - (days - 1))
+  return date.toISOString().slice(0, 10)
+}
+
 export function SimpleDataTable<T extends object>({
   session,
   endpoint,
@@ -81,7 +96,8 @@ export function SimpleDataTable<T extends object>({
   filters,
   rowKey,
   emptyTitle,
-  emptyDescription
+  emptyDescription,
+  defaultWindowDays
 }: Props<T>): React.JSX.Element {
   const showToast = useToast()
   const [rows, setRows] = useState<T[] | null>(null)
@@ -91,7 +107,9 @@ export function SimpleDataTable<T extends object>({
 
   const [search, setSearch] = useState('')
   const [selectValues, setSelectValues] = useState<Record<string, string>>({})
-  const [dateFrom, setDateFrom] = useState('')
+  const [dateFrom, setDateFrom] = useState(() =>
+    defaultWindowDays ? daysAgoIso(defaultWindowDays) : ''
+  )
   const [dateTo, setDateTo] = useState('')
 
   const dateRangeFilter = filters?.find((f) => f.type === 'dateRange')

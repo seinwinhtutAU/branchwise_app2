@@ -308,6 +308,73 @@ def test_non_admin_cannot_update_second_commit_qty(authed_client: TestClient, db
     assert response.status_code == 403
 
 
+def _receipt_payload(**overrides) -> dict:
+    payload = {
+        "product_code": "WS-001",
+        "warehouse": "Main WH",
+        "qty_received": 10,
+        "received_date": dt.date(2026, 8, 10).isoformat(),
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_warehouse_receipt_matches_by_product_code_without_a_voucher_id(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_user(db_session, branch=branch)
+    voucher = authed_client.post("/api/factory-vouchers", json=_voucher_payload()).json()["voucher"]
+    voucher_line = voucher["lines"][0]
+    assert voucher_line["qty"] == 30
+    assert voucher_line["received_qty"] == 0
+
+    response = authed_client.post("/api/warehouse-receipts", json=_receipt_payload())
+    assert response.status_code == 201
+    body = response.json()
+    assert body["voucher_id"] == voucher["id"]
+    assert body["voucher_line_id"] == voucher_line["id"]
+
+    updated_voucher = authed_client.get("/api/factory-vouchers").json()[0]
+    assert updated_voucher["lines"][0]["received_qty"] == 10
+
+
+def test_warehouse_receipt_fills_oldest_open_voucher_first(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_user(db_session, branch=branch)
+    older = authed_client.post(
+        "/api/factory-vouchers", json=_voucher_payload(voucher_date=dt.date(2026, 8, 1).isoformat())
+    ).json()["voucher"]
+    authed_client.post(
+        "/api/factory-vouchers", json=_voucher_payload(voucher_date=dt.date(2026, 8, 5).isoformat())
+    )
+
+    response = authed_client.post("/api/warehouse-receipts", json=_receipt_payload())
+    assert response.status_code == 201
+    assert response.json()["voucher_id"] == older["id"]
+
+
+def test_warehouse_receipt_with_unknown_product_code_fails(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_user(db_session, branch=branch)
+
+    response = authed_client.post("/api/warehouse-receipts", json=_receipt_payload(product_code="UNKNOWN"))
+    assert response.status_code == 400
+
+
+def test_deleting_a_warehouse_receipt_reverses_received_qty(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_user(db_session, branch=branch)
+    authed_client.post("/api/factory-vouchers", json=_voucher_payload())
+
+    receipt = authed_client.post("/api/warehouse-receipts", json=_receipt_payload()).json()
+    assert authed_client.get("/api/factory-vouchers").json()[0]["lines"][0]["received_qty"] == 10
+
+    delete = authed_client.delete(f"/api/warehouse-receipts/{receipt['id']}")
+    assert delete.status_code == 204
+    assert authed_client.get("/api/factory-vouchers").json()[0]["lines"][0]["received_qty"] == 0
+
+
 def test_admin_can_set_second_commit_qty(authed_client: TestClient, db_session: Session):
     branch = _make_branch(db_session)
     _make_user(db_session, branch=None)  # admin: no fixed branch

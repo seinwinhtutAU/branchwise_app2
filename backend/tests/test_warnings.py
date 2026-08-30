@@ -232,6 +232,44 @@ def test_missing_product_pluralizes_multiple_occurrences(db_session: Session):
     )
 
 
+def test_missing_product_respects_sale_since_window(db_session: Session):
+    branch, user = _make_branch_and_user(db_session)
+    product = _make_product(db_session, "SKU-2b")
+    _make_sale_line(
+        db_session, branch=branch, product=product, slip_id="slip-2b", qty=2, sale_date=datetime.date(2026, 8, 1)
+    )
+    db_session.commit()
+
+    assert data_quality.missing_product_warnings(db_session, user) != []
+    assert (
+        data_quality.missing_product_warnings(db_session, user, sale_since=datetime.date(2026, 8, 20))
+        == []
+    )
+    assert (
+        data_quality.missing_product_warnings(db_session, user, sale_since=datetime.date(2026, 8, 1))
+        != []
+    )
+
+
+def test_missing_product_respects_purchase_since_window(db_session: Session):
+    branch, user = _make_branch_and_user(db_session)
+    product = _make_product(db_session, "SKU-6d")
+    _make_purchase_line(
+        db_session, branch=branch, product=product, qty=4, purchase_date=datetime.date(2026, 8, 1)
+    )
+    db_session.commit()
+
+    assert data_quality.missing_product_warnings(db_session, user) != []
+    assert (
+        data_quality.missing_product_warnings(db_session, user, purchase_since=datetime.date(2026, 8, 20))
+        == []
+    )
+    assert (
+        data_quality.missing_product_warnings(db_session, user, purchase_since=datetime.date(2026, 8, 1))
+        != []
+    )
+
+
 def test_reconciliation_flags_mismatch(db_session: Session):
     branch, user = _make_branch_and_user(db_session)
     product = _make_product(db_session, "SKU-4")
@@ -484,3 +522,42 @@ def test_warnings_endpoint_returns_all_sections(authed_client: TestClient, db_se
         "reconciliation_mismatch",
     }
     assert all(s["rows"] == [] for s in body["sections"])
+
+
+def test_warnings_endpoint_defaults_to_business_wide_sale_window(
+    authed_client: TestClient, db_session: Session
+):
+    branch = Branch(name="Retail 1", phone_number="000", address="TBD")
+    db_session.add(branch)
+    db_session.flush()
+    # Admin (no fixed branch_id) so the PUT /api/settings call below is permitted, and
+    # this account still sees every branch's sale rows for the GET /api/warnings checks.
+    db_session.add(
+        User(id="test-user-id", name="Tester", email="test@example.com", role=UserRole.ADMIN)
+    )
+    product = _make_product(db_session, "SKU-1")
+    _make_sale_line(
+        db_session,
+        branch=branch,
+        product=product,
+        slip_id="slip-1",
+        qty=0,
+        sale_date=datetime.date.today() - datetime.timedelta(days=5),
+    )
+    db_session.commit()
+
+    # No sale_days query param: with the default sale_warning_window_days setting (1),
+    # a sale from 5 days ago falls outside the check window.
+    response = authed_client.get("/api/warnings")
+    assert response.status_code == 200
+    sale_section = next(s for s in response.json()["sections"] if s["id"] == "sale_numeric")
+    assert sale_section["rows"] == []
+
+    put_response = authed_client.put("/api/settings", json={"sale_warning_window_days": 7})
+    assert put_response.status_code == 200
+
+    # Same request, no query param — now picks up the business-wide setting and flags it.
+    response = authed_client.get("/api/warnings")
+    assert response.status_code == 200
+    sale_section = next(s for s in response.json()["sections"] if s["id"] == "sale_numeric")
+    assert len(sale_section["rows"]) == 1

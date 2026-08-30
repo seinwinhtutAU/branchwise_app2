@@ -2,12 +2,13 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import { ToastProvider } from '@renderer/lib/toast'
-import { applyTheme, getStoredTheme } from '@renderer/lib/theme'
+import { applyTheme, getCachedTheme } from '@renderer/lib/theme'
 import './styles/globals.css'
 
-// Applied before the first render so a saved light/dark override takes effect immediately
-// instead of flashing the system-default theme while React mounts.
-applyTheme(getStoredTheme())
+// Applied before the first render, from the last theme fetched from the backend, so the
+// app doesn't flash the system-default theme while it boots and re-fetches the
+// business-wide setting (see lib/appSettings.ts).
+applyTheme(getCachedTheme())
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
