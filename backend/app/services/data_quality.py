@@ -103,6 +103,16 @@ def _fetch_branches(db: Session, branch_ids: set[str | None]) -> dict[str, Branc
     return {b.id: b for b in db.query(Branch).filter(Branch.id.in_(ids))}
 
 
+def _import_batch_meta(import_batch: ImportBatch | None) -> dict:
+    """The three _ImportBatch* record keys _numeric_warning_rows reads back out via
+    _source_import — shared by every numeric check's record builder."""
+    return {
+        "_ImportBatchId": import_batch.id if import_batch else None,
+        "_ImportBatchFilename": import_batch.filename if import_batch else None,
+        "_ImportBatchDate": import_batch.created_at.isoformat() if import_batch else None,
+    }
+
+
 def _numeric_warning_rows(
     records: list[dict],
     rules: list[NumericRule],
@@ -209,11 +219,7 @@ def sale_numeric_warnings(
                 "_BuyingPriceSource": buying_price_source,
                 "_Profit": profit,
                 "_ProfitMarginPct": profit_margin_pct,
-                "_ImportBatchId": import_batch.id if import_batch else None,
-                "_ImportBatchFilename": import_batch.filename if import_batch else None,
-                "_ImportBatchDate": import_batch.created_at.isoformat()
-                if import_batch
-                else None,
+                **_import_batch_meta(import_batch),
             }
         )
 
@@ -296,11 +302,7 @@ def inventory_numeric_warnings(db: Session, user: User) -> list[dict]:
                 "_Description": product.description,
                 "_Group": product.group_name,
                 "_Location": stock_level.location_raw,
-                "_ImportBatchId": import_batch.id if import_batch else None,
-                "_ImportBatchFilename": import_batch.filename if import_batch else None,
-                "_ImportBatchDate": import_batch.created_at.isoformat()
-                if import_batch
-                else None,
+                **_import_batch_meta(import_batch),
             }
         )
 
@@ -358,11 +360,7 @@ def purchase_numeric_warnings(
                 "_Description": product.description,
                 "_UOM": purchase_line.uom,
                 "_Location": purchase.location_raw,
-                "_ImportBatchId": import_batch.id if import_batch else None,
-                "_ImportBatchFilename": import_batch.filename if import_batch else None,
-                "_ImportBatchDate": import_batch.created_at.isoformat()
-                if import_batch
-                else None,
+                **_import_batch_meta(import_batch),
             }
         )
 
@@ -597,16 +595,8 @@ def inventory_reconciliation_warnings(
         # A mismatch or unit-mix warning is about the *latest* snapshot being wrong —
         # that's the one import worth pointing at, even though the check itself also
         # reads the prior snapshot and the purchases/sales in between.
-        batch_ids = {
-            sl.import_batch_id for sl in latest_snapshot.values() if sl.import_batch_id
-        }
-        batches_by_id = (
-            {
-                b.id: b
-                for b in db.query(ImportBatch).filter(ImportBatch.id.in_(batch_ids))
-            }
-            if batch_ids
-            else {}
+        batches_by_id = _fetch_import_batches(
+            db, {sl.import_batch_id for sl in latest_snapshot.values()}
         )
 
         purchased: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
