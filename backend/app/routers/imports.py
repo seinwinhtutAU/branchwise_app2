@@ -58,6 +58,20 @@ def _check_report_type(origin_rows: list[list[str]], expected: str) -> None:
         )
 
 
+def _parse_or_400(
+    parser, contents: bytes, filename: str | None, expected_type: str, *parser_args
+) -> tuple[list[list[str]], pd.DataFrame]:
+    """The shared front half of every preview/confirm endpoint: run one import
+    type's parser, translating any parse failure into a 400, then reject an
+    obviously wrong file (see _check_report_type)."""
+    try:
+        origin_rows, clean_df = parser(contents, filename or "", *parser_args)
+    except Exception as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
+    _check_report_type(origin_rows, expected_type)
+    return origin_rows, clean_df
+
+
 def _resolve_branch_id(user: User, branch_id: str | None, db: Session) -> str | None:
     if user.branch_id is not None:
         return user.branch_id
@@ -152,13 +166,10 @@ async def import_sales_file(
     branch = _resolve_branch_for_preview(user, branch_id, db)
 
     contents = await file.read()
-    try:
-        origin_rows, clean_df = parse_pos_sale_upload(
-            contents, file.filename or "", branch.sale_date_format if branch else "MDY"
-        )
-    except Exception as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
-    _check_report_type(origin_rows, "sale")
+    origin_rows, clean_df = _parse_or_400(
+        parse_pos_sale_upload, contents, file.filename, "sale",
+        branch.sale_date_format if branch else "MDY",
+    )
 
     return _build_preview(file.filename, origin_rows, clean_df, SALES_OUTPUT_COLUMNS, SALES_VALIDATION_RULES)
 
@@ -175,13 +186,10 @@ async def confirm_sales_file(
     branch = db.get(Branch, resolved_branch_id)
 
     contents = await file.read()
-    try:
-        origin_rows, clean_df = parse_pos_sale_upload(
-            contents, file.filename or "", branch.sale_date_format if branch else "MDY"
-        )
-    except Exception as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
-    _check_report_type(origin_rows, "sale")
+    origin_rows, clean_df = _parse_or_400(
+        parse_pos_sale_upload, contents, file.filename, "sale",
+        branch.sale_date_format if branch else "MDY",
+    )
 
     preview_data = _build_preview(
         file.filename, origin_rows, clean_df, SALES_OUTPUT_COLUMNS, SALES_VALIDATION_RULES
@@ -208,13 +216,10 @@ async def import_inventory_file(
     branch = _resolve_branch_for_preview(user, branch_id, db)
 
     contents = await file.read()
-    try:
-        origin_rows, clean_df = parse_inventory_upload(
-            contents, file.filename or "", branch.inventory_date_format if branch else "MDY"
-        )
-    except Exception as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
-    _check_report_type(origin_rows, "inventory")
+    origin_rows, clean_df = _parse_or_400(
+        parse_inventory_upload, contents, file.filename, "inventory",
+        branch.inventory_date_format if branch else "MDY",
+    )
 
     return _build_preview(
         file.filename, origin_rows, clean_df, INVENTORY_OUTPUT_COLUMNS, INVENTORY_VALIDATION_RULES
@@ -233,13 +238,10 @@ async def confirm_inventory_file(
     branch = db.get(Branch, resolved_branch_id)
 
     contents = await file.read()
-    try:
-        origin_rows, clean_df = parse_inventory_upload(
-            contents, file.filename or "", branch.inventory_date_format if branch else "MDY"
-        )
-    except Exception as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
-    _check_report_type(origin_rows, "inventory")
+    origin_rows, clean_df = _parse_or_400(
+        parse_inventory_upload, contents, file.filename, "inventory",
+        branch.inventory_date_format if branch else "MDY",
+    )
 
     preview_data = _build_preview(
         file.filename, origin_rows, clean_df, INVENTORY_OUTPUT_COLUMNS, INVENTORY_VALIDATION_RULES
@@ -262,11 +264,9 @@ async def import_purchase_file(
     _check_extension(file.filename)
 
     contents = await file.read()
-    try:
-        origin_rows, clean_df = parse_purchase_upload(contents, file.filename or "")
-    except Exception as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
-    _check_report_type(origin_rows, "purchase")
+    origin_rows, clean_df = _parse_or_400(
+        parse_purchase_upload, contents, file.filename, "purchase"
+    )
 
     return _build_preview(
         file.filename, origin_rows, clean_df, PURCHASE_OUTPUT_COLUMNS, PURCHASE_VALIDATION_RULES
@@ -292,11 +292,9 @@ async def confirm_purchase_file(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "purchase_date must be YYYY-MM-DD") from exc
 
     contents = await file.read()
-    try:
-        origin_rows, clean_df = parse_purchase_upload(contents, file.filename or "")
-    except Exception as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
-    _check_report_type(origin_rows, "purchase")
+    origin_rows, clean_df = _parse_or_400(
+        parse_purchase_upload, contents, file.filename, "purchase"
+    )
 
     preview_data = _build_preview(
         file.filename, origin_rows, clean_df, PURCHASE_OUTPUT_COLUMNS, PURCHASE_VALIDATION_RULES
