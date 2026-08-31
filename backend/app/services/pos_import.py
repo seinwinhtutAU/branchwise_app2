@@ -119,6 +119,34 @@ def _is_line_item_row(row: list[str]) -> bool:
     return bool(stock_code) and price is not None and qty is not None
 
 
+def _check_slip_subtotal(
+    mismatches: list[dict],
+    slip_id: str | None,
+    slip_number: str | None,
+    report_date: str | None,
+    slip_line_total: float,
+    slip_expected_total: float | None,
+) -> None:
+    """Record a mismatch when a slip's line items don't sum to its own subtotal row.
+    Called once per slip boundary (the next "Slip Number" line, or end of file)."""
+    if slip_expected_total is None or abs(slip_line_total - slip_expected_total) <= 0.01:
+        return
+    logger.warning(
+        "Slip %s: line items sum to %.2f but subtotal row says %.2f",
+        slip_id, slip_line_total, slip_expected_total,
+    )
+    mismatches.append(
+        {
+            "SlipID": slip_id,
+            "SlipNumber": slip_number,
+            "Date": report_date,
+            "LineTotal": round(slip_line_total, 2),
+            "SubtotalOnSlip": round(slip_expected_total, 2),
+            "Difference": round(slip_line_total - slip_expected_total, 2),
+        }
+    )
+
+
 def parse_pos_sale_export_from_grid(
     rows: list[list[str]], fallback_date_format: str = "MDY"
 ) -> pd.DataFrame:
@@ -165,21 +193,10 @@ def parse_pos_sale_export_from_grid(
             continue
 
         if first == "Slip Number":
-            if slip_expected_total is not None and abs(slip_line_total - slip_expected_total) > 0.01:
-                logger.warning(
-                    "Slip %s: line items sum to %.2f but subtotal row says %.2f",
-                    slip_id, slip_line_total, slip_expected_total,
-                )
-                subtotal_mismatches.append(
-                    {
-                        "SlipID": slip_id,
-                        "SlipNumber": slip_number,
-                        "Date": report_date,
-                        "LineTotal": round(slip_line_total, 2),
-                        "SubtotalOnSlip": round(slip_expected_total, 2),
-                        "Difference": round(slip_line_total - slip_expected_total, 2),
-                    }
-                )
+            _check_slip_subtotal(
+                subtotal_mismatches, slip_id, slip_number, report_date,
+                slip_line_total, slip_expected_total,
+            )
             slip_number = row[2].strip()
             slip_time = row[5].strip()
             slip_id = f"{report_date.replace('-', '')}-{slip_number.zfill(3)}"
@@ -220,21 +237,10 @@ def parse_pos_sale_export_from_grid(
         # Per-slip subtotal row: "<qty_total>,<discount_total>,<amount_total>,<net_amount_total>,..."
         slip_expected_total = parse_number(row[2]) if len(row) > 2 else None
 
-    if slip_expected_total is not None and abs(slip_line_total - slip_expected_total) > 0.01:
-        logger.warning(
-            "Slip %s: line items sum to %.2f but subtotal row says %.2f",
-            slip_id, slip_line_total, slip_expected_total,
-        )
-        subtotal_mismatches.append(
-            {
-                "SlipID": slip_id,
-                "SlipNumber": slip_number,
-                "Date": report_date,
-                "LineTotal": round(slip_line_total, 2),
-                "SubtotalOnSlip": round(slip_expected_total, 2),
-                "Difference": round(slip_line_total - slip_expected_total, 2),
-            }
-        )
+    _check_slip_subtotal(
+        subtotal_mismatches, slip_id, slip_number, report_date,
+        slip_line_total, slip_expected_total,
+    )
 
     df = pd.DataFrame.from_records(records, columns=OUTPUT_COLUMNS)
     df.attrs["origin_indices"] = origin_indices
