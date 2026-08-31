@@ -141,6 +141,16 @@ def _kpi(value: float, previous_value: float) -> dict:
     return {"value": value, "previous_value": previous_value, "delta_pct": delta_pct}
 
 
+def _each_day(start: date, end: date):
+    """Every date in [start, end] — the zero-fill backbone of each daily trend: a
+    day with no sales imported yet should read as an actual 0 on the chart, not
+    silently disappear."""
+    current = start
+    while current <= end:
+        yield current
+        current += timedelta(days=1)
+
+
 def _daily_trend(db: Session, branch_id: str, start: date, end: date) -> list[dict]:
     rows = (
         db.query(Sale.sale_date, func.coalesce(func.sum(SaleLine.net_amount), 0))
@@ -150,15 +160,10 @@ def _daily_trend(db: Session, branch_id: str, start: date, end: date) -> list[di
         .all()
     )
     by_date = {sale_date: float(total) for sale_date, total in rows}
-
-    # Zero-fill every day in the window — a day with no sales imported yet should
-    # read as "no revenue," a real gap in the bar chart, not silently disappear.
-    trend = []
-    current = start
-    while current <= end:
-        trend.append({"date": current.isoformat(), "net_revenue": by_date.get(current, 0.0)})
-        current += timedelta(days=1)
-    return trend
+    return [
+        {"date": day.isoformat(), "net_revenue": by_date.get(day, 0.0)}
+        for day in _each_day(start, end)
+    ]
 
 
 def _top_products(
@@ -216,6 +221,24 @@ def _hour_band_label(hour: int) -> str | None:
     return f"{hour:02d}-{hour + 1:02d}"
 
 
+def _bucket_heatmap(rows, value_key: str) -> list[dict]:
+    """Sum (sale_date, sale_time, value) rows into the weekday × hour-band grid both
+    heatmaps share; a row whose time can't be parsed or falls outside business hours
+    is left out entirely (see _hour_band_label)."""
+    totals: dict[tuple[int, str], float] = {}
+    for sale_date, sale_time, value in rows:
+        hour = _parse_hour(sale_time)
+        band = _hour_band_label(hour) if hour is not None else None
+        if band is None:
+            continue
+        key = (sale_date.weekday(), band)
+        totals[key] = totals.get(key, 0) + value
+    return [
+        {"weekday": weekday, "hour_band": hour_band, value_key: total}
+        for (weekday, hour_band), total in sorted(totals.items())
+    ]
+
+
 def _revenue_heatmap(db: Session, branch_id: str, start: date, end: date) -> list[dict]:
     rows = (
         db.query(Sale.sale_date, Sale.sale_time, SaleLine.net_amount)
@@ -223,18 +246,10 @@ def _revenue_heatmap(db: Session, branch_id: str, start: date, end: date) -> lis
         .filter(Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end)
         .all()
     )
-    totals: dict[tuple[int, str], float] = {}
-    for sale_date, sale_time, net_amount in rows:
-        hour = _parse_hour(sale_time)
-        band = _hour_band_label(hour) if hour is not None else None
-        if band is None:
-            continue
-        key = (sale_date.weekday(), band)
-        totals[key] = totals.get(key, 0.0) + float(net_amount or 0)
-    return [
-        {"weekday": weekday, "hour_band": hour_band, "net_revenue": total}
-        for (weekday, hour_band), total in sorted(totals.items())
-    ]
+    return _bucket_heatmap(
+        ((sale_date, sale_time, float(net_amount or 0)) for sale_date, sale_time, net_amount in rows),
+        "net_revenue",
+    )
 
 
 def build_revenue_dashboard(
@@ -391,8 +406,7 @@ def _cost_totals_and_products(
     # as None ("—" on the frontend) rather than a misleading 0, same rule the
     # per-product breakdown above already follows.
     trend = []
-    current = start
-    while current <= end:
+    for current in _each_day(start, end):
         day_bucket = per_day.get(current, {"net_revenue": 0.0, "estimated_cost": 0.0, "priced_qty": 0.0})
         if day_bucket["net_revenue"] == 0:
             day_cost: float | None = 0.0
@@ -411,7 +425,6 @@ def _cost_totals_and_products(
                 "margin_pct": day_margin_pct,
             }
         )
-        current += timedelta(days=1)
 
     return net_revenue_total, cogs_total, len(transaction_ids), products[:TOP_PRODUCTS_LIMIT], trend
 
@@ -668,18 +681,10 @@ def _footfall_heatmap(db: Session, branch_id: str, start: date, end: date) -> li
         .filter(Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end)
         .all()
     )
-    totals: dict[tuple[int, str], int] = {}
-    for sale_date, sale_time in rows:
-        hour = _parse_hour(sale_time)
-        band = _hour_band_label(hour) if hour is not None else None
-        if band is None:
-            continue
-        key = (sale_date.weekday(), band)
-        totals[key] = totals.get(key, 0) + 1
-    return [
-        {"weekday": weekday, "hour_band": hour_band, "transaction_count": count}
-        for (weekday, hour_band), count in sorted(totals.items())
-    ]
+    return _bucket_heatmap(
+        ((sale_date, sale_time, 1) for sale_date, sale_time in rows),
+        "transaction_count",
+    )
 
 
 def _transaction_count_trend(db: Session, branch_id: str, start: date, end: date) -> list[dict]:
@@ -693,12 +698,10 @@ def _transaction_count_trend(db: Session, branch_id: str, start: date, end: date
         .all()
     )
     by_date = {sale_date: int(count) for sale_date, count in rows}
-    trend = []
-    current = start
-    while current <= end:
-        trend.append({"date": current.isoformat(), "transaction_count": by_date.get(current, 0)})
-        current += timedelta(days=1)
-    return trend
+    return [
+        {"date": day.isoformat(), "transaction_count": by_date.get(day, 0)}
+        for day in _each_day(start, end)
+    ]
 
 
 def build_customer_dashboard(
