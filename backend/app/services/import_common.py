@@ -153,7 +153,10 @@ def validate_rows(df: pd.DataFrame, rules: list[NumericRule]) -> list[list[dict]
     can't be zero — enter at least 1"), not just the raw column name.
     """
     issues: list[list[dict]] = []
-    for _, row in df.iterrows():
+    # Plain dicts rather than df.iterrows() — iterrows materializes a Series per
+    # row, which is several times slower across the thousands of rows a Warning
+    # page load or import preview can push through here.
+    for row in df.to_dict(orient="records"):
         failed: list[dict] = []
         for column, minimum in rules:
             value = row.get(column)
