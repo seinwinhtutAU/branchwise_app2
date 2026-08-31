@@ -60,7 +60,8 @@ def persist_inventory(
     # line, so this is left unset rather than passed as None.
     printed_at = df.attrs.get("printed_at")
 
-    for _, row in df.iterrows():
+    # Plain dicts, not iterrows() — same reasoning as validate_rows in import_common.
+    for row in df.to_dict(orient="records"):
         stock_level = StockLevel(
             branch_id=branch_id,
             import_batch_id=batch.id,

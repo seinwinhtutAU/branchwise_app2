@@ -73,7 +73,8 @@ def persist_purchases(
     db.add(purchase)
     summary["purchase_id"] = purchase.id
 
-    for _, row in df.iterrows():
+    # Plain dicts, not iterrows() — same reasoning as validate_rows in import_common.
+    for row in df.to_dict(orient="records"):
         db.add(
             PurchaseLine(
                 purchase_id=purchase.id,

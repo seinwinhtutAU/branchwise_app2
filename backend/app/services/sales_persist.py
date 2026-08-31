@@ -79,7 +79,8 @@ def persist_sales(
         db.add(sale)
         summary["sales_created"] += 1
 
-        for _, row in group.iterrows():
+        # Plain dicts, not iterrows() — same reasoning as validate_rows in import_common.
+        for row in group.to_dict(orient="records"):
             db.add(
                 SaleLine(
                     sale_id=sale.id,
