@@ -197,6 +197,32 @@ def test_dashboard_top_products_ordered_by_revenue(authed_client: TestClient, db
     response = authed_client.get("/api/dashboard/revenue?period=today")
     top_products = response.json()["top_products"]
     assert [p["stock_code"] for p in top_products] == ["SKU-B", "SKU-A"]
+    assert top_products[0]["avg_selling_price"] == 1500.0
+    assert top_products[1]["avg_selling_price"] == 500.0
+
+
+def test_dashboard_top_products_selling_price_is_qty_weighted(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    # 1 unit at 100, 9 units at 200 -> qty-weighted average should sit close to 200,
+    # not the simple average of the two prices (150).
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-1",
+        sale_date=today, sale_time="10:00", qty=1, net_amount=100,
+    )
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-2",
+        sale_date=today, sale_time="11:00", qty=9, net_amount=1800,
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/revenue?period=today")
+    top_products = response.json()["top_products"]
+    assert top_products[0]["avg_selling_price"] == 190.0
 
 
 def test_dashboard_heatmap_buckets_by_weekday_and_hour_band(
@@ -356,9 +382,14 @@ def test_cost_dashboard_uses_point_in_time_price_for_cogs_and_margin(
     assert body["products"][0]["stock_code"] == "SKU-1"
     assert body["products"][0]["estimated_cost"] == 200.0
     assert body["products"][0]["estimated_margin"] == 100.0
+    assert len(body["trend"]) == 1
+    assert body["trend"][0]["date"] == today.isoformat()
+    assert body["trend"][0]["net_revenue"] == 300.0
+    assert body["trend"][0]["estimated_cost"] == 200.0
+    assert round(body["trend"][0]["margin_pct"], 2) == 33.33
 
 
-def test_cost_dashboard_product_with_no_priced_lines_has_null_cost(
+def test_cost_dashboard_product_with_no_priced_lines_is_excluded_from_ranking(
     authed_client: TestClient, db_session: Session
 ):
     branch = _make_branch(db_session)
@@ -374,8 +405,73 @@ def test_cost_dashboard_product_with_no_priced_lines_has_null_cost(
     response = authed_client.get("/api/dashboard/cost?period=today")
     body = response.json()
     assert body["estimated_cogs"]["value"] == 0.0
-    assert body["products"][0]["estimated_cost"] is None
-    assert body["products"][0]["estimated_margin"] is None
+    # A product with no cost estimate can't be ranked by profit, so the top-profit
+    # products list simply excludes it rather than showing a "—" entry.
+    assert body["products"] == []
+    assert body["trend"][0]["net_revenue"] == 100.0
+    assert body["trend"][0]["estimated_cost"] is None
+    assert body["trend"][0]["margin_pct"] is None
+
+
+def test_cost_dashboard_products_ranked_by_estimated_margin_not_revenue(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    high_revenue_low_margin = _make_product(db_session, "SKU-A", description="High revenue, thin margin")
+    low_revenue_high_margin = _make_product(db_session, "SKU-B", description="Low revenue, fat margin")
+    today = datetime.date.today()
+    _make_purchase(
+        db_session, branch=branch, product=high_revenue_low_margin,
+        purchase_date=today - datetime.timedelta(days=1), qty=100, buying_price=95,
+    )
+    _make_purchase(
+        db_session, branch=branch, product=low_revenue_high_margin,
+        purchase_date=today - datetime.timedelta(days=1), qty=100, buying_price=10,
+    )
+    # SKU-A: revenue 1000, cost 950, margin 50.
+    _make_sale(
+        db_session, branch=branch, product=high_revenue_low_margin, slip_id="slip-1",
+        sale_date=today, sale_time="10:00", qty=10, net_amount=1000,
+    )
+    # SKU-B: revenue 200, cost 100, margin 100 — smaller revenue, bigger profit.
+    _make_sale(
+        db_session, branch=branch, product=low_revenue_high_margin, slip_id="slip-2",
+        sale_date=today, sale_time="10:00", qty=10, net_amount=200,
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/cost?period=today")
+    body = response.json()
+    assert [p["stock_code"] for p in body["products"]] == ["SKU-B", "SKU-A"]
+    assert body["products"][0]["estimated_margin"] == 100.0
+    assert body["products"][1]["estimated_margin"] == 50.0
+
+
+def test_cost_dashboard_trend_zero_fills_days_with_no_sales(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    yesterday = today - datetime.timedelta(days=1)
+    _make_purchase(db_session, branch=branch, product=product, purchase_date=yesterday, qty=10, buying_price=100)
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-1",
+        sale_date=today, sale_time="10:00", qty=2, net_amount=300,
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/cost?period=7d")
+    assert response.status_code == 200
+    trend = {row["date"]: row for row in response.json()["trend"]}
+    assert trend[today.isoformat()]["net_revenue"] == 300.0
+    assert trend[today.isoformat()]["estimated_cost"] == 200.0
+    no_sales_day = (today - datetime.timedelta(days=3)).isoformat()
+    assert trend[no_sales_day]["net_revenue"] == 0.0
+    assert trend[no_sales_day]["estimated_cost"] == 0.0
+    assert trend[no_sales_day]["margin_pct"] is None
 
 
 def test_cost_dashboard_purchase_warnings_scoped_to_period(
@@ -423,11 +519,41 @@ def test_inventory_dashboard_stock_value_and_low_stock_status(
     assert body["sku_count"] == 2
     assert body["estimated_stock_value"] == 3 * 50 + 100 * 20
     assert body["critical_count"] == 1
-    categories = {row["category"]: row["value"] for row in body["stock_value_by_category"]}
-    assert categories == {"Snacks": 150.0, "Drinks": 2000.0}
+    categories = {row["category"]: row["qty"] for row in body["stock_qty_by_category"]}
+    assert categories == {"Snacks": 3.0, "Drinks": 100.0}
     low_stock_codes = {item["stock_code"] for item in body["low_stock_items"]}
     assert low_stock_codes == {"SKU-A"}
     assert body["low_stock_items"][0]["status"] == "Critical"
+    # SKU-B has never sold at all -> flagged as dead stock (still on hand, no sales in
+    # the dead-stock window); SKU-A sells daily, so it's the opposite of dead stock.
+    assert body["dead_stock_count"] == 1
+    dead_stock_codes = {item["stock_code"] for item in body["dead_stock_items"]}
+    assert dead_stock_codes == {"SKU-B"}
+    assert body["dead_stock_items"][0]["category"] == "Drinks"
+
+
+def test_inventory_dashboard_dead_stock_excludes_sales_within_the_window(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    now = datetime.datetime.now()
+    _make_stock_level(db_session, branch=branch, product=product, on_hand_qty=10, buying_price=10, snapshot_at=now)
+    # A sale 60 days ago: outside the 30-day velocity window (no computable days-left,
+    # so not "low stock"), but inside the 90-day dead-stock window -> not dead stock.
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-60-days-ago",
+        sale_date=datetime.date.today() - datetime.timedelta(days=60),
+        sale_time="10:00", qty=1, net_amount=100,
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/inventory")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dead_stock_count"] == 0
+    assert body["low_stock_items"] == []
 
 
 def test_inventory_dashboard_requires_retail_branch_for_admin(

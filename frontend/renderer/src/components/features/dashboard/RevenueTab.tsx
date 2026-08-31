@@ -34,6 +34,7 @@ interface TopProduct {
   description: string
   qty: number
   net_revenue: number
+  avg_selling_price: number | null
 }
 
 interface HeatmapCell {
@@ -71,6 +72,7 @@ function TopProductsTable({ products }: { products: TopProduct[] }): React.JSX.E
           <Th>Stock Code</Th>
           <Th>Description</Th>
           <Th className="text-right">Qty</Th>
+          <Th className="text-right">Selling Price</Th>
           <Th className="text-right">Net Revenue</Th>
         </Tr>
       </Thead>
@@ -81,6 +83,9 @@ function TopProductsTable({ products }: { products: TopProduct[] }): React.JSX.E
             <Td className="font-mono text-xs whitespace-nowrap">{product.stock_code}</Td>
             <Td>{product.description}</Td>
             <Td className="text-right tabular-nums">{product.qty.toLocaleString()}</Td>
+            <Td className="text-right tabular-nums">
+              {product.avg_selling_price === null ? '—' : formatMoney(product.avg_selling_price)}
+            </Td>
             <Td className="text-right tabular-nums">{formatMoney(product.net_revenue)}</Td>
           </Tr>
         ))}

@@ -7,8 +7,9 @@ import { CardHeader } from '@renderer/components/ui/Card'
 import { EmptyState } from '@renderer/components/ui/EmptyState'
 import { Input } from '@renderer/components/ui/Input'
 import { Select } from '@renderer/components/ui/Select'
-import { DashboardIcon, DollarIcon } from '@renderer/components/ui/icons'
+import { DashboardIcon } from '@renderer/components/ui/icons'
 import type { Profile } from '@renderer/components/features/types'
+import { CostTab } from '@renderer/components/features/dashboard/CostTab'
 import { CustomerTab } from '@renderer/components/features/dashboard/CustomerTab'
 import { InventoryTab } from '@renderer/components/features/dashboard/InventoryTab'
 import { RevenueTab } from '@renderer/components/features/dashboard/RevenueTab'
@@ -108,7 +109,7 @@ export function DashboardPage({ session, profile, branchOptions, onViewWarnings 
               </Select>
             </div>
           )}
-          {activeTab !== 'inventory' && activeTab !== 'cost' && (
+          {activeTab !== 'inventory' && (
             <>
               <div className="w-44">
                 <Select
@@ -168,13 +169,14 @@ export function DashboardPage({ session, profile, branchOptions, onViewWarnings 
         />
       )}
       {!waitingOnBranch && activeTab === 'cost' && (
-        // Kept as an empty placeholder for now rather than the real (already-built)
-        // CostTab — see CostTab.tsx, which is untouched and ready to swap back in here
-        // whenever Cost is ready to ship.
-        <EmptyState
-          icon={<DollarIcon />}
-          title="Coming soon"
-          description="Cost and margin estimates for this branch aren't shown here yet."
+        <CostTab
+          session={session}
+          branchId={branchId}
+          period={period}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          canLoad={canLoad}
+          onViewWarnings={onViewWarnings}
         />
       )}
       {!waitingOnBranch && activeTab === 'inventory' && (

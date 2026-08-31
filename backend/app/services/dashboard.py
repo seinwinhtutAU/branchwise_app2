@@ -7,7 +7,6 @@ the row-level list endpoints (GET /api/sales etc.) use for admin's "every branch
 view, since that view doesn't apply here at all.
 """
 
-import statistics
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
@@ -53,6 +52,12 @@ CRITICAL_DAYS_OF_STOCK = 3
 LOW_DAYS_OF_STOCK = 7
 WATCH_DAYS_OF_STOCK = 14
 LOW_STOCK_ITEMS_LIMIT = 50
+
+# Dead stock uses its own, longer window than the days-of-stock velocity above — 30
+# days with no sale is routine for a slow-but-fine product; 90 days with no sale at all
+# (while still sitting on the shelf) is a much stronger "this isn't moving" signal.
+DEAD_STOCK_WINDOW_DAYS = 90
+DEAD_STOCK_ITEMS_LIMIT = 50
 
 # sale_time is free text (see app/models/sale.py) — whatever the POS export happened
 # to print, not a validated time type — so parsing is best-effort: try common shapes,
@@ -165,6 +170,10 @@ def _top_products(
             Product.description,
             func.coalesce(func.sum(SaleLine.qty), 0),
             func.coalesce(func.sum(SaleLine.net_amount), 0),
+            # Qty-weighted, not a plain average of the line-level prices — a product
+            # sold 1 unit at one price and 100 units at another should read close to
+            # that second price, not halfway between the two.
+            func.coalesce(func.sum(SaleLine.selling_price * SaleLine.qty), 0),
         )
         .join(SaleLine, SaleLine.product_id == Product.id)
         .join(Sale, SaleLine.sale_id == Sale.id)
@@ -175,8 +184,14 @@ def _top_products(
         .all()
     )
     return [
-        {"stock_code": code, "description": description, "qty": float(qty), "net_revenue": float(net)}
-        for code, description, qty, net in rows
+        {
+            "stock_code": code,
+            "description": description,
+            "qty": float(qty),
+            "net_revenue": float(net),
+            "avg_selling_price": float(weighted_price) / float(qty) if qty else None,
+        }
+        for code, description, qty, net, weighted_price in rows
     ]
 
 
@@ -270,7 +285,7 @@ def build_revenue_dashboard(
 
 def _cost_totals_and_products(
     db: Session, branch_id: str, start: date, end: date
-) -> tuple[float, float, int, list[dict]]:
+) -> tuple[float, float, int, list[dict], list[dict]]:
     """One pass over the period's sale lines that produces both the branch-wide
     COGS/revenue totals and the per-product cost breakdown, reusing the exact same
     point-in-time cost lookup (app/services/pricing.py) the Sale tab and Warning page
@@ -294,6 +309,7 @@ def _cost_totals_and_products(
     cogs_total = 0.0
     transaction_ids: set[str] = set()
     per_product: dict[str, dict] = {}
+    per_day: dict[date, dict] = {}
 
     for sale_line, sale, product in rows:
         net_amount = float(sale_line.net_amount or 0)
@@ -331,6 +347,14 @@ def _cost_totals_and_products(
             bucket["estimated_cost"] += cost
             bucket["priced_qty"] += qty
 
+        day_bucket = per_day.setdefault(
+            sale.sale_date, {"net_revenue": 0.0, "estimated_cost": 0.0, "priced_qty": 0.0}
+        )
+        day_bucket["net_revenue"] += net_amount
+        if cost is not None:
+            day_bucket["estimated_cost"] += cost
+            day_bucket["priced_qty"] += qty
+
     products = []
     for bucket in per_product.values():
         # A product with zero priced lines has no cost estimate at all — None (shown as
@@ -354,8 +378,42 @@ def _cost_totals_and_products(
                 "margin_pct": margin_pct,
             }
         )
-    products.sort(key=lambda p: p["net_revenue"], reverse=True)
-    return net_revenue_total, cogs_total, len(transaction_ids), products[:TOP_PRODUCTS_LIMIT]
+    # Ranked by estimated profit, not revenue — a high-volume, thin-margin product
+    # should not crowd out a lower-revenue product that's actually more profitable. A
+    # product with no cost estimate at all can't be ranked by profit, so it's left out
+    # of this list entirely rather than sorted as if its margin were 0.
+    products = [p for p in products if p["estimated_margin"] is not None]
+    products.sort(key=lambda p: p["estimated_margin"], reverse=True)
+
+    # Zero-fill every day in the window, same convention _daily_trend uses — a day
+    # with no sales reads as an actual 0, not a gap. A day with sales but no priced
+    # line at all (no purchase/stock record to cost it against) reports cost/margin
+    # as None ("—" on the frontend) rather than a misleading 0, same rule the
+    # per-product breakdown above already follows.
+    trend = []
+    current = start
+    while current <= end:
+        day_bucket = per_day.get(current, {"net_revenue": 0.0, "estimated_cost": 0.0, "priced_qty": 0.0})
+        if day_bucket["net_revenue"] == 0:
+            day_cost: float | None = 0.0
+            day_margin_pct = None
+        elif day_bucket["priced_qty"] > 0:
+            day_cost = day_bucket["estimated_cost"]
+            day_margin_pct = (day_bucket["net_revenue"] - day_cost) / day_bucket["net_revenue"] * 100
+        else:
+            day_cost = None
+            day_margin_pct = None
+        trend.append(
+            {
+                "date": current.isoformat(),
+                "net_revenue": day_bucket["net_revenue"],
+                "estimated_cost": day_cost,
+                "margin_pct": day_margin_pct,
+            }
+        )
+        current += timedelta(days=1)
+
+    return net_revenue_total, cogs_total, len(transaction_ids), products[:TOP_PRODUCTS_LIMIT], trend
 
 
 def build_cost_dashboard(
@@ -367,10 +425,10 @@ def build_cost_dashboard(
     date_to: date | None = None,
 ) -> dict:
     period_range = resolve_period(period, date_from=date_from, date_to=date_to)
-    net_revenue, cogs, transaction_count, products = _cost_totals_and_products(
+    net_revenue, cogs, transaction_count, products, trend = _cost_totals_and_products(
         db, branch_id, period_range.start, period_range.end
     )
-    prev_net_revenue, prev_cogs, prev_transaction_count, _ = _cost_totals_and_products(
+    prev_net_revenue, prev_cogs, prev_transaction_count, _, _ = _cost_totals_and_products(
         db, branch_id, period_range.previous_start, period_range.previous_end
     )
 
@@ -403,6 +461,7 @@ def build_cost_dashboard(
         "estimated_cogs": _kpi(cogs, prev_cogs),
         "estimated_gross_margin_pct": _kpi(gross_margin_pct, prev_gross_margin_pct),
         "estimated_margin_per_basket": _kpi(margin_per_basket, prev_margin_per_basket),
+        "trend": trend,
         "products": products,
         "purchase_warnings": purchase_warnings,
     }
@@ -472,11 +531,14 @@ def build_inventory_dashboard(db: Session, branch_id: str, branch_name: str) -> 
     rows = _latest_stock_levels(db, branch_id)
     product_ids = {product.id for _, product in rows}
     velocity = _sales_velocity(db, branch_id, product_ids)
+    # A second, longer-window velocity check purely to decide "has this sold at all
+    # recently" for dead stock — see DEAD_STOCK_WINDOW_DAYS.
+    dead_stock_velocity = _sales_velocity(db, branch_id, product_ids, window_days=DEAD_STOCK_WINDOW_DAYS)
 
     estimated_stock_value = 0.0
-    value_by_category: dict[str, float] = {}
+    qty_by_category: dict[str, float] = {}
     low_stock_items: list[dict] = []
-    days_left_values: list[float] = []
+    dead_stock_items: list[dict] = []
     status_counts = {"Critical": 0, "Low": 0, "Watch": 0}
     latest_snapshot_at = None
 
@@ -486,15 +548,18 @@ def build_inventory_dashboard(db: Session, branch_id: str, branch_name: str) -> 
         value = on_hand_qty * buying_price if buying_price is not None else 0.0
         estimated_stock_value += value
         category = product.group_name or "Uncategorized"
-        value_by_category[category] = value_by_category.get(category, 0.0) + value
+        # Quantity, not value, for the per-category breakdown — it comes straight from
+        # the inventory import every time, unlike value, which silently reads as 0 for
+        # any product missing a buying_price on its latest snapshot (see
+        # estimated_stock_value above) and would otherwise make a category look
+        # artificially small.
+        qty_by_category[category] = qty_by_category.get(category, 0.0) + on_hand_qty
 
         if latest_snapshot_at is None or stock_level.snapshot_at > latest_snapshot_at:
             latest_snapshot_at = stock_level.snapshot_at
 
         daily_velocity = velocity.get(product.id, 0.0)
         days_left = on_hand_qty / daily_velocity if daily_velocity > 0 else None
-        if days_left is not None:
-            days_left_values.append(days_left)
         status = _stock_status(days_left)
         if status:
             status_counts[status] += 1
@@ -508,10 +573,23 @@ def build_inventory_dashboard(db: Session, branch_id: str, branch_name: str) -> 
                 }
             )
 
+        # Dead stock: still on the shelf, but hasn't sold at all in DEAD_STOCK_WINDOW_DAYS
+        # — on_hand_qty <= 0 is excluded since there's nothing sitting there to flag.
+        if on_hand_qty > 0 and dead_stock_velocity.get(product.id, 0.0) == 0.0:
+            dead_stock_items.append(
+                {
+                    "stock_code": product.stock_code,
+                    "description": product.description,
+                    "on_hand_qty": on_hand_qty,
+                    "category": category,
+                }
+            )
+
     low_stock_items.sort(key=lambda item: item["days_left"])
-    stock_value_by_category = sorted(
-        ({"category": category, "value": value} for category, value in value_by_category.items()),
-        key=lambda row: row["value"],
+    dead_stock_items.sort(key=lambda item: item["on_hand_qty"], reverse=True)
+    stock_qty_by_category = sorted(
+        ({"category": category, "qty": qty} for category, qty in qty_by_category.items()),
+        key=lambda row: row["qty"],
         reverse=True,
     )
 
@@ -542,9 +620,10 @@ def build_inventory_dashboard(db: Session, branch_id: str, branch_name: str) -> 
         "low_count": status_counts["Low"],
         "watch_count": status_counts["Watch"],
         "estimated_stock_value": estimated_stock_value,
-        "median_days_of_stock": statistics.median(days_left_values) if days_left_values else None,
-        "stock_value_by_category": stock_value_by_category,
+        "dead_stock_count": len(dead_stock_items),
+        "stock_qty_by_category": stock_qty_by_category,
         "low_stock_items": low_stock_items[:LOW_STOCK_ITEMS_LIMIT],
+        "dead_stock_items": dead_stock_items[:DEAD_STOCK_ITEMS_LIMIT],
         "warnings": warnings,
     }
 

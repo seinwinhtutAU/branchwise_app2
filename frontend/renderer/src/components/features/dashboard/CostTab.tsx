@@ -7,27 +7,40 @@ import { Card, CardHeader } from '@renderer/components/ui/Card'
 import { EmptyState } from '@renderer/components/ui/EmptyState'
 import { Skeleton } from '@renderer/components/ui/Skeleton'
 import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
-import { DashboardIcon, DollarIcon, WarningIcon } from '@renderer/components/ui/icons'
+import { DashboardIcon, ScaleIcon } from '@renderer/components/ui/icons'
 import {
+  ChartViewToggle,
   StatTile,
+  TrendChart,
+  TwoLineTrendChart,
   WarningsTile,
   formatMoney,
   formatPercent,
   periodQueryParams,
   previousPeriodLabel,
+  type ChartView,
   type KpiValue,
   type PeriodKey,
   type SaleWarningRow
 } from './shared'
+
+interface CostTrendPoint {
+  date: string
+  net_revenue: number
+  estimated_cost: number | null
+  margin_pct: number | null
+}
 
 interface CostProduct {
   stock_code: string
   description: string
   qty: number
   net_revenue: number
-  estimated_cost: number | null
-  estimated_margin: number | null
-  margin_pct: number | null
+  // Never null here — a product with no cost estimate at all is excluded from this
+  // ranking server-side (see build_cost_dashboard), since it can't be ranked by profit.
+  estimated_cost: number
+  estimated_margin: number
+  margin_pct: number
 }
 
 interface CostDashboardData {
@@ -35,17 +48,18 @@ interface CostDashboardData {
   estimated_cogs: KpiValue
   estimated_gross_margin_pct: KpiValue
   estimated_margin_per_basket: KpiValue
+  trend: CostTrendPoint[]
   products: CostProduct[]
   purchase_warnings: SaleWarningRow[]
 }
 
-function CostProductsTable({ products }: { products: CostProduct[] }): React.JSX.Element {
+function TopProfitProductsTable({ products }: { products: CostProduct[] }): React.JSX.Element {
   if (products.length === 0) {
     return (
       <EmptyState
-        icon={<DollarIcon />}
-        title="No sales in this period"
-        description="Cost and margin by product will appear once there's sales data for the selected period."
+        icon={<ScaleIcon />}
+        title="No priced products in this period"
+        description="Top profit products will appear once there's sales data with a purchase or stock record to estimate cost against."
       />
     )
   }
@@ -69,15 +83,11 @@ function CostProductsTable({ products }: { products: CostProduct[] }): React.JSX
             <Td className="font-mono text-xs whitespace-nowrap">{product.stock_code}</Td>
             <Td>{product.description}</Td>
             <Td className="text-right tabular-nums">{formatMoney(product.net_revenue)}</Td>
-            <Td className="text-right tabular-nums">
-              {product.estimated_cost === null ? '—' : formatMoney(product.estimated_cost)}
+            <Td className="text-right tabular-nums">{formatMoney(product.estimated_cost)}</Td>
+            <Td className="text-right tabular-nums font-medium text-text-primary">
+              {formatMoney(product.estimated_margin)}
             </Td>
-            <Td className="text-right tabular-nums">
-              {product.estimated_margin === null ? '—' : formatMoney(product.estimated_margin)}
-            </Td>
-            <Td className="text-right tabular-nums">
-              {product.margin_pct === null ? '—' : formatPercent(product.margin_pct)}
-            </Td>
+            <Td className="text-right tabular-nums">{formatPercent(product.margin_pct)}</Td>
           </Tr>
         ))}
       </Tbody>
@@ -99,6 +109,7 @@ export function CostTab({ session, branchId, period, dateFrom, dateTo, canLoad, 
   const showToast = useToast()
   const [data, setData] = useState<CostDashboardData | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
+  const [marginTrendView, setMarginTrendView] = useState<ChartView>('line')
 
   async function load(): Promise<void> {
     if (!canLoad) return
@@ -151,21 +162,14 @@ export function CostTab({ session, branchId, period, dateFrom, dateTo, canLoad, 
           <Skeleton className="h-24" />
         </div>
         <Skeleton className="h-48" />
+        <Skeleton className="h-48" />
+        <Skeleton className="h-48" />
       </div>
     )
   }
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex gap-3 rounded-lg bg-warning-subtle p-4">
-        <WarningIcon className="w-5 h-5 shrink-0 mt-0.5 text-warning" />
-        <p className="text-sm text-text-secondary leading-relaxed">
-          <span className="font-medium text-text-primary">Every number on this tab is an estimate</span>, built from
-          whichever purchase record or stock count was on file as of each sale — not a guaranteed-accurate cost
-          accounting figure. A product with no priced sale lines shows "—" rather than a misleading 0.
-        </p>
-      </div>
-
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatTile
           label="Estimated Cost of Goods Sold"
@@ -187,13 +191,44 @@ export function CostTab({ session, branchId, period, dateFrom, dateTo, canLoad, 
         />
       </div>
 
+      <Card>
+        <CardHeader
+          title="Gross margin trend"
+          description="Estimated gross margin % by day over the selected period."
+          action={<ChartViewToggle view={marginTrendView} onChange={setMarginTrendView} />}
+        />
+        <TrendChart
+          points={data.trend}
+          getValue={(p) => p.margin_pct ?? 0}
+          formatValue={formatPercent}
+          ariaLabel="Daily estimated gross margin percentage"
+          view={marginTrendView}
+        />
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Revenue vs. cost per day"
+          description="The gap between the two lines is the day's estimated margin."
+        />
+        <TwoLineTrendChart
+          points={data.trend}
+          getPrimaryValue={(p) => p.net_revenue}
+          getSecondaryValue={(p) => p.estimated_cost ?? 0}
+          primaryLabel="Net Revenue"
+          secondaryLabel="Est. Cost"
+          formatValue={formatMoney}
+          ariaLabel="Daily net revenue and estimated cost"
+        />
+      </Card>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <Card className="lg:col-span-2">
           <CardHeader
-            title="Cost & margin by product"
-            description="Same top products as Revenue, viewed through a cost lens."
+            title="Top profit products"
+            description="Ranked by estimated Ks profit, not revenue — the products actually worth pushing more."
           />
-          <CostProductsTable products={data.products} />
+          <TopProfitProductsTable products={data.products} />
         </Card>
         <Card>
           <CardHeader title="Purchase data quality" description="Bad values on purchase lines in the selected period." />

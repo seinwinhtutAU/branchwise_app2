@@ -241,7 +241,7 @@ export function TrendChart<T extends { date: string }>({
                     TREND_CHART_HEIGHT - y,
                     4
                   )}
-                  className={cn(hoverIndex === i ? 'fill-brand' : 'fill-brand/75')}
+                  className={cn('fill-brand', hoverIndex === i ? 'opacity-100' : 'opacity-75')}
                 />
               ) : (
                 (hoverIndex === i || i === points.length - 1) && (
@@ -261,6 +261,7 @@ export function TrendChart<T extends { date: string }>({
                 width={slotWidth}
                 height={TREND_CHART_HEIGHT}
                 fill="transparent"
+                className={cn('outline-none rounded-sm', hoverIndex === i && 'ring-2 ring-brand')}
                 tabIndex={0}
                 role="button"
                 aria-label={`${formatShortDate(point.date, true)}: ${formatValue(value)}`}
@@ -292,6 +293,135 @@ export function TrendChart<T extends { date: string }>({
           <div className="text-text-muted">{formatShortDate(hovered.date, true)}</div>
         </div>
       )}
+    </div>
+  )
+}
+
+// Two overlaid daily lines sharing one axis (both series are the same unit, so this
+// never becomes a dual-axis chart) — the gap between them is the thing to read, e.g.
+// net revenue vs. estimated cost, where the vertical distance between the two lines
+// at any point is the margin. Categorical, not magnitude, so each line gets a fixed
+// color rather than the sequential single-hue ramp WeekdayHourHeatmap uses; the
+// secondary line is also dashed so the two are distinguishable without relying on
+// color alone, and a legend names them since there are 2 series (dataviz
+// color-formula.md).
+export function TwoLineTrendChart<T extends { date: string }>({
+  points,
+  getPrimaryValue,
+  getSecondaryValue,
+  primaryLabel,
+  secondaryLabel,
+  formatValue,
+  ariaLabel
+}: {
+  points: T[]
+  getPrimaryValue: (point: T) => number
+  getSecondaryValue: (point: T) => number
+  primaryLabel: string
+  secondaryLabel: string
+  formatValue: (value: number) => string
+  ariaLabel: string
+}): React.JSX.Element {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  if (points.length === 0) {
+    return <p className="text-sm text-text-muted">No data for this period.</p>
+  }
+
+  const slotWidth = TREND_CHART_WIDTH / points.length
+  const maxValue = Math.max(...points.map(getPrimaryValue), ...points.map(getSecondaryValue), 0)
+  const labelIndices = trendLabelIndices(points.length)
+  const hovered = hoverIndex !== null ? points[hoverIndex] : null
+
+  function yFor(value: number): number {
+    return maxValue > 0 ? TREND_CHART_HEIGHT - (Math.max(0, value) / maxValue) * (TREND_CHART_HEIGHT - 8) : TREND_CHART_HEIGHT
+  }
+  const centerX = (i: number): number => i * slotWidth + slotWidth / 2
+  const primaryPath = points.map((point, i) => `${i === 0 ? 'M' : 'L'}${centerX(i)},${yFor(getPrimaryValue(point))}`).join(' ')
+  const secondaryPath = points.map((point, i) => `${i === 0 ? 'M' : 'L'}${centerX(i)},${yFor(getSecondaryValue(point))}`).join(' ')
+
+  return (
+    <div className="relative">
+      <svg
+        viewBox={`0 0 ${TREND_CHART_WIDTH} ${TREND_CHART_HEIGHT + 22}`}
+        className="w-full"
+        role="img"
+        aria-label={ariaLabel}
+      >
+        <line
+          x1={0}
+          y1={TREND_CHART_HEIGHT}
+          x2={TREND_CHART_WIDTH}
+          y2={TREND_CHART_HEIGHT}
+          stroke="var(--color-border)"
+          strokeWidth={1}
+        />
+        <path d={secondaryPath} fill="none" className="stroke-text-disabled" strokeWidth={2} strokeDasharray="4 3" strokeLinecap="round" strokeLinejoin="round" />
+        <path d={primaryPath} fill="none" className="stroke-brand" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+        {points.map((point, i) => {
+          const primaryY = yFor(getPrimaryValue(point))
+          const secondaryY = yFor(getSecondaryValue(point))
+          const showDots = hoverIndex === i || i === points.length - 1
+          return (
+            <g key={point.date}>
+              {showDots && (
+                <>
+                  <circle cx={centerX(i)} cy={secondaryY} r={hoverIndex === i ? 4 : 3} className="fill-text-disabled" stroke="var(--color-bg-base)" strokeWidth={2} />
+                  <circle cx={centerX(i)} cy={primaryY} r={hoverIndex === i ? 4 : 3} className="fill-brand" stroke="var(--color-bg-base)" strokeWidth={2} />
+                </>
+              )}
+              <rect
+                x={i * slotWidth}
+                y={0}
+                width={slotWidth}
+                height={TREND_CHART_HEIGHT}
+                fill="transparent"
+                className={cn('outline-none rounded-sm', hoverIndex === i && 'ring-2 ring-brand')}
+                tabIndex={0}
+                role="button"
+                aria-label={`${formatShortDate(point.date, true)}: ${primaryLabel} ${formatValue(getPrimaryValue(point))}, ${secondaryLabel} ${formatValue(getSecondaryValue(point))}`}
+                onMouseEnter={() => setHoverIndex(i)}
+                onMouseLeave={() => setHoverIndex((current) => (current === i ? null : current))}
+                onFocus={() => setHoverIndex(i)}
+                onBlur={() => setHoverIndex((current) => (current === i ? null : current))}
+              />
+              {labelIndices.has(i) && (
+                <text
+                  x={centerX(i)}
+                  y={TREND_CHART_HEIGHT + 16}
+                  textAnchor="middle"
+                  className="fill-text-muted text-[10px]"
+                >
+                  {formatShortDate(point.date)}
+                </text>
+              )}
+            </g>
+          )
+        })}
+      </svg>
+      {hovered && (
+        <div
+          className="pointer-events-none absolute top-0 -translate-x-1/2 -translate-y-full rounded-md border border-border bg-bg-base px-2.5 py-1.5 text-xs shadow-md whitespace-nowrap"
+          style={{ left: `${((hoverIndex! + 0.5) / points.length) * 100}%` }}
+        >
+          <div className="text-text-secondary">
+            {primaryLabel}: <span className="font-medium text-text-primary">{formatValue(getPrimaryValue(hovered))}</span>
+          </div>
+          <div className="text-text-secondary">
+            {secondaryLabel}: <span className="font-medium text-text-primary">{formatValue(getSecondaryValue(hovered))}</span>
+          </div>
+          <div className="text-text-muted">{formatShortDate(hovered.date, true)}</div>
+        </div>
+      )}
+      <div className="flex items-center gap-4 text-xs text-text-muted mt-1">
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-0.5 rounded-full bg-brand" />
+          {primaryLabel}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-0.5 rounded-full bg-text-disabled" style={{ backgroundImage: 'repeating-linear-gradient(to right, var(--color-text-disabled) 0 3px, transparent 3px 5px)' }} />
+          {secondaryLabel}
+        </span>
+      </div>
     </div>
   )
 }

@@ -486,3 +486,13 @@ export function DollarIcon({ className = 'w-5 h-5' }: { className?: string }): R
     </svg>
   )
 }
+
+export function ScaleIcon({ className = 'w-5 h-5' }: { className?: string }): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path d="M19 5L5 19" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="7.5" cy="7.5" r="3" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="16.5" cy="16.5" r="3" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  )
+}

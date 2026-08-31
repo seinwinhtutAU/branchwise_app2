@@ -9,11 +9,11 @@ import { EmptyState } from '@renderer/components/ui/EmptyState'
 import { Skeleton } from '@renderer/components/ui/Skeleton'
 import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
 import { DashboardIcon, InventoryIcon } from '@renderer/components/ui/icons'
-import { StatTile, WarningsTile, formatMoney, formatShortDate, type SaleWarningRow } from './shared'
+import { StatTile, WarningsTile, formatCount, formatMoney, formatShortDate, type SaleWarningRow } from './shared'
 
-interface CategoryValue {
+interface CategoryQty {
   category: string
-  value: number
+  qty: number
 }
 
 interface LowStockItem {
@@ -24,6 +24,13 @@ interface LowStockItem {
   status: 'Critical' | 'Low' | 'Watch'
 }
 
+interface DeadStockItem {
+  stock_code: string
+  description: string
+  on_hand_qty: number
+  category: string
+}
+
 interface InventoryDashboardData {
   branch_name: string
   as_of: string | null
@@ -32,9 +39,10 @@ interface InventoryDashboardData {
   low_count: number
   watch_count: number
   estimated_stock_value: number
-  median_days_of_stock: number | null
-  stock_value_by_category: CategoryValue[]
+  dead_stock_count: number
+  stock_qty_by_category: CategoryQty[]
   low_stock_items: LowStockItem[]
+  dead_stock_items: DeadStockItem[]
   warnings: SaleWarningRow[]
 }
 
@@ -44,11 +52,11 @@ const STATUS_BADGE_VARIANT: Record<LowStockItem['status'], 'error' | 'warning' |
   Watch: 'info'
 }
 
-function CategoryValueList({ categories }: { categories: CategoryValue[] }): React.JSX.Element {
+function CategoryQtyList({ categories }: { categories: CategoryQty[] }): React.JSX.Element {
   if (categories.length === 0) {
-    return <p className="text-sm text-text-muted">No categorized stock value yet.</p>
+    return <p className="text-sm text-text-muted">No categorized stock yet.</p>
   }
-  const maxValue = Math.max(...categories.map((c) => c.value), 0)
+  const maxQty = Math.max(...categories.map((c) => c.qty), 0)
   return (
     <div className="flex flex-col gap-2.5">
       {categories.map((row) => (
@@ -59,11 +67,11 @@ function CategoryValueList({ categories }: { categories: CategoryValue[] }): Rea
           <div className="flex-1 h-2.5 rounded-full bg-bg-raised overflow-hidden">
             <div
               className="h-full rounded-full bg-brand"
-              style={{ width: maxValue > 0 ? `${(row.value / maxValue) * 100}%` : '0%' }}
+              style={{ width: maxQty > 0 ? `${(row.qty / maxQty) * 100}%` : '0%' }}
             />
           </div>
           <span className="w-24 shrink-0 text-right text-sm tabular-nums text-text-primary">
-            {formatMoney(row.value)}
+            {formatCount(row.qty)}
           </span>
         </div>
       ))}
@@ -102,6 +110,40 @@ function LowStockTable({ items }: { items: LowStockItem[] }): React.JSX.Element 
             <Td>{item.description}</Td>
             <Td className="text-right tabular-nums">{item.on_hand_qty.toLocaleString()}</Td>
             <Td className="text-right tabular-nums">{item.days_left}</Td>
+          </Tr>
+        ))}
+      </Tbody>
+    </TableContainer>
+  )
+}
+
+function DeadStockTable({ items }: { items: DeadStockItem[] }): React.JSX.Element {
+  if (items.length === 0) {
+    return (
+      <EmptyState
+        icon={<InventoryIcon />}
+        title="No dead stock"
+        description="Nothing on hand has gone 90 days without a sale."
+      />
+    )
+  }
+  return (
+    <TableContainer>
+      <Thead>
+        <Tr>
+          <Th>Stock Code</Th>
+          <Th>Description</Th>
+          <Th>Category</Th>
+          <Th className="text-right">On Hand Qty</Th>
+        </Tr>
+      </Thead>
+      <Tbody>
+        {items.map((item) => (
+          <Tr key={item.stock_code}>
+            <Td className="font-mono text-xs whitespace-nowrap">{item.stock_code}</Td>
+            <Td>{item.description}</Td>
+            <Td className="text-text-muted">{item.category}</Td>
+            <Td className="text-right tabular-nums">{item.on_hand_qty.toLocaleString()}</Td>
           </Tr>
         ))}
       </Tbody>
@@ -197,16 +239,16 @@ export function InventoryTab({ session, branchId, canLoad, onViewWarnings }: Pro
         />
         <StatTile label="Estimated Stock Value" value={formatMoney(data.estimated_stock_value)} />
         <StatTile
-          label="Median Days of Stock"
-          value={data.median_days_of_stock === null ? '—' : data.median_days_of_stock.toFixed(1)}
-          sub="Based on the last 30 days' sales"
+          label="Dead Stock"
+          value={data.dead_stock_count.toLocaleString()}
+          sub="On hand, no sales in 90 days"
         />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <Card>
-          <CardHeader title="Stock value by category" description="Estimated on-hand value, grouped by product category." />
-          <CategoryValueList categories={data.stock_value_by_category} />
+          <CardHeader title="Stock on hand by category" description="On-hand quantity, grouped by product category." />
+          <CategoryQtyList categories={data.stock_qty_by_category} />
         </Card>
         <Card>
           <CardHeader
@@ -223,6 +265,14 @@ export function InventoryTab({ session, branchId, canLoad, onViewWarnings }: Pro
           description="Estimated to run out soonest, based on the last 30 days' sales velocity."
         />
         <LowStockTable items={data.low_stock_items} />
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Dead stock"
+          description="Still on hand, but hasn't sold at all in the last 90 days — worth a look before restocking or marking it down."
+        />
+        <DeadStockTable items={data.dead_stock_items} />
       </Card>
     </div>
   )

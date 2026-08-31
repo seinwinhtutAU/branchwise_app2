@@ -31,7 +31,7 @@ def get_data_overview(
         .join(Sale, SaleLine.sale_id == Sale.id)
         .join(Product, SaleLine.product_id == Product.id)
         .outerjoin(Branch, Sale.branch_id == Branch.id)
-        .order_by(Sale.sale_date, Sale.slip_number, SaleLine.line_no)
+        .order_by(Sale.sale_date.desc(), Sale.slip_number.desc(), SaleLine.line_no.desc())
     )
     if user.branch_id is not None:
         query = query.filter(Sale.branch_id == user.branch_id)
