@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
 import { useToast } from '@renderer/lib/useToast'
+import { useLatestRequest } from '@renderer/lib/useLatestRequest'
 import { Badge } from '@renderer/components/ui/Badge'
 import { Button } from '@renderer/components/ui/Button'
 import { Card, CardHeader } from '@renderer/components/ui/Card'
@@ -163,16 +164,19 @@ export function InventoryTab({ session, branchId, canLoad, onViewWarnings }: Pro
   const showToast = useToast()
   const [data, setData] = useState<InventoryDashboardData | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
+  const nextRequest = useLatestRequest()
 
   async function load(): Promise<void> {
     if (!canLoad) return
+    const signal = nextRequest()
     setLoadFailed(false)
     try {
       const params = new URLSearchParams()
       if (branchId) params.set('branch_id', branchId)
       const qs = params.toString()
       const response = await fetch(`${apiBaseUrl}/api/dashboard/inventory${qs ? `?${qs}` : ''}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` }
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        signal
       })
       if (!response.ok) {
         setLoadFailed(true)
@@ -181,6 +185,7 @@ export function InventoryTab({ session, branchId, canLoad, onViewWarnings }: Pro
       }
       setData(await response.json())
     } catch {
+      if (signal.aborted) return
       setLoadFailed(true)
       showToast('error', 'Failed to load the Inventory dashboard — is the backend running?')
     }
