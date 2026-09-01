@@ -96,10 +96,18 @@ No new dependencies, no schema/API changes, no folder restructuring.
 
 ## Needs your review / pre-existing issues found
 
-- **`npm run lint` is broken** (pre-existing, not caused by this branch): ESLint
-  v9 no longer reads `.eslintrc.*` and the repo has no `eslint.config.js`, so lint
-  exits without checking anything. Fixing it means migrating the config — a tooling
-  change I didn't make under "no new dependencies / smallest-risk" rules.
-  Until then the frontend's only automated gate is `tsc`.
+- **`npm run lint` was broken** (pre-existing): the repo had no ESLint config file
+  at all, so ESLint v9 printed its migration notice and checked nothing. Fixed on
+  request in a follow-up commit by adding `eslint.config.mjs` (flat config built
+  from the already-installed `@electron-toolkit/eslint-config-ts`,
+  `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh` — no new
+  dependencies). First real run found: one dead constant (`CATEGORY_ORDER` in
+  `WarningsPage.tsx`, only used to derive a type — replaced with a plain union
+  type), one stale `eslint-disable` comment (`ImportDataView.tsx`, removed), and
+  10 `react-refresh/only-export-components` hits in `dashboard/shared.tsx` and
+  `lib/toast.tsx`. That last rule only governs whether Vite Fast Refresh can
+  hot-swap a file in dev; satisfying it means splitting helpers out of untested
+  frontend files, so it's downgraded to `warn` in the config rather than
+  restructured. Lint now exits 0 with those 10 warnings.
 - The working tree had an uncommitted `docs/retail_dashboard.md` modification from
   before this session; it was left untouched and uncommitted.

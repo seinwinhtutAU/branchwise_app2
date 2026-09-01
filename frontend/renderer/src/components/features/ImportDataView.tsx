@@ -111,7 +111,6 @@ export function ImportDataView({ clean, origin, controls }: Props): React.JSX.El
       highlightRow(pendingScrollRow)
     }
     setPendingScrollRow(null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pendingScrollRow])
 
   function goToWarning(direction: 1 | -1): void {
