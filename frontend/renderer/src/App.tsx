@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl, supabase } from '@renderer/lib/supabaseClient'
-import { useToast } from '@renderer/lib/toast'
+import { useToast } from '@renderer/lib/useToast'
 import { AuthScreen } from '@renderer/components/features/AuthScreen'
 import { AppShell, type NavItem, type WorkspaceTab } from '@renderer/components/features/AppShell'
 import FileImportCard from '@renderer/components/features/FileImportCard'

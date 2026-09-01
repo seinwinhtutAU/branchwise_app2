@@ -1,7 +1,7 @@
 import { useRef, useState, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
-import { useToast } from '@renderer/lib/toast'
+import { useToast } from '@renderer/lib/useToast'
 import { Card, CardHeader } from '@renderer/components/ui/Card'
 import { UploadIcon } from '@renderer/components/ui/icons'
 import type { ImportPreviewResult, PendingImport } from './types'

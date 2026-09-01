@@ -32,20 +32,11 @@ from app.models.stock_level import StockLevel
 from app.models.user import User
 from app.services.branches import list_retail_branches
 from app.services.import_common import NumericRule, validate_rows
+from app.services.stock import latest_stock_query
 from app.services.inventory_import import VALIDATION_RULES as INVENTORY_VALIDATION_RULES
 from app.services.pos_import import VALIDATION_RULES as SALES_VALIDATION_RULES
-from app.services.pricing import (
-    compute_profit,
-    point_in_time_buying_price,
-    purchase_price_history,
-    stock_level_price_history,
-)
+from app.services.pricing import compute_profit, sale_line_pricer
 from app.services.purchase_import import VALIDATION_RULES as PURCHASE_VALIDATION_RULES
-from app.services.settings import (
-    get_purchase_lookback_window_days,
-    get_stock_forward_fallback_window_days,
-    get_stock_lookback_window_days,
-)
 
 # Below this many units of difference, treat it as routine noise (breakage, a
 # one-off miscount) rather than something worth interrupting staff over — the
@@ -101,6 +92,16 @@ def _fetch_branches(db: Session, branch_ids: set[str | None]) -> dict[str, Branc
     if not ids:
         return {}
     return {b.id: b for b in db.query(Branch).filter(Branch.id.in_(ids))}
+
+
+def _import_batch_meta(import_batch: ImportBatch | None) -> dict:
+    """The three _ImportBatch* record keys _numeric_warning_rows reads back out via
+    _source_import — shared by every numeric check's record builder."""
+    return {
+        "_ImportBatchId": import_batch.id if import_batch else None,
+        "_ImportBatchFilename": import_batch.filename if import_batch else None,
+        "_ImportBatchDate": import_batch.created_at.isoformat() if import_batch else None,
+    }
 
 
 def _numeric_warning_rows(
@@ -161,12 +162,7 @@ def sale_numeric_warnings(
 
     # Same buying-price/profit lookup as GET /api/sales, so the detail view here matches
     # the Sale tab exactly rather than a trimmed-down version of it.
-    product_ids = {product.id for _, _, product, _ in line_rows}
-    purchase_history = purchase_price_history(db, product_ids)
-    stock_history = stock_level_price_history(db, product_ids)
-    forward_fallback_window_days = get_stock_forward_fallback_window_days(db)
-    purchase_lookback_window_days = get_purchase_lookback_window_days(db)
-    stock_lookback_window_days = get_stock_lookback_window_days(db)
+    price_for = sale_line_pricer(db, {product.id for _, _, product, _ in line_rows})
     import_batches = _fetch_import_batches(
         db, {sale.import_batch_id for _, sale, _, _ in line_rows}
     )
@@ -174,15 +170,7 @@ def sale_numeric_warnings(
     records = []
     for sale_line, sale, product, branch in line_rows:
         import_batch = import_batches.get(sale.import_batch_id)
-        buying_price, buying_price_source = point_in_time_buying_price(
-            purchase_history,
-            stock_history,
-            product.id,
-            sale.sale_date,
-            forward_fallback_window_days,
-            purchase_lookback_window_days,
-            stock_lookback_window_days,
-        )
+        buying_price, buying_price_source = price_for(product.id, sale.sale_date)
         profit, profit_margin_pct = compute_profit(
             buying_price, sale_line.qty, sale_line.net_amount
         )
@@ -209,11 +197,7 @@ def sale_numeric_warnings(
                 "_BuyingPriceSource": buying_price_source,
                 "_Profit": profit,
                 "_ProfitMarginPct": profit_margin_pct,
-                "_ImportBatchId": import_batch.id if import_batch else None,
-                "_ImportBatchFilename": import_batch.filename if import_batch else None,
-                "_ImportBatchDate": import_batch.created_at.isoformat()
-                if import_batch
-                else None,
+                **_import_batch_meta(import_batch),
             }
         )
 
@@ -256,27 +240,7 @@ def inventory_numeric_warnings(db: Session, user: User) -> list[dict]:
     """Validates only the latest snapshot per branch+product (same "current
     stock" definition as GET /api/inventory), not full history — a
     since-superseded snapshot shouldn't show up as a standing warning."""
-    latest = (
-        db.query(
-            StockLevel.product_id,
-            StockLevel.branch_id,
-            func.max(StockLevel.snapshot_at).label("snapshot_at"),
-        )
-        .group_by(StockLevel.product_id, StockLevel.branch_id)
-        .subquery()
-    )
-    query = (
-        db.query(StockLevel, Product, Branch)
-        .join(Product, StockLevel.product_id == Product.id)
-        .outerjoin(Branch, StockLevel.branch_id == Branch.id)
-        .join(
-            latest,
-            (StockLevel.product_id == latest.c.product_id)
-            & StockLevel.branch_id.is_not_distinct_from(latest.c.branch_id)
-            & (StockLevel.snapshot_at == latest.c.snapshot_at),
-        )
-    )
-    query = _branch_filter(query, user, StockLevel.branch_id)
+    query = _branch_filter(latest_stock_query(db), user, StockLevel.branch_id)
     query_rows = query.all()
     import_batches = _fetch_import_batches(
         db, {sl.import_batch_id for sl, _, _ in query_rows}
@@ -296,11 +260,7 @@ def inventory_numeric_warnings(db: Session, user: User) -> list[dict]:
                 "_Description": product.description,
                 "_Group": product.group_name,
                 "_Location": stock_level.location_raw,
-                "_ImportBatchId": import_batch.id if import_batch else None,
-                "_ImportBatchFilename": import_batch.filename if import_batch else None,
-                "_ImportBatchDate": import_batch.created_at.isoformat()
-                if import_batch
-                else None,
+                **_import_batch_meta(import_batch),
             }
         )
 
@@ -358,11 +318,7 @@ def purchase_numeric_warnings(
                 "_Description": product.description,
                 "_UOM": purchase_line.uom,
                 "_Location": purchase.location_raw,
-                "_ImportBatchId": import_batch.id if import_batch else None,
-                "_ImportBatchFilename": import_batch.filename if import_batch else None,
-                "_ImportBatchDate": import_batch.created_at.isoformat()
-                if import_batch
-                else None,
+                **_import_batch_meta(import_batch),
             }
         )
 
@@ -597,16 +553,8 @@ def inventory_reconciliation_warnings(
         # A mismatch or unit-mix warning is about the *latest* snapshot being wrong —
         # that's the one import worth pointing at, even though the check itself also
         # reads the prior snapshot and the purchases/sales in between.
-        batch_ids = {
-            sl.import_batch_id for sl in latest_snapshot.values() if sl.import_batch_id
-        }
-        batches_by_id = (
-            {
-                b.id: b
-                for b in db.query(ImportBatch).filter(ImportBatch.id.in_(batch_ids))
-            }
-            if batch_ids
-            else {}
+        batches_by_id = _fetch_import_batches(
+            db, {sl.import_batch_id for sl in latest_snapshot.values()}
         )
 
         purchased: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))

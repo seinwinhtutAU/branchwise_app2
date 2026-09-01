@@ -1,12 +1,17 @@
 from bisect import bisect_right
 from datetime import date
-from typing import Literal
+from typing import Callable, Literal
 
 from sqlalchemy.orm import Session
 
 from app.models.app_settings import DEFAULT_SETTINGS
 from app.models.purchase import Purchase, PurchaseLine
 from app.models.stock_level import StockLevel
+from app.services.settings import (
+    get_purchase_lookback_window_days,
+    get_stock_forward_fallback_window_days,
+    get_stock_lookback_window_days,
+)
 
 PriceHistory = dict[str, list[tuple[date, float]]]
 
@@ -167,6 +172,35 @@ def point_in_time_buying_price(
     if price is not None:
         return price, "stock_forward_fill"
     return None, None
+
+
+def sale_line_pricer(
+    db: Session, product_ids: set[str]
+) -> Callable[[str, date], tuple[float | None, BuyingPriceSource | None]]:
+    """Everything point_in_time_buying_price needs, fetched once for a whole result
+    set: both price histories for `product_ids` (bulk queries) and the three
+    business-setting windows. Returns a `(product_id, as_of) -> (price, source)`
+    callable so the Sale tab, Data Overview, the Warning page's sale-numeric check,
+    and the Cost dashboard all price sale lines through identical plumbing instead
+    of each repeating it."""
+    purchase_history = purchase_price_history(db, product_ids)
+    stock_history = stock_level_price_history(db, product_ids)
+    forward_fallback_window_days = get_stock_forward_fallback_window_days(db)
+    purchase_lookback_window_days = get_purchase_lookback_window_days(db)
+    stock_lookback_window_days = get_stock_lookback_window_days(db)
+
+    def price(product_id: str, as_of: date) -> tuple[float | None, BuyingPriceSource | None]:
+        return point_in_time_buying_price(
+            purchase_history,
+            stock_history,
+            product_id,
+            as_of,
+            forward_fallback_window_days,
+            purchase_lookback_window_days,
+            stock_lookback_window_days,
+        )
+
+    return price
 
 
 def compute_profit(

@@ -16,7 +16,7 @@ from app.schemas.wholesale import (
     FactoryVoucherUpdate,
     FactoryVoucherUpdateResult,
 )
-from app.services.branches import resolve_branch_id
+from app.services.branches import branch_name, resolve_branch_id
 from app.services.wholesale import apply_voucher_line_to_orders, colors_total, next_voucher_no
 
 router = APIRouter(prefix="/api/factory-vouchers", tags=["factory-vouchers"])
@@ -116,9 +116,8 @@ def create_voucher(
     db.commit()
     db.refresh(voucher)
 
-    branch = db.get(Branch, branch_id) if branch_id else None
     return FactoryVoucherCreateResult(
-        voucher=_voucher_to_out(voucher, branch.name if branch else None),
+        voucher=_voucher_to_out(voucher, branch_name(db, branch_id)),
         updated_order_count=len(updated_lines),
     )
 
@@ -138,8 +137,7 @@ def update_voucher(
     db.commit()
     db.refresh(voucher)
 
-    branch = db.get(Branch, voucher.branch_id) if voucher.branch_id else None
-    return _voucher_to_out(voucher, branch.name if branch else None)
+    return _voucher_to_out(voucher, branch_name(db, voucher.branch_id))
 
 
 @router.delete("/{voucher_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -166,9 +164,8 @@ def add_voucher_line(
     db.commit()
     db.refresh(voucher)
 
-    branch = db.get(Branch, voucher.branch_id) if voucher.branch_id else None
     return FactoryVoucherCreateResult(
-        voucher=_voucher_to_out(voucher, branch.name if branch else None),
+        voucher=_voucher_to_out(voucher, branch_name(db, voucher.branch_id)),
         updated_order_count=len(updated_lines),
     )
 
@@ -198,9 +195,8 @@ def update_voucher_line(
     db.commit()
     db.refresh(voucher)
 
-    branch = db.get(Branch, voucher.branch_id) if voucher.branch_id else None
     return FactoryVoucherUpdateResult(
-        voucher=_voucher_to_out(voucher, branch.name if branch else None),
+        voucher=_voucher_to_out(voucher, branch_name(db, voucher.branch_id)),
         updated_order_count=len(updated_lines),
     )
 

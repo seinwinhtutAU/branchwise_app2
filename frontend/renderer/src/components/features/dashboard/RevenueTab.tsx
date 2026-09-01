@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
-import { useToast } from '@renderer/lib/toast'
+import { useToast } from '@renderer/lib/useToast'
 import { Button } from '@renderer/components/ui/Button'
 import { Card, CardHeader } from '@renderer/components/ui/Card'
 import { EmptyState } from '@renderer/components/ui/EmptyState'
@@ -14,15 +14,17 @@ import {
   TrendChart,
   WarningsTile,
   WeekdayHourHeatmap,
+  type ChartView
+} from './shared'
+import {
   formatCount,
   formatMoney,
   periodQueryParams,
   previousPeriodLabel,
-  type ChartView,
   type KpiValue,
   type PeriodKey,
   type SaleWarningRow
-} from './shared'
+} from './helpers'
 
 interface TrendPoint {
   date: string

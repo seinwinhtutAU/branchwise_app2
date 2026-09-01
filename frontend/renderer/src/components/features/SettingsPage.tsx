@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
-import { useToast } from '@renderer/lib/toast'
+import { useToast } from '@renderer/lib/useToast'
 import type { AppSettings } from '@renderer/lib/appSettings'
 import type { ThemeMode } from '@renderer/lib/theme'
 import { Card, CardHeader } from '@renderer/components/ui/Card'

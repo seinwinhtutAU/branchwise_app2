@@ -21,6 +21,14 @@ def resolve_branch_id(user: User, branch_id: str | None, db: Session) -> str | N
     return branch_id
 
 
+def branch_name(db: Session, branch_id: str | None) -> str | None:
+    """Display name for a nullable branch_id — None in, None out, and None for an
+    id with no Branch row (deleted/unknown) rather than an error, since callers
+    only use this to label a response."""
+    branch = db.get(Branch, branch_id) if branch_id else None
+    return branch.name if branch else None
+
+
 def list_retail_branches(db: Session) -> Query:
     """Branches with no wholesale-role user assigned, ordered by name.
 

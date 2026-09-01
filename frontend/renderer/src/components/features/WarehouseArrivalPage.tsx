@@ -1,7 +1,7 @@
 import { useEffect, useState, type FocusEvent, type KeyboardEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
-import { useToast } from '@renderer/lib/toast'
+import { useToast } from '@renderer/lib/useToast'
 import { useWholesaleBranchOptions } from '@renderer/lib/useBranches'
 import { cn } from '@renderer/lib/utils'
 import { Button } from '@renderer/components/ui/Button'

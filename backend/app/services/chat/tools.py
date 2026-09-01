@@ -11,13 +11,13 @@ from langchain_core.tools import tool
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.branch import Branch
 from app.models.product import Product
 from app.models.purchase import Purchase, PurchaseLine
 from app.models.sale import Sale, SaleLine
 from app.models.stock_level import StockLevel
 from app.models.user import User
 from app.services.data_quality import build_warning_sections
+from app.services.stock import latest_stock_query
 
 DEFAULT_QUERY_WINDOW_DAYS = 30
 MAX_STOCK_ROWS = 30
@@ -130,26 +130,7 @@ def build_tools(db: Session, user: User) -> list:
         filters by a stock code/description substring; `low_stock_max_qty` caps results
         to items at or below that quantity (use it for "what's low on stock"-type
         questions). Returns at most 30 rows, sorted lowest quantity first."""
-        latest = (
-            db.query(
-                StockLevel.product_id,
-                StockLevel.branch_id,
-                func.max(StockLevel.snapshot_at).label("snapshot_at"),
-            )
-            .group_by(StockLevel.product_id, StockLevel.branch_id)
-            .subquery()
-        )
-        query = (
-            db.query(StockLevel, Product, Branch)
-            .join(Product, StockLevel.product_id == Product.id)
-            .outerjoin(Branch, StockLevel.branch_id == Branch.id)
-            .join(
-                latest,
-                (StockLevel.product_id == latest.c.product_id)
-                & StockLevel.branch_id.is_not_distinct_from(latest.c.branch_id)
-                & (StockLevel.snapshot_at == latest.c.snapshot_at),
-            )
-        )
+        query = latest_stock_query(db)
         if user.branch_id is not None:
             query = query.filter(StockLevel.branch_id == user.branch_id)
         if search:

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
-import { useToast } from '@renderer/lib/toast'
+import { useToast } from '@renderer/lib/useToast'
 import { cn } from '@renderer/lib/utils'
 import { useImportFilePicker } from '@renderer/lib/useImportFilePicker'
 import { Button } from '@renderer/components/ui/Button'
@@ -78,8 +78,7 @@ const IMPORT_TYPE_LABEL: Record<ImportType, string> = {
   inventory: 'Inventory'
 }
 
-const CATEGORY_ORDER = ['Sale', 'Inventory', 'Purchase', 'Daily check'] as const
-type Category = (typeof CATEGORY_ORDER)[number]
+type Category = 'Sale' | 'Inventory' | 'Purchase' | 'Daily check'
 
 // Order used by the "All" tab — daily check surfaces first since it's the one most
 // likely to hide a real stock-count problem, ahead of the per-transaction checks.
