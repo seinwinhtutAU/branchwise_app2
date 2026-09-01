@@ -9,6 +9,7 @@ import pandas as pd
 import pyidaungsu as pds
 from sqlalchemy.orm import Session
 
+from app.models.import_batch import ImportBatch, ImportType
 from app.models.product import Product
 
 SUPPORTED_EXTENSIONS = {".csv", ".xls", ".xlsx"}
@@ -190,6 +191,28 @@ def product_summary_messages(created: int, updated: int) -> list[str]:
     if updated:
         messages.append(f"{pluralize(updated, 'existing product')} updated")
     return messages
+
+
+def new_import_batch(
+    import_type: ImportType,
+    *,
+    branch_id: str | None,
+    uploaded_by: str | None,
+    source_file: str | None,
+    preview_data: dict | None,
+) -> ImportBatch:
+    """A fresh (not yet committed) ImportBatch header, identical across the three
+    persist services — client-generated id so the data rows it creates can reference
+    batch.id before any flush, summary filled in by the caller at the end."""
+    return ImportBatch(
+        id=str(uuid.uuid4()),
+        import_type=import_type,
+        branch_id=branch_id,
+        uploaded_by=uploaded_by,
+        filename=source_file,
+        summary={},
+        preview_data=preview_data or {},
+    )
 
 
 def get_or_create_products(

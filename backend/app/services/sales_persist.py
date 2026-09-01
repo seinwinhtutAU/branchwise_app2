@@ -4,9 +4,14 @@ import uuid
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from app.models.import_batch import ImportBatch, ImportType
+from app.models.import_batch import ImportType
 from app.models.sale import Sale, SaleLine
-from app.services.import_common import get_or_create_products, pluralize, product_summary_messages
+from app.services.import_common import (
+    get_or_create_products,
+    new_import_batch,
+    pluralize,
+    product_summary_messages,
+)
 
 
 def persist_sales(
@@ -19,14 +24,12 @@ def persist_sales(
     uploaded_by: str | None = None,
     preview_data: dict | None = None,
 ) -> dict:
-    batch = ImportBatch(
-        id=str(uuid.uuid4()),
-        import_type=ImportType.SALES,
+    batch = new_import_batch(
+        ImportType.SALES,
         branch_id=branch_id,
         uploaded_by=uploaded_by,
-        filename=source_file,
-        summary={},
-        preview_data=preview_data or {},
+        source_file=source_file,
+        preview_data=preview_data,
     )
     db.add(batch)
 
