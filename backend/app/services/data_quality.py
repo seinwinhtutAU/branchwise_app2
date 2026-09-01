@@ -32,6 +32,7 @@ from app.models.stock_level import StockLevel
 from app.models.user import User
 from app.services.branches import list_retail_branches
 from app.services.import_common import NumericRule, validate_rows
+from app.services.stock import latest_stock_query
 from app.services.inventory_import import VALIDATION_RULES as INVENTORY_VALIDATION_RULES
 from app.services.pos_import import VALIDATION_RULES as SALES_VALIDATION_RULES
 from app.services.pricing import compute_profit, sale_line_pricer
@@ -239,27 +240,7 @@ def inventory_numeric_warnings(db: Session, user: User) -> list[dict]:
     """Validates only the latest snapshot per branch+product (same "current
     stock" definition as GET /api/inventory), not full history — a
     since-superseded snapshot shouldn't show up as a standing warning."""
-    latest = (
-        db.query(
-            StockLevel.product_id,
-            StockLevel.branch_id,
-            func.max(StockLevel.snapshot_at).label("snapshot_at"),
-        )
-        .group_by(StockLevel.product_id, StockLevel.branch_id)
-        .subquery()
-    )
-    query = (
-        db.query(StockLevel, Product, Branch)
-        .join(Product, StockLevel.product_id == Product.id)
-        .outerjoin(Branch, StockLevel.branch_id == Branch.id)
-        .join(
-            latest,
-            (StockLevel.product_id == latest.c.product_id)
-            & StockLevel.branch_id.is_not_distinct_from(latest.c.branch_id)
-            & (StockLevel.snapshot_at == latest.c.snapshot_at),
-        )
-    )
-    query = _branch_filter(query, user, StockLevel.branch_id)
+    query = _branch_filter(latest_stock_query(db), user, StockLevel.branch_id)
     query_rows = query.all()
     import_batches = _fetch_import_batches(
         db, {sl.import_batch_id for sl, _, _ in query_rows}
