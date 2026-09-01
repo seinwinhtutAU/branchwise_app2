@@ -34,18 +34,8 @@ from app.services.branches import list_retail_branches
 from app.services.import_common import NumericRule, validate_rows
 from app.services.inventory_import import VALIDATION_RULES as INVENTORY_VALIDATION_RULES
 from app.services.pos_import import VALIDATION_RULES as SALES_VALIDATION_RULES
-from app.services.pricing import (
-    compute_profit,
-    point_in_time_buying_price,
-    purchase_price_history,
-    stock_level_price_history,
-)
+from app.services.pricing import compute_profit, sale_line_pricer
 from app.services.purchase_import import VALIDATION_RULES as PURCHASE_VALIDATION_RULES
-from app.services.settings import (
-    get_purchase_lookback_window_days,
-    get_stock_forward_fallback_window_days,
-    get_stock_lookback_window_days,
-)
 
 # Below this many units of difference, treat it as routine noise (breakage, a
 # one-off miscount) rather than something worth interrupting staff over — the
@@ -171,12 +161,7 @@ def sale_numeric_warnings(
 
     # Same buying-price/profit lookup as GET /api/sales, so the detail view here matches
     # the Sale tab exactly rather than a trimmed-down version of it.
-    product_ids = {product.id for _, _, product, _ in line_rows}
-    purchase_history = purchase_price_history(db, product_ids)
-    stock_history = stock_level_price_history(db, product_ids)
-    forward_fallback_window_days = get_stock_forward_fallback_window_days(db)
-    purchase_lookback_window_days = get_purchase_lookback_window_days(db)
-    stock_lookback_window_days = get_stock_lookback_window_days(db)
+    price_for = sale_line_pricer(db, {product.id for _, _, product, _ in line_rows})
     import_batches = _fetch_import_batches(
         db, {sale.import_batch_id for _, sale, _, _ in line_rows}
     )
@@ -184,15 +169,7 @@ def sale_numeric_warnings(
     records = []
     for sale_line, sale, product, branch in line_rows:
         import_batch = import_batches.get(sale.import_batch_id)
-        buying_price, buying_price_source = point_in_time_buying_price(
-            purchase_history,
-            stock_history,
-            product.id,
-            sale.sale_date,
-            forward_fallback_window_days,
-            purchase_lookback_window_days,
-            stock_lookback_window_days,
-        )
+        buying_price, buying_price_source = price_for(product.id, sale.sale_date)
         profit, profit_margin_pct = compute_profit(
             buying_price, sale_line.qty, sale_line.net_amount
         )

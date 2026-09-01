@@ -7,17 +7,7 @@ from app.models.branch import Branch
 from app.models.product import Product
 from app.models.sale import Sale, SaleLine
 from app.models.user import User
-from app.services.pricing import (
-    compute_profit,
-    point_in_time_buying_price,
-    purchase_price_history,
-    stock_level_price_history,
-)
-from app.services.settings import (
-    get_purchase_lookback_window_days,
-    get_stock_forward_fallback_window_days,
-    get_stock_lookback_window_days,
-)
+from app.services.pricing import compute_profit, sale_line_pricer
 
 router = APIRouter(prefix="/api/data-overview", tags=["data-overview"])
 
@@ -37,24 +27,11 @@ def get_data_overview(
         query = query.filter(Sale.branch_id == user.branch_id)
 
     line_rows = query.all()
-    product_ids = {product.id for _, _, product, _ in line_rows}
-    purchase_history = purchase_price_history(db, product_ids)
-    stock_history = stock_level_price_history(db, product_ids)
-    forward_fallback_window_days = get_stock_forward_fallback_window_days(db)
-    purchase_lookback_window_days = get_purchase_lookback_window_days(db)
-    stock_lookback_window_days = get_stock_lookback_window_days(db)
+    price_for = sale_line_pricer(db, {product.id for _, _, product, _ in line_rows})
 
     result = []
     for sale_line, sale, product, branch in line_rows:
-        buying_price, buying_price_source = point_in_time_buying_price(
-            purchase_history,
-            stock_history,
-            product.id,
-            sale.sale_date,
-            forward_fallback_window_days,
-            purchase_lookback_window_days,
-            stock_lookback_window_days,
-        )
+        buying_price, buying_price_source = price_for(product.id, sale.sale_date)
         profit, profit_margin_pct = compute_profit(
             buying_price, sale_line.qty, sale_line.net_amount
         )

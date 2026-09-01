@@ -19,17 +19,10 @@ from app.models.product import Product
 from app.models.sale import Sale, SaleLine
 from app.models.stock_level import StockLevel
 from app.services import data_quality
-from app.services.pricing import (
-    point_in_time_buying_price,
-    purchase_price_history,
-    stock_level_price_history,
-)
+from app.services.pricing import sale_line_pricer
 from app.services.settings import (
-    get_purchase_lookback_window_days,
     get_purchase_warning_window_days,
     get_sale_warning_window_days,
-    get_stock_forward_fallback_window_days,
-    get_stock_lookback_window_days,
 )
 
 PeriodKey = Literal["today", "yesterday", "7d", "30d"]
@@ -313,12 +306,7 @@ def _cost_totals_and_products(
         .filter(Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end)
         .all()
     )
-    product_ids = {product.id for _, _, product in rows}
-    purchase_history = purchase_price_history(db, product_ids)
-    stock_history = stock_level_price_history(db, product_ids)
-    forward_days = get_stock_forward_fallback_window_days(db)
-    purchase_lookback_days = get_purchase_lookback_window_days(db)
-    stock_lookback_days = get_stock_lookback_window_days(db)
+    price_for = sale_line_pricer(db, {product.id for _, _, product in rows})
 
     net_revenue_total = 0.0
     cogs_total = 0.0
@@ -332,15 +320,7 @@ def _cost_totals_and_products(
         net_revenue_total += net_amount
         transaction_ids.add(sale.id)
 
-        buying_price, _source = point_in_time_buying_price(
-            purchase_history,
-            stock_history,
-            product.id,
-            sale.sale_date,
-            forward_days,
-            purchase_lookback_days,
-            stock_lookback_days,
-        )
+        buying_price, _source = price_for(product.id, sale.sale_date)
         cost = float(buying_price) * qty if buying_price is not None else None
         if cost is not None:
             cogs_total += cost
