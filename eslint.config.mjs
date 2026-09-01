@@ -14,12 +14,6 @@ export default tseslint.config(
   {
     settings: {
       react: { version: 'detect' }
-    },
-    rules: {
-      // Only affects whether Vite Fast Refresh can hot-swap a file in dev — a few
-      // files (dashboard/shared.tsx, lib/toast.tsx) deliberately export helpers
-      // alongside components. Worth seeing, not worth failing the build over.
-      'react-refresh/only-export-components': 'warn'
     }
   }
 )

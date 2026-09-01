@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
-import { useToast } from '@renderer/lib/toast'
+import { useToast } from '@renderer/lib/useToast'
 import { Button } from '@renderer/components/ui/Button'
 import { Card, CardHeader } from '@renderer/components/ui/Card'
 import { Skeleton } from '@renderer/components/ui/Skeleton'
@@ -12,17 +12,19 @@ import {
   StatTile,
   TrendChart,
   WarningsTile,
-  WEEKDAY_LABELS,
   WeekdayHourHeatmap,
+  type ChartView
+} from './shared'
+import {
+  WEEKDAY_LABELS,
   formatCount,
   formatPercent,
   periodQueryParams,
   previousPeriodLabel,
-  type ChartView,
   type KpiValue,
   type PeriodKey,
   type SaleWarningRow
-} from './shared'
+} from './helpers'
 
 interface TransactionCountPoint {
   date: string

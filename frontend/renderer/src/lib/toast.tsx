@@ -1,9 +1,6 @@
-import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { Toast, type ToastData, type ToastVariant } from '@renderer/components/ui/Toast'
-
-type ShowToast = (variant: ToastVariant, message: string) => void
-
-const ToastContext = createContext<ShowToast | null>(null)
+import { ToastContext, type ShowToast } from './useToast'
 
 const AUTO_DISMISS_MS: Record<ToastVariant, number> = {
   success: 4000,
@@ -38,10 +35,4 @@ export function ToastProvider({ children }: { children: ReactNode }): React.JSX.
       </div>
     </ToastContext.Provider>
   )
-}
-
-export function useToast(): ShowToast {
-  const ctx = useContext(ToastContext)
-  if (!ctx) throw new Error('useToast must be used within a ToastProvider')
-  return ctx
 }

@@ -105,9 +105,14 @@ No new dependencies, no schema/API changes, no folder restructuring.
   `WarningsPage.tsx`, only used to derive a type — replaced with a plain union
   type), one stale `eslint-disable` comment (`ImportDataView.tsx`, removed), and
   10 `react-refresh/only-export-components` hits in `dashboard/shared.tsx` and
-  `lib/toast.tsx`. That last rule only governs whether Vite Fast Refresh can
-  hot-swap a file in dev; satisfying it means splitting helpers out of untested
-  frontend files, so it's downgraded to `warn` in the config rather than
-  restructured. Lint now exits 0 with those 10 warnings.
+  `lib/toast.tsx` (files exporting helpers alongside components, which blocks
+  Vite Fast Refresh from hot-swapping them in dev). Those were then resolved
+  properly in a follow-up commit: the non-component exports of
+  `dashboard/shared.tsx` (period options, formatters, `WEEKDAY_LABELS`, plain
+  types) moved to a new `dashboard/helpers.ts`, and `useToast` plus its context
+  moved to a new `lib/useToast.ts` so `lib/toast.tsx` only exports
+  `ToastProvider`. Pure moves — no function bodies changed; 20 `useToast`
+  importers and 5 dashboard importers were repointed. `npm run lint` now exits
+  0 with zero warnings, `npm run typecheck` and `npm run build` both pass.
 - The working tree had an uncommitted `docs/retail_dashboard.md` modification from
   before this session; it was left untouched and uncommitted.

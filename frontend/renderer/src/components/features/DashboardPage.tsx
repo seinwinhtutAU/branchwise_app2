@@ -13,7 +13,7 @@ import { CostTab } from '@renderer/components/features/dashboard/CostTab'
 import { CustomerTab } from '@renderer/components/features/dashboard/CustomerTab'
 import { InventoryTab } from '@renderer/components/features/dashboard/InventoryTab'
 import { RevenueTab } from '@renderer/components/features/dashboard/RevenueTab'
-import { PERIOD_OPTIONS, type PeriodKey } from '@renderer/components/features/dashboard/shared'
+import { PERIOD_OPTIONS, type PeriodKey } from '@renderer/components/features/dashboard/helpers'
 
 interface Props {
   session: Session

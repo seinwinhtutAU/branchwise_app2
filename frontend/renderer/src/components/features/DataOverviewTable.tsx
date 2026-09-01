@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
-import { useToast } from '@renderer/lib/toast'
+import { useToast } from '@renderer/lib/useToast'
 import { cn } from '@renderer/lib/utils'
 import { formatBuyingPriceSource } from '@renderer/lib/buyingPriceSource'
 import { downloadCsv } from '@renderer/lib/csv'

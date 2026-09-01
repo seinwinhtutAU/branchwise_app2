@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
-import { useToast } from '@renderer/lib/toast'
+import { useToast } from '@renderer/lib/useToast'
 import { cn } from '@renderer/lib/utils'
 import { useImportFilePicker } from '@renderer/lib/useImportFilePicker'
 import { Button } from '@renderer/components/ui/Button'
