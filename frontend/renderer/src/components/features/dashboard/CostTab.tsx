@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
 import { useToast } from '@renderer/lib/useToast'
+import { useLatestRequest } from '@renderer/lib/useLatestRequest'
 import { Button } from '@renderer/components/ui/Button'
 import { Card, CardHeader } from '@renderer/components/ui/Card'
 import { EmptyState } from '@renderer/components/ui/EmptyState'
@@ -112,15 +113,18 @@ export function CostTab({ session, branchId, period, dateFrom, dateTo, canLoad, 
   const [data, setData] = useState<CostDashboardData | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
   const [marginTrendView, setMarginTrendView] = useState<ChartView>('line')
+  const nextRequest = useLatestRequest()
 
   async function load(): Promise<void> {
     if (!canLoad) return
+    const signal = nextRequest()
     setLoadFailed(false)
     try {
       const params = periodQueryParams(period, dateFrom, dateTo)
       if (branchId) params.set('branch_id', branchId)
       const response = await fetch(`${apiBaseUrl}/api/dashboard/cost?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` }
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        signal
       })
       if (!response.ok) {
         setLoadFailed(true)
@@ -129,6 +133,7 @@ export function CostTab({ session, branchId, period, dateFrom, dateTo, canLoad, 
       }
       setData(await response.json())
     } catch {
+      if (signal.aborted) return
       setLoadFailed(true)
       showToast('error', 'Failed to load the Cost dashboard — is the backend running?')
     }

@@ -61,6 +61,9 @@ function DashboardTabBar({ activeTab, onSelect }: { activeTab: Tab; onSelect: (t
   )
 }
 
+// How long the custom date inputs must sit unchanged before the tabs fetch with them.
+const CUSTOM_RANGE_SETTLE_MS = 400
+
 export function DashboardPage({ session, profile, branchOptions, onViewWarnings }: Props): React.JSX.Element {
   // Admin has no fixed branch_id — same convention used everywhere else in the app.
   const isAdmin = profile !== null && profile.branch_id === null
@@ -73,6 +76,25 @@ export function DashboardPage({ session, profile, branchOptions, onViewWarnings 
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const hasCustomRange = !!dateFrom && !!dateTo
+
+  // What the tabs actually fetch with. A native date input fires change on every
+  // segment edit — typing a year yields 0002 → 0020 → 0202 → 2026, each a valid
+  // date — so fetching straight off the raw values above fires a request per
+  // keystroke, some for absurd multi-century windows. Instead the raw pair is applied
+  // only once it's complete and in order, after a short pause in typing; a range
+  // that stays half-finished reverts the tabs to the period preset after that same
+  // pause. Clearing both is applied immediately (there's nothing to wait for).
+  const [appliedRange, setAppliedRange] = useState({ from: '', to: '' })
+  useEffect(() => {
+    const next =
+      dateFrom && dateTo && dateFrom <= dateTo ? { from: dateFrom, to: dateTo } : { from: '', to: '' }
+    if (!dateFrom && !dateTo) {
+      setAppliedRange(next)
+      return
+    }
+    const timer = setTimeout(() => setAppliedRange(next), CUSTOM_RANGE_SETTLE_MS)
+    return () => clearTimeout(timer)
+  }, [dateFrom, dateTo])
 
   function clearCustomRange(): void {
     setDateFrom('')
@@ -162,8 +184,8 @@ export function DashboardPage({ session, profile, branchOptions, onViewWarnings 
           session={session}
           branchId={branchId}
           period={period}
-          dateFrom={dateFrom}
-          dateTo={dateTo}
+          dateFrom={appliedRange.from}
+          dateTo={appliedRange.to}
           canLoad={canLoad}
           onViewWarnings={onViewWarnings}
         />
@@ -173,8 +195,8 @@ export function DashboardPage({ session, profile, branchOptions, onViewWarnings 
           session={session}
           branchId={branchId}
           period={period}
-          dateFrom={dateFrom}
-          dateTo={dateTo}
+          dateFrom={appliedRange.from}
+          dateTo={appliedRange.to}
           canLoad={canLoad}
           onViewWarnings={onViewWarnings}
         />
@@ -192,8 +214,8 @@ export function DashboardPage({ session, profile, branchOptions, onViewWarnings 
           session={session}
           branchId={branchId}
           period={period}
-          dateFrom={dateFrom}
-          dateTo={dateTo}
+          dateFrom={appliedRange.from}
+          dateTo={appliedRange.to}
           canLoad={canLoad}
           onViewWarnings={onViewWarnings}
         />
