@@ -14,7 +14,7 @@ from app.schemas.wholesale import (
     CustomerOrderOut,
     CustomerOrderUpdate,
 )
-from app.services.branches import resolve_branch_id
+from app.services.branches import branch_name, resolve_branch_id
 from app.services.wholesale import (
     apply_existing_voucher_to_line,
     colors_total,
@@ -145,8 +145,7 @@ def create_order(
     db.commit()
     db.refresh(order)
 
-    branch = db.get(Branch, branch_id) if branch_id else None
-    return _order_to_out(order, branch.name if branch else None)
+    return _order_to_out(order, branch_name(db, branch_id))
 
 
 @router.patch("/{order_id}")
@@ -164,8 +163,7 @@ def update_order(
     db.commit()
     db.refresh(order)
 
-    branch = db.get(Branch, order.branch_id) if order.branch_id else None
-    return _order_to_out(order, branch.name if branch else None)
+    return _order_to_out(order, branch_name(db, order.branch_id))
 
 
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -192,8 +190,7 @@ def add_order_line(
     db.commit()
     db.refresh(order)
 
-    branch = db.get(Branch, order.branch_id) if order.branch_id else None
-    return _order_to_out(order, branch.name if branch else None)
+    return _order_to_out(order, branch_name(db, order.branch_id))
 
 
 @router.patch("/{order_id}/lines/{line_id}")
@@ -224,8 +221,7 @@ def update_order_line(
     db.commit()
     db.refresh(order)
 
-    branch = db.get(Branch, order.branch_id) if order.branch_id else None
-    return _order_to_out(order, branch.name if branch else None)
+    return _order_to_out(order, branch_name(db, order.branch_id))
 
 
 @router.delete("/{order_id}/lines/{line_id}", status_code=status.HTTP_204_NO_CONTENT)
