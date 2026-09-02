@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
-import { useToast } from '@renderer/lib/useToast'
+import { useCachedFetch } from '@renderer/lib/useCachedFetch'
 import { cn } from '@renderer/lib/utils'
 import { useImportFilePicker } from '@renderer/lib/useImportFilePicker'
 import { Button } from '@renderer/components/ui/Button'
@@ -613,10 +613,16 @@ function WarningsPage({
   onViewImportBatch,
   onFileReady
 }: Props): React.JSX.Element {
-  const showToast = useToast()
-  const [sections, setSections] = useState<WarningSection[] | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [loadFailed, setLoadFailed] = useState(false)
+  // Cached like the dashboard tabs — coming back to the Warning page from somewhere
+  // else shows the rows it showed last time rather than a skeleton, and refetches only
+  // when the window settings change, an import is confirmed or reverted, or the entry
+  // ages out. See lib/useCachedFetch.ts.
+  const { data, isRefreshing, failed, reload } = useCachedFetch<{ sections: WarningSection[] }>(
+    `${apiBaseUrl}/api/warnings?sale_days=${saleWindowDays}&purchase_days=${purchaseWindowDays}`,
+    session,
+    'Warning page'
+  )
+  const sections = data?.sections ?? null
   const [activeTab, setActiveTab] = useState<Tab>('All')
   const [branchFilter, setBranchFilter] = useState('')
   const { trigger: triggerFilePicker, input: filePickerInput, picking } = useImportFilePicker(session, onFileReady)
@@ -631,36 +637,12 @@ function WarningsPage({
   )
   const branchFilterOptions = branchOptions.length > 0 ? branchOptions : distinctBranches(sections)
 
-  async function load(): Promise<void> {
-    setLoading(true)
-    setLoadFailed(false)
-    try {
-      const response = await fetch(
-        `${apiBaseUrl}/api/warnings?sale_days=${saleWindowDays}&purchase_days=${purchaseWindowDays}`,
-        { headers: { Authorization: `Bearer ${session.access_token}` } }
-      )
-      if (!response.ok) {
-        setLoadFailed(true)
-        showToast('error', `Failed to load warnings: ${response.status}`)
-        return
-      }
-      const body = await response.json()
-      setSections(body.sections)
-      onCountChange?.(
-        (body.sections as WarningSection[]).reduce((sum, s) => sum + s.rows.length, 0)
-      )
-    } catch {
-      setLoadFailed(true)
-      showToast('error', 'Failed to load warnings — is the backend running?')
-    } finally {
-      setLoading(false)
-    }
-  }
-
+  // The nav badge's count follows whatever the fetch produced, cached or fresh — it is
+  // a business-wide total, so it deliberately ignores the Branch filter below.
   useEffect(() => {
-    load()
+    if (sections) onCountChange?.(sections.reduce((sum, section) => sum + section.rows.length, 0))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.access_token, saleWindowDays, purchaseWindowDays])
+  }, [sections])
 
   // Opens the file picker right here on the Warning page — batchId/filename tag the
   // resulting PendingImport so confirming it also removes that batch first (see
@@ -700,22 +682,22 @@ function WarningsPage({
           title="Warning"
           description={`Short, actionable data problems, grouped by area — open a row's Details for the full record. The Sale "fix these numbers" check (and the missing-inventory-record check's sale side) covers the last ${saleWindowDays === 1 ? 'day' : `${saleWindowDays} days`}; Purchase (and its purchase side) covers the last ${purchaseWindowDays === 1 ? 'day' : `${purchaseWindowDays} days`} (business-wide — an admin can change these in Settings).`}
           action={
-            <Button variant="secondary" size="sm" onClick={load} loading={loading}>
+            <Button variant="secondary" size="sm" onClick={reload} loading={isRefreshing}>
               Refresh
             </Button>
           }
         />
       </div>
 
-      {sections === null && loading && <TableSkeleton rows={4} cols={4} />}
+      {sections === null && !failed && <TableSkeleton rows={4} cols={4} />}
 
-      {sections === null && !loading && loadFailed && (
+      {sections === null && failed && (
         <EmptyState
           icon={<WarningIcon />}
           title="Couldn't load warnings"
           description="Something went wrong reaching the backend."
           action={
-            <Button variant="secondary" size="sm" onClick={load}>
+            <Button variant="secondary" size="sm" onClick={reload}>
               Try again
             </Button>
           }

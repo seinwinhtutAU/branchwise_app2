@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
+import { useCachedFetch } from '@renderer/lib/useCachedFetch'
 import { useToast } from '@renderer/lib/useToast'
 import { cn } from '@renderer/lib/utils'
 import { Badge } from '@renderer/components/ui/Badge'
@@ -137,56 +138,25 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
   const showToast = useToast()
   const [activeTab, setActiveTab] = useState<Tab>('freshness')
 
-  const [freshness, setFreshness] = useState<FreshnessRow[] | null>(null)
-  const [freshnessLoading, setFreshnessLoading] = useState(false)
-  const [freshnessFailed, setFreshnessFailed] = useState(false)
+  const {
+    data: freshness,
+    isRefreshing: freshnessRefreshing,
+    failed: freshnessFailed,
+    reload: loadFreshness
+  } = useCachedFetch<FreshnessRow[]>(`${apiBaseUrl}/api/imports/freshness`, session, 'upload freshness')
 
   const [days, setDays] = useState<number>(30)
-  const [health, setHealth] = useState<ImportHealthResponse | null>(null)
-  const [healthLoading, setHealthLoading] = useState(false)
-  const [healthFailed, setHealthFailed] = useState(false)
-
-  async function loadFreshness(): Promise<void> {
-    setFreshnessLoading(true)
-    setFreshnessFailed(false)
-    try {
-      const response = await fetch(`${apiBaseUrl}/api/imports/freshness`, {
-        headers: { Authorization: `Bearer ${session.access_token}` }
-      })
-      if (!response.ok) {
-        setFreshnessFailed(true)
-        showToast('error', `Failed to load upload freshness: ${response.status}`)
-        return
-      }
-      setFreshness(await response.json())
-    } catch {
-      setFreshnessFailed(true)
-      showToast('error', 'Failed to load upload freshness — is the backend running?')
-    } finally {
-      setFreshnessLoading(false)
-    }
-  }
-
-  async function loadHealth(): Promise<void> {
-    setHealthLoading(true)
-    setHealthFailed(false)
-    try {
-      const response = await fetch(`${apiBaseUrl}/api/imports/health?days=${days}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` }
-      })
-      if (!response.ok) {
-        setHealthFailed(true)
-        showToast('error', `Failed to load import health: ${response.status}`)
-        return
-      }
-      setHealth(await response.json())
-    } catch {
-      setHealthFailed(true)
-      showToast('error', 'Failed to load import health — is the backend running?')
-    } finally {
-      setHealthLoading(false)
-    }
-  }
+  // `days` is in the URL, so changing it is a different cache key and fetches properly.
+  const {
+    data: health,
+    isRefreshing: healthRefreshing,
+    failed: healthFailed,
+    reload: loadHealth
+  } = useCachedFetch<ImportHealthResponse>(
+    `${apiBaseUrl}/api/imports/health?days=${days}`,
+    session,
+    'import health'
+  )
 
   async function dismissBatch(batchId: string): Promise<void> {
     try {
@@ -198,24 +168,14 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
         showToast('error', `Failed to dismiss: ${response.status}`)
         return
       }
-      setHealth((prev) =>
-        prev ? { ...prev, batches_to_review: prev.batches_to_review.filter((row) => row.batch_id !== batchId) } : prev
-      )
+      // Refetch rather than dropping the row locally: the cached copy is shared, and a
+      // hand-edited one would disagree with the server the next time it is read.
+      loadHealth()
       showToast('success', 'Dismissed — already handled batches won\'t clutter this list')
     } catch {
       showToast('error', 'Failed to dismiss — is the backend running?')
     }
   }
-
-  useEffect(() => {
-    loadFreshness()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.access_token])
-
-  useEffect(() => {
-    loadHealth()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.access_token, days])
 
   return (
     <div className="flex flex-col gap-6">
@@ -230,7 +190,7 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
               loadFreshness()
               loadHealth()
             }}
-            loading={freshnessLoading || healthLoading}
+            loading={freshnessRefreshing || healthRefreshing}
           >
             Refresh
           </Button>
@@ -254,8 +214,8 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
 
       {activeTab === 'freshness' && (
         <>
-          {freshness === null && freshnessLoading && <TableSkeleton rows={3} cols={4} />}
-          {freshness === null && !freshnessLoading && freshnessFailed && (
+          {freshness === null && !freshnessFailed && <TableSkeleton rows={3} cols={4} />}
+          {freshness === null && freshnessFailed && (
             <EmptyState
               icon={<HeartPulseIcon />}
               title="Couldn't load upload freshness"
@@ -303,9 +263,9 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
 
       {activeTab === 'health' && (
         <>
-          {health === null && healthLoading && <TableSkeleton rows={4} cols={4} />}
+          {health === null && !healthFailed && <TableSkeleton rows={4} cols={4} />}
 
-          {health === null && !healthLoading && healthFailed && (
+          {health === null && healthFailed && (
             <EmptyState
               icon={<HeartPulseIcon />}
               title="Couldn't load import health"

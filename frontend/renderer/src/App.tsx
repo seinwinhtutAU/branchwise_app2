@@ -1,5 +1,14 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
+import {
+  clearFetchCache,
+  useCachedFetchMany,
+  useImportedDataWatch
+} from '@renderer/lib/useCachedFetch'
+import {
+  dashboardUrl,
+  type OverviewData
+} from '@renderer/components/features/dashboard/helpers'
 import { apiBaseUrl, supabase } from '@renderer/lib/supabaseClient'
 import { useToast } from '@renderer/lib/useToast'
 import { AuthScreen } from '@renderer/components/features/AuthScreen'
@@ -11,6 +20,7 @@ import {
   type DataTableFilter
 } from '@renderer/components/features/SimpleDataTable'
 import type { PendingImport, Profile } from '@renderer/components/features/types'
+import type { InventorySubTab } from '@renderer/components/features/InventoryPage'
 import { useBranches, useRetailBranchOptions } from '@renderer/lib/useBranches'
 import { formatBuyingPriceSource } from '@renderer/lib/buyingPriceSource'
 import { useAppSettings } from '@renderer/lib/appSettings'
@@ -20,6 +30,7 @@ import {
   HistoryIcon,
   HeartPulseIcon,
   OverviewIcon,
+  BellIcon,
   DashboardIcon,
   SalesIcon,
   InventoryIcon,
@@ -45,18 +56,21 @@ const ImportHistoryDetailPage = lazy(
 )
 const ImportOverviewPage = lazy(() => import('@renderer/components/features/ImportOverviewPage'))
 const DataOverviewTable = lazy(() => import('@renderer/components/features/DataOverviewTable'))
+const InventoryPage = lazy(() => import('@renderer/components/features/InventoryPage'))
 const CustomerOrdersPage = lazy(() => import('@renderer/components/features/CustomerOrdersPage'))
 const FactoryVouchersPage = lazy(() => import('@renderer/components/features/FactoryVouchersPage'))
 const WarehouseArrivalPage = lazy(() => import('@renderer/components/features/WarehouseArrivalPage'))
 const FactoryReceivingPage = lazy(() => import('@renderer/components/features/FactoryReceivingPage'))
 const WarningsPage = lazy(() => import('@renderer/components/features/WarningsPage'))
 const DashboardPage = lazy(() => import('@renderer/components/features/DashboardPage'))
+const BusinessAlertsPage = lazy(() => import('@renderer/components/features/BusinessAlertsPage'))
 const ChatPage = lazy(() => import('@renderer/components/features/ChatPage'))
 const SettingsPage = lazy(() => import('@renderer/components/features/SettingsPage'))
 const HelpPage = lazy(() => import('@renderer/components/features/HelpPage'))
 
 type Section =
   | 'dashboard'
+  | 'businessAlerts'
   | 'import'
   | 'history'
   | 'importOverview'
@@ -81,6 +95,10 @@ type Workspace = 'retail' | 'wholesale'
 
 const RETAIL_NAV_ITEMS: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <DashboardIcon /> },
+  // Sits next to Dashboard rather than next to Warning, even though both are "things
+  // that are wrong": this one is about the business, Warning is about the imported data
+  // being wrong, and they are read by different people for different reasons.
+  { id: 'businessAlerts', label: 'Business Alerts', icon: <BellIcon /> },
   { id: 'import', label: 'Import', icon: <UploadIcon /> },
   { id: 'history', label: 'Import History', icon: <HistoryIcon /> },
   {
@@ -163,6 +181,7 @@ const HELP_NAV_ITEM: NavItem = {
 
 const SECTION_TITLES: Record<Section, string> = {
   dashboard: 'Dashboard',
+  businessAlerts: 'Business alerts',
   import: 'Import data',
   history: 'Import history',
   importOverview: 'Import overview',
@@ -238,30 +257,6 @@ const SALE_COLUMNS: DataTableColumn<SaleRow>[] = [
   }
 ]
 
-interface InventoryRow {
-  Branch: string | null
-  Snapshot_At: string
-  StockCode: string
-  Description: string
-  Group: string | null
-  On_Hand_Qty: number | null
-  Buying_Price: number | null
-  Selling_Price: number | null
-  Location: string | null
-}
-
-const INVENTORY_COLUMNS: DataTableColumn<InventoryRow>[] = [
-  { key: 'Branch', label: 'Branch' },
-  { key: 'Snapshot_At', label: 'Last Updated' },
-  { key: 'StockCode', label: 'Stock Code' },
-  { key: 'Description', label: 'Description' },
-  { key: 'Group', label: 'Group' },
-  { key: 'On_Hand_Qty', label: 'On Hand Qty', align: 'right' },
-  { key: 'Buying_Price', label: 'Buying Price', align: 'right' },
-  { key: 'Selling_Price', label: 'Selling Price', align: 'right' },
-  { key: 'Location', label: 'Location' }
-]
-
 interface PurchaseRow {
   Branch: string | null
   Date: string
@@ -287,6 +282,21 @@ const PURCHASE_COLUMNS: DataTableColumn<PurchaseRow>[] = [
 function App(): React.JSX.Element {
   const showToast = useToast()
   const [session, setSession] = useState<Session | null>(null)
+  // Notices imports and reverts done by other accounts on other machines, so their
+  // work invalidates this browser's cached pages too (see useImportedDataWatch).
+  useImportedDataWatch(session)
+  // Which Dashboard tab and branch to open when another section sends the user there.
+  const [dashboardTarget, setDashboardTarget] = useState<
+    { tab: 'revenue' | 'cost' | 'inventory' | 'customer'; branchId: string } | null
+  >(null)
+  // Which Inventory sub-tab to open when the dashboard's "view all" links send the user
+  // there — read once on mount by InventoryPage, same pattern as dashboardTarget above.
+  const [inventoryTarget, setInventoryTarget] = useState<InventorySubTab | null>(null)
+  // Which branch the Dashboard's Overview tab has open (null = the all-branches page).
+  // Held here rather than inside the tab because switching to Revenue unmounts that tab,
+  // and coming back should return to the branch you were reading, not to the branch list.
+  // Only "← All branches" clears it.
+  const [overviewBranchId, setOverviewBranchId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [profileLoading, setProfileLoading] = useState(false)
   const [rawSection, setSection] = useState<Section>('import')
@@ -300,7 +310,14 @@ function App(): React.JSX.Element {
   const [submitting, setSubmitting] = useState(false)
   const [me, setMe] = useState<string | null>(null)
 
-  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null)
+  // A queue rather than a single value so picking several files at once (see
+  // FileImportCard) reviews them one after another instead of only ever the first.
+  // `pendingImportQueueTotal` is the size the queue started at, kept separately since the
+  // queue itself shrinks as each file is confirmed or skipped — it's what lets
+  // ImportReviewPage show "File 2 of 5" instead of just "File 2".
+  const [pendingImportQueue, setPendingImportQueue] = useState<PendingImport[]>([])
+  const [pendingImportQueueTotal, setPendingImportQueueTotal] = useState(0)
+  const pendingImport = pendingImportQueue[0] ?? null
   const [viewingBatchId, setViewingBatchId] = useState<string | null>(null)
   const [highlightBatchId, setHighlightBatchId] = useState<string | null>(null)
   const [warningCount, setWarningCount] = useState(0)
@@ -338,7 +355,12 @@ function App(): React.JSX.Element {
       setProfileLoading(false)
       return
     }
-    setProfileLoading(true)
+    // Only block the app on the *first* profile load. Supabase refreshes the access
+    // token whenever the window regains focus, which fires onAuthStateChange, which
+    // re-runs this effect — and showing the full-screen spinner then unmounts every page
+    // below, throwing away which tab you were on, which branch you had open, and every
+    // filter you had set. Switching to another app and back should not reset the app.
+    if (profile === null) setProfileLoading(true)
     fetch(`${apiBaseUrl}/api/me`, {
       headers: { Authorization: `Bearer ${session.access_token}` }
     })
@@ -346,6 +368,9 @@ function App(): React.JSX.Element {
       .then(setProfile)
       .catch(() => setProfile(null))
       .finally(() => setProfileLoading(false))
+    // `profile` is read to decide whether this is the first load; adding it to the deps
+    // would re-fetch every time the fetch itself sets it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session])
 
   // Admin accounts (no fixed branch_id) see every branch's data merged, so their filter
@@ -413,12 +438,45 @@ function App(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, isWholesale, saleWindowDays, purchaseWindowDays])
 
+  // The Business Alerts badge, counted from the same per-branch overview payloads the
+  // Dashboard and the Business Alerts page read — so this costs one set of requests that
+  // then makes both of those pages open instantly, rather than a separate count endpoint
+  // whose work would be thrown away. Data-quality alerts are excluded here for the same
+  // reason they are excluded from that page: the Warning badge already counts them.
+  const businessAlertUrls = useMemo(() => {
+    if (isWholesale) return []
+    const branchIds = isAdmin
+      ? retailBranchOptions.map((branch) => branch.id)
+      : profile?.branch_id
+        ? [profile.branch_id]
+        : []
+    // The default window both pages open on, so the badge and the page agree.
+    return branchIds.map((id) => dashboardUrl('overview', id, { period: '30d', dateFrom: '', dateTo: '' }))
+  }, [isAdmin, isWholesale, profile?.branch_id, retailBranchOptions])
+
+  const { data: branchHealth } = useCachedFetchMany<OverviewData>(
+    businessAlertUrls,
+    session,
+    'business alerts'
+  )
+  const businessAlertCount = useMemo(
+    () =>
+      Object.values(branchHealth).reduce(
+        (total, branch) =>
+          total + branch.alerts.filter((alert) => alert.dimension !== 'data_quality').length,
+        0
+      ),
+    [branchHealth]
+  )
+
   const navItems = useMemo(
     () =>
-      WORKSPACE_NAV_ITEMS[effectiveWorkspace].map((item) =>
-        item.id === 'warnings' ? { ...item, badgeCount: warningCount } : item
-      ),
-    [effectiveWorkspace, warningCount]
+      WORKSPACE_NAV_ITEMS[effectiveWorkspace].map((item) => {
+        if (item.id === 'warnings') return { ...item, badgeCount: warningCount }
+        if (item.id === 'businessAlerts') return { ...item, badgeCount: businessAlertCount }
+        return item
+      }),
+    [effectiveWorkspace, warningCount, businessAlertCount]
   )
 
   // Only admin actually switches workspaces — a retail-only or wholesale-only account is
@@ -439,7 +497,8 @@ function App(): React.JSX.Element {
 
   function handleWorkspaceChange(id: string): void {
     const next = id as Workspace
-    setPendingImport(null)
+    setPendingImportQueue([])
+    setPendingImportQueueTotal(0)
     setViewingBatchId(null)
     setHighlightBatchId(null)
     setWorkspace(next)
@@ -452,13 +511,15 @@ function App(): React.JSX.Element {
       {
         type: 'search',
         keys: ['StockCode', 'Description'],
-        placeholder: 'Stock code or description'
+        placeholder: 'Stock code or description',
+        serverParam: 'search'
       },
       {
         type: 'select',
         key: 'Branch',
         label: 'Branch',
-        options: branchOptions
+        options: branchOptions,
+        serverParam: 'branch'
       },
       {
         type: 'dateRange',
@@ -470,37 +531,20 @@ function App(): React.JSX.Element {
     [branchOptions]
   )
 
-  const inventoryFilters: DataTableFilter<InventoryRow>[] = useMemo(
-    () => [
-      {
-        type: 'search',
-        keys: ['StockCode', 'Description'],
-        placeholder: 'Stock code or description'
-      },
-      {
-        type: 'select',
-        key: 'Branch',
-        label: 'Branch',
-        options: branchOptions
-      },
-      { type: 'select', key: 'Group', label: 'Group' },
-      { type: 'dateRange', key: 'Snapshot_At', label: 'Last Updated' }
-    ],
-    [branchOptions]
-  )
-
   const purchaseFilters: DataTableFilter<PurchaseRow>[] = useMemo(
     () => [
       {
         type: 'search',
         keys: ['StockCode', 'Description'],
-        placeholder: 'Stock code or description'
+        placeholder: 'Stock code or description',
+        serverParam: 'search'
       },
       {
         type: 'select',
         key: 'Branch',
         label: 'Branch',
-        options: branchOptions
+        options: branchOptions,
+        serverParam: 'branch'
       },
       {
         type: 'dateRange',
@@ -548,6 +592,10 @@ function App(): React.JSX.Element {
 
   async function handleSignOut(): Promise<void> {
     await supabase.auth.signOut()
+    // Drop every cached page: the next account may be scoped to a different branch, and
+    // serving it this one's numbers would be both wrong and a disclosure.
+    clearFetchCache()
+    setOverviewBranchId(null)
     setMe(null)
   }
 
@@ -562,34 +610,49 @@ function App(): React.JSX.Element {
   }
 
   function handleSectionChange(id: string): void {
-    setPendingImport(null)
+    setPendingImportQueue([])
+    setPendingImportQueueTotal(0)
     setViewingBatchId(null)
     setHighlightBatchId(null)
     setSection(id as Section)
   }
 
+  // The single-file flows (Import History's "Reimport", Warning page's "Import to fix")
+  // — always exactly one file replacing one specific batch, so no queue indicator.
   function handleFileReady(pending: PendingImport): void {
-    setPendingImport(pending)
+    setPendingImportQueue([pending])
+    setPendingImportQueueTotal(0)
+  }
+
+  // The main Import grid's FileImportCard, which can hand back several files from one
+  // pick — each still gets its own review/confirm step, one after another.
+  function handleFilesReady(pendings: PendingImport[]): void {
+    setPendingImportQueue(pendings)
+    setPendingImportQueueTotal(pendings.length)
   }
 
   // Jumps from a Warning row's "Source Import" link to that exact batch's row in Import
   // History — the list, not the read-only detail view, since Revert lives on the row
   // itself. Highlighting it saves hunting through the list for the right one to revert.
   function handleViewImportBatch(batchId: string): void {
-    setPendingImport(null)
+    setPendingImportQueue([])
+    setPendingImportQueueTotal(0)
     setViewingBatchId(null)
     setHighlightBatchId(batchId)
     setSection('history')
   }
 
   function handleImportConfirmed(): void {
+    const justConfirmed = pendingImportQueue[0]
     showToast(
       'success',
-      pendingImport?.revertBatchId
-        ? `${pendingImport.importLabel} reimported successfully`
-        : `${pendingImport?.importLabel} imported successfully`
+      justConfirmed?.revertBatchId
+        ? `${justConfirmed.importLabel} reimported successfully`
+        : `${justConfirmed?.importLabel} imported successfully`
     )
-    setPendingImport(null)
+    // Advances to the next queued file rather than clearing outright — an empty queue
+    // naturally falls back to the Import grid since `pendingImport` derives from it.
+    setPendingImportQueue((queue) => queue.slice(1))
     refreshWarningCount()
   }
 
@@ -647,10 +710,19 @@ function App(): React.JSX.Element {
       >
         {pendingImport ? (
           <ImportReviewPage
+            // Forces a full remount on every distinct file (see PendingImport.id) — the
+            // previewed rows, branch pick, and purchase date are all local state that
+            // must not carry over from whichever file was just confirmed or skipped.
+            key={pendingImport.id}
             session={session}
             profile={profile}
             pending={pendingImport}
-            onBack={() => setPendingImport(null)}
+            queuePosition={
+              pendingImportQueueTotal > 1
+                ? { index: pendingImportQueueTotal - pendingImportQueue.length + 1, total: pendingImportQueueTotal }
+                : undefined
+            }
+            onBack={() => setPendingImportQueue((queue) => queue.slice(1))}
             onConfirmed={handleImportConfirmed}
           />
         ) : viewingBatchId ? (
@@ -667,6 +739,34 @@ function App(): React.JSX.Element {
                 profile={profile}
                 branchOptions={retailBranchOptions}
                 onViewWarnings={() => handleSectionChange('warnings')}
+                onViewBusinessAlerts={() => handleSectionChange('businessAlerts')}
+                onViewInventoryList={(tab) => {
+                  // InventoryPage reads this once, on mount — same pattern as
+                  // dashboardTarget just above.
+                  setInventoryTarget(tab)
+                  handleSectionChange('inventory')
+                }}
+                overviewBranchId={overviewBranchId}
+                onOverviewBranchChange={setOverviewBranchId}
+                initialTab={dashboardTarget?.tab}
+                initialBranchId={dashboardTarget?.branchId}
+              />
+            )}
+            {section === 'businessAlerts' && (
+              <BusinessAlertsPage
+                session={session}
+                profile={profile}
+                branchOptions={retailBranchOptions}
+                onOpenEvidence={(target, branchId) => {
+                  if (target === 'warnings') {
+                    handleSectionChange('warnings')
+                    return
+                  }
+                  // DashboardPage reads these once, on mount — which is exactly what a
+                  // section switch does, so the tab and branch survive the jump.
+                  setDashboardTarget({ tab: target, branchId })
+                  handleSectionChange('dashboard')
+                }}
               />
             )}
 
@@ -690,7 +790,7 @@ function App(): React.JSX.Element {
                     description="Daily sales slip exports"
                     endpoint="/api/imports/sales"
                     icon={<SalesIcon />}
-                    onFileReady={handleFileReady}
+                    onFilesReady={handleFilesReady}
                   />
                   <FileImportCard
                     session={session}
@@ -698,7 +798,7 @@ function App(): React.JSX.Element {
                     description="Stock purchase records"
                     endpoint="/api/imports/purchase"
                     icon={<PurchaseIcon />}
-                    onFileReady={handleFileReady}
+                    onFilesReady={handleFilesReady}
                   />
                 </div>
                 <FileImportCard
@@ -707,7 +807,7 @@ function App(): React.JSX.Element {
                   description="Monthly stock snapshots"
                   endpoint="/api/imports/inventory"
                   icon={<InventoryIcon />}
-                  onFileReady={handleFileReady}
+                  onFilesReady={handleFilesReady}
                 />
               </div>
             )}
@@ -745,20 +845,14 @@ function App(): React.JSX.Element {
                 emptyTitle="No sales yet"
                 emptyDescription="Import a sales file to see it here."
                 defaultWindowDays={saleListWindowDays}
+                serverPaged
               />
             )}
             {section === 'inventory' && (
-              <SimpleDataTable<InventoryRow>
+              <InventoryPage
                 session={session}
-                endpoint="/api/inventory"
-                title="Inventory"
-                description="Current stock on hand, from each product's most recent inventory snapshot."
-                icon={<InventoryIcon />}
-                columns={INVENTORY_COLUMNS}
-                filters={inventoryFilters}
-                rowKey={(row, i) => `${row.StockCode}-${row.Branch}-${i}`}
-                emptyTitle="No inventory yet"
-                emptyDescription="Import an inventory file to see it here."
+                branchOptions={branchOptions}
+                initialTab={inventoryTarget ?? undefined}
               />
             )}
             {section === 'purchase' && (
@@ -774,6 +868,7 @@ function App(): React.JSX.Element {
                 emptyTitle="No purchases yet"
                 emptyDescription="Import a purchase file to see it here."
                 defaultWindowDays={purchaseListWindowDays}
+                serverPaged
               />
             )}
             {section === 'warnings' && (

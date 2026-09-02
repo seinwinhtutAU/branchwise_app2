@@ -14,6 +14,10 @@ from app.services.settings import get_sale_list_window_days
 
 router = APIRouter(prefix="/api/sales", tags=["sales"])
 
+# Mirrors Data Overview's PAGE_SIZE — a page of results here is exactly one page of the
+# table on screen, so SimpleDataTable never has to hold more than that in memory either.
+PAGE_SIZE = 50
+
 
 @router.get("")
 def list_sales(
@@ -23,9 +27,16 @@ def list_sales(
     date_to: date | None = Query(
         None, description="Only include sales on/before this date"
     ),
+    search: str | None = Query(None, description="Matches stock code or description"),
+    branch: str | None = Query(None, description="Branch name"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(PAGE_SIZE, ge=1, le=500),
+    export: bool = Query(
+        False, description="Ignore paging and return every matching row, for CSV/Excel download"
+    ),
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
-) -> list[dict]:
+) -> dict:
     if date_from is None:
         # Sale history only ever grows (daily imports across 4 branches), so an unbounded
         # "select everything" would get slower every day. Bound the default query to the
@@ -39,26 +50,38 @@ def list_sales(
         .join(Product, SaleLine.product_id == Product.id)
         .outerjoin(Branch, Sale.branch_id == Branch.id)
         .filter(Sale.sale_date >= date_from)
-        .order_by(Sale.sale_date.desc(), Sale.slip_number, SaleLine.line_no)
     )
     if date_to is not None:
         query = query.filter(Sale.sale_date <= date_to)
     if user.branch_id is not None:
         query = query.filter(Sale.branch_id == user.branch_id)
+    if search:
+        like = f"%{search}%"
+        query = query.filter(
+            (Product.stock_code.ilike(like)) | (Product.description.ilike(like))
+        )
+    if branch:
+        query = query.filter(Branch.name == branch)
 
+    total = query.count()
+
+    query = query.order_by(Sale.sale_date.desc(), Sale.slip_number, SaleLine.line_no)
+    if not export:
+        query = query.offset((page - 1) * page_size).limit(page_size)
     line_rows = query.all()
+
     price_for = sale_line_pricer(db, {product.id for _, _, product, _ in line_rows})
 
-    result = []
-    for sale_line, sale, product, branch in line_rows:
+    rows = []
+    for sale_line, sale, product, branch_row in line_rows:
         buying_price, buying_price_source = price_for(product.id, sale.sale_date)
         profit, profit_margin_pct = compute_profit(
             buying_price, sale_line.qty, sale_line.net_amount
         )
 
-        result.append(
+        rows.append(
             {
-                "Branch": branch.name if branch else None,
+                "Branch": branch_row.name if branch_row else None,
                 "Date": sale.sale_date.isoformat(),
                 "Time": sale.sale_time,
                 "SlipID": sale.slip_id,
@@ -81,4 +104,4 @@ def list_sales(
             }
         )
 
-    return result
+    return {"rows": rows, "total": total}

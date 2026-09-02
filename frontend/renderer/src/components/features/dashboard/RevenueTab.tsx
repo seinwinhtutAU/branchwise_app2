@@ -1,8 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import { apiBaseUrl } from '@renderer/lib/supabaseClient'
-import { useToast } from '@renderer/lib/useToast'
-import { useLatestRequest } from '@renderer/lib/useLatestRequest'
+import { useCachedFetch } from '@renderer/lib/useCachedFetch'
 import { Button } from '@renderer/components/ui/Button'
 import { Card, CardHeader } from '@renderer/components/ui/Card'
 import { EmptyState } from '@renderer/components/ui/EmptyState'
@@ -10,6 +8,7 @@ import { Skeleton } from '@renderer/components/ui/Skeleton'
 import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
 import { DashboardIcon, SalesIcon } from '@renderer/components/ui/icons'
 import {
+  RefreshingHint,
   ChartViewToggle,
   StatTile,
   TrendChart,
@@ -18,9 +17,9 @@ import {
   type ChartView
 } from './shared'
 import {
+  dashboardUrl,
   formatCount,
   formatMoney,
-  periodQueryParams,
   previousPeriodLabel,
   type KpiValue,
   type PeriodKey,
@@ -108,52 +107,24 @@ interface Props {
 }
 
 export function RevenueTab({ session, branchId, period, dateFrom, dateTo, canLoad, onViewWarnings }: Props): React.JSX.Element {
-  const showToast = useToast()
-  const [data, setData] = useState<RevenueDashboardData | null>(null)
-  const [loadFailed, setLoadFailed] = useState(false)
   const [trendView, setTrendView] = useState<ChartView>('bar')
-  const nextRequest = useLatestRequest()
-
-  async function load(): Promise<void> {
-    if (!canLoad) return
-    const signal = nextRequest()
-    setLoadFailed(false)
-    try {
-      const params = periodQueryParams(period, dateFrom, dateTo)
-      if (branchId) params.set('branch_id', branchId)
-      const response = await fetch(`${apiBaseUrl}/api/dashboard/revenue?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        signal
-      })
-      if (!response.ok) {
-        setLoadFailed(true)
-        showToast('error', `Failed to load the Revenue dashboard: ${response.status}`)
-        return
-      }
-      setData(await response.json())
-    } catch {
-      if (signal.aborted) return
-      setLoadFailed(true)
-      showToast('error', 'Failed to load the Revenue dashboard — is the backend running?')
-    }
-  }
-
-  useEffect(() => {
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.access_token, period, dateFrom, dateTo, branchId])
+  // One cached request per (tab, branch, period) — returning to this tab with the same
+  // selection shows the numbers it showed last time instead of a skeleton. See
+  // lib/useCachedFetch.ts.
+  const url = canLoad ? dashboardUrl('revenue', branchId, { period, dateFrom, dateTo }) : null
+  const { data, isRefreshing, failed, reload } = useCachedFetch<RevenueDashboardData>(url, session, 'Revenue dashboard')
 
   if (!canLoad) return <></>
 
   if (data === null) {
-    if (loadFailed) {
+    if (failed) {
       return (
         <EmptyState
           icon={<DashboardIcon />}
           title="Couldn't load the Revenue dashboard"
           description="Something went wrong reaching the backend."
           action={
-            <Button variant="secondary" size="sm" onClick={load}>
+            <Button variant="secondary" size="sm" onClick={reload}>
               Try again
             </Button>
           }
@@ -175,6 +146,7 @@ export function RevenueTab({ session, branchId, period, dateFrom, dateTo, canLoa
 
   return (
     <div className="flex flex-col gap-4">
+      <RefreshingHint show={isRefreshing} />
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatTile
           label="Net Revenue"
@@ -219,16 +191,15 @@ export function RevenueTab({ session, branchId, period, dateFrom, dateTo, canLoa
         <WeekdayHourHeatmap cells={data.heatmap} getValue={(c) => c.net_revenue} formatValue={formatMoney} />
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-        <Card>
-          <CardHeader title="Top products" description="Ranked by net revenue in the selected period." />
-          <TopProductsTable products={data.top_products} />
-        </Card>
-        <Card>
-          <CardHeader title="Sale data quality" description="Bad values on sale lines in the selected period." />
-          <WarningsTile warnings={data.sale_warnings} label="Sale" onViewWarnings={onViewWarnings} />
-        </Card>
-      </div>
+      <Card>
+        <CardHeader title="Top products" description="Ranked by net revenue in the selected period." />
+        <TopProductsTable products={data.top_products} />
+      </Card>
+
+      <Card>
+        <CardHeader title="Sale data quality" description="Bad values on sale lines in the selected period." />
+        <WarningsTile warnings={data.sale_warnings} label="Sale" onViewWarnings={onViewWarnings} />
+      </Card>
     </div>
   )
 }

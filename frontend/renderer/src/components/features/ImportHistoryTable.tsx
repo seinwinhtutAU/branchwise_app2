@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
+import { invalidateImportedData, useCachedFetch } from '@renderer/lib/useCachedFetch'
 import { useToast } from '@renderer/lib/useToast'
 import { cn } from '@renderer/lib/utils'
 import { useImportFilePicker } from '@renderer/lib/useImportFilePicker'
@@ -98,9 +99,11 @@ function ImportHistoryTable({
   onFileReady
 }: Props): React.JSX.Element {
   const showToast = useToast()
-  const [rows, setRows] = useState<ImportBatchRow[] | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [loadFailed, setLoadFailed] = useState(false)
+  const { data: rows, isRefreshing, failed, reload } = useCachedFetch<ImportBatchRow[]>(
+    `${apiBaseUrl}/api/imports/history`,
+    session,
+    'import history'
+  )
   const [revertingId, setRevertingId] = useState<string | null>(null)
   const { aboveRef, containerStyle } = useStickyAbove()
   const highlightRowRef = useRef<HTMLTableRowElement | null>(null)
@@ -122,32 +125,6 @@ function ImportHistoryTable({
   const [branchFilter, setBranchFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-
-  async function load(): Promise<void> {
-    setLoading(true)
-    setLoadFailed(false)
-    try {
-      const response = await fetch(`${apiBaseUrl}/api/imports/history`, {
-        headers: { Authorization: `Bearer ${session.access_token}` }
-      })
-      if (!response.ok) {
-        setLoadFailed(true)
-        showToast('error', `Failed to load history: ${response.status}`)
-        return
-      }
-      setRows(await response.json())
-    } catch {
-      setLoadFailed(true)
-      showToast('error', 'Failed to load history — is the backend running?')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.access_token])
 
   // Only scrolls the row into view if it's on the current (default, unfiltered) page —
   // a highlight from Warnings always arrives with filters cleared and page 1, so this
@@ -204,7 +181,10 @@ function ImportHistoryTable({
         showToast('error', body?.detail ?? `Revert failed: ${response.status}`)
         return
       }
-      await load()
+      // The batch's sale/inventory/purchase rows are gone, so every cached page is now
+      // wrong — including this one, which refetches itself as a result. See
+      // invalidateImportedData.
+      invalidateImportedData()
     } catch {
       showToast('error', 'Revert failed — is the backend running?')
     } finally {
@@ -220,7 +200,7 @@ function ImportHistoryTable({
           title="Import history"
           description="Every confirmed upload — reimport a corrected file to replace a mistaken one, or remove it outright."
           action={
-            <Button variant="secondary" size="sm" onClick={load} loading={loading}>
+            <Button variant="secondary" size="sm" onClick={reload} loading={isRefreshing}>
               Refresh
             </Button>
           }
@@ -295,15 +275,15 @@ function ImportHistoryTable({
         )}
       </div>
 
-      {rows === null && loading && <TableSkeleton rows={4} cols={7} />}
+      {rows === null && !failed && <TableSkeleton rows={4} cols={7} />}
 
-      {rows === null && !loading && loadFailed && (
+      {rows === null && failed && (
         <EmptyState
           icon={<HistoryIcon />}
           title="Couldn't load import history"
           description="Something went wrong reaching the backend."
           action={
-            <Button variant="secondary" size="sm" onClick={load}>
+            <Button variant="secondary" size="sm" onClick={reload}>
               Try again
             </Button>
           }

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
+import { cn } from '@renderer/lib/utils'
 import { useToast } from '@renderer/lib/useToast'
-import type { AppSettings } from '@renderer/lib/appSettings'
+import type { AppSettings, BranchHealthWeights, EarlyWarningThresholds } from '@renderer/lib/appSettings'
 import type { ThemeMode } from '@renderer/lib/theme'
 import { Card, CardHeader } from '@renderer/components/ui/Card'
 import { Input } from '@renderer/components/ui/Input'
@@ -94,11 +95,140 @@ function DayCountField({
   )
 }
 
+// DayCountField's decimal sibling, for the Branch Health weights and Early Warning
+// firing points — those are percentages and shares, not whole days, and several are
+// entered as a positive number the caller stores as a negative one ("revenue falls by
+// more than 10%" is easier to set than "-10").
+function NumberField({
+  label,
+  hint,
+  value,
+  min,
+  max,
+  disabled,
+  onCommit
+}: {
+  label: string
+  hint: string
+  value: number | undefined
+  min: number
+  max: number
+  disabled: boolean
+  onCommit: (value: number) => void
+}): React.JSX.Element {
+  const [draft, setDraft] = useState(value !== undefined ? String(value) : '')
+  useEffect(() => {
+    if (value !== undefined) setDraft(String(value))
+  }, [value])
+
+  function commit(): void {
+    if (value === undefined) return
+    const parsed = Number(draft)
+    if (Number.isFinite(parsed) && draft.trim() !== '') {
+      const clamped = Math.min(Math.max(parsed, min), max)
+      setDraft(String(clamped))
+      if (clamped !== value) onCommit(clamped)
+    } else {
+      setDraft(String(value))
+    }
+  }
+
+  return (
+    <Input
+      type="text"
+      inputMode="decimal"
+      label={label}
+      hint={hint}
+      value={draft}
+      disabled={disabled || value === undefined}
+      onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ''))}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur()
+      }}
+    />
+  )
+}
+
+const HEALTH_WEIGHT_FIELDS: { key: keyof BranchHealthWeights; label: string }[] = [
+  { key: 'sales', label: 'Sales' },
+  { key: 'profit', label: 'Profit' },
+  { key: 'inventory', label: 'Inventory' },
+  { key: 'customer', label: 'Customer' },
+  { key: 'data_quality', label: 'Data Quality' }
+]
+
+// `negative: true` means the field is shown as a positive number and stored as its
+// negative — "revenue falls by more than 10%" rather than asking anyone to type "-10".
+const WARNING_THRESHOLD_FIELDS: {
+  key: keyof EarlyWarningThresholds
+  label: string
+  hint: string
+  negative?: boolean
+}[] = [
+  { key: 'revenue_decline_warning_pct', label: 'Revenue warning — falls more than', hint: '%', negative: true },
+  { key: 'revenue_decline_critical_pct', label: 'Revenue critical — falls more than', hint: '%', negative: true },
+  { key: 'low_margin_warning_pct', label: 'Margin warning — below', hint: '%' },
+  { key: 'low_margin_critical_pct', label: 'Margin critical — below', hint: '%' },
+  { key: 'margin_slip_warning_pp', label: 'Margin slip warning — falls more than', hint: 'percentage points', negative: true },
+  { key: 'dead_stock_warning_share_pct', label: 'Dead stock warning — above', hint: '% of products' },
+  { key: 'dead_stock_critical_share_pct', label: 'Dead stock critical — above', hint: '% of products' },
+  { key: 'traffic_decline_warning_pct', label: 'Footfall warning — visits fall more than', hint: '%', negative: true },
+  { key: 'single_item_basket_warning_share_pct', label: 'Single-item baskets warning — above', hint: '% of visits' }
+]
+
+type SettingsTab = 'general' | 'checks' | 'pricing' | 'health' | 'branches'
+
+// Ten stacked cards was one long scroll with no shape to it, so related settings are
+// grouped and the groups are tabs — same pill control the Dashboard and Import Overview
+// already use, so this reads as the app's existing pattern rather than a new one.
+const SETTINGS_TABS: { id: SettingsTab; label: string; retailOnly?: boolean }[] = [
+  { id: 'general', label: 'General' },
+  { id: 'checks', label: 'Data checks', retailOnly: true },
+  { id: 'pricing', label: 'Buying price' },
+  { id: 'health', label: 'Branch health', retailOnly: true },
+  { id: 'branches', label: 'Branches' }
+]
+
+function SettingsTabBar({
+  tabs,
+  activeTab,
+  onSelect
+}: {
+  tabs: { id: SettingsTab; label: string }[]
+  activeTab: SettingsTab
+  onSelect: (tab: SettingsTab) => void
+}): React.JSX.Element {
+  return (
+    <div role="tablist" className="flex flex-wrap gap-1 p-1 rounded-lg bg-bg-subtle w-fit">
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          role="tab"
+          aria-selected={activeTab === tab.id}
+          onClick={() => onSelect(tab.id)}
+          className={cn(
+            'flex items-center gap-1.5 h-8 px-4 rounded-md text-sm font-medium transition-all duration-150',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1',
+            activeTab === tab.id
+              ? 'bg-brand-subtle text-brand shadow-sm'
+              : 'text-text-muted hover:text-text-secondary'
+          )}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSettings }: Props): React.JSX.Element {
   const showToast = useToast()
   // Wholesale accounts never see the Warning tab (no sale/inventory/purchase data), so the
   // check-window setting has nothing to apply to for them.
   const isWholesale = profile?.role === 'wholesale'
+  const [tab, setTab] = useState<SettingsTab>('general')
 
   const [branches, setBranches] = useState<BranchDateFormats[] | null>(null)
   // Tracks which specific AppSettings key (or "branch-id:field" pair) is mid-save — as a
@@ -185,6 +315,14 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         description="Business-wide preferences — the same for every account and every device."
       />
 
+      {isAdmin && (
+        <SettingsTabBar
+          tabs={SETTINGS_TABS.filter((option) => !option.retailOnly || !isWholesale)}
+          activeTab={tab}
+          onSelect={setTab}
+        />
+      )}
+
       {!isAdmin && (
         <Card>
           <CardHeader
@@ -194,7 +332,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && (
+      {isAdmin && tab === 'general' && (
         <Card>
           <CardHeader title="Appearance" description="Business-wide — applies to every signed-in account." />
           <ThemeSwitcher
@@ -207,7 +345,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && !isWholesale && (
+      {isAdmin && !isWholesale && tab === 'checks' && (
         <Card>
           <CardHeader
             title="Daily check windows"
@@ -260,7 +398,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && !isWholesale && (
+      {isAdmin && !isWholesale && tab === 'general' && (
         <Card>
           <CardHeader
             title="Sale & Purchase list default range"
@@ -313,7 +451,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && !isWholesale && (
+      {isAdmin && !isWholesale && tab === 'general' && (
         <Card>
           <CardHeader
             title="Buying Price Source column"
@@ -344,7 +482,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && (
+      {isAdmin && tab === 'pricing' && (
         <Card>
           <CardHeader
             title="Purchase price lookback days"
@@ -375,7 +513,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && (
+      {isAdmin && tab === 'pricing' && (
         <Card>
           <CardHeader
             title="Inventory price lookback days"
@@ -406,7 +544,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && (
+      {isAdmin && tab === 'pricing' && (
         <Card>
           <CardHeader
             title="Inventory price forward days"
@@ -437,7 +575,94 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && (
+      {isAdmin && !isWholesale && tab === 'health' && (
+        <Card>
+          <CardHeader
+            title="Branch health weights"
+            description="How much each part of the Dashboard's Overview score counts. They don't have to add up to 100% — the score always divides by whatever could actually be measured for the branch and period on screen — but keeping them close to it makes the numbers easier to read."
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {HEALTH_WEIGHT_FIELDS.map((field) => (
+              <div key={field.key}>
+                {!settings ? (
+                  <Skeleton className="h-10 w-full" />
+                ) : (
+                  <NumberField
+                    label={field.label}
+                    hint="% of the score"
+                    // Stored as a fraction, shown as a percentage — nobody reasons
+                    // about a weight of 0.25.
+                    value={Math.round(settings.branch_health_weights[field.key] * 1000) / 10}
+                    min={0}
+                    max={100}
+                    disabled={savingKeys.has('branch_health_weights')}
+                    onCommit={(percent) =>
+                      handleSettingChange(
+                        'branch_health_weights',
+                        { ...settings.branch_health_weights, [field.key]: percent / 100 },
+                        'Branch health weights updated',
+                        "Couldn't update branch health weights"
+                      )
+                    }
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+          {settings && (
+            <p className="text-sm text-text-muted mt-4">
+              Currently adding up to{' '}
+              <span className="font-medium text-text-secondary tabular-nums">
+                {Math.round(
+                  Object.values(settings.branch_health_weights).reduce((sum, weight) => sum + weight, 0) * 100
+                )}
+                %
+              </span>
+              .
+            </p>
+          )}
+        </Card>
+      )}
+
+      {isAdmin && !isWholesale && tab === 'health' && (
+        <Card>
+          <CardHeader
+            title="Early warning thresholds"
+            description="When the Overview page raises each warning. Lower the numbers to hear about problems sooner and more often; raise them to only be told about the serious ones."
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {WARNING_THRESHOLD_FIELDS.map((field) => (
+              <div key={field.key}>
+                {!settings ? (
+                  <Skeleton className="h-10 w-full" />
+                ) : (
+                  <NumberField
+                    label={field.label}
+                    hint={field.hint}
+                    value={Math.abs(settings.early_warning_thresholds[field.key])}
+                    min={0}
+                    max={100}
+                    disabled={savingKeys.has('early_warning_thresholds')}
+                    onCommit={(entered) =>
+                      handleSettingChange(
+                        'early_warning_thresholds',
+                        {
+                          ...settings.early_warning_thresholds,
+                          [field.key]: field.negative ? -entered : entered
+                        },
+                        'Early warning thresholds updated',
+                        "Couldn't update early warning thresholds"
+                      )
+                    }
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {isAdmin && tab === 'branches' && (
         <Card>
           <CardHeader
             title="Branch date formats"

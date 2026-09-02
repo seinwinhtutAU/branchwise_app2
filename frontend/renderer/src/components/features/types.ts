@@ -25,6 +25,11 @@ export interface ImportPreviewResult {
 }
 
 export interface PendingImport {
+  // Unique per pick, even for two files with the same name — App.tsx keys
+  // ImportReviewPage on this so switching to a different pending file (advancing a
+  // multi-file queue, or a fresh single-file reimport) always remounts it with a clean
+  // slate instead of reusing state (branch pick, previewed rows, etc.) from the last one.
+  id: string
   importLabel: string
   endpoint: string
   file: File

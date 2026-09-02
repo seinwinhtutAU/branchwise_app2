@@ -82,3 +82,33 @@ def get_sale_list_window_days(db: Session) -> int:
 def get_purchase_list_window_days(db: Session) -> int:
     """Typed convenience wrapper. See get_stock_forward_fallback_window_days."""
     return get_setting(db, "purchase_list_window_days")
+
+
+def _merged_over_default(db: Session, key: str) -> dict:
+    """A nested setting's saved value laid over its defaults, so a dict saved before a
+    new sub-key existed still returns a complete set rather than a hole that whatever
+    reads it has to guard against. Unknown keys in the saved value are dropped for the
+    same reason — the defaults define the shape."""
+    default = DEFAULT_SETTINGS[key]
+    saved = get_setting(db, key)
+    if not isinstance(saved, dict):
+        return dict(default)
+    return {name: saved.get(name, fallback) for name, fallback in default.items()}
+
+
+def get_branch_health_weights(db: Session) -> dict[str, float]:
+    """How much each dimension counts toward the Branch Health Score. Deliberately not
+    forced to sum to 1: the scorer already re-normalises over whichever dimensions were
+    measurable, so a set that sums to 0.9 or 1.1 still produces a sound 0-100 score, and
+    rejecting it would block a legitimate half-finished edit in the Settings form."""
+    return {name: float(value) for name, value in _merged_over_default(db, "branch_health_weights").items()}
+
+
+def get_early_warning_thresholds(db: Session) -> dict[str, float]:
+    """The firing points for every Early Warning rule, as a plain dict — the caller
+    turns it into an early_warning.Thresholds. Returning the dataclass from here would
+    make this module import early_warning, which already reaches back into settings
+    through branch_health."""
+    return {
+        name: float(value) for name, value in _merged_over_default(db, "early_warning_thresholds").items()
+    }

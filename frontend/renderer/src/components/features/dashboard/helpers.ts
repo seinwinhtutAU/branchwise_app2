@@ -1,3 +1,5 @@
+import { apiBaseUrl } from '@renderer/lib/supabaseClient'
+
 // Non-component helpers shared by the dashboard tabs. Kept apart from shared.tsx
 // (components only) so Vite Fast Refresh can hot-swap that file in dev — a module
 // that exports both components and plain values/functions can't be refreshed in place.
@@ -38,6 +40,95 @@ export function periodQueryParams(period: PeriodKey, dateFrom: string, dateTo: s
     params.set('period', period)
   }
   return params
+}
+
+// The one place a dashboard tab's request URL is built. It doubles as the cache key in
+// useCachedFetch, so every parameter that changes what comes back has to appear in it —
+// which is exactly why building it here rather than inline in five tabs matters.
+export function dashboardUrl(
+  tab: 'overview' | 'revenue' | 'cost' | 'inventory' | 'customer',
+  branchId: string,
+  // Omitted for Inventory, which has no period control at all.
+  window?: { period: PeriodKey; dateFrom: string; dateTo: string }
+): string {
+  const params = window
+    ? periodQueryParams(window.period, window.dateFrom, window.dateTo)
+    : new URLSearchParams()
+  if (branchId) params.set('branch_id', branchId)
+  const query = params.toString()
+  return `${apiBaseUrl}/api/dashboard/${tab}${query ? `?${query}` : ''}`
+}
+
+// --- the Overview payload (GET /api/dashboard/overview) ------------------------------
+// Shared by the Overview tab and the Alerts tab, so they read one definition of the
+// shape rather than two that can drift.
+
+export type HealthStatus = 'healthy' | 'needs_attention' | 'critical'
+export type AlertSeverity = 'critical' | 'warning'
+
+/** Which tab holds the evidence behind a score or an alert. */
+export type EvidenceTarget = 'revenue' | 'cost' | 'inventory' | 'customer' | 'warnings'
+
+export interface SubMetric {
+  key: string
+  label: string
+  unit: 'pct' | 'pct_change' | 'pct_points' | 'days' | 'count' | 'rate'
+  weight: number
+  value: number | null
+  score: number | null
+  /** One sentence saying what this measures. */
+  definition: string
+  /** The figures the value was worked out from, or null when it wasn't measurable. */
+  calculation: string | null
+  /** [value, score] breakpoints — the same table the score was computed against. */
+  bands: [number, number][]
+}
+
+export interface DimensionScore {
+  key: string
+  label: string
+  description: string
+  weight: number
+  effective_weight: number | null
+  score: number | null
+  status: HealthStatus | null
+  insufficient_data_reason: string | null
+  sub_metrics: SubMetric[]
+}
+
+export interface HealthAlert {
+  id: string
+  severity: AlertSeverity
+  dimension: string
+  title: string
+  summary: string
+  what_happened: string
+  recommended_action: string
+  link: EvidenceTarget
+  /** The `SubMetric.key` this alert is about — see the Overview branch page. */
+  measure: string
+  driver: string | null
+  interpretation: string | null
+}
+
+export interface OverviewData {
+  branch_id: string
+  branch_name: string
+  date_from: string
+  date_to: string
+  overall_score: number | null
+  status: HealthStatus | null
+  scored_weight: number
+  dimensions: DimensionScore[]
+  alerts: HealthAlert[]
+}
+
+export const EVIDENCE_LABEL: Record<EvidenceTarget, string> = {
+  revenue: 'View Revenue',
+  cost: 'View Cost',
+  inventory: 'View Inventory',
+  customer: 'View Customer',
+  warnings: 'View Warning page'
 }
 
 export interface KpiValue {

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
-import { useToast } from '@renderer/lib/useToast'
+import { useCachedFetch } from '@renderer/lib/useCachedFetch'
 import { cn } from '@renderer/lib/utils'
+import { useToast } from '@renderer/lib/useToast'
 import { formatBuyingPriceSource } from '@renderer/lib/buyingPriceSource'
 import { downloadCsv } from '@renderer/lib/csv'
 import { downloadExcel } from '@renderer/lib/excel'
@@ -16,8 +17,7 @@ import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/u
 import { Pagination } from '@renderer/components/ui/Pagination'
 import { DownloadIcon, OverviewIcon } from '@renderer/components/ui/icons'
 import { useStickyAbove } from '@renderer/lib/useStickyAbove'
-import { distinctValues, inDateRange, matchesSearch } from '@renderer/lib/filters'
-import { usePagination } from '@renderer/lib/usePagination'
+import { useSettled } from '@renderer/lib/useSettled'
 
 interface OverviewRow {
   Branch: string | null
@@ -41,6 +41,13 @@ interface OverviewRow {
   Group: string | null
   profit: number | null
   profit_margin_pct: number | null
+}
+
+interface OverviewResponse {
+  rows: OverviewRow[]
+  total: number
+  groups: string[]
+  branches: string[]
 }
 
 interface Props {
@@ -96,6 +103,12 @@ const BAND_LABEL: Record<Band, string> = {
   purchase: 'Purchase'
 }
 
+// How long a text/date filter must sit unchanged before it's sent to the backend — same
+// idea, and same delay, as DashboardPage's custom date range: a native date input fires
+// a change per keystroke, and this table's search box shouldn't refetch per letter typed.
+const FILTER_SETTLE_MS = 400
+const PAGE_SIZE = 50
+
 function SourceLegend(): React.JSX.Element {
   return (
     <div className="flex flex-row flex-wrap items-center gap-4 mb-4">
@@ -150,9 +163,6 @@ function DataOverviewTable({
   showBuyingPriceSource
 }: Props): React.JSX.Element {
   const showToast = useToast()
-  const [rows, setRows] = useState<OverviewRow[] | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [loadFailed, setLoadFailed] = useState(false)
   const { aboveRef, containerStyle } = useStickyAbove()
 
   const [search, setSearch] = useState('')
@@ -160,38 +170,24 @@ function DataOverviewTable({
   const [groupFilter, setGroupFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [page, setPage] = useState(1)
+  const [exporting, setExporting] = useState<'csv' | 'excel' | null>(null)
+
+  // What's actually fetched — settled text/date filters, applied instantly for the two
+  // dropdowns (a select fires once per choice, not per keystroke, so it needs no delay).
+  const appliedSearch = useSettled(search, FILTER_SETTLE_MS)
+  const appliedDateFrom = useSettled(dateFrom, FILTER_SETTLE_MS)
+  const appliedDateTo = useSettled(dateTo, FILTER_SETTLE_MS)
+
+  useEffect(() => {
+    setPage(1)
+  }, [appliedSearch, branchFilter, groupFilter, appliedDateFrom, appliedDateTo])
 
   const visibleColumns = useMemo(
     () =>
       showBuyingPriceSource ? COLUMNS : COLUMNS.filter((col) => col.key !== 'Buying_Price_Source'),
     [showBuyingPriceSource]
   )
-
-  async function load(): Promise<void> {
-    setLoading(true)
-    setLoadFailed(false)
-    try {
-      const response = await fetch(`${apiBaseUrl}/api/data-overview`, {
-        headers: { Authorization: `Bearer ${session.access_token}` }
-      })
-      if (!response.ok) {
-        setLoadFailed(true)
-        showToast('error', `Failed to load data overview: ${response.status}`)
-        return
-      }
-      setRows(await response.json())
-    } catch {
-      setLoadFailed(true)
-      showToast('error', 'Failed to load data overview — is the backend running?')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.access_token])
 
   const hasActiveFilters =
     search !== '' || branchFilter !== '' || groupFilter !== '' || dateFrom !== '' || dateTo !== ''
@@ -204,20 +200,39 @@ function DataOverviewTable({
     setDateTo('')
   }
 
-  const filteredRows = useMemo(() => {
-    if (!rows) return null
-    return rows.filter(
-      (row) =>
-        (!search ||
-          matchesSearch(row.StockCode, search) ||
-          matchesSearch(row.Description, search)) &&
-        (!branchFilter || row.Branch === branchFilter) &&
-        (!groupFilter || row.Group === groupFilter) &&
-        inDateRange(row.Date, { from: dateFrom, to: dateTo })
-    )
-  }, [rows, search, branchFilter, groupFilter, dateFrom, dateTo])
+  function buildParams(extra?: Record<string, string>): URLSearchParams {
+    const params = new URLSearchParams()
+    if (appliedSearch) params.set('search', appliedSearch)
+    if (branchFilter) params.set('branch', branchFilter)
+    if (groupFilter) params.set('group', groupFilter)
+    if (appliedDateFrom) params.set('date_from', appliedDateFrom)
+    if (appliedDateTo) params.set('date_to', appliedDateTo)
+    if (extra) for (const [key, value] of Object.entries(extra)) params.set(key, value)
+    return params
+  }
 
-  const { page, setPage, totalPages, pageItems, pageSize } = usePagination(filteredRows)
+  const url = useMemo(() => {
+    const params = buildParams({ page: String(page), page_size: String(PAGE_SIZE) })
+    return `${apiBaseUrl}/api/data-overview?${params.toString()}`
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appliedSearch, branchFilter, groupFilter, appliedDateFrom, appliedDateTo, page])
+
+  const { data, isRefreshing, failed, reload } = useCachedFetch<OverviewResponse>(
+    url,
+    session,
+    'data overview'
+  )
+
+  const rows = data?.rows ?? null
+  const total = data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  // Strands nobody: if a background refresh (someone else's import) shrinks the result
+  // set out from under a page the user is sitting on, snap back to the last real page
+  // instead of showing an empty one.
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages)
+  }, [totalPages, page])
 
   function overviewCsvRows(source: OverviewRow[]): string[][] {
     return source.map((row) =>
@@ -230,22 +245,44 @@ function DataOverviewTable({
     )
   }
 
-  function handleDownloadCsv(): void {
-    if (!filteredRows || filteredRows.length === 0) return
-    downloadCsv(
-      'data-overview.csv',
-      visibleColumns.map((col) => col.label),
-      overviewCsvRows(filteredRows)
-    )
+  // Every page load only fetches one page of rows, so a full export needs its own
+  // request — deliberate and user-triggered, unlike the old full-history fetch this
+  // replaced (see backend/app/routers/data_overview.py for why that mattered).
+  async function fetchAllForExport(): Promise<OverviewRow[] | null> {
+    const params = buildParams({ export: 'true' })
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/data-overview?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      })
+      if (!response.ok) throw new Error(String(response.status))
+      const body = (await response.json()) as OverviewResponse
+      return body.rows
+    } catch {
+      showToast('error', 'Failed to prepare the export — is the backend running?')
+      return null
+    }
   }
 
-  function handleDownloadExcel(): void {
-    if (!filteredRows || filteredRows.length === 0) return
+  async function handleDownloadCsv(): Promise<void> {
+    if (total === 0) return
+    setExporting('csv')
+    const allRows = await fetchAllForExport()
+    setExporting(null)
+    if (!allRows) return
+    downloadCsv('data-overview.csv', visibleColumns.map((col) => col.label), overviewCsvRows(allRows))
+  }
+
+  async function handleDownloadExcel(): Promise<void> {
+    if (total === 0) return
+    setExporting('excel')
+    const allRows = await fetchAllForExport()
+    setExporting(null)
+    if (!allRows) return
     downloadExcel(
       'data-overview.xlsx',
       'Data overview',
       visibleColumns.map((col) => col.label),
-      overviewCsvRows(filteredRows)
+      overviewCsvRows(allRows)
     )
   }
 
@@ -261,7 +298,8 @@ function DataOverviewTable({
                 variant="secondary"
                 size="sm"
                 onClick={handleDownloadCsv}
-                disabled={!filteredRows || filteredRows.length === 0}
+                disabled={total === 0}
+                loading={exporting === 'csv'}
               >
                 <DownloadIcon className="w-4 h-4" />
                 CSV
@@ -270,12 +308,13 @@ function DataOverviewTable({
                 variant="secondary"
                 size="sm"
                 onClick={handleDownloadExcel}
-                disabled={!filteredRows || filteredRows.length === 0}
+                disabled={total === 0}
+                loading={exporting === 'excel'}
               >
                 <DownloadIcon className="w-4 h-4" />
                 Excel
               </Button>
-              <Button variant="secondary" size="sm" onClick={load} loading={loading}>
+              <Button variant="secondary" size="sm" onClick={reload} loading={isRefreshing}>
                 Refresh
               </Button>
             </div>
@@ -284,7 +323,7 @@ function DataOverviewTable({
 
         <SourceLegend />
 
-        {rows && rows.length > 0 && (
+        {(total > 0 || hasActiveFilters) && (
           <div className="flex flex-wrap items-end gap-3 pb-4 -mt-1">
             <Input
               label="Search"
@@ -295,8 +334,7 @@ function DataOverviewTable({
             />
 
             {(() => {
-              const options =
-                branchOptions.length > 0 ? branchOptions : distinctValues(rows, 'Branch')
+              const options = branchOptions.length > 0 ? branchOptions : data?.branches ?? []
               return options.length > 1 ? (
                 <div className="w-40">
                   <Select
@@ -316,7 +354,7 @@ function DataOverviewTable({
             })()}
 
             {(() => {
-              const groupOptions = distinctValues(rows, 'Group')
+              const groupOptions = data?.groups ?? []
               return groupOptions.length > 1 ? (
                 <div className="w-40">
                   <Select
@@ -359,22 +397,22 @@ function DataOverviewTable({
         )}
       </div>
 
-      {rows === null && loading && <TableSkeleton rows={6} cols={8} />}
+      {rows === null && !failed && <TableSkeleton rows={6} cols={8} />}
 
-      {rows === null && !loading && loadFailed && (
+      {rows === null && failed && (
         <EmptyState
           icon={<OverviewIcon />}
           title="Couldn't load data overview"
           description="Something went wrong reaching the backend."
           action={
-            <Button variant="secondary" size="sm" onClick={load}>
+            <Button variant="secondary" size="sm" onClick={reload}>
               Try again
             </Button>
           }
         />
       )}
 
-      {rows !== null && rows.length === 0 && (
+      {rows !== null && total === 0 && !hasActiveFilters && (
         <EmptyState
           icon={<OverviewIcon />}
           title="No sales data yet"
@@ -382,7 +420,7 @@ function DataOverviewTable({
         />
       )}
 
-      {rows !== null && rows.length > 0 && filteredRows !== null && filteredRows.length === 0 && (
+      {rows !== null && total === 0 && hasActiveFilters && (
         <EmptyState
           icon={<OverviewIcon />}
           title="No rows match your filters"
@@ -395,7 +433,7 @@ function DataOverviewTable({
         />
       )}
 
-      {filteredRows !== null && filteredRows.length > 0 && pageItems && (
+      {rows !== null && rows.length > 0 && (
         <>
           <TableContainer
             className="overflow-y-auto border-0 rounded-none"
@@ -412,7 +450,7 @@ function DataOverviewTable({
               </Tr>
             </Thead>
             <Tbody>
-              {pageItems.map((row) => (
+              {rows.map((row) => (
                 <Tr key={row.LineID}>
                   {visibleColumns.map((col) => (
                     <Td
@@ -433,8 +471,8 @@ function DataOverviewTable({
           <Pagination
             page={page}
             totalPages={totalPages}
-            totalItems={filteredRows.length}
-            pageSize={pageSize}
+            totalItems={total}
+            pageSize={PAGE_SIZE}
             onPageChange={setPage}
           />
         </>

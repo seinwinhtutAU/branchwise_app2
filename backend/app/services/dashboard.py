@@ -1,10 +1,14 @@
 """Aggregation for the per-branch retail dashboard (see docs/retail_dashboard.md).
 
-One branch at a time, never a cross-branch rollup — the caller resolves which
-branch first (see app/routers/dashboard.py), and every query here is scoped to
-that one branch_id directly rather than reusing the nullable-branch_id pattern
-the row-level list endpoints (GET /api/sales etc.) use for admin's "every branch"
-view, since that view doesn't apply here at all.
+One branch at a time, never a cross-branch rollup, for every tab except Inventory's
+stock-health figures — the caller resolves which branch first (see
+app/routers/dashboard.py), and every query here is scoped to that one branch_id
+directly rather than reusing the nullable-branch_id pattern the row-level list
+endpoints (GET /api/sales etc.) use for admin's "every branch" view, since that view
+doesn't apply to a period-scoped tab like Revenue or Cost. compute_stock_health is the
+one exception: current stock has no period control (see STOCK_VELOCITY_WINDOW_DAYS's
+comment), and its figures are also the source of truth for the standalone Low Stock /
+Dead Stock list pages, which do need an "every branch" view — see its own docstring.
 """
 
 from dataclasses import dataclass
@@ -15,6 +19,7 @@ from typing import Literal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.models.branch import Branch
 from app.models.product import Product
 from app.models.sale import Sale, SaleLine
 from app.models.stock_level import StockLevel
@@ -24,6 +29,7 @@ from app.services.settings import (
     get_purchase_warning_window_days,
     get_sale_warning_window_days,
 )
+from app.services.stock import latest_stock_query
 
 PeriodKey = Literal["today", "yesterday", "7d", "30d"]
 VALID_PERIODS: frozenset[str] = frozenset({"today", "yesterday", "7d", "30d"})
@@ -51,6 +57,13 @@ LOW_STOCK_ITEMS_LIMIT = 50
 # (while still sitting on the shelf) is a much stronger "this isn't moving" signal.
 DEAD_STOCK_WINDOW_DAYS = 90
 DEAD_STOCK_ITEMS_LIMIT = 50
+
+# The stretch of time *before* the recent velocity window, derived from the two windows
+# above rather than declared separately so it can never drift out of step with them.
+# Comparing the recent daily rate against this earlier one is what separates "demand
+# went up" from "stock was left to run down" for a product about to run out — the two
+# call for different responses (reorder more, versus reorder sooner).
+BASELINE_VELOCITY_WINDOW_DAYS = DEAD_STOCK_WINDOW_DAYS - STOCK_VELOCITY_WINDOW_DAYS
 
 # sale_time is free text (see app/models/sale.py) — whatever the POS export happened
 # to print, not a validated time type — so parsing is best-effort: try common shapes,
@@ -293,11 +306,18 @@ def build_revenue_dashboard(
 
 def _cost_totals_and_products(
     db: Session, branch_id: str, start: date, end: date
-) -> tuple[float, float, int, list[dict], list[dict]]:
+) -> tuple[float, float, float, int, list[dict], list[dict]]:
     """One pass over the period's sale lines that produces both the branch-wide
     COGS/revenue totals and the per-product cost breakdown, reusing the exact same
     point-in-time cost lookup (app/services/pricing.py) the Sale tab and Warning page
     already use — rather than a second, differently-computed cost figure.
+
+    Returns (net_revenue, cogs, priced_net_revenue, transaction_count, products, trend).
+    `priced_net_revenue` is the slice of net_revenue whose line actually had a cost
+    estimate — the denominator for "how much of this margin figure is real," which the
+    branch health score needs before it will score Profit at all (see
+    app/services/branch_health.py). COGS alone can't answer that: a small COGS means
+    either genuinely cheap goods or mostly-unpriced lines, and those are opposite facts.
     """
     rows = (
         db.query(SaleLine, Sale, Product)
@@ -310,6 +330,7 @@ def _cost_totals_and_products(
 
     net_revenue_total = 0.0
     cogs_total = 0.0
+    priced_net_revenue_total = 0.0
     transaction_ids: set[str] = set()
     per_product: dict[str, dict] = {}
     per_day: dict[date, dict] = {}
@@ -324,6 +345,7 @@ def _cost_totals_and_products(
         cost = float(buying_price) * qty if buying_price is not None else None
         if cost is not None:
             cogs_total += cost
+            priced_net_revenue_total += net_amount
 
         bucket = per_product.setdefault(
             product.id,
@@ -406,7 +428,14 @@ def _cost_totals_and_products(
             }
         )
 
-    return net_revenue_total, cogs_total, len(transaction_ids), products[:TOP_PRODUCTS_LIMIT], trend
+    return (
+        net_revenue_total,
+        cogs_total,
+        priced_net_revenue_total,
+        len(transaction_ids),
+        products[:TOP_PRODUCTS_LIMIT],
+        trend,
+    )
 
 
 def build_cost_dashboard(
@@ -418,10 +447,10 @@ def build_cost_dashboard(
     date_to: date | None = None,
 ) -> dict:
     period_range = resolve_period(period, date_from=date_from, date_to=date_to)
-    net_revenue, cogs, transaction_count, products, trend = _cost_totals_and_products(
+    net_revenue, cogs, _priced, transaction_count, products, trend = _cost_totals_and_products(
         db, branch_id, period_range.start, period_range.end
     )
-    prev_net_revenue, prev_cogs, prev_transaction_count, _, _ = _cost_totals_and_products(
+    prev_net_revenue, prev_cogs, _prev_priced, prev_transaction_count, _, _ = _cost_totals_and_products(
         db, branch_id, period_range.previous_start, period_range.previous_end
     )
 
@@ -439,7 +468,7 @@ def build_cost_dashboard(
     # for why a SimpleNamespace stands in for the real caller here.
     day_count = (period_range.end - period_range.start).days + 1
     warning_sections = data_quality.build_warning_sections(
-        db, SimpleNamespace(branch_id=branch_id), day_count, day_count
+        db, SimpleNamespace(branch_id=branch_id), day_count, day_count, {"purchase_numeric"}
     )
     purchase_warnings = next(
         (section["rows"] for section in warning_sections if section["id"] == "purchase_numeric"), []
@@ -463,46 +492,66 @@ def build_cost_dashboard(
 # --- Inventory ----------------------------------------------------------------------
 
 
-def _latest_stock_levels(db: Session, branch_id: str) -> list[tuple[StockLevel, Product]]:
-    latest = (
-        db.query(StockLevel.product_id, func.max(StockLevel.snapshot_at).label("snapshot_at"))
-        .filter(StockLevel.branch_id == branch_id)
-        .group_by(StockLevel.product_id)
-        .subquery()
-    )
-    return (
-        db.query(StockLevel, Product)
-        .join(Product, StockLevel.product_id == Product.id)
-        .join(
-            latest,
-            (StockLevel.product_id == latest.c.product_id)
-            & (StockLevel.snapshot_at == latest.c.snapshot_at),
-        )
-        .filter(StockLevel.branch_id == branch_id)
-        .all()
-    )
+def _latest_stock_levels(
+    db: Session, branch_id: str | None
+) -> list[tuple[StockLevel, Product, Branch | None]]:
+    """`branch_id=None` covers every branch at once — the nullable-branch_id convention
+    GET /api/sales etc. use, and what the standalone Low Stock / Dead Stock pages need
+    for admin's "all branches" view (see compute_stock_health). The dashboard's own
+    caller, _stock_summary, always passes a concrete branch_id — see the module
+    docstring for why that stays true."""
+    query = latest_stock_query(db)
+    if branch_id is not None:
+        query = query.filter(StockLevel.branch_id == branch_id)
+    return query.all()
 
 
 def _sales_velocity(
-    db: Session, branch_id: str, product_ids: set[str], window_days: int = STOCK_VELOCITY_WINDOW_DAYS
-) -> dict[str, float]:
-    """Average daily qty sold per product over a fixed trailing window — the basis for
-    each product's "days of stock left" estimate below."""
-    if not product_ids:
+    db: Session,
+    branch_id: str | None,
+    product_ids: set[str] | None = None,
+    window_days: int = STOCK_VELOCITY_WINDOW_DAYS,
+) -> dict[tuple[str, str | None], float]:
+    """Average daily qty sold per (product, branch) pair over a fixed trailing window —
+    the basis for each product's "days of stock left" estimate below. Keyed by branch
+    too (not just product) so the same stock code in two different branches gets its own
+    velocity rather than one blended figure — this matters once branch_id can be None."""
+    if product_ids is not None and not product_ids:
         return {}
     since = date.today() - timedelta(days=window_days - 1)
-    rows = (
-        db.query(SaleLine.product_id, func.coalesce(func.sum(SaleLine.qty), 0))
+    query = (
+        db.query(SaleLine.product_id, Sale.branch_id, func.coalesce(func.sum(SaleLine.qty), 0))
         .join(Sale, SaleLine.sale_id == Sale.id)
-        .filter(
-            Sale.branch_id == branch_id,
-            Sale.sale_date >= since,
-            SaleLine.product_id.in_(product_ids),
-        )
-        .group_by(SaleLine.product_id)
-        .all()
+        .filter(Sale.sale_date >= since)
     )
-    return {product_id: float(total) / window_days for product_id, total in rows}
+    if branch_id is not None:
+        query = query.filter(Sale.branch_id == branch_id)
+    if product_ids is not None:
+        query = query.filter(SaleLine.product_id.in_(product_ids))
+    rows = query.group_by(SaleLine.product_id, Sale.branch_id).all()
+    return {
+        (product_id, sale_branch_id): float(total) / window_days
+        for product_id, sale_branch_id, total in rows
+    }
+
+
+def _last_sale_dates(
+    db: Session, branch_id: str | None, product_ids: set[str]
+) -> dict[tuple[str, str | None], date]:
+    """Most recent sale_date per (product, branch), with no trailing-window filter —
+    unlike _sales_velocity, dead stock needs to say exactly how long it's been since a
+    sale, not just "not within the last 90 days"."""
+    if not product_ids:
+        return {}
+    query = (
+        db.query(SaleLine.product_id, Sale.branch_id, func.max(Sale.sale_date))
+        .join(Sale, SaleLine.sale_id == Sale.id)
+        .filter(SaleLine.product_id.in_(product_ids))
+    )
+    if branch_id is not None:
+        query = query.filter(Sale.branch_id == branch_id)
+    rows = query.group_by(SaleLine.product_id, Sale.branch_id).all()
+    return {(product_id, sale_branch_id): last_date for product_id, sale_branch_id, last_date in rows}
 
 
 def _stock_status(days_left: float | None) -> str | None:
@@ -520,22 +569,121 @@ def _stock_status(days_left: float | None) -> str | None:
     return None
 
 
-def build_inventory_dashboard(db: Session, branch_id: str, branch_name: str) -> dict:
+def _stock_health_from_rows(
+    rows: list[tuple[StockLevel, Product, Branch | None]],
+    velocity: dict[tuple[str, str | None], float],
+    dead_stock_velocity: dict[tuple[str, str | None], float],
+    last_sale_dates: dict[tuple[str, str | None], date],
+) -> tuple[list[dict], list[dict]]:
+    """The actual low-stock/dead-stock item-building loop, given rows and both velocity
+    windows already fetched — split out from compute_stock_health so _stock_summary can
+    reuse it against rows it already has, rather than querying stock levels twice."""
+    low_stock_items: list[dict] = []
+    dead_stock_items: list[dict] = []
+    today = date.today()
+
+    for stock_level, product, branch in rows:
+        on_hand_qty = float(stock_level.on_hand_qty or 0)
+        key = (product.id, stock_level.branch_id)
+        branch_name = branch.name if branch else None
+
+        daily_velocity = velocity.get(key, 0.0)
+        days_left = on_hand_qty / daily_velocity if daily_velocity > 0 else None
+        status = _stock_status(days_left)
+        if status:
+            # The earlier window's daily rate, backed out of the two velocity figures
+            # already computed above rather than queried again: the 90-day window
+            # contains the 30-day one, so the difference is exactly what sold in the 60
+            # days before it. Clamped at 0 because float subtraction of two averages can
+            # land a hair below zero when nothing sold in that stretch.
+            recent_qty = daily_velocity * STOCK_VELOCITY_WINDOW_DAYS
+            window_qty = dead_stock_velocity.get(key, 0.0) * DEAD_STOCK_WINDOW_DAYS
+            baseline_daily_velocity = max(
+                0.0, (window_qty - recent_qty) / BASELINE_VELOCITY_WINDOW_DAYS
+            )
+            low_stock_items.append(
+                {
+                    "stock_code": product.stock_code,
+                    "description": product.description,
+                    "branch": branch_name,
+                    "on_hand_qty": on_hand_qty,
+                    "days_left": round(days_left, 1),
+                    "status": status,
+                    "daily_velocity": daily_velocity,
+                    "baseline_daily_velocity": baseline_daily_velocity,
+                }
+            )
+
+        # Dead stock: still on the shelf, but hasn't sold at all in DEAD_STOCK_WINDOW_DAYS
+        # — on_hand_qty <= 0 is excluded since there's nothing sitting there to flag.
+        if on_hand_qty > 0 and dead_stock_velocity.get(key, 0.0) == 0.0:
+            last_sold = last_sale_dates.get(key)
+            dead_stock_items.append(
+                {
+                    "stock_code": product.stock_code,
+                    "description": product.description,
+                    "branch": branch_name,
+                    "on_hand_qty": on_hand_qty,
+                    "category": product.group_name or "Uncategorized",
+                    "last_sold_at": last_sold.isoformat() if last_sold else None,
+                    # None means never sold at all (no Sale row ever, not just none
+                    # recently) — worth keeping distinct from a large day count rather
+                    # than collapsing both into one number.
+                    "days_since_last_sale": (today - last_sold).days if last_sold else None,
+                }
+            )
+
+    low_stock_items.sort(key=lambda item: item["days_left"])
+    dead_stock_items.sort(key=lambda item: item["on_hand_qty"], reverse=True)
+    return low_stock_items, dead_stock_items
+
+
+def compute_stock_health(db: Session, branch_id: str | None) -> tuple[list[dict], list[dict]]:
+    """Every low-stock and dead-stock item, uncapped (unlike the Inventory tab's own
+    LOW_STOCK_ITEMS_LIMIT/DEAD_STOCK_ITEMS_LIMIT slice) — the shared computation behind
+    both that dashboard tab and the standalone Low Stock / Dead Stock pages
+    (GET /api/inventory/low-stock, /dead-stock), which page through the rest. One
+    function so the two views can never disagree on which products are flagged — see
+    _stock_summary's docstring for why that consistency matters for the branch health
+    score too.
+
+    `branch_id=None` covers every branch at once, for admin's "all branches" list view
+    — see the module docstring for why this is the one exception to "always one branch."
+    """
     rows = _latest_stock_levels(db, branch_id)
-    product_ids = {product.id for _, product in rows}
+    product_ids = {product.id for _, product, _ in rows}
     velocity = _sales_velocity(db, branch_id, product_ids)
     # A second, longer-window velocity check purely to decide "has this sold at all
     # recently" for dead stock — see DEAD_STOCK_WINDOW_DAYS.
     dead_stock_velocity = _sales_velocity(db, branch_id, product_ids, window_days=DEAD_STOCK_WINDOW_DAYS)
+    last_sale_dates = _last_sale_dates(db, branch_id, product_ids)
+    return _stock_health_from_rows(rows, velocity, dead_stock_velocity, last_sale_dates)
+
+
+def _stock_summary(db: Session, branch_id: str) -> dict:
+    """Everything the Inventory tab reports about current stock, minus the
+    data-quality warnings — split out so the branch health score (see
+    app/services/branch_health.py) can read the exact same SKU/dead-stock/low-stock
+    figures the tab shows without also paying for a second warnings pass over a
+    window it doesn't want. If Overview and the Inventory tab ever disagreed on the
+    dead-stock count the whole score would lose its credibility, so there is
+    deliberately only one place that counts it.
+    """
+    rows = _latest_stock_levels(db, branch_id)
+    product_ids = {product.id for _, product, _ in rows}
+    velocity = _sales_velocity(db, branch_id, product_ids)
+    dead_stock_velocity = _sales_velocity(db, branch_id, product_ids, window_days=DEAD_STOCK_WINDOW_DAYS)
+    last_sale_dates = _last_sale_dates(db, branch_id, product_ids)
+    low_stock_items, dead_stock_items = _stock_health_from_rows(
+        rows, velocity, dead_stock_velocity, last_sale_dates
+    )
 
     estimated_stock_value = 0.0
     qty_by_category: dict[str, float] = {}
-    low_stock_items: list[dict] = []
-    dead_stock_items: list[dict] = []
     status_counts = {"Critical": 0, "Low": 0, "Watch": 0}
     latest_snapshot_at = None
 
-    for stock_level, product in rows:
+    for stock_level, product, _branch in rows:
         on_hand_qty = float(stock_level.on_hand_qty or 0)
         buying_price = float(stock_level.buying_price) if stock_level.buying_price is not None else None
         value = on_hand_qty * buying_price if buying_price is not None else 0.0
@@ -551,62 +699,22 @@ def build_inventory_dashboard(db: Session, branch_id: str, branch_name: str) -> 
         if latest_snapshot_at is None or stock_level.snapshot_at > latest_snapshot_at:
             latest_snapshot_at = stock_level.snapshot_at
 
-        daily_velocity = velocity.get(product.id, 0.0)
-        days_left = on_hand_qty / daily_velocity if daily_velocity > 0 else None
-        status = _stock_status(days_left)
-        if status:
-            status_counts[status] += 1
-            low_stock_items.append(
-                {
-                    "stock_code": product.stock_code,
-                    "description": product.description,
-                    "on_hand_qty": on_hand_qty,
-                    "days_left": round(days_left, 1),
-                    "status": status,
-                }
-            )
+    for item in low_stock_items:
+        status_counts[item["status"]] += 1
 
-        # Dead stock: still on the shelf, but hasn't sold at all in DEAD_STOCK_WINDOW_DAYS
-        # — on_hand_qty <= 0 is excluded since there's nothing sitting there to flag.
-        if on_hand_qty > 0 and dead_stock_velocity.get(product.id, 0.0) == 0.0:
-            dead_stock_items.append(
-                {
-                    "stock_code": product.stock_code,
-                    "description": product.description,
-                    "on_hand_qty": on_hand_qty,
-                    "category": category,
-                }
-            )
-
-    low_stock_items.sort(key=lambda item: item["days_left"])
-    dead_stock_items.sort(key=lambda item: item["on_hand_qty"], reverse=True)
     stock_qty_by_category = sorted(
         ({"category": category, "qty": qty} for category, qty in qty_by_category.items()),
         key=lambda row: row["qty"],
         reverse=True,
     )
 
-    # Reuses the exact same Inventory/Daily-check checks the Warning page runs, using
-    # the business-wide check-window settings (there's no period control here to derive
-    # a window from) — scoped to this dashboard's branch, same SimpleNamespace approach
-    # as build_revenue_dashboard's sale_warnings.
-    warning_sections = data_quality.build_warning_sections(
-        db,
-        SimpleNamespace(branch_id=branch_id),
-        get_sale_warning_window_days(db),
-        get_purchase_warning_window_days(db),
-    )
-    relevant_section_ids = {"inventory_numeric", "missing_product", "reconciliation_uom", "reconciliation_mismatch"}
-    warnings = [
-        row
-        for section in warning_sections
-        if section["id"] in relevant_section_ids
-        for row in section["rows"]
-    ]
+    # branch is only meaningful for the standalone all-branches list pages — every item
+    # here is already scoped to this one dashboard's branch_id, so it's dropped rather
+    # than sent to the frontend redundantly on every row.
+    def _drop_branch(item: dict) -> dict:
+        return {k: v for k, v in item.items() if k != "branch"}
 
     return {
-        "branch_id": branch_id,
-        "branch_name": branch_name,
         "as_of": latest_snapshot_at.isoformat() if latest_snapshot_at else None,
         "sku_count": len(rows),
         "critical_count": status_counts["Critical"],
@@ -615,8 +723,32 @@ def build_inventory_dashboard(db: Session, branch_id: str, branch_name: str) -> 
         "estimated_stock_value": estimated_stock_value,
         "dead_stock_count": len(dead_stock_items),
         "stock_qty_by_category": stock_qty_by_category,
-        "low_stock_items": low_stock_items[:LOW_STOCK_ITEMS_LIMIT],
-        "dead_stock_items": dead_stock_items[:DEAD_STOCK_ITEMS_LIMIT],
+        "low_stock_items": [_drop_branch(item) for item in low_stock_items[:LOW_STOCK_ITEMS_LIMIT]],
+        "dead_stock_items": [_drop_branch(item) for item in dead_stock_items[:DEAD_STOCK_ITEMS_LIMIT]],
+    }
+
+
+def build_inventory_dashboard(db: Session, branch_id: str, branch_name: str) -> dict:
+    summary = _stock_summary(db, branch_id)
+
+    # Reuses the exact same Inventory/Daily-check checks the Warning page runs, using
+    # the business-wide check-window settings (there's no period control here to derive
+    # a window from) — scoped to this dashboard's branch, same SimpleNamespace approach
+    # as build_revenue_dashboard's sale_warnings.
+    relevant_section_ids = {"inventory_numeric", "missing_product", "reconciliation_uom", "reconciliation_mismatch"}
+    warning_sections = data_quality.build_warning_sections(
+        db,
+        SimpleNamespace(branch_id=branch_id),
+        get_sale_warning_window_days(db),
+        get_purchase_warning_window_days(db),
+        relevant_section_ids,
+    )
+    warnings = [row for section in warning_sections for row in section["rows"]]
+
+    return {
+        "branch_id": branch_id,
+        "branch_name": branch_name,
+        **summary,
         "warnings": warnings,
     }
 

@@ -2,21 +2,25 @@ import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { cn } from '@renderer/lib/utils'
 import type { BranchOption } from '@renderer/lib/useBranches'
-import { Button } from '@renderer/components/ui/Button'
 import { CardHeader } from '@renderer/components/ui/Card'
 import { EmptyState } from '@renderer/components/ui/EmptyState'
-import { Input } from '@renderer/components/ui/Input'
 import { Select } from '@renderer/components/ui/Select'
 import { DashboardIcon } from '@renderer/components/ui/icons'
 import type { Profile } from '@renderer/components/features/types'
 import { CostTab } from '@renderer/components/features/dashboard/CostTab'
 import { CustomerTab } from '@renderer/components/features/dashboard/CustomerTab'
 import { InventoryTab } from '@renderer/components/features/dashboard/InventoryTab'
+import { OverviewTab, type EvidenceTarget } from '@renderer/components/features/dashboard/OverviewTab'
 import { RevenueTab } from '@renderer/components/features/dashboard/RevenueTab'
-import { PERIOD_OPTIONS, type PeriodKey } from '@renderer/components/features/dashboard/helpers'
+import { PeriodControls } from '@renderer/components/features/dashboard/shared'
+import { usePeriodRange } from '@renderer/components/features/dashboard/usePeriodRange'
 
 interface Props {
   session: Session
+  // Set when another section sends the user here — the Business Alerts page opens the
+  // evidence tab for a specific branch, and that has to survive the section switch.
+  initialTab?: Tab
+  initialBranchId?: string
   profile: Profile | null
   // Only used for an admin account (no fixed branch) — the dashboard is always one
   // branch at a time, never a cross-branch rollup, so admin needs a way to pick which
@@ -25,11 +29,24 @@ interface Props {
   // Every tab's data-quality tile links out to the full Warning page instead of just
   // naming it in text — this is the app-level nav switch that gets it there.
   onViewWarnings: () => void
+  // The Overview branch page explains a score; the alerts behind it live on their own
+  // page, so it links there rather than repeating them.
+  onViewBusinessAlerts: () => void
+  // The Inventory tab's Low Stock / Dead Stock tables show only their top few rows — this
+  // opens the matching full, paginated list on the Inventory nav page for the rest.
+  onViewInventoryList: (tab: 'lowStock' | 'deadStock') => void
+  // Which branch the Overview tab has open. Owned by App so it survives this page
+  // unmounting the tab on every tab switch — see App.tsx.
+  overviewBranchId: string | null
+  onOverviewBranchChange: (branchId: string | null) => void
 }
 
-type Tab = 'revenue' | 'cost' | 'inventory' | 'customer'
+type Tab = 'overview' | 'revenue' | 'cost' | 'inventory' | 'customer'
 
+// Overview first, and first on load: it's the decision page, and the four that follow
+// are the evidence behind whichever part of it is red (see docs/branch_health.md).
 const TABS: { id: Tab; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
   { id: 'revenue', label: 'Revenue' },
   { id: 'cost', label: 'Cost' },
   { id: 'inventory', label: 'Inventory' },
@@ -61,45 +78,28 @@ function DashboardTabBar({ activeTab, onSelect }: { activeTab: Tab; onSelect: (t
   )
 }
 
-// How long the custom date inputs must sit unchanged before the tabs fetch with them.
-const CUSTOM_RANGE_SETTLE_MS = 400
-
-export function DashboardPage({ session, profile, branchOptions, onViewWarnings }: Props): React.JSX.Element {
+export function DashboardPage({
+  session,
+  profile,
+  branchOptions,
+  onViewWarnings,
+  onViewBusinessAlerts,
+  onViewInventoryList,
+  overviewBranchId,
+  onOverviewBranchChange,
+  initialTab,
+  initialBranchId
+}: Props): React.JSX.Element {
   // Admin has no fixed branch_id — same convention used everywhere else in the app.
   const isAdmin = profile !== null && profile.branch_id === null
-  const [activeTab, setActiveTab] = useState<Tab>('revenue')
-  const [period, setPeriod] = useState<PeriodKey>('today')
-  const [branchId, setBranchId] = useState('')
-  // A custom range (both set) overrides the period preset entirely — see
-  // shared.tsx's periodQueryParams. Cleared together, not per-field, since a lone
-  // "from" or "to" is a half-finished range, not a usable one.
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const hasCustomRange = !!dateFrom && !!dateTo
-
-  // What the tabs actually fetch with. A native date input fires change on every
-  // segment edit — typing a year yields 0002 → 0020 → 0202 → 2026, each a valid
-  // date — so fetching straight off the raw values above fires a request per
-  // keystroke, some for absurd multi-century windows. Instead the raw pair is applied
-  // only once it's complete and in order, after a short pause in typing; a range
-  // that stays half-finished reverts the tabs to the period preset after that same
-  // pause. Clearing both is applied immediately (there's nothing to wait for).
-  const [appliedRange, setAppliedRange] = useState({ from: '', to: '' })
-  useEffect(() => {
-    const next =
-      dateFrom && dateTo && dateFrom <= dateTo ? { from: dateFrom, to: dateTo } : { from: '', to: '' }
-    if (!dateFrom && !dateTo) {
-      setAppliedRange(next)
-      return
-    }
-    const timer = setTimeout(() => setAppliedRange(next), CUSTOM_RANGE_SETTLE_MS)
-    return () => clearTimeout(timer)
-  }, [dateFrom, dateTo])
-
-  function clearCustomRange(): void {
-    setDateFrom('')
-    setDateTo('')
-  }
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? 'overview')
+  const [branchId, setBranchId] = useState(initialBranchId ?? '')
+  // 30d, not today: Overview is the landing tab and it is built on vs-previous-period
+  // growth, where one day against the day before is mostly noise. The control is shared
+  // across tabs, so switching keeps whatever is selected.
+  const range = usePeriodRange('30d')
+  const { period } = range
+  const appliedRange = range.applied
 
   // Defaults admin to the first retail branch once the list loads — a branch-scoped
   // account never needs this (its own branch is resolved server-side regardless of
@@ -115,12 +115,15 @@ export function DashboardPage({ session, profile, branchOptions, onViewWarnings 
 
   return (
     <div className="flex flex-col gap-4">
-      <CardHeader title="Dashboard" description="Revenue, cost, inventory, and customer behavior for one branch." />
+      <CardHeader
+        title="Dashboard"
+        description="Branch health across every retail branch, and revenue, cost, inventory and customer detail one branch at a time."
+      />
 
       <div className="flex flex-wrap items-end justify-between gap-3">
         <DashboardTabBar activeTab={activeTab} onSelect={setActiveTab} />
         <div className="flex flex-wrap items-end gap-3">
-          {isAdmin && branchOptions.length > 0 && (
+          {isAdmin && branchOptions.length > 0 && activeTab !== 'overview' && (
             <div className="w-48">
               <Select label="Branch" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
                 {branchOptions.map((branch) => (
@@ -131,43 +134,7 @@ export function DashboardPage({ session, profile, branchOptions, onViewWarnings 
               </Select>
             </div>
           )}
-          {activeTab !== 'inventory' && (
-            <>
-              <div className="w-44">
-                <Select
-                  label="Period"
-                  value={period}
-                  disabled={hasCustomRange}
-                  onChange={(e) => setPeriod(e.target.value as PeriodKey)}
-                >
-                  {PERIOD_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <Input
-                type="date"
-                label="Date from"
-                value={dateFrom}
-                max={dateTo || undefined}
-                onChange={(e) => setDateFrom(e.target.value)}
-              />
-              <Input
-                type="date"
-                label="Date to"
-                value={dateTo}
-                min={dateFrom || undefined}
-                onChange={(e) => setDateTo(e.target.value)}
-              />
-              {(dateFrom || dateTo) && (
-                <Button variant="ghost" size="sm" onClick={clearCustomRange}>
-                  Clear range
-                </Button>
-              )}
-            </>
-          )}
+          {activeTab !== 'inventory' && <PeriodControls range={range} />}
         </div>
       </div>
 
@@ -179,6 +146,31 @@ export function DashboardPage({ session, profile, branchOptions, onViewWarnings 
         />
       )}
 
+      {!waitingOnBranch && activeTab === 'overview' && (
+        <OverviewTab
+          session={session}
+          isAdmin={isAdmin}
+          branchOptions={branchOptions}
+          branchId={branchId}
+          period={period}
+          dateFrom={appliedRange.from}
+          dateTo={appliedRange.to}
+          canLoad={canLoad}
+          onViewBusinessAlerts={onViewBusinessAlerts}
+          openBranchId={overviewBranchId}
+          onOpenBranchChange={onOverviewBranchChange}
+          // A red dimension or alert is only useful if you can go look at what produced
+          // it — four of the five open the tab holding that evidence, and Data Quality
+          // leaves the dashboard for the Warning page entirely. The branch comes along
+          // too, so drilling in from a branch card shows that branch, not whichever one
+          // the shared selector happened to be on.
+          onOpenEvidence={(target: EvidenceTarget, evidenceBranchId: string) => {
+            setBranchId(evidenceBranchId)
+            if (target === 'warnings') onViewWarnings()
+            else setActiveTab(target)
+          }}
+        />
+      )}
       {!waitingOnBranch && activeTab === 'revenue' && (
         <RevenueTab
           session={session}
@@ -207,6 +199,7 @@ export function DashboardPage({ session, profile, branchOptions, onViewWarnings 
           branchId={branchId}
           canLoad={canLoad}
           onViewWarnings={onViewWarnings}
+          onViewInventoryList={onViewInventoryList}
         />
       )}
       {!waitingOnBranch && activeTab === 'customer' && (

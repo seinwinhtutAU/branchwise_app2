@@ -1,14 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import { apiBaseUrl } from '@renderer/lib/supabaseClient'
-import { useToast } from '@renderer/lib/useToast'
-import { useLatestRequest } from '@renderer/lib/useLatestRequest'
+import { useCachedFetch } from '@renderer/lib/useCachedFetch'
 import { Button } from '@renderer/components/ui/Button'
 import { Card, CardHeader } from '@renderer/components/ui/Card'
 import { Skeleton } from '@renderer/components/ui/Skeleton'
 import { EmptyState } from '@renderer/components/ui/EmptyState'
 import { DashboardIcon } from '@renderer/components/ui/icons'
 import {
+  RefreshingHint,
   ChartViewToggle,
   StatTile,
   TrendChart,
@@ -17,10 +16,10 @@ import {
   type ChartView
 } from './shared'
 import {
+  dashboardUrl,
   WEEKDAY_LABELS,
   formatCount,
   formatPercent,
-  periodQueryParams,
   previousPeriodLabel,
   type KpiValue,
   type PeriodKey,
@@ -95,52 +94,24 @@ interface Props {
 }
 
 export function CustomerTab({ session, branchId, period, dateFrom, dateTo, canLoad, onViewWarnings }: Props): React.JSX.Element {
-  const showToast = useToast()
-  const [data, setData] = useState<CustomerDashboardData | null>(null)
-  const [loadFailed, setLoadFailed] = useState(false)
   const [trendView, setTrendView] = useState<ChartView>('bar')
-  const nextRequest = useLatestRequest()
-
-  async function load(): Promise<void> {
-    if (!canLoad) return
-    const signal = nextRequest()
-    setLoadFailed(false)
-    try {
-      const params = periodQueryParams(period, dateFrom, dateTo)
-      if (branchId) params.set('branch_id', branchId)
-      const response = await fetch(`${apiBaseUrl}/api/dashboard/customer?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        signal
-      })
-      if (!response.ok) {
-        setLoadFailed(true)
-        showToast('error', `Failed to load the Customer dashboard: ${response.status}`)
-        return
-      }
-      setData(await response.json())
-    } catch {
-      if (signal.aborted) return
-      setLoadFailed(true)
-      showToast('error', 'Failed to load the Customer dashboard — is the backend running?')
-    }
-  }
-
-  useEffect(() => {
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.access_token, period, dateFrom, dateTo, branchId])
+  // One cached request per (tab, branch, period) — returning to this tab with the same
+  // selection shows the numbers it showed last time instead of a skeleton. See
+  // lib/useCachedFetch.ts.
+  const url = canLoad ? dashboardUrl('customer', branchId, { period, dateFrom, dateTo }) : null
+  const { data, isRefreshing, failed, reload } = useCachedFetch<CustomerDashboardData>(url, session, 'Customer dashboard')
 
   if (!canLoad) return <></>
 
   if (data === null) {
-    if (loadFailed) {
+    if (failed) {
       return (
         <EmptyState
           icon={<DashboardIcon />}
           title="Couldn't load the Customer dashboard"
           description="Something went wrong reaching the backend."
           action={
-            <Button variant="secondary" size="sm" onClick={load}>
+            <Button variant="secondary" size="sm" onClick={reload}>
               Try again
             </Button>
           }
@@ -163,6 +134,7 @@ export function CustomerTab({ session, branchId, period, dateFrom, dateTo, canLo
 
   return (
     <div className="flex flex-col gap-4">
+      <RefreshingHint show={isRefreshing} />
       <p className="text-sm text-text-muted">
         Shopping patterns, not customer identity — the retail POS data has no customer identifier, so this looks at
         how people shop (transactions and visits) instead of who they are.

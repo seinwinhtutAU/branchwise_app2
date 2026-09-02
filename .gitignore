@@ -7,6 +7,23 @@ out
 .eslintcache
 *.tsbuildinfo
 
+# Compiled output accidentally emitted next to the TypeScript sources. The tsconfigs set
+# noEmit so this shouldn't happen, but if it ever does the damage is silent and nasty:
+# Vite resolves .jsx before .tsx, so the app runs the stale compiled copy while the .tsx
+# on disk still looks correct. Ignoring them keeps a stray `tsc` run out of git at least.
+# frontend/ only — the backend is Python, and root-level JS configs are real source.
+frontend/**/*.js
+frontend/**/*.jsx
+frontend/**/*.d.ts
+# ...except these two, which are genuine hand-written sources, not build output.
+!frontend/preload/index.d.ts
+!frontend/renderer/src/env.d.ts
+# Same thing at the repo root: tsconfig.node.json includes electron.vite.config.*, so a
+# stray emit lands here rather than under frontend/. The .ts is the real source.
+electron.vite.config.js
+electron.vite.config.d.ts
+electron.vite.config.*.mjs
+
 # Python
 backend/.venv
 backend/__pycache__

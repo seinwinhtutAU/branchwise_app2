@@ -7,6 +7,7 @@ from app.core.security import get_current_app_user
 from app.db.session import get_db
 from app.models.branch import Branch
 from app.models.user import User
+from app.services import branch_health as branch_health_service
 from app.services import dashboard as dashboard_service
 from app.services.branches import list_retail_branches, resolve_branch_id
 
@@ -48,6 +49,28 @@ def _validate_period_or_dates(period: str, date_from: date | None, date_to: date
             status.HTTP_400_BAD_REQUEST,
             f"period must be one of {sorted(dashboard_service.VALID_PERIODS)}",
         )
+
+
+@router.get("/overview")
+def get_overview_dashboard(
+    # Defaults to 30d, not today, unlike every other tab. Overview is built on
+    # vs-previous-period growth, and one day against the day before is mostly noise —
+    # a single quiet Tuesday would read as a critical sales collapse. The other tabs
+    # keep their today default because they report levels, not movement.
+    period: str = Query("30d", description="today | yesterday | 7d | 30d"),
+    date_from: date | None = Query(None, description=DATE_FROM_DESCRIPTION),
+    date_to: date | None = Query(None, description=DATE_TO_DESCRIPTION),
+    branch_id: str | None = Query(
+        None, description="Required for an admin account (no fixed branch); ignored otherwise"
+    ),
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    _validate_period_or_dates(period, date_from, date_to)
+    branch = _resolve_retail_branch(user, branch_id, db)
+    return branch_health_service.build_overview_dashboard(
+        db, branch.id, branch.name, period, date_from=date_from, date_to=date_to
+    )
 
 
 @router.get("/revenue")

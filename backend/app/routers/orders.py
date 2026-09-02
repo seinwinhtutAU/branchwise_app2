@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.security import get_current_app_user
@@ -23,6 +23,10 @@ from app.services.wholesale import (
 )
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
+
+# Small — each order can carry several lines, all eager-loaded, so a page here is a lot
+# heavier per row than e.g. Data Overview's sale lines.
+PAGE_SIZE = 20
 
 
 def _line_to_out(line: CustomerOrderLine) -> CustomerOrderLineOut:
@@ -105,21 +109,32 @@ def _new_line(payload: CustomerOrderLineCreate, user: User) -> CustomerOrderLine
 
 
 @router.get("")
-def list_orders(user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> list[CustomerOrderOut]:
+def list_orders(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(PAGE_SIZE, ge=1, le=500),
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    # An admin sees every branch's orders, which only ever grows — paged the same way
+    # Data Overview is, one page of orders (with their lines) at a time instead of every
+    # order this business has ever taken.
+    query = db.query(CustomerOrder, Branch).outerjoin(Branch, CustomerOrder.branch_id == Branch.id)
+    if user.branch_id is not None:
+        query = query.filter(CustomerOrder.branch_id == user.branch_id)
+    total = query.count()
+
     query = (
-        db.query(CustomerOrder, Branch)
-        .outerjoin(Branch, CustomerOrder.branch_id == Branch.id)
-        .options(
+        query.options(
             selectinload(CustomerOrder.lines).joinedload(CustomerOrderLine.matched_voucher_line).joinedload(
                 FactoryVoucherLine.voucher
             )
         )
+        .order_by(CustomerOrder.order_no.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
-    if user.branch_id is not None:
-        query = query.filter(CustomerOrder.branch_id == user.branch_id)
-    query = query.order_by(CustomerOrder.order_no.desc())
-
-    return [_order_to_out(order, branch.name if branch else None) for order, branch in query.all()]
+    rows = [_order_to_out(order, branch.name if branch else None) for order, branch in query.all()]
+    return {"rows": rows, "total": total}
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

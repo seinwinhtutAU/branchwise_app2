@@ -105,7 +105,7 @@ def test_voucher_prices_matching_orders_and_flips_to_waiting(
     voucher_body = voucher_response.json()
     assert voucher_body["updated_order_count"] == 1
 
-    updated_order = authed_client.get("/api/orders").json()[0]
+    updated_order = authed_client.get("/api/orders").json()["rows"][0]
     assert updated_order["id"] == order["id"]
     updated_line = updated_order["lines"][0]
     voucher_line = voucher_body["voucher"]["lines"][0]
@@ -125,7 +125,7 @@ def test_complete_order_is_not_touched_by_a_new_voucher(authed_client: TestClien
 
     authed_client.post("/api/factory-vouchers", json=_voucher_payload())
 
-    unchanged = authed_client.get("/api/orders").json()[0]
+    unchanged = authed_client.get("/api/orders").json()["rows"][0]
     unchanged_line = unchanged["lines"][0]
     assert unchanged_line["status"] == "complete"
     assert unchanged_line["buying_price"] is None
@@ -157,7 +157,7 @@ def test_latest_voucher_overwrites_price_on_open_orders(authed_client: TestClien
         "/api/factory-vouchers", json=_voucher_payload(line=_voucher_line_payload(buying_price=1800))
     ).json()["voucher"]
 
-    order = authed_client.get("/api/orders").json()[0]
+    order = authed_client.get("/api/orders").json()["rows"][0]
     line = order["lines"][0]
     assert line["buying_price"] == 1800
     assert line["matched_voucher_id"] == second_voucher["lines"][0]["id"]
@@ -192,7 +192,7 @@ def test_voucher_only_matches_orders_in_the_same_branch(authed_client: TestClien
     ).json()
     assert voucher["updated_order_count"] == 0
 
-    unchanged = [o for o in authed_client.get("/api/orders").json() if o["id"] == order["id"]][0]
+    unchanged = [o for o in authed_client.get("/api/orders").json()["rows"] if o["id"] == order["id"]][0]
     unchanged_line = unchanged["lines"][0]
     assert unchanged_line["status"] == "not_start"
     assert unchanged_line["buying_price"] is None
@@ -228,7 +228,7 @@ def test_order_can_be_created_with_a_non_default_status(authed_client: TestClien
     voucher = authed_client.post("/api/factory-vouchers", json=_voucher_payload()).json()
     assert voucher["updated_order_count"] == 0
 
-    unchanged = [o for o in authed_client.get("/api/orders").json() if o["id"] == order["id"]][0]
+    unchanged = [o for o in authed_client.get("/api/orders").json()["rows"] if o["id"] == order["id"]][0]
     assert unchanged["lines"][0]["buying_price"] is None
 
 
@@ -256,7 +256,7 @@ def test_deleting_the_last_line_deletes_the_order(authed_client: TestClient, db_
 
     response = authed_client.delete(f"/api/orders/{order['id']}/lines/{line_id}")
     assert response.status_code == 204
-    assert authed_client.get("/api/orders").json() == []
+    assert authed_client.get("/api/orders").json()["rows"] == []
 
 
 def test_voucher_can_have_multiple_product_lines(authed_client: TestClient, db_session: Session):
@@ -335,7 +335,7 @@ def test_warehouse_receipt_matches_by_product_code_without_a_voucher_id(
     assert body["voucher_id"] == voucher["id"]
     assert body["voucher_line_id"] == voucher_line["id"]
 
-    updated_voucher = authed_client.get("/api/factory-vouchers").json()[0]
+    updated_voucher = authed_client.get("/api/factory-vouchers").json()["rows"][0]
     assert updated_voucher["lines"][0]["received_qty"] == 10
 
 
@@ -368,11 +368,11 @@ def test_deleting_a_warehouse_receipt_reverses_received_qty(authed_client: TestC
     authed_client.post("/api/factory-vouchers", json=_voucher_payload())
 
     receipt = authed_client.post("/api/warehouse-receipts", json=_receipt_payload()).json()
-    assert authed_client.get("/api/factory-vouchers").json()[0]["lines"][0]["received_qty"] == 10
+    assert authed_client.get("/api/factory-vouchers").json()["rows"][0]["lines"][0]["received_qty"] == 10
 
     delete = authed_client.delete(f"/api/warehouse-receipts/{receipt['id']}")
     assert delete.status_code == 204
-    assert authed_client.get("/api/factory-vouchers").json()[0]["lines"][0]["received_qty"] == 0
+    assert authed_client.get("/api/factory-vouchers").json()["rows"][0]["lines"][0]["received_qty"] == 0
 
 
 def test_admin_can_set_second_commit_qty(authed_client: TestClient, db_session: Session):

@@ -286,6 +286,20 @@ export function TrashIcon({ className = 'w-5 h-5' }: { className?: string }): Re
   )
 }
 
+export function BellIcon({ className = 'w-5 h-5' }: { className?: string }): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path
+        d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 export function WarningIcon({ className = 'w-5 h-5' }: { className?: string }): React.JSX.Element {
   return (
     <svg {...base} className={className}>

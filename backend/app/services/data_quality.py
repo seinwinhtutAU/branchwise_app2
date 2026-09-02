@@ -104,46 +104,55 @@ def _import_batch_meta(import_batch: ImportBatch | None) -> dict:
     }
 
 
-def _numeric_warning_rows(
-    records: list[dict],
-    rules: list[NumericRule],
-    field_builder,
-    column_labels: dict[str, str],
-) -> list[dict]:
-    if not records:
+def _numeric_failures(
+    validation_records: list[dict], rules: list[NumericRule]
+) -> list[tuple[int, list[dict]]]:
+    """`(row index, issues)` for the rows that failed, and nothing for the rows that
+    passed.
+
+    Split out from building the warning rows so a caller can validate a *cheap
+    projection* — just the numeric columns the rules actually read — and then pay for
+    the expensive display enrichment (point-in-time pricing, the source import batch)
+    only on the handful of rows that failed. That ordering matters a lot in practice:
+    on a real branch this check reads a few hundred sale lines and finds zero problems,
+    and enriching all of them first meant ~750ms of prefetching whose entire output was
+    then thrown away.
+
+    The projection must contain every column the rules name — validate_rows treats a
+    missing column as an unparseable value, so an incomplete projection would flag
+    every row rather than fail loudly.
+    """
+    if not validation_records:
         return []
-    row_issues = validate_rows(pd.DataFrame.from_records(records), rules)
-    rows = []
-    for record, issues in zip(records, row_issues):
-        if not issues:
-            continue
-        parts = []
-        highlight = []
-        for issue in issues:
-            value = record.get(issue["column"])
-            unparseable = value is None or (isinstance(value, float) and pd.isna(value))
-            # Name the actual value so the one-liner is self-contained — "Buying Price
-            # can't be a negative number (currently -500.00)" — rather than making
-            # someone go find it themselves in the row's data.
-            parts.append(
-                issue["message"]
-                if unparseable
-                else f"{issue['message']} (currently {value})"
-            )
-            highlight.append(column_labels[issue["column"]])
-        rows.append(
-            {
-                "note": "; ".join(parts),
-                "fields": field_builder(record),
-                "highlight": highlight,
-                "source_import": _source_import(
-                    record.get("_ImportBatchId"),
-                    record.get("_ImportBatchFilename"),
-                    record.get("_ImportBatchDate"),
-                ),
-            }
+    row_issues = validate_rows(pd.DataFrame.from_records(validation_records), rules)
+    return [(index, issues) for index, issues in enumerate(row_issues) if issues]
+
+
+def _numeric_warning_row(
+    record: dict, issues: list[dict], field_builder, column_labels: dict[str, str]
+) -> dict:
+    parts = []
+    highlight = []
+    for issue in issues:
+        value = record.get(issue["column"])
+        unparseable = value is None or (isinstance(value, float) and pd.isna(value))
+        # Name the actual value so the one-liner is self-contained — "Buying Price
+        # can't be a negative number (currently -500.00)" — rather than making
+        # someone go find it themselves in the row's data.
+        parts.append(
+            issue["message"] if unparseable else f"{issue['message']} (currently {value})"
         )
-    return rows
+        highlight.append(column_labels[issue["column"]])
+    return {
+        "note": "; ".join(parts),
+        "fields": field_builder(record),
+        "highlight": highlight,
+        "source_import": _source_import(
+            record.get("_ImportBatchId"),
+            record.get("_ImportBatchFilename"),
+            record.get("_ImportBatchDate"),
+        ),
+    }
 
 
 def sale_numeric_warnings(
@@ -160,15 +169,36 @@ def sale_numeric_warnings(
         query = query.filter(Sale.sale_date >= since)
     line_rows = query.all()
 
+    # Validate the five numeric columns first — everything below is display detail for
+    # rows that turn out to be wrong, and on clean data there are none. See
+    # _numeric_failures.
+    failures = _numeric_failures(
+        [
+            {
+                "Selling_Price": sale_line.selling_price,
+                "Qty": sale_line.qty,
+                "Discount_Amount": sale_line.discount_amount,
+                "Amount": sale_line.amount,
+                "Net_Amount": sale_line.net_amount,
+            }
+            for sale_line, _, _, _ in line_rows
+        ],
+        SALES_VALIDATION_RULES,
+    )
+    if not failures:
+        return []
+    failing_rows = [line_rows[index] for index, _ in failures]
+
     # Same buying-price/profit lookup as GET /api/sales, so the detail view here matches
-    # the Sale tab exactly rather than a trimmed-down version of it.
-    price_for = sale_line_pricer(db, {product.id for _, _, product, _ in line_rows})
+    # the Sale tab exactly rather than a trimmed-down version of it — now over just the
+    # failing rows' products rather than every product in the window.
+    price_for = sale_line_pricer(db, {product.id for _, _, product, _ in failing_rows})
     import_batches = _fetch_import_batches(
-        db, {sale.import_batch_id for _, sale, _, _ in line_rows}
+        db, {sale.import_batch_id for _, sale, _, _ in failing_rows}
     )
 
     records = []
-    for sale_line, sale, product, branch in line_rows:
+    for sale_line, sale, product, branch in failing_rows:
         import_batch = import_batches.get(sale.import_batch_id)
         buying_price, buying_price_source = price_for(product.id, sale.sale_date)
         profit, profit_margin_pct = compute_profit(
@@ -233,7 +263,10 @@ def sale_numeric_warnings(
         "Amount": "Amount",
         "Net_Amount": "Net Amount",
     }
-    return _numeric_warning_rows(records, SALES_VALIDATION_RULES, fields, column_labels)
+    return [
+        _numeric_warning_row(record, issues, fields, column_labels)
+        for record, (_, issues) in zip(records, failures)
+    ]
 
 
 def inventory_numeric_warnings(db: Session, user: User) -> list[dict]:
@@ -242,12 +275,27 @@ def inventory_numeric_warnings(db: Session, user: User) -> list[dict]:
     since-superseded snapshot shouldn't show up as a standing warning."""
     query = _branch_filter(latest_stock_query(db), user, StockLevel.branch_id)
     query_rows = query.all()
+
+    failures = _numeric_failures(
+        [
+            {
+                "On_Hand_Qty": stock_level.on_hand_qty,
+                "Buying_Price": stock_level.buying_price,
+                "Selling_Price": stock_level.selling_price,
+            }
+            for stock_level, _, _ in query_rows
+        ],
+        INVENTORY_VALIDATION_RULES,
+    )
+    if not failures:
+        return []
+    failing_rows = [query_rows[index] for index, _ in failures]
     import_batches = _fetch_import_batches(
-        db, {sl.import_batch_id for sl, _, _ in query_rows}
+        db, {sl.import_batch_id for sl, _, _ in failing_rows}
     )
 
     records = []
-    for stock_level, product, branch in query_rows:
+    for stock_level, product, branch in failing_rows:
         import_batch = import_batches.get(stock_level.import_batch_id)
         records.append(
             {
@@ -283,9 +331,10 @@ def inventory_numeric_warnings(db: Session, user: User) -> list[dict]:
         "Buying_Price": "Buying Price",
         "Selling_Price": "Selling Price",
     }
-    return _numeric_warning_rows(
-        records, INVENTORY_VALIDATION_RULES, fields, column_labels
-    )
+    return [
+        _numeric_warning_row(record, issues, fields, column_labels)
+        for record, (_, issues) in zip(records, failures)
+    ]
 
 
 def purchase_numeric_warnings(
@@ -301,12 +350,23 @@ def purchase_numeric_warnings(
     if since is not None:
         query = query.filter(Purchase.purchase_date >= since)
     query_rows = query.all()
+
+    failures = _numeric_failures(
+        [
+            {"Quantity": purchase_line.quantity, "Buying_Price": purchase_line.buying_price}
+            for purchase_line, _, _, _ in query_rows
+        ],
+        PURCHASE_VALIDATION_RULES,
+    )
+    if not failures:
+        return []
+    failing_rows = [query_rows[index] for index, _ in failures]
     import_batches = _fetch_import_batches(
-        db, {purchase.import_batch_id for _, purchase, _, _ in query_rows}
+        db, {purchase.import_batch_id for _, purchase, _, _ in failing_rows}
     )
 
     records = []
-    for purchase_line, purchase, product, branch in query_rows:
+    for purchase_line, purchase, product, branch in failing_rows:
         import_batch = import_batches.get(purchase.import_batch_id)
         records.append(
             {
@@ -336,9 +396,10 @@ def purchase_numeric_warnings(
         ]
 
     column_labels = {"Quantity": "Quantity", "Buying_Price": "Buying Price"}
-    return _numeric_warning_rows(
-        records, PURCHASE_VALIDATION_RULES, fields, column_labels
-    )
+    return [
+        _numeric_warning_row(record, issues, fields, column_labels)
+        for record, (_, issues) in zip(records, failures)
+    ]
 
 
 MissingProductOccurrence = tuple[
@@ -694,7 +755,7 @@ def inventory_reconciliation_warnings(
 
 
 def build_warning_sections(
-    db: Session, user: User, sale_days: int, purchase_days: int
+    db: Session, user: User, sale_days: int, purchase_days: int, section_ids: set[str] | None = None
 ) -> list[dict]:
     """Assembles every check above into the section list GET /api/warnings returns —
     shared with the chatbot's get_data_quality_warnings tool so both surface identical
@@ -706,18 +767,33 @@ def build_warning_sections(
     load. Inventory-numeric has no equivalent window: it always validates only the latest
     snapshot per branch+product (see inventory_numeric_warnings), so there's nothing to
     widen.
+
+    `section_ids` restricts which checks actually run. The Warning page wants all of
+    them, but a dashboard tab showing a single tile does not: the Cost tab used to
+    compute all six to display `purchase_numeric` alone, which is a 34ms check behind
+    1.5s of work. Each check is independent, so the ones nobody asked for are simply
+    never called, and the returned list keeps its usual order minus the omitted ones.
     """
     sale_since = date.today() - timedelta(days=sale_days - 1)
     purchase_since = date.today() - timedelta(days=purchase_days - 1)
-    reconciliation_mismatch, reconciliation_uom = inventory_reconciliation_warnings(db, user)
 
-    return [
+    def wanted(section_id: str) -> bool:
+        return section_ids is None or section_id in section_ids
+
+    # The two reconciliation sections come out of one pass, so it runs if either is
+    # wanted and is skipped entirely when neither is.
+    if wanted("reconciliation_mismatch") or wanted("reconciliation_uom"):
+        reconciliation_mismatch, reconciliation_uom = inventory_reconciliation_warnings(db, user)
+    else:
+        reconciliation_mismatch, reconciliation_uom = [], []
+
+    sections = [
         {
             "id": "sale_numeric",
             "title": "Sale — fix these numbers",
             "description": "A price, quantity, or amount looks wrong on these sale lines — check the slip and re-import if needed.",
             "severity": "warning",
-            "rows": sale_numeric_warnings(db, user, since=sale_since),
+            "rows": sale_numeric_warnings(db, user, since=sale_since) if wanted("sale_numeric") else [],
         },
         {
             "id": "inventory_numeric",
@@ -726,22 +802,28 @@ def build_warning_sections(
                 "A quantity or price looks wrong on the latest stock snapshot for these — recount or re-import the corrected file."
             ),
             "severity": "warning",
-            "rows": inventory_numeric_warnings(db, user),
+            "rows": inventory_numeric_warnings(db, user) if wanted("inventory_numeric") else [],
         },
         {
             "id": "purchase_numeric",
             "title": "Purchase — fix these numbers",
             "description": "A quantity or price looks wrong on these purchase lines — check the invoice and re-import if needed.",
             "severity": "warning",
-            "rows": purchase_numeric_warnings(db, user, since=purchase_since),
+            "rows": (
+                purchase_numeric_warnings(db, user, since=purchase_since)
+                if wanted("purchase_numeric")
+                else []
+            ),
         },
         {
             "id": "missing_product",
             "title": "Inventory — add missing records",
             "description": "These stock codes were sold and/or purchased within the Sale/Purchase check windows above but have no inventory record yet — add one so stock levels stay accurate.",
             "severity": "warning",
-            "rows": missing_product_warnings(
-                db, user, sale_since=sale_since, purchase_since=purchase_since
+            "rows": (
+                missing_product_warnings(db, user, sale_since=sale_since, purchase_since=purchase_since)
+                if wanted("missing_product")
+                else []
             ),
         },
         {
@@ -765,3 +847,4 @@ def build_warning_sections(
             "rows": reconciliation_mismatch,
         },
     ]
+    return [section for section in sections if wanted(section["id"])]

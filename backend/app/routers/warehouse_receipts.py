@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.security import get_current_app_user
@@ -12,6 +12,9 @@ from app.services.branches import resolve_branch_id
 from app.services.wholesale import record_warehouse_receipt
 
 router = APIRouter(prefix="/api/warehouse-receipts", tags=["warehouse-receipts"])
+
+# Flat, one-row-per-arrival log — same shape and page size as Data Overview.
+PAGE_SIZE = 50
 
 
 def _receipt_to_out(receipt: WarehouseReceipt) -> WarehouseReceiptOut:
@@ -32,19 +35,28 @@ def _receipt_to_out(receipt: WarehouseReceipt) -> WarehouseReceiptOut:
 
 @router.get("")
 def list_receipts(
-    user: User = Depends(get_current_app_user), db: Session = Depends(get_db)
-) -> list[WarehouseReceiptOut]:
+    page: int = Query(1, ge=1),
+    page_size: int = Query(PAGE_SIZE, ge=1, le=1000),
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
     query = (
         db.query(WarehouseReceipt)
         .join(FactoryVoucherLine, WarehouseReceipt.voucher_line_id == FactoryVoucherLine.id)
         .join(FactoryVoucher, FactoryVoucherLine.voucher_id == FactoryVoucher.id)
-        .options(selectinload(WarehouseReceipt.voucher_line).selectinload(FactoryVoucherLine.voucher))
     )
     if user.branch_id is not None:
         query = query.filter(FactoryVoucher.branch_id == user.branch_id)
-    query = query.order_by(WarehouseReceipt.received_date.desc(), WarehouseReceipt.created_at.desc())
+    total = query.count()
 
-    return [_receipt_to_out(receipt) for receipt in query.all()]
+    query = (
+        query.options(selectinload(WarehouseReceipt.voucher_line).selectinload(FactoryVoucherLine.voucher))
+        .order_by(WarehouseReceipt.received_date.desc(), WarehouseReceipt.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    rows = [_receipt_to_out(receipt) for receipt in query.all()]
+    return {"rows": rows, "total": total}
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

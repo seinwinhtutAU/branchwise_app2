@@ -356,6 +356,35 @@ def get_import_freshness(
     ]
 
 
+@router.get("/data-version")
+def get_import_data_version(
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """A cheap token that changes whenever this account's imported data changes.
+
+    The frontend caches the dashboard and Warning pages until something makes them
+    stale, and it can see its *own* imports and reverts — but not one done by another
+    account on another machine, which is the normal case for a business with several
+    branches. Polling this is how it finds out: three aggregates over one indexed table,
+    cheap enough to call every minute, versus re-running a two-second dashboard query to
+    discover nothing changed.
+
+    `reverted_at` is in the token as well as `created_at` because reverting deletes rows
+    without creating a batch — the newest-created timestamp alone would not move.
+    """
+    query = db.query(
+        func.max(ImportBatch.created_at),
+        func.max(ImportBatch.reverted_at),
+        func.count(ImportBatch.id),
+    )
+    # Same visibility rule as the history list: a branch account sees its own branch.
+    if user.branch_id is not None:
+        query = query.filter(ImportBatch.branch_id == user.branch_id)
+    created_at, reverted_at, batch_count = query.one()
+    return {"version": f"{created_at or ''}|{reverted_at or ''}|{batch_count}"}
+
+
 @router.get("/history")
 def list_import_history(
     limit: int | None = None,

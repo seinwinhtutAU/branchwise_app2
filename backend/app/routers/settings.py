@@ -12,6 +12,41 @@ from app.services.settings import get_all_settings, set_setting
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
+class BranchHealthWeights(BaseModel):
+    """How much each dimension counts toward the Branch Health Score.
+
+    Sent as a complete set, not per-field: a weight only means anything relative to the
+    other four, so letting one arrive on its own would silently reweight the whole score
+    in a way nobody chose. Deliberately *not* required to sum to 1 — the scorer already
+    re-normalises over whichever dimensions were measurable, so a set summing to 0.9
+    still yields a sound 0-100 score, and rejecting it would block a legitimate
+    in-progress edit in the Settings form.
+    """
+
+    sales: float = Field(ge=0, le=1)
+    profit: float = Field(ge=0, le=1)
+    inventory: float = Field(ge=0, le=1)
+    customer: float = Field(ge=0, le=1)
+    data_quality: float = Field(ge=0, le=1)
+
+
+class EarlyWarningThresholds(BaseModel):
+    """The firing point for each Early Warning rule. Bounds are sanity caps rather than
+    business rules — the point of exposing these is that the business decides what
+    counts as a problem — but a decline threshold above zero would fire on every growing
+    branch, and a margin floor above 100% would fire on every branch there is."""
+
+    revenue_decline_warning_pct: float = Field(ge=-100, le=0)
+    revenue_decline_critical_pct: float = Field(ge=-100, le=0)
+    low_margin_warning_pct: float = Field(ge=0, le=100)
+    low_margin_critical_pct: float = Field(ge=0, le=100)
+    margin_slip_warning_pp: float = Field(ge=-100, le=0)
+    dead_stock_warning_share_pct: float = Field(ge=0, le=100)
+    dead_stock_critical_share_pct: float = Field(ge=0, le=100)
+    traffic_decline_warning_pct: float = Field(ge=-100, le=0)
+    single_item_basket_warning_share_pct: float = Field(ge=0, le=100)
+
+
 class AppSettingsUpdate(BaseModel):
     # Every field is optional so a PUT can update just one setting without having to
     # resend every other one — omitted fields are left untouched.
@@ -28,6 +63,9 @@ class AppSettingsUpdate(BaseModel):
     sale_list_window_days: int | None = Field(default=None, ge=1, le=365)
     purchase_list_window_days: int | None = Field(default=None, ge=1, le=365)
     show_buying_price_source: bool | None = None
+    # See docs/branch_health.md. Whole-set updates (see each model's docstring).
+    branch_health_weights: BranchHealthWeights | None = None
+    early_warning_thresholds: EarlyWarningThresholds | None = None
 
 
 @router.get("")
@@ -52,6 +90,8 @@ def update_settings(
             "Only an admin account can change business-wide settings",
         )
 
+    # model_dump turns the two nested models into plain dicts, which is exactly what the
+    # JSON value column stores — no special-casing needed for them here.
     for key, value in payload.model_dump(exclude_none=True).items():
         set_setting(db, key, value)
     return get_all_settings(db)

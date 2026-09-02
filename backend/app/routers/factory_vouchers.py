@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.security import get_current_app_user
@@ -20,6 +20,11 @@ from app.services.branches import branch_name, resolve_branch_id
 from app.services.wholesale import apply_voucher_line_to_orders, colors_total, next_voucher_no
 
 router = APIRouter(prefix="/api/factory-vouchers", tags=["factory-vouchers"])
+
+# See orders.py's PAGE_SIZE comment — same reasoning, and the same 500 ceiling lets the
+# read-only receiving-status page (which wants "every voucher" as one overview, not a
+# browsable page-at-a-time list) still ask for one bounded request instead of everything.
+PAGE_SIZE = 20
 
 
 def _line_to_out(line: FactoryVoucherLine) -> FactoryVoucherLineOut:
@@ -79,18 +84,24 @@ def _new_line(payload: FactoryVoucherLineCreate) -> FactoryVoucherLine:
 
 @router.get("")
 def list_vouchers(
-    user: User = Depends(get_current_app_user), db: Session = Depends(get_db)
-) -> list[FactoryVoucherOut]:
-    query = (
-        db.query(FactoryVoucher, Branch)
-        .outerjoin(Branch, FactoryVoucher.branch_id == Branch.id)
-        .options(selectinload(FactoryVoucher.lines))
-    )
+    page: int = Query(1, ge=1),
+    page_size: int = Query(PAGE_SIZE, ge=1, le=500),
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    query = db.query(FactoryVoucher, Branch).outerjoin(Branch, FactoryVoucher.branch_id == Branch.id)
     if user.branch_id is not None:
         query = query.filter(FactoryVoucher.branch_id == user.branch_id)
-    query = query.order_by(FactoryVoucher.voucher_no.desc())
+    total = query.count()
 
-    return [_voucher_to_out(voucher, branch.name if branch else None) for voucher, branch in query.all()]
+    query = (
+        query.options(selectinload(FactoryVoucher.lines))
+        .order_by(FactoryVoucher.voucher_no.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    rows = [_voucher_to_out(voucher, branch.name if branch else None) for voucher, branch in query.all()]
+    return {"rows": rows, "total": total}
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

@@ -53,6 +53,7 @@ export function useImportFilePicker(
       }
       const result = await response.json()
       onFileReady?.({
+        id: crypto.randomUUID(),
         importLabel: context.importLabel,
         endpoint: context.endpoint,
         file,

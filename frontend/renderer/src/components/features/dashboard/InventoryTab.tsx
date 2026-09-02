@@ -1,8 +1,5 @@
-import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import { apiBaseUrl } from '@renderer/lib/supabaseClient'
-import { useToast } from '@renderer/lib/useToast'
-import { useLatestRequest } from '@renderer/lib/useLatestRequest'
+import { useCachedFetch } from '@renderer/lib/useCachedFetch'
 import { Badge } from '@renderer/components/ui/Badge'
 import { Button } from '@renderer/components/ui/Button'
 import { Card, CardHeader } from '@renderer/components/ui/Card'
@@ -10,8 +7,8 @@ import { EmptyState } from '@renderer/components/ui/EmptyState'
 import { Skeleton } from '@renderer/components/ui/Skeleton'
 import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
 import { DashboardIcon, InventoryIcon } from '@renderer/components/ui/icons'
-import { StatTile, WarningsTile } from './shared'
-import { formatCount, formatMoney, formatShortDate, type SaleWarningRow } from './helpers'
+import { RefreshingHint, StatTile, WarningsTile } from './shared'
+import { dashboardUrl, formatCount, formatMoney, formatShortDate, type SaleWarningRow } from './helpers'
 
 interface CategoryQty {
   category: string
@@ -31,6 +28,8 @@ interface DeadStockItem {
   description: string
   on_hand_qty: number
   category: string
+  // null means never sold at all, not just "not in the last 90 days".
+  days_since_last_sale: number | null
 }
 
 interface InventoryDashboardData {
@@ -81,7 +80,33 @@ function CategoryQtyList({ categories }: { categories: CategoryQty[] }): React.J
   )
 }
 
-function LowStockTable({ items }: { items: LowStockItem[] }): React.JSX.Element {
+// The dashboard is a glance, not a browse — a hundred-plus-row table here would defeat
+// that. Ten rows is enough to see whether it's worth acting on; "View all" hands off to
+// the full, paginated, filterable list on the Inventory nav page for the rest.
+const PREVIEW_ROWS = 10
+
+function ViewAllLink({ totalCount, shown, onClick, label }: { totalCount: number; shown: number; onClick: () => void; label: string }): React.JSX.Element | null {
+  if (totalCount <= shown) return null
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-3 text-sm text-brand hover:text-brand-hover font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded"
+    >
+      View all {totalCount.toLocaleString()} {label} →
+    </button>
+  )
+}
+
+function LowStockTable({
+  items,
+  totalCount,
+  onViewAll
+}: {
+  items: LowStockItem[]
+  totalCount: number
+  onViewAll: () => void
+}): React.JSX.Element {
   if (items.length === 0) {
     return (
       <EmptyState
@@ -91,35 +116,47 @@ function LowStockTable({ items }: { items: LowStockItem[] }): React.JSX.Element 
       />
     )
   }
+  const preview = items.slice(0, PREVIEW_ROWS)
   return (
-    <TableContainer>
-      <Thead>
-        <Tr>
-          <Th>Status</Th>
-          <Th>Stock Code</Th>
-          <Th>Description</Th>
-          <Th className="text-right">On Hand Qty</Th>
-          <Th className="text-right">Est. Days Left</Th>
-        </Tr>
-      </Thead>
-      <Tbody>
-        {items.map((item) => (
-          <Tr key={item.stock_code}>
-            <Td>
-              <Badge variant={STATUS_BADGE_VARIANT[item.status]}>{item.status}</Badge>
-            </Td>
-            <Td className="font-mono text-xs whitespace-nowrap">{item.stock_code}</Td>
-            <Td>{item.description}</Td>
-            <Td className="text-right tabular-nums">{item.on_hand_qty.toLocaleString()}</Td>
-            <Td className="text-right tabular-nums">{item.days_left}</Td>
+    <>
+      <TableContainer>
+        <Thead>
+          <Tr>
+            <Th>Status</Th>
+            <Th>Stock Code</Th>
+            <Th>Description</Th>
+            <Th className="text-right">On Hand Qty</Th>
+            <Th className="text-right">Est. Days Left</Th>
           </Tr>
-        ))}
-      </Tbody>
-    </TableContainer>
+        </Thead>
+        <Tbody>
+          {preview.map((item) => (
+            <Tr key={item.stock_code}>
+              <Td>
+                <Badge variant={STATUS_BADGE_VARIANT[item.status]}>{item.status}</Badge>
+              </Td>
+              <Td className="font-mono text-xs whitespace-nowrap">{item.stock_code}</Td>
+              <Td>{item.description}</Td>
+              <Td className="text-right tabular-nums">{item.on_hand_qty.toLocaleString()}</Td>
+              <Td className="text-right tabular-nums">{item.days_left}</Td>
+            </Tr>
+          ))}
+        </Tbody>
+      </TableContainer>
+      <ViewAllLink totalCount={totalCount} shown={preview.length} onClick={onViewAll} label="low-stock items" />
+    </>
   )
 }
 
-function DeadStockTable({ items }: { items: DeadStockItem[] }): React.JSX.Element {
+function DeadStockTable({
+  items,
+  totalCount,
+  onViewAll
+}: {
+  items: DeadStockItem[]
+  totalCount: number
+  onViewAll: () => void
+}): React.JSX.Element {
   if (items.length === 0) {
     return (
       <EmptyState
@@ -129,27 +166,35 @@ function DeadStockTable({ items }: { items: DeadStockItem[] }): React.JSX.Elemen
       />
     )
   }
+  const preview = items.slice(0, PREVIEW_ROWS)
   return (
-    <TableContainer>
-      <Thead>
-        <Tr>
-          <Th>Stock Code</Th>
-          <Th>Description</Th>
-          <Th>Category</Th>
-          <Th className="text-right">On Hand Qty</Th>
-        </Tr>
-      </Thead>
-      <Tbody>
-        {items.map((item) => (
-          <Tr key={item.stock_code}>
-            <Td className="font-mono text-xs whitespace-nowrap">{item.stock_code}</Td>
-            <Td>{item.description}</Td>
-            <Td className="text-text-muted">{item.category}</Td>
-            <Td className="text-right tabular-nums">{item.on_hand_qty.toLocaleString()}</Td>
+    <>
+      <TableContainer>
+        <Thead>
+          <Tr>
+            <Th>Stock Code</Th>
+            <Th>Description</Th>
+            <Th>Category</Th>
+            <Th className="text-right">On Hand Qty</Th>
+            <Th className="text-right">Days Unsold</Th>
           </Tr>
-        ))}
-      </Tbody>
-    </TableContainer>
+        </Thead>
+        <Tbody>
+          {preview.map((item) => (
+            <Tr key={item.stock_code}>
+              <Td className="font-mono text-xs whitespace-nowrap">{item.stock_code}</Td>
+              <Td>{item.description}</Td>
+              <Td className="text-text-muted">{item.category}</Td>
+              <Td className="text-right tabular-nums">{item.on_hand_qty.toLocaleString()}</Td>
+              <Td className="text-right tabular-nums text-text-muted">
+                {item.days_since_last_sale === null ? 'Never sold' : `${item.days_since_last_sale} days`}
+              </Td>
+            </Tr>
+          ))}
+        </Tbody>
+      </TableContainer>
+      <ViewAllLink totalCount={totalCount} shown={preview.length} onClick={onViewAll} label="dead-stock items" />
+    </>
   )
 }
 
@@ -158,55 +203,33 @@ interface Props {
   branchId: string
   canLoad: boolean
   onViewWarnings: () => void
+  onViewInventoryList: (tab: 'lowStock' | 'deadStock') => void
 }
 
-export function InventoryTab({ session, branchId, canLoad, onViewWarnings }: Props): React.JSX.Element {
-  const showToast = useToast()
-  const [data, setData] = useState<InventoryDashboardData | null>(null)
-  const [loadFailed, setLoadFailed] = useState(false)
-  const nextRequest = useLatestRequest()
-
-  async function load(): Promise<void> {
-    if (!canLoad) return
-    const signal = nextRequest()
-    setLoadFailed(false)
-    try {
-      const params = new URLSearchParams()
-      if (branchId) params.set('branch_id', branchId)
-      const qs = params.toString()
-      const response = await fetch(`${apiBaseUrl}/api/dashboard/inventory${qs ? `?${qs}` : ''}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        signal
-      })
-      if (!response.ok) {
-        setLoadFailed(true)
-        showToast('error', `Failed to load the Inventory dashboard: ${response.status}`)
-        return
-      }
-      setData(await response.json())
-    } catch {
-      if (signal.aborted) return
-      setLoadFailed(true)
-      showToast('error', 'Failed to load the Inventory dashboard — is the backend running?')
-    }
-  }
-
-  useEffect(() => {
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.access_token, branchId])
+export function InventoryTab({
+  session,
+  branchId,
+  canLoad,
+  onViewWarnings,
+  onViewInventoryList
+}: Props): React.JSX.Element {
+  // One cached request per (tab, branch, period) — returning to this tab with the same
+  // selection shows the numbers it showed last time instead of a skeleton. See
+  // lib/useCachedFetch.ts.
+  const url = canLoad ? dashboardUrl('inventory', branchId) : null
+  const { data, isRefreshing, failed, reload } = useCachedFetch<InventoryDashboardData>(url, session, 'Inventory dashboard')
 
   if (!canLoad) return <></>
 
   if (data === null) {
-    if (loadFailed) {
+    if (failed) {
       return (
         <EmptyState
           icon={<DashboardIcon />}
           title="Couldn't load the Inventory dashboard"
           description="Something went wrong reaching the backend."
           action={
-            <Button variant="secondary" size="sm" onClick={load}>
+            <Button variant="secondary" size="sm" onClick={reload}>
               Try again
             </Button>
           }
@@ -230,6 +253,7 @@ export function InventoryTab({ session, branchId, canLoad, onViewWarnings }: Pro
 
   return (
     <div className="flex flex-col gap-4">
+      <RefreshingHint show={isRefreshing} />
       <p className="text-sm text-text-muted">
         {data.as_of
           ? `Current stock as of the latest inventory snapshot — ${formatShortDate(data.as_of.slice(0, 10), true)}.`
@@ -270,7 +294,11 @@ export function InventoryTab({ session, branchId, canLoad, onViewWarnings }: Pro
           title="Low stock"
           description="Estimated to run out soonest, based on the last 30 days' sales velocity."
         />
-        <LowStockTable items={data.low_stock_items} />
+        <LowStockTable
+          items={data.low_stock_items}
+          totalCount={lowStockCount}
+          onViewAll={() => onViewInventoryList('lowStock')}
+        />
       </Card>
 
       <Card>
@@ -278,7 +306,11 @@ export function InventoryTab({ session, branchId, canLoad, onViewWarnings }: Pro
           title="Dead stock"
           description="Still on hand, but hasn't sold at all in the last 90 days — worth a look before restocking or marking it down."
         />
-        <DeadStockTable items={data.dead_stock_items} />
+        <DeadStockTable
+          items={data.dead_stock_items}
+          totalCount={data.dead_stock_count}
+          onViewAll={() => onViewInventoryList('deadStock')}
+        />
       </Card>
     </div>
   )

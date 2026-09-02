@@ -22,6 +22,24 @@ DEFAULT_SETTINGS_RESPONSE = {
     "sale_list_window_days": 90,
     "purchase_list_window_days": 90,
     "show_buying_price_source": True,
+    "branch_health_weights": {
+        "sales": 0.25,
+        "profit": 0.25,
+        "inventory": 0.25,
+        "customer": 0.15,
+        "data_quality": 0.10,
+    },
+    "early_warning_thresholds": {
+        "revenue_decline_warning_pct": -10.0,
+        "revenue_decline_critical_pct": -20.0,
+        "low_margin_warning_pct": 10.0,
+        "low_margin_critical_pct": 5.0,
+        "margin_slip_warning_pp": -3.0,
+        "dead_stock_warning_share_pct": 10.0,
+        "dead_stock_critical_share_pct": 25.0,
+        "traffic_decline_warning_pct": -10.0,
+        "single_item_basket_warning_share_pct": 60.0,
+    },
 }
 
 

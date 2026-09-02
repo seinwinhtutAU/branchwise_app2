@@ -36,6 +36,54 @@ Defined as CSS variables in `frontend/renderer/src/styles/globals.css`, consumed
 
 This is a fairly generic "shadcn-adjacent" indigo SaaS palette — competent but not distinctive. A design pass could reasonably start here: brand personality, type scale, and information density are the biggest open questions.
 
+## 1b. Data fetching and caching
+
+`frontend/renderer/src/lib/useCachedFetch.ts` backs the dashboard tabs and the Warning
+page. It exists because `App.tsx` renders each section as `{section === 'x' && ...}` and
+`DashboardPage` does the same per tab — so navigating away *unmounts* the component and
+destroys its state, and coming back was always a fresh mount: skeleton, refetch, wait.
+On the heaviest page that was a couple of seconds every single time, which is what made
+the app feel slow.
+
+The cache key is the full request URL, so any change to period, date range or branch is
+a different key and fetches properly. Beyond that a cached entry is reused until one of
+four things happens: `invalidateImportedData()` is called (from confirming an import in
+`ImportReviewPage` and from reverting one in `ImportHistoryTable` — those are the only
+things in this app that change the sale/inventory/purchase data these pages read);
+`useImportedDataWatch` (called once in `App.tsx`) notices that *someone else* changed it,
+by polling `GET /api/imports/data-version` every minute and on window focus — a token
+built from the newest created/reverted import-batch timestamps and the batch count,
+scoped to the branch the account can see, so another branch's import doesn't invalidate
+anything here; the entry ages past five minutes, now only a backstop against a page left
+open all day; or the caller calls `reload()`. `clearFetchCache()` runs on sign
+out, since the next account may be scoped to a different branch.
+
+When an entry is reused but needs revalidating, the hook returns the old data
+immediately and refetches behind it with `isRefreshing` set, which the tabs render as a
+quiet `RefreshingHint`. A skeleton says "you have nothing"; last minute's numbers say
+"here's what we knew" — for a dashboard the second is nearly always better. A background
+refresh that fails leaves the good data on screen and only toasts.
+
+### 1c. Not losing the user's place
+
+Two rules the app has to follow, both learned the hard way:
+
+**A token refresh must not blank the app.** Supabase refreshes the access token whenever
+the window regains focus, which fires `onAuthStateChange` and re-runs `App.tsx`'s
+profile-loading effect. That effect used to set `profileLoading` every time, and
+`profileLoading` renders a full-screen spinner — unmounting every page below it. The
+visible symptom was that switching to another app and back reset the Dashboard to its
+first tab, closed whichever branch was open, and cleared every table filter. The spinner
+now shows only on the *first* load, when there is no profile yet; later refreshes happen
+silently behind whatever is on screen.
+
+**State a user navigates back to belongs above the thing that unmounts.** `App.tsx` renders
+sections as `{section === 'x' && ...}` and `DashboardPage` renders tabs the same way, so
+moving away destroys the component. Anything the user expects to find again on return has
+to be held higher up: which branch the Overview tab has open lives in `App.tsx`, so going
+Overview → Revenue → Overview comes back to that branch's page rather than the branch
+list. Only "← All branches" clears it.
+
 ## 2. Global layout (`AppShell`)
 
 Two states depending on viewport:
@@ -152,10 +200,27 @@ Same inline spreadsheet pattern as Customer Orders, for factory vouchers (header
 - Adding a voucher line auto-prices and matches every open (`not_start`) Customer Order line with the same product code in the same branch, flipping those lines to `waiting` — this is the primary way Customer Order lines get priced, described further in [architecture.md](./architecture.md).
 
 ### 3.13 Settings (`SettingsPage`)
-Personal, per-device preferences. Shown to every role.
+Business-wide preferences — the same for every account and device. Every role reaches
+the page; only an admin account sees anything editable (the server enforces this too).
 
-- **Appearance** card: the `ThemeSwitcher` — a 3-way segmented control (Light / Dark / System) with sun/moon/monitor icons, backed by `data-theme` + `prefers-color-scheme` (see [design tokens](#1-design-tokens-current) below — this is the toggle that section 5 used to say didn't exist).
-- **Daily check window** card (hidden for wholesale accounts, which have no Warning page): a single Select ("Check the last 1/3/7/14/30 days") controlling how far back the Warning page's Sale/Purchase checks look; Inventory always checks only the latest snapshot regardless of this setting.
+Settings are grouped into **five tabs**, using the same pill tab bar as the Dashboard
+and Import Overview. This replaced a single column of ten stacked cards, which had grown
+past the point where anyone could find anything in it:
+
+- **General** — Appearance (the `ThemeSwitcher`: a 3-way Light / Dark / System segmented
+  control backed by `data-theme` + `prefers-color-scheme`), the Sale/Purchase list
+  default range, and the Buying Price Source column toggle.
+- **Data checks** — how far back the Warning page's Sale and Purchase checks look,
+  independently of each other. Inventory always checks only the latest snapshot, so
+  there is nothing to configure for it.
+- **Buying price** — the three point-in-time pricing windows (purchase lookback,
+  inventory lookback, inventory forward fallback).
+- **Branch health** — the Overview score's dimension weights, with a running total, and
+  every Early Warning rule's firing point. See `docs/branch_health.md`.
+- **Branches** — per-branch Sale/Inventory date formats. Per branch, not business-wide.
+
+The two retail-only tabs (Data checks, Branch health) are hidden from a wholesale
+account, which has no Warning page or retail dashboard.
 
 ## 4. Reusable UI primitives (`components/ui/`)
 

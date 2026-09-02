@@ -267,3 +267,64 @@ def test_reverted_slip_can_be_reimported(authed_client: TestClient, db_session: 
     second = _confirm_sale(authed_client)
     assert second["sales_created"] == 1
     assert second["sales_skipped_duplicate"] == 0
+
+
+# --- the cache's cross-account staleness probe ----------------------------------------
+
+
+def test_data_version_moves_when_an_import_is_confirmed(
+    authed_client: TestClient, db_session: Session
+):
+    """The frontend caches the dashboard and Warning pages and polls this to find out
+    when *someone else* changed the data. If the token didn't move on a confirm, every
+    other account would keep showing stale numbers."""
+    _make_user(db_session, branch_name="Ashley")
+
+    before = authed_client.get("/api/imports/data-version").json()["version"]
+    _confirm_sale(authed_client)
+    after = authed_client.get("/api/imports/data-version").json()["version"]
+
+    assert before != after
+    # Stable when nothing has happened — otherwise every poll would invalidate the cache.
+    assert authed_client.get("/api/imports/data-version").json()["version"] == after
+
+
+def test_data_version_moves_when_an_import_is_reverted(
+    authed_client: TestClient, db_session: Session
+):
+    """A revert deletes rows without creating a batch, so the newest-created timestamp
+    alone would not move — which is why reverted_at is in the token too."""
+    _make_user(db_session, branch_name="Ashley")
+    batch_id = _confirm_sale(authed_client)["batch_id"]
+
+    before = authed_client.get("/api/imports/data-version").json()["version"]
+    assert authed_client.post(f"/api/imports/history/{batch_id}/revert").status_code == 200
+    assert authed_client.get("/api/imports/data-version").json()["version"] != before
+
+
+def test_data_version_is_scoped_to_the_branch_the_account_can_see(
+    authed_client: TestClient, db_session: Session
+):
+    """A branch account shouldn't refetch its dashboard because another branch imported
+    something it can't even see."""
+    branch = _make_user(db_session, branch_name="Ashley")
+    assert branch is not None
+    other = Branch(name="AungThitSar", phone_number="000", address="TBD")
+    db_session.add(other)
+    db_session.flush()
+
+    before = authed_client.get("/api/imports/data-version").json()["version"]
+    db_session.add(
+        ImportBatch(
+            import_type="sales",
+            branch_id=other.id,
+            filename="someone-elses.csv",
+            status=ImportBatchStatus.COMPLETED,
+            summary={},
+            preview_data={},
+            created_at=datetime.now(),
+        )
+    )
+    db_session.commit()
+
+    assert authed_client.get("/api/imports/data-version").json()["version"] == before

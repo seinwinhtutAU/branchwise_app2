@@ -1,11 +1,155 @@
 import { Fragment, useState } from 'react'
 import { cn } from '@renderer/lib/utils'
 import { Badge } from '@renderer/components/ui/Badge'
+import { Button } from '@renderer/components/ui/Button'
 import { Card } from '@renderer/components/ui/Card'
-import { WEEKDAY_LABELS, formatShortDate, type SaleWarningRow } from './helpers'
+import { Input } from '@renderer/components/ui/Input'
+import { Select } from '@renderer/components/ui/Select'
+import { ClipboardIcon } from '@renderer/components/ui/icons'
+import {
+  EVIDENCE_LABEL,
+  PERIOD_OPTIONS,
+  WEEKDAY_LABELS,
+  formatShortDate,
+  type EvidenceTarget,
+  type HealthAlert,
+  type PeriodKey,
+  type SaleWarningRow
+} from './helpers'
+import type { PeriodRange } from './usePeriodRange'
 
 // Components only — plain helpers/constants/types live in ./helpers so Vite Fast
 // Refresh can hot-swap this file in dev.
+
+// Shown while a tab revalidates behind numbers that are already on screen. Deliberately
+// quiet: the data below it is real and usable, it is just a minute old, so this must not
+// read like an error or pull the eye away from the figures.
+export function RefreshingHint({ show }: { show: boolean }): React.JSX.Element | null {
+  if (!show) return null
+  return (
+    <p className="text-xs text-text-muted flex items-center gap-1.5" role="status">
+      <span className="w-1.5 h-1.5 rounded-full bg-brand animate-pulse motion-reduce:animate-none" />
+      Refreshing…
+    </p>
+  )
+}
+
+// Percentages, money and counts inside an alert sentence. Bolding them lets a reader
+// take the number off the row at a glance and read the sentence only if they want the
+// rest — which is how these actually get read.
+const NUMBER_PATTERN =
+  /(Ks\s[\d,]+(?:\.\d+)?|[\d,]+(?:\.\d+)?\s?(?:%|percentage points|points|days)|\b[\d,]*\d\b)/g
+
+function withNumbersEmphasised(text: string): React.ReactNode[] {
+  return text
+    .split(NUMBER_PATTERN)
+    .map((part, index) =>
+      index % 2 === 1 ? (
+        <strong key={index} className="font-semibold text-text-primary">
+          {part}
+        </strong>
+      ) : (
+        <Fragment key={index}>{part}</Fragment>
+      )
+    )
+}
+
+function AlertSection({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">{label}</span>
+      <p className="text-sm text-text-secondary">{children}</p>
+    </div>
+  )
+}
+
+/**
+ * The body of an alert, in the four parts a reader actually asks for in order: what
+ * happened, what appears to have driven it, what that means, and what to do about it.
+ *
+ * Driver and interpretation are separate sections rather than one paragraph because they
+ * are different kinds of claim — the driver is measured ("transactions −17.8%, average
+ * sale +7.9%"), the interpretation is the reading of it ("this is a footfall problem, not
+ * a basket-size one"). Running them together lets the second borrow the authority of the
+ * first.
+ *
+ * The action sits apart, tinted and holding the button, because it is the thing the whole
+ * alert exists to produce.
+ */
+export function AlertExplanation({
+  alert,
+  onOpenEvidence
+}: {
+  alert: HealthAlert
+  onOpenEvidence: (target: EvidenceTarget) => void
+}): React.JSX.Element {
+  return (
+    <div className="grid gap-4 md:grid-cols-3">
+      <div className="md:col-span-2 flex flex-col gap-3">
+        <AlertSection label="What happened">{withNumbersEmphasised(alert.what_happened)}</AlertSection>
+        {alert.driver && (
+          <AlertSection label="Possible driver">{withNumbersEmphasised(alert.driver)}</AlertSection>
+        )}
+        {alert.interpretation && (
+          <AlertSection label="Interpretation">{withNumbersEmphasised(alert.interpretation)}</AlertSection>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-border-brand bg-brand-subtle p-3 flex flex-col gap-2 self-start">
+        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-brand">
+          <ClipboardIcon className="w-3.5 h-3.5" />
+          What to do
+        </span>
+        <p className="text-sm text-text-primary">{alert.recommended_action}</p>
+        <Button variant="secondary" size="sm" className="self-start" onClick={() => onOpenEvidence(alert.link)}>
+          {EVIDENCE_LABEL[alert.link]} →
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// The period preset + custom range controls, shared by the Dashboard and the Business
+// Alerts page. Driven by usePeriodRange, which owns the state and the settle timing.
+export function PeriodControls({ range }: { range: PeriodRange }): React.JSX.Element {
+  return (
+    <>
+      <div className="w-44">
+        <Select
+          label="Period"
+          value={range.period}
+          disabled={range.hasCustomRange}
+          onChange={(e) => range.setPeriod(e.target.value as PeriodKey)}
+        >
+          {PERIOD_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <Input
+        type="date"
+        label="Date from"
+        value={range.dateFrom}
+        max={range.dateTo || undefined}
+        onChange={(e) => range.setDateFrom(e.target.value)}
+      />
+      <Input
+        type="date"
+        label="Date to"
+        value={range.dateTo}
+        min={range.dateFrom || undefined}
+        onChange={(e) => range.setDateTo(e.target.value)}
+      />
+      {(range.dateFrom || range.dateTo) && (
+        <Button variant="ghost" size="sm" onClick={range.clearCustomRange}>
+          Clear range
+        </Button>
+      )}
+    </>
+  )
+}
 
 export function DeltaBadge({ deltaPct }: { deltaPct: number | null }): React.JSX.Element {
   if (deltaPct === null) {

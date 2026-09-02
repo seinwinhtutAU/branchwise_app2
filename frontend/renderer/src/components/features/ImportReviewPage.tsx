@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { apiBaseUrl } from '@renderer/lib/supabaseClient'
+import { invalidateImportedData } from '@renderer/lib/useCachedFetch'
 import { useToast } from '@renderer/lib/useToast'
 import { Button } from '@renderer/components/ui/Button'
 import { Input } from '@renderer/components/ui/Input'
+import { ProgressBar } from '@renderer/components/ui/ProgressBar'
 import { Select } from '@renderer/components/ui/Select'
 import { ImportDataView } from './ImportDataView'
 import type { ImportPreviewResult, PendingImport, Profile } from './types'
@@ -17,11 +19,14 @@ interface Props {
   session: Session
   profile: Profile | null
   pending: PendingImport
+  // Set only when this file is one of several picked at once (see FileImportCard) — an
+  // ad-hoc single-file reimport (Import History, Warning page) has no queue to show.
+  queuePosition?: { index: number; total: number }
   onBack: () => void
   onConfirmed: (summary: Record<string, unknown>) => void
 }
 
-function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Props): React.JSX.Element {
+function ImportReviewPage({ session, profile, pending, queuePosition, onBack, onConfirmed }: Props): React.JSX.Element {
   const { importLabel, endpoint, file, result, revertBatchId, replacingFilename } = pending
   const showToast = useToast()
 
@@ -144,6 +149,10 @@ function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Pr
         return
       }
 
+      // Sales/inventory/purchase data just changed, so every cached dashboard and
+      // Warning page is out of date. This is the honest invalidation signal in this app
+      // — a confirmed or reverted import is the only thing that moves that data.
+      invalidateImportedData()
       onConfirmed(body)
     } catch {
       showToast(
@@ -175,13 +184,25 @@ function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Pr
             />
           </svg>
         </button>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h2 className="text-lg font-semibold text-text-primary tracking-tight">
             Review {importLabel} import
+            {queuePosition && (
+              <span className="ml-2 text-sm font-normal text-text-muted">
+                File {queuePosition.index} of {queuePosition.total}
+              </span>
+            )}
           </h2>
           <p className="text-sm text-text-muted truncate">{result.filename}</p>
         </div>
       </div>
+
+      {queuePosition && (
+        <ProgressBar
+          value={((queuePosition.index - 1) / queuePosition.total) * 100}
+          className="max-w-sm"
+        />
+      )}
 
       {revertBatchId && (
         <p className="text-sm text-warning bg-warning-subtle rounded-md px-3 py-2">
@@ -229,7 +250,7 @@ function ImportReviewPage({ session, profile, pending, onBack, onConfirmed }: Pr
               {revertBatchId ? 'Confirm & Replace' : 'Confirm Import'}
             </Button>
             <Button variant="ghost" onClick={onBack}>
-              Cancel
+              {queuePosition ? 'Skip this file' : 'Cancel'}
             </Button>
           </div>
         }
