@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" role="img" aria-label="BranchWise">
+  <!-- branches stepping upward from one head office -->
+  <path d="M32 35 V 47" stroke="#6366f1" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M13 35 H 51" stroke="#6366f1" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M13 35 V 27 M32 35 V 23 M51 35 V 19" stroke="#6366f1" stroke-width="4.5" stroke-linecap="round"/>
+  <circle cx="32" cy="51" r="6" fill="#4338ca"/>
+  <rect x="7"  y="15" width="12" height="12" rx="3.5" fill="#a5b4fc"/>
+  <rect x="26" y="11" width="12" height="12" rx="3.5" fill="#818cf8"/>
+  <rect x="45" y="7"  width="12" height="12" rx="3.5" fill="#4f46e5"/>
+</svg>

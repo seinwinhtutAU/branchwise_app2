@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" fill="none" role="img" aria-label="BranchWise">
+  <defs>
+    <linearGradient id="bw" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#818cf8"/>
+      <stop offset="1" stop-color="#4338ca"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="114" fill="url(#bw)"/>
+  <g transform="translate(96 96) scale(5)">
+    <path d="M32 35 V 47" stroke="#ffffff" stroke-width="4.8" stroke-linecap="round"/>
+    <path d="M13 35 H 51" stroke="#ffffff" stroke-width="4.8" stroke-linecap="round"/>
+    <path d="M13 35 V 27 M32 35 V 23 M51 35 V 19" stroke="#ffffff" stroke-width="4.8" stroke-linecap="round"/>
+    <circle cx="32" cy="51" r="6" fill="#ffffff"/>
+    <rect x="7"  y="15" width="12" height="12" rx="3.5" fill="#c7d2fe"/>
+    <rect x="26" y="11" width="12" height="12" rx="3.5" fill="#e0e7ff"/>
+    <rect x="45" y="7"  width="12" height="12" rx="3.5" fill="#ffffff"/>
+  </g>
+</svg>

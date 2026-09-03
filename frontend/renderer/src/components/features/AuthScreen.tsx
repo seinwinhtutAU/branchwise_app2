@@ -1,5 +1,6 @@
 import { Button } from '@renderer/components/ui/Button'
 import { Input } from '@renderer/components/ui/Input'
+import { LogoChip, LogoWordmark } from '@renderer/components/ui/Logo'
 
 type Mode = 'sign-in' | 'sign-up'
 
@@ -41,18 +42,8 @@ export function AuthScreen({
     <div className="min-h-screen flex items-center justify-center bg-bg-subtle px-4 py-12">
       <div className="w-full max-w-sm animate-slide-up motion-reduce:animate-none">
         <div className="flex flex-col items-center gap-2 mb-8">
-          <div className="w-11 h-11 rounded-xl bg-brand text-white flex items-center justify-center shadow-sm">
-            <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" aria-hidden="true">
-              <path
-                d="M3 21V8l9-5 9 5v13M3 21h18M3 21v-9a2 2 0 012-2h2M21 21v-9a2 2 0 00-2-2h-2M9 21v-6a2 2 0 012-2h2a2 2 0 012 2v6"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </div>
-          <h1 className="text-xl font-semibold text-text-primary tracking-tight">Branchwise</h1>
+          <LogoChip className="w-11 h-11 rounded-xl" markClassName="w-7 h-7" />
+          <LogoWordmark className="text-xl" />
           <p className="text-sm text-text-muted">Sign in to manage your branch's data</p>
         </div>
 

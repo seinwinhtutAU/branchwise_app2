@@ -17,6 +17,14 @@ same conversation, so a single margin rule reports whichever is worse rather tha
 rules firing about one number and burying everything else. An alert list a manager
 learns to skim is worthless.
 
+**Three severities, only two of which ask for anything.** `critical` is act today,
+`warning` is act soon, and `normal` is a movement drifting the wrong way that is not
+worth doing anything about yet — a margin down a point, a product with a fortnight of
+cover left. The reason a third level does not turn the page into noise is that nothing
+counts it: the nav badge, the branch tiles and the Overview cards all count criticals
+and warnings only, so the number a manager reacts to still means "things to act on",
+while the list itself can show the drift that produced no alert at all before.
+
 **Data-integrity alerts delegate to app/services/data_quality.py entirely**, down to
 that check's own title and severity (carried on the snapshot as `data_issue_sections`).
 This engine holds no second opinion about what counts as a data problem or how bad one
@@ -32,20 +40,28 @@ from typing import Callable
 
 from app.services import explanation
 from app.services.branch_health import MIN_COST_COVERAGE_PCT, BranchSnapshot
-from app.services.dashboard import CRITICAL_DAYS_OF_STOCK, DEAD_STOCK_WINDOW_DAYS, LOW_DAYS_OF_STOCK
+from app.services.dashboard import (
+    CRITICAL_DAYS_OF_STOCK,
+    DEAD_STOCK_WINDOW_DAYS,
+    LOW_DAYS_OF_STOCK,
+    WATCH_DAYS_OF_STOCK,
+)
 
 CRITICAL = "critical"
 WARNING = "warning"
+NORMAL = "normal"
 
-# Sort order only — critical first. Not a score, and deliberately not a third "info"
-# level: a list where everything is worth mentioning is a list nobody reads.
-_SEVERITY_RANK = {CRITICAL: 0, WARNING: 1}
+# Sort order only, not a score: act today, then act soon, then the notices that ask for
+# nothing. `normal` earns its place because it is never counted — see the module
+# docstring — so the list can carry a drift without inflating the number beside the nav
+# item, which is what a third level usually breaks.
+_SEVERITY_RANK = {CRITICAL: 0, WARNING: 1, NORMAL: 2}
 
 
 @dataclass(frozen=True)
 class Alert:
     id: str
-    severity: str  # critical | warning
+    severity: str  # critical | warning | normal
     dimension: str  # matches a branch_health DIMENSIONS key
     title: str
     # A few words for the collapsed one-line row and the all-branches card — the Overview
@@ -81,14 +97,19 @@ class Thresholds:
     argument, so making the thresholds business-tunable needs no change to any rule.
     """
 
+    revenue_decline_normal_pct: float = -5.0
     revenue_decline_warning_pct: float = -10.0
     revenue_decline_critical_pct: float = -20.0
+    low_margin_normal_pct: float = 15.0
     low_margin_warning_pct: float = 10.0
     low_margin_critical_pct: float = 5.0
+    margin_slip_normal_pp: float = -1.0
     margin_slip_warning_pp: float = -3.0
+    dead_stock_normal_share_pct: float = 5.0
     dead_stock_warning_share_pct: float = 10.0
     dead_stock_critical_share_pct: float = 25.0
     traffic_decline_warning_pct: float = -10.0
+    single_item_basket_normal_share_pct: float = 45.0
     single_item_basket_warning_share_pct: float = 60.0
 
 
@@ -109,6 +130,16 @@ def _count_products(count: int) -> str:
 
 def _its_their(count: int) -> str:
     return "its" if count == 1 else "their"
+
+
+# One line per severity rather than a ternary chain inside the alert: the three titles
+# are the same sentence at three strengths, and reading them together is how you check
+# they still are.
+_REVENUE_TITLE = {
+    CRITICAL: "Revenue has fallen sharply",
+    WARNING: "Revenue is falling",
+    NORMAL: "Revenue is drifting down",
+}
 
 
 def _period_phrase(snapshot: BranchSnapshot) -> str:
@@ -151,10 +182,15 @@ def revenue_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert
     if not snapshot.previous_net_revenue:
         return []
     growth = (snapshot.net_revenue - snapshot.previous_net_revenue) / snapshot.previous_net_revenue * 100
-    if growth > thresholds.revenue_decline_warning_pct:
+    if growth > thresholds.revenue_decline_normal_pct:
         return []
 
-    severity = CRITICAL if growth <= thresholds.revenue_decline_critical_pct else WARNING
+    if growth <= thresholds.revenue_decline_critical_pct:
+        severity = CRITICAL
+    elif growth <= thresholds.revenue_decline_warning_pct:
+        severity = WARNING
+    else:
+        severity = NORMAL
     # Revenue = transactions x average basket, and that identity decomposes exactly —
     # so the alert can say which of the two actually caused the fall instead of leaving
     # the manager to guess. The two cases call for completely different responses.
@@ -174,12 +210,22 @@ def revenue_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert
             summary=f"Revenue down {abs(growth):.1f}%",
             severity=severity,
             dimension="sales",
-            title="Revenue has fallen sharply" if severity == CRITICAL else "Revenue is falling",
+            title=_REVENUE_TITLE[severity],
             what_happened=(
                 f"Net revenue is down {abs(growth):.1f}% against {_period_phrase(snapshot)}."
+                + (
+                    " That is a drift rather than a drop — it stays under the "
+                    f"{abs(thresholds.revenue_decline_warning_pct):.0f}% fall this business treats "
+                    "as a warning."
+                    if severity == NORMAL
+                    else ""
+                )
             ),
             recommended_action=(
-                "Open the Revenue tab and read the daily trend for when the drop started, then "
+                "Nothing to act on yet. Worth reading the Revenue tab's daily trend to see whether "
+                "this is one quiet week or the start of a run."
+                if severity == NORMAL
+                else "Open the Revenue tab and read the daily trend for when the drop started, then "
                 "compare the top products against the previous period to see what stopped selling."
             ),
             link="revenue",
@@ -197,8 +243,13 @@ def margin_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]
         return []
 
     margin = snapshot.gross_margin_pct
-    if margin < thresholds.low_margin_warning_pct:
-        severity = CRITICAL if margin < thresholds.low_margin_critical_pct else WARNING
+    if margin < thresholds.low_margin_normal_pct:
+        if margin < thresholds.low_margin_critical_pct:
+            severity = CRITICAL
+        elif margin < thresholds.low_margin_warning_pct:
+            severity = WARNING
+        else:
+            severity = NORMAL
         # A low margin is a level, not a movement, so the useful "why" is whether it is
         # new: a margin thin for months is a pricing decision to revisit, one that was
         # healthy last period is an event to investigate.
@@ -215,13 +266,23 @@ def margin_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]
                 summary=f"Margin at {margin:.1f}%",
                 severity=severity,
                 dimension="profit",
-                title="Margin is below a healthy level",
+                title=(
+                    "Margin is on the low side"
+                    if severity == NORMAL
+                    else "Margin is below a healthy level"
+                ),
                 what_happened=(
-                    f"Estimated gross margin is {margin:.1f}%, under the "
+                    f"Estimated gross margin is {margin:.1f}%, on the low side but still above the "
+                    f"{thresholds.low_margin_warning_pct:.0f}% level this business treats as a warning."
+                    if severity == NORMAL
+                    else f"Estimated gross margin is {margin:.1f}%, under the "
                     f"{thresholds.low_margin_warning_pct:.0f}% level this business treats as healthy."
                 ),
                 recommended_action=(
-                    "Open the Cost tab's profit ranking — it is sorted by estimated profit, so the "
+                    "Nothing to act on yet. Worth a look at the Cost tab's profit ranking to see "
+                    "which products are holding it down."
+                    if severity == NORMAL
+                    else "Open the Cost tab's profit ranking — it is sorted by estimated profit, so the "
                     "products dragging the margin down sit at the bottom."
                 ),
                 link="cost",
@@ -236,8 +297,9 @@ def margin_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]
     ):
         return []
     change = margin - snapshot.previous_gross_margin_pct
-    if change > thresholds.margin_slip_warning_pp:
+    if change > thresholds.margin_slip_normal_pp:
         return []
+    slip_severity = WARNING if change <= thresholds.margin_slip_warning_pp else NORMAL
     # Margin is a ratio, so what moved it is a race between two growth rates: what the
     # branch sold for, and what it paid for what it sold.
     decomposed = explanation.decompose_margin_change(
@@ -256,16 +318,19 @@ def margin_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]
             id="margin_slipping",
             measure="margin_growth_pp",
             summary=f"Margin down {abs(change):.1f} points",
-            severity=WARNING,
+            severity=slip_severity,
             dimension="profit",
-            title="Margin is slipping",
+            title="Margin is slipping" if slip_severity == WARNING else "Margin has edged down",
             what_happened=(
                 f"Estimated gross margin fell {abs(change):.1f} percentage points against "
                 f"{_period_phrase(snapshot)}, from {snapshot.previous_gross_margin_pct:.1f}% to "
                 f"{margin:.1f}%."
             ),
             recommended_action=(
-                "Open the Cost tab's revenue-versus-cost chart to see whether costs rose or "
+                "Nothing to act on yet. The Cost tab's revenue-versus-cost chart shows whether it "
+                "was costs rising or selling prices falling, if it keeps moving."
+                if slip_severity == NORMAL
+                else "Open the Cost tab's revenue-versus-cost chart to see whether costs rose or "
                 "selling prices fell — the gap between the two lines is the margin."
             ),
             link="cost",
@@ -325,6 +390,29 @@ def stockout_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Aler
                 interpretation=interpretation,
             )
         ]
+    if snapshot.watch_count > 0:
+        return [
+            Alert(
+                id="watch_stock",
+                measure="stockout_risk_share_pct",
+                summary=f"{_count_products(snapshot.watch_count)} worth watching",
+                severity=NORMAL,
+                dimension="inventory",
+                title="Stock worth keeping an eye on",
+                what_happened=(
+                    f"{_products(snapshot.watch_count)} between {LOW_DAYS_OF_STOCK} and "
+                    f"{WATCH_DAYS_OF_STOCK} days of stock left at "
+                    f"{_its_their(snapshot.watch_count)} recent selling rate — enough cover for now."
+                ),
+                recommended_action=(
+                    "Nothing to order today. These are the products to include in the next "
+                    "regular order rather than a special one."
+                ),
+                link="inventory",
+                driver=driver,
+                interpretation=interpretation,
+            )
+        ]
     return []
 
 
@@ -332,9 +420,14 @@ def dead_stock_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Al
     if not snapshot.sku_count or snapshot.dead_stock_count == 0:
         return []
     share = snapshot.dead_stock_count / snapshot.sku_count * 100
-    if share < thresholds.dead_stock_warning_share_pct:
+    if share < thresholds.dead_stock_normal_share_pct:
         return []
-    severity = CRITICAL if share >= thresholds.dead_stock_critical_share_pct else WARNING
+    if share >= thresholds.dead_stock_critical_share_pct:
+        severity = CRITICAL
+    elif share >= thresholds.dead_stock_warning_share_pct:
+        severity = WARNING
+    else:
+        severity = NORMAL
     return [
         Alert(
             id="dead_stock",
@@ -342,13 +435,24 @@ def dead_stock_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Al
             summary=f"{snapshot.dead_stock_count} of {snapshot.sku_count} products not moving",
             severity=severity,
             dimension="inventory",
-            title="Too much stock is not moving",
+            title=(
+                "Some stock is not moving" if severity == NORMAL else "Too much stock is not moving"
+            ),
             what_happened=(
                 f"{snapshot.dead_stock_count} of {snapshot.sku_count} products ({share:.0f}%) still "
                 f"have stock on the shelf but have not sold once in {DEAD_STOCK_WINDOW_DAYS} days."
+                + (
+                    " Every shop carries some, and this is within the share this business treats "
+                    "as ordinary."
+                    if severity == NORMAL
+                    else ""
+                )
             ),
             recommended_action=(
-                "Open the Inventory tab's dead-stock table. These are the candidates for a "
+                "Nothing to act on yet. The Inventory tab's dead-stock table is worth a look "
+                "before the next order, so these are not reordered."
+                if severity == NORMAL
+                else "Open the Inventory tab's dead-stock table. These are the candidates for a "
                 "clearance price, and the ones not to reorder."
             ),
             link="inventory",
@@ -373,7 +477,11 @@ def traffic_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert
     revenue_growth = (
         (snapshot.net_revenue - snapshot.previous_net_revenue) / snapshot.previous_net_revenue * 100
     )
-    if revenue_growth <= thresholds.revenue_decline_warning_pct:
+    # Quiet means quiet enough that revenue_rule said nothing at all — including its
+    # normal tier. Below that the fall is already on the page, decomposed into exactly
+    # this explanation, and a second card repeating it is the duplication this engine
+    # avoids everywhere else.
+    if revenue_growth <= thresholds.revenue_decline_normal_pct:
         return []
     transaction_growth = (
         (snapshot.transaction_count - snapshot.previous_transaction_count)
@@ -424,8 +532,11 @@ def single_item_basket_rule(snapshot: BranchSnapshot, thresholds: Thresholds) ->
     if not snapshot.transaction_count:
         return []
     share = snapshot.single_item_basket_share_pct
-    if share < thresholds.single_item_basket_warning_share_pct:
+    if share < thresholds.single_item_basket_normal_share_pct:
         return []
+    severity = (
+        WARNING if share >= thresholds.single_item_basket_warning_share_pct else NORMAL
+    )
     # Like a low margin, this is a level rather than a movement, so the "why" that
     # changes the decision is whether it is new: a branch that has always sold this way
     # has a layout question, one that jumped has an event to find.
@@ -440,12 +551,19 @@ def single_item_basket_rule(snapshot: BranchSnapshot, thresholds: Thresholds) ->
             id="single_item_baskets",
             measure="single_item_basket_share_pct",
             summary=f"{share:.0f}% of visits buy one item",
-            severity=WARNING,
+            severity=severity,
             dimension="customer",
-            title="Most visits buy only one thing",
+            title=(
+                "Many visits buy only one thing"
+                if severity == NORMAL
+                else "Most visits buy only one thing"
+            ),
             what_happened=f"{share:.0f}% of transactions in this period were a single line item.",
             recommended_action=(
-                "Open the Customer tab's items-per-basket histogram. A high single-item share is "
+                "Nothing to act on yet. The Customer tab's items-per-basket histogram shows "
+                "whether this is how the branch has always sold."
+                if severity == NORMAL
+                else "Open the Customer tab's items-per-basket histogram. A high single-item share is "
                 "usually a placement or bundling opportunity rather than a demand problem."
             ),
             link="customer",

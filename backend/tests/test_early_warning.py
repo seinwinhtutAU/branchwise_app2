@@ -104,22 +104,43 @@ def test_critical_alerts_sort_ahead_of_warnings():
 def test_thresholds_are_injectable_so_the_business_can_tune_them():
     """Phase 5 will build these from app_settings; the rules already take them as an
     argument, so tuning must not need a code change."""
-    snapshot = _snapshot(net_revenue=95_000.0)  # -5%: quiet at the default -10%
+    snapshot = _snapshot(net_revenue=97_000.0)  # -3%: quiet at every default level
     assert early_warning.evaluate(snapshot) == []
-    strict = early_warning.Thresholds(revenue_decline_warning_pct=-2.0)
+    strict = early_warning.Thresholds(revenue_decline_normal_pct=-2.0, revenue_decline_warning_pct=-2.0)
     assert _ids(early_warning.evaluate(snapshot, strict)) == ["revenue_decline"]
 
 
 # --- individual rules -----------------------------------------------------------------
 
 
-def test_revenue_decline_escalates_from_warning_to_critical():
-    assert early_warning.evaluate(_snapshot(net_revenue=95_000.0)) == []  # -5%, quiet
+def test_revenue_decline_escalates_from_normal_to_warning_to_critical():
+    assert early_warning.evaluate(_snapshot(net_revenue=97_000.0)) == []  # -3%, quiet
+    normal = _by_id(early_warning.evaluate(_snapshot(net_revenue=94_000.0)), "revenue_decline")
+    assert normal.severity == early_warning.NORMAL
+    assert normal.title == "Revenue is drifting down"
     warning = _by_id(early_warning.evaluate(_snapshot(net_revenue=88_000.0)), "revenue_decline")
     assert warning.severity == early_warning.WARNING
     assert "12.0%" in warning.what_happened
     critical = _by_id(early_warning.evaluate(_snapshot(net_revenue=70_000.0)), "revenue_decline")
     assert critical.severity == early_warning.CRITICAL
+
+
+def test_a_normal_alert_still_carries_an_action_and_never_reads_as_urgent():
+    """The point of the third level is that it asks for nothing today — so its action has
+    to say so, or it is just a warning wearing a different badge."""
+    normal = _by_id(early_warning.evaluate(_snapshot(net_revenue=94_000.0)), "revenue_decline")
+    assert normal.severity == early_warning.NORMAL
+    assert normal.recommended_action.startswith("Nothing to act on yet")
+
+
+def test_normal_alerts_sort_below_the_ones_that_need_a_decision():
+    alerts = early_warning.evaluate(
+        _snapshot(net_revenue=94_000.0, critical_count=2, single_item_basket_share_pct=55.0)
+    )
+    severities = [alert.severity for alert in alerts]
+    assert severities == sorted(severities, key=lambda s: early_warning._SEVERITY_RANK[s])
+    assert severities[0] == early_warning.CRITICAL
+    assert severities[-1] == early_warning.NORMAL
 
 
 def test_an_empty_period_is_reported_as_a_missing_import_not_a_100pct_collapse():
@@ -187,10 +208,41 @@ def test_traffic_alert_needs_both_halves_of_the_pattern():
 
 
 def test_single_item_basket_share_fires_above_its_threshold():
-    assert early_warning.evaluate(_snapshot(single_item_basket_share_pct=55.0)) == []
-    assert _ids(early_warning.evaluate(_snapshot(single_item_basket_share_pct=70.0))) == [
-        "single_item_baskets"
-    ]
+    assert early_warning.evaluate(_snapshot(single_item_basket_share_pct=40.0)) == []
+    normal = _by_id(
+        early_warning.evaluate(_snapshot(single_item_basket_share_pct=55.0)), "single_item_baskets"
+    )
+    assert normal.severity == early_warning.NORMAL
+    warning = _by_id(
+        early_warning.evaluate(_snapshot(single_item_basket_share_pct=70.0)), "single_item_baskets"
+    )
+    assert warning.severity == early_warning.WARNING
+
+
+def test_stock_reports_only_the_worst_of_its_three_levels():
+    """One rule owns one subject, and that still holds now the subject has three levels:
+    a branch with products at every level hears about the ones running out, not about
+    the ones with a fortnight of cover."""
+    watch_only = _by_id(early_warning.evaluate(_snapshot(watch_count=4)), "watch_stock")
+    assert watch_only.severity == early_warning.NORMAL
+    assert _ids(early_warning.evaluate(_snapshot(watch_count=4, low_count=2))) == ["low_stock"]
+    assert _ids(early_warning.evaluate(_snapshot(watch_count=4, critical_count=1))) == ["stockout_risk"]
+
+
+def test_dead_stock_and_margin_have_a_normal_tier_below_their_warning_one():
+    dead = _by_id(early_warning.evaluate(_snapshot(dead_stock_count=7)), "dead_stock")
+    assert dead.severity == early_warning.NORMAL
+    assert dead.title == "Some stock is not moving"
+    assert early_warning.evaluate(_snapshot(dead_stock_count=3)) == []
+
+    margin = _by_id(early_warning.evaluate(_snapshot(gross_margin_pct=13.0)), "low_margin")
+    assert margin.severity == early_warning.NORMAL
+    slipping = _by_id(
+        early_warning.evaluate(_snapshot(gross_margin_pct=28.0, previous_gross_margin_pct=30.0)),
+        "margin_slipping",
+    )
+    assert slipping.severity == early_warning.NORMAL
+    assert slipping.title == "Margin has edged down"
 
 
 def test_data_quality_alerts_reuse_the_warning_pages_own_titles_and_severities():
@@ -328,9 +380,9 @@ def test_saved_thresholds_reach_the_overview_endpoint(authed_client: TestClient,
     db_session.add(product)
     db_session.flush()
     today = datetime.date.today()
-    # Revenue down 6%: quiet at the default -10% firing point.
+    # Revenue down 3%: quiet at every default firing point, including the -5% normal one.
     _make_sale(
-        db_session, branch=branch, product=product, slip_id="now", sale_date=today, qty=1, net_amount=940
+        db_session, branch=branch, product=product, slip_id="now", sale_date=today, qty=1, net_amount=970
     )
     _make_sale(
         db_session,
@@ -350,14 +402,19 @@ def test_saved_thresholds_reach_the_overview_endpoint(authed_client: TestClient,
         "/api/settings",
         json={
             "early_warning_thresholds": {
+                "revenue_decline_normal_pct": -2.0,
                 "revenue_decline_warning_pct": -2.0,
                 "revenue_decline_critical_pct": -20.0,
+                "low_margin_normal_pct": 15.0,
                 "low_margin_warning_pct": 10.0,
                 "low_margin_critical_pct": 5.0,
+                "margin_slip_normal_pp": -1.0,
                 "margin_slip_warning_pp": -3.0,
+                "dead_stock_normal_share_pct": 5.0,
                 "dead_stock_warning_share_pct": 10.0,
                 "dead_stock_critical_share_pct": 25.0,
                 "traffic_decline_warning_pct": -10.0,
+                "single_item_basket_normal_share_pct": 45.0,
                 "single_item_basket_warning_share_pct": 60.0,
             }
         },
@@ -365,7 +422,8 @@ def test_saved_thresholds_reach_the_overview_endpoint(authed_client: TestClient,
     assert response.status_code == 200
 
     noisy = authed_client.get(f"/api/dashboard/overview?branch_id={branch.id}&period=30d").json()
-    assert "revenue_decline" in [alert["id"] for alert in noisy["alerts"]]
+    raised = [alert for alert in noisy["alerts"] if alert["id"] == "revenue_decline"]
+    assert [alert["severity"] for alert in raised] == ["warning"]
 
 
 def test_a_threshold_set_saved_before_a_rule_existed_still_works(

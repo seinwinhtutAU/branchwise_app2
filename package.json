@@ -1,5 +1,6 @@
 {
   "name": "branchwise-app2",
+  "productName": "BranchWise",
   "version": "1.0.0",
   "description": "An Electron application with React and TypeScript",
   "main": "./out/main/index.js",
@@ -21,7 +22,9 @@
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "npm run build && electron-builder --mac",
-    "build:linux": "npm run build && electron-builder --linux"
+    "build:linux": "npm run build && electron-builder --linux",
+    "diagrams": "./diagram/render.sh",
+    "brand": "./brand/export.sh"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",
@@ -35,6 +38,7 @@
   "devDependencies": {
     "@electron-toolkit/eslint-config-ts": "^3.0.0",
     "@electron-toolkit/tsconfig": "^1.0.1",
+    "@mermaid-js/mermaid-cli": "^11.17.0",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^4.3.4",

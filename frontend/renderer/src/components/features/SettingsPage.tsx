@@ -166,14 +166,19 @@ const WARNING_THRESHOLD_FIELDS: {
   hint: string
   negative?: boolean
 }[] = [
+  { key: 'revenue_decline_normal_pct', label: 'Revenue normal — falls more than', hint: '%', negative: true },
   { key: 'revenue_decline_warning_pct', label: 'Revenue warning — falls more than', hint: '%', negative: true },
   { key: 'revenue_decline_critical_pct', label: 'Revenue critical — falls more than', hint: '%', negative: true },
+  { key: 'low_margin_normal_pct', label: 'Margin normal — below', hint: '%' },
   { key: 'low_margin_warning_pct', label: 'Margin warning — below', hint: '%' },
   { key: 'low_margin_critical_pct', label: 'Margin critical — below', hint: '%' },
+  { key: 'margin_slip_normal_pp', label: 'Margin slip normal — falls more than', hint: 'percentage points', negative: true },
   { key: 'margin_slip_warning_pp', label: 'Margin slip warning — falls more than', hint: 'percentage points', negative: true },
+  { key: 'dead_stock_normal_share_pct', label: 'Dead stock normal — above', hint: '% of products' },
   { key: 'dead_stock_warning_share_pct', label: 'Dead stock warning — above', hint: '% of products' },
   { key: 'dead_stock_critical_share_pct', label: 'Dead stock critical — above', hint: '% of products' },
   { key: 'traffic_decline_warning_pct', label: 'Footfall warning — visits fall more than', hint: '%', negative: true },
+  { key: 'single_item_basket_normal_share_pct', label: 'Single-item baskets normal — above', hint: '% of visits' },
   { key: 'single_item_basket_warning_share_pct', label: 'Single-item baskets warning — above', hint: '% of visits' }
 ]
 
@@ -628,7 +633,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         <Card>
           <CardHeader
             title="Early warning thresholds"
-            description="When the Overview page raises each warning. Lower the numbers to hear about problems sooner and more often; raise them to only be told about the serious ones."
+            description="When each alert is raised. Normal is a notice that asks for nothing today, warning is act soon, critical is act now. Lower the numbers to hear about problems sooner; raise them to only be told about the serious ones."
           />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {WARNING_THRESHOLD_FIELDS.map((field) => (

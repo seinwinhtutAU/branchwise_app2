@@ -64,7 +64,48 @@ export function dashboardUrl(
 // shape rather than two that can drift.
 
 export type HealthStatus = 'healthy' | 'needs_attention' | 'critical'
-export type AlertSeverity = 'critical' | 'warning'
+export type AlertSeverity = 'critical' | 'warning' | 'normal'
+
+/**
+ * How each status band is named and coloured, in one place: the Overview tab's gauge,
+ * dimension bars and branch cards, and the Business Alerts page's branch strip, all read
+ * it, so a branch that is "Healthy" is the same word and the same green everywhere.
+ */
+/**
+ * How each alert severity is named and coloured, in one place — the Overview tab and the
+ * Business Alerts page both read it, so one problem looks the same wherever it appears.
+ *
+ * `normal` is the level that asks for nothing today: a margin down a point, a fortnight
+ * of stock cover left. It is green because that is what it means — nothing to act on —
+ * and because it is never counted anywhere (see the nav badge and the branch tiles), so
+ * the numbers a manager reacts to still count only the two levels that need a decision.
+ */
+export const SEVERITY_META: Record<
+  AlertSeverity,
+  { label: string; badge: 'error' | 'warning' | 'success'; text: string; accent: string; dot: string }
+> = {
+  critical: { label: 'Critical', badge: 'error', text: 'text-error', accent: 'border-l-error', dot: 'bg-error' },
+  warning: { label: 'Warning', badge: 'warning', text: 'text-warning', accent: 'border-l-warning', dot: 'bg-warning' },
+  normal: { label: 'Normal', badge: 'success', text: 'text-success', accent: 'border-l-success', dot: 'bg-success' }
+}
+
+/** The severities that ask for a decision — what every count in the app counts. */
+export const ACTIONABLE_SEVERITIES: AlertSeverity[] = ['critical', 'warning']
+
+export const STATUS_META: Record<
+  HealthStatus,
+  { label: string; badge: 'success' | 'warning' | 'error'; bar: string; text: string; stroke: string }
+> = {
+  healthy: { label: 'Healthy', badge: 'success', bar: 'bg-success', text: 'text-success', stroke: 'stroke-success' },
+  needs_attention: {
+    label: 'Needs attention',
+    badge: 'warning',
+    bar: 'bg-warning',
+    text: 'text-warning',
+    stroke: 'stroke-warning'
+  },
+  critical: { label: 'Critical', badge: 'error', bar: 'bg-error', text: 'text-error', stroke: 'stroke-error' }
+}
 
 /** Which tab holds the evidence behind a score or an alert. */
 export type EvidenceTarget = 'revenue' | 'cost' | 'inventory' | 'customer' | 'warnings'

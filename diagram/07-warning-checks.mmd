@@ -1,0 +1,15 @@
+%% Warning page — checking the data can be trusted
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Helvetica, Arial, sans-serif","fontSize":"15px","primaryColor":"#eef2ff","primaryTextColor":"#1e293b","primaryBorderColor":"#a5b4fc","lineColor":"#94a3b8","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1"},"flowchart":{"curve":"basis","nodeSpacing":28,"rankSpacing":42,"padding":8,"useMaxWidth":true}}%%
+flowchart TD
+    D["Confirmed imports"]:::data --> N["Are the numbers sensible?<br/>no zero prices,<br/>no negative quantities"]
+    D --> M["Is every item sold or bought<br/>also on the stock list?"]
+    D --> R["Last count + purchases - sales<br/>= the stock counted now?"]
+    N --> L["Warning list<br/>plain note · the field at fault ·<br/>link to the import that caused it"]:::warn
+    M --> L
+    R --> L
+    L --> F["Undo that import,<br/>correct the file,<br/>import it again"]
+    F --> G["Warning cleared,<br/>audit trail kept"]:::good
+    classDef crit fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
+    classDef warn fill:#fef3c7,stroke:#f59e0b,color:#78350f
+    classDef good fill:#dcfce7,stroke:#22c55e,color:#14532d
+    classDef data fill:#e0f2fe,stroke:#38bdf8,color:#0c4a6e
