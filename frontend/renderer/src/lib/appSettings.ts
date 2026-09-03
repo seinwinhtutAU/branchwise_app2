@@ -16,14 +16,19 @@ export interface BranchHealthWeights {
 }
 
 export interface EarlyWarningThresholds {
+  revenue_decline_normal_pct: number
   revenue_decline_warning_pct: number
   revenue_decline_critical_pct: number
+  low_margin_normal_pct: number
   low_margin_warning_pct: number
   low_margin_critical_pct: number
+  margin_slip_normal_pp: number
   margin_slip_warning_pp: number
+  dead_stock_normal_share_pct: number
   dead_stock_warning_share_pct: number
   dead_stock_critical_share_pct: number
   traffic_decline_warning_pct: number
+  single_item_basket_normal_share_pct: number
   single_item_basket_warning_share_pct: number
 }
 
@@ -55,7 +60,25 @@ export function useAppSettings(session: Session | null): {
   useEffect(() => {
     if (!session) {
       setSettings(null)
-      return
+      // Nobody is signed in, so the sign-in screen is what's on screen — and it should
+      // be painted in the business's theme rather than in whatever this device last
+      // cached (nothing, on a fresh install) or the operating system's. GET
+      // /api/settings/theme is the one unauthenticated settings route, returning that
+      // single key. Failing silently is correct here: without a backend the cached or
+      // system theme is still the best guess available, and a sign-in screen must never
+      // depend on the backend being up.
+      let publicCancelled = false
+      fetch(`${apiBaseUrl}/api/settings/theme`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((body: { theme: ThemeMode } | null) => {
+          if (publicCancelled || !body) return
+          applyTheme(body.theme)
+          cacheTheme(body.theme)
+        })
+        .catch(() => {})
+      return () => {
+        publicCancelled = true
+      }
     }
     let cancelled = false
     fetch(`${apiBaseUrl}/api/settings`, {

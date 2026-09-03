@@ -1,0 +1,4 @@
+    classDef crit fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
+    classDef warn fill:#fef3c7,stroke:#f59e0b,color:#78350f
+    classDef good fill:#dcfce7,stroke:#22c55e,color:#14532d
+    classDef data fill:#e0f2fe,stroke:#38bdf8,color:#0c4a6e

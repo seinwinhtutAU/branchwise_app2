@@ -4,19 +4,8 @@ const base = {
   'aria-hidden': true
 } as const
 
-export function LogoIcon({ className = 'w-6 h-6' }: { className?: string }): React.JSX.Element {
-  return (
-    <svg {...base} className={className}>
-      <path
-        d="M3 21V8l9-5 9 5v13M3 21h18M3 21v-9a2 2 0 012-2h2M21 21v-9a2 2 0 00-2-2h-2M9 21v-6a2 2 0 012-2h2a2 2 0 012 2v6"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
+// Re-exported from Logo.tsx so the one true mark lives in a single file.
+export { LogoMark as LogoIcon } from '@renderer/components/ui/Logo'
 
 export function UploadIcon({ className = 'w-5 h-5' }: { className?: string }): React.JSX.Element {
   return (
@@ -415,6 +404,14 @@ export function HelpIcon({ className = 'w-5 h-5' }: { className?: string }): Rea
         strokeLinejoin="round"
       />
       <path d="M12 17.5h.01" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function CloseIcon({ className = 'w-5 h-5' }: { className?: string }): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   )
 }

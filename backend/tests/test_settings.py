@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.models.app_settings import DEFAULT_SETTINGS, AppSetting
 from app.models.user import User, UserRole
+from app.services.settings import set_setting
 
 
 def _make_user(db_session: Session, *, role: UserRole) -> None:
@@ -30,17 +31,38 @@ DEFAULT_SETTINGS_RESPONSE = {
         "data_quality": 0.10,
     },
     "early_warning_thresholds": {
+        "revenue_decline_normal_pct": -5.0,
         "revenue_decline_warning_pct": -10.0,
         "revenue_decline_critical_pct": -20.0,
+        "low_margin_normal_pct": 15.0,
         "low_margin_warning_pct": 10.0,
         "low_margin_critical_pct": 5.0,
+        "margin_slip_normal_pp": -1.0,
         "margin_slip_warning_pp": -3.0,
+        "dead_stock_normal_share_pct": 5.0,
         "dead_stock_warning_share_pct": 10.0,
         "dead_stock_critical_share_pct": 25.0,
         "traffic_decline_warning_pct": -10.0,
+        "single_item_basket_normal_share_pct": 45.0,
         "single_item_basket_warning_share_pct": 60.0,
     },
 }
+
+
+def test_theme_is_readable_without_signing_in(client: TestClient, db_session: Session):
+    """The sign-in screen has to be painted before there is a token to send, so this one
+    key — and only this one — is readable unauthenticated."""
+    response = client.get("/api/settings/theme")
+    assert response.status_code == 200
+    assert response.json() == {"theme": "system"}
+
+    set_setting(db_session, "theme", "dark")
+    assert client.get("/api/settings/theme").json() == {"theme": "dark"}
+
+
+def test_the_rest_of_the_settings_still_need_a_token(client: TestClient):
+    """The theme route is the exception, not a hole: everything else stays behind auth."""
+    assert client.get("/api/settings").status_code in (401, 403)
 
 
 def test_get_settings_returns_defaults_before_any_are_saved(

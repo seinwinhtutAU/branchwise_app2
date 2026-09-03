@@ -36,14 +36,21 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "data_quality": 0.10,
     },
     "early_warning_thresholds": {
+        # Three levels per rule wherever a rule has a milder tier: `normal` is the drift
+        # that asks for nothing today, `warning` is act soon, `critical` is act now.
+        "revenue_decline_normal_pct": -5.0,
         "revenue_decline_warning_pct": -10.0,
         "revenue_decline_critical_pct": -20.0,
+        "low_margin_normal_pct": 15.0,
         "low_margin_warning_pct": 10.0,
         "low_margin_critical_pct": 5.0,
+        "margin_slip_normal_pp": -1.0,
         "margin_slip_warning_pp": -3.0,
+        "dead_stock_normal_share_pct": 5.0,
         "dead_stock_warning_share_pct": 10.0,
         "dead_stock_critical_share_pct": 25.0,
         "traffic_decline_warning_pct": -10.0,
+        "single_item_basket_normal_share_pct": 45.0,
         "single_item_basket_warning_share_pct": 60.0,
     },
 }

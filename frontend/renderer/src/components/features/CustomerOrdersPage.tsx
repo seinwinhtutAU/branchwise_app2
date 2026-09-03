@@ -11,6 +11,7 @@ import { EmptyState } from '@renderer/components/ui/EmptyState'
 import { Input } from '@renderer/components/ui/Input'
 import { Select } from '@renderer/components/ui/Select'
 import { Textarea } from '@renderer/components/ui/Textarea'
+import { Pagination } from '@renderer/components/ui/Pagination'
 import { TableSkeleton } from '@renderer/components/ui/Skeleton'
 import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
 import { TrashIcon } from '@renderer/components/ui/icons'
@@ -138,9 +139,17 @@ function emptyDraft(): DraftState {
   }
 }
 
+// Matches PAGE_SIZE in backend/app/routers/orders.py, so the Pagination control's
+// arithmetic agrees with the rows the server actually sends back.
+const PAGE_SIZE = 20
+
 export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Element {
   const showToast = useToast()
   const [orders, setOrders] = useState<CustomerOrder[] | null>(null)
+  // The list endpoint returns one page — `{rows, total}` — so the page it is showing and
+  // how many orders exist behind it are part of this page's state.
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
   const [isAdding, setIsAdding] = useState(false)
@@ -170,15 +179,18 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
     setLoading(true)
     setLoadFailed(false)
     try {
-      const response = await fetch(`${apiBaseUrl}/api/orders`, {
-        headers: { Authorization: `Bearer ${session.access_token}` }
-      })
+      const response = await fetch(
+        `${apiBaseUrl}/api/orders?page=${page}&page_size=${PAGE_SIZE}`,
+        { headers: { Authorization: `Bearer ${session.access_token}` } }
+      )
       if (!response.ok) {
         setLoadFailed(true)
         showToast('error', `Failed to load orders: ${response.status}`)
         return
       }
-      setOrders(await response.json())
+      const body = (await response.json()) as { rows: CustomerOrder[]; total: number }
+      setOrders(body.rows)
+      setTotal(body.total)
     } catch {
       setLoadFailed(true)
       showToast('error', 'Failed to load orders — is the backend running?')
@@ -190,7 +202,14 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.access_token])
+  }, [session.access_token, page])
+
+  // Deleting the last order on the last page would otherwise leave the reader staring at
+  // an empty page that isn't the empty state.
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages)
+  }, [page, totalPages])
 
   function openAdd(): void {
     setDraft(emptyDraft())
@@ -964,6 +983,16 @@ export function CustomerOrdersPage({ session, profile }: Props): React.JSX.Eleme
             ))}
           </Tbody>
         </TableContainer>
+      )}
+
+      {orders !== null && total > PAGE_SIZE && (
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          totalItems={total}
+          pageSize={PAGE_SIZE}
+          onPageChange={setPage}
+        />
       )}
     </div>
   )

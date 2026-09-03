@@ -11,7 +11,7 @@ A desktop app for a Myanmar retail business with one wholesale branch and three 
 - [Branch health score](./branch_health.md) — the Overview tab's 0-100 score per dimension, its weight/band table, and how it handles data it can't measure
 - [Import health](./import_health.md) — checks on whether an import's cleaning/confirm step behaved correctly
 - [UI overview](./ui-overview.md) — design system and component conventions
-- [Help page](./help.md) — the in-app plain-language reference for staff
+- [User guide](./help.md) — the plain-language reference for staff (written for the in-app Help page, which has since been removed; kept as documentation and as the source material for the chat assistant)
 - [Known limitations](./known-limitations.md) — gaps that are known and deliberately deferred
 
 For day-to-day dev commands (running tests, migrations, the dev server), see [`CLAUDE.md`](../CLAUDE.md) at the repo root.

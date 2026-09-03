@@ -115,22 +115,40 @@ it** — as a severity-ranked list of named problems on the same payload.
 Each rule is a pure `(BranchSnapshot, Thresholds) -> list[Alert]` registered in one
 `RULES` tuple, so adding a check means appending a function and nothing else in the file
 changes. Every alert carries `title`, `what_happened`, `recommended_action`, a
-`severity` (`critical` or `warning` — deliberately no third "info" level, since a list
-where everything is worth mentioning is a list nobody reads), the `dimension` it belongs
-to, and the `link` naming the tab holding its evidence.
+`severity`, the `dimension` it belongs to, and the `link` naming the tab holding its
+evidence.
+
+**There are three severities, and only two of them ask for anything.** `critical` is act
+today, `warning` is act soon, and `normal` is a movement drifting the wrong way that is
+not worth doing anything about yet — a margin down a point, a product with a fortnight of
+cover left. A third level is normally how an alert list turns into noise, and the reason
+it does not here is that **nothing counts it**: the nav badge, the Business Alerts branch
+tiles and the Overview branch cards all count criticals and warnings only, so the number
+a manager reacts to still means "things to act on", while the list itself can show the
+drift that used to produce no row at all. A `normal` alert's `recommended_action` says as
+much in its first words ("Nothing to act on yet…"), and there is a test asserting it.
 
 | Rule | Fires when | Severity |
 | --- | --- | --- |
 | `no_sales_recorded` | No sales at all this period, after a period that had them | critical |
-| `revenue_decline` | Revenue growth ≤ -10% (≤ -20% escalates) | warning / critical |
-| `low_margin` | Gross margin < 10% (< 5% escalates) | warning / critical |
-| `margin_slipping` | Margin fell ≥ 3 percentage points | warning |
+| `revenue_decline` | Revenue growth ≤ -5% (≤ -10% and ≤ -20% escalate) | normal / warning / critical |
+| `low_margin` | Gross margin < 15% (< 10% and < 5% escalate) | normal / warning / critical |
+| `margin_slipping` | Margin fell ≥ 1 percentage point (≥ 3 escalates) | normal / warning |
 | `stockout_risk` | Any product with ≤ 3 days of stock left | critical |
 | `low_stock` | Any product with < 7 days of stock left | warning |
-| `dead_stock` | ≥ 10% of SKUs on the shelf with no sale in 90 days (≥ 25% escalates) | warning / critical |
+| `watch_stock` | Any product with 7–14 days of stock left | normal |
+| `dead_stock` | ≥ 5% of SKUs on the shelf with no sale in 90 days (≥ 10% and ≥ 25% escalate) | normal / warning / critical |
 | `traffic_decline` | Transactions down ≥ 10% while the average sale rose **and** revenue itself stayed quiet | warning |
-| `single_item_baskets` | ≥ 60% of transactions were one line item | warning |
+| `single_item_baskets` | ≥ 45% of transactions were one line item (≥ 60% escalates) | normal / warning |
 | `data_quality_*` | Any Warning-page check found rows this period | that check's own severity |
+
+Two rules deliberately have no `normal` tier. `no_sales_recorded` is never mild — an
+empty period is either a missing import or a shut shop. `traffic_decline` is already the
+narrow hidden case (see below), and a milder version of "the headline looks fine" is
+indistinguishable from an ordinary week. `watch_stock` is the opposite: the one rule that
+exists *only* at `normal`, reusing the Inventory tab's own third band
+(`WATCH_DAYS_OF_STOCK` = 14), so the three stock levels on that page and the three
+severities here are the same three bands rather than two sets that can drift apart.
 
 Three design rules behind that table:
 
@@ -138,9 +156,11 @@ Three design rules behind that table:
   are the same conversation, so one rule reports whichever is worse rather than two
   firing about one number and burying everything else. Same for stockout vs. low stock,
   and for revenue decline vs. an empty period. `traffic_decline` extends this across
-  rules: it fires only when revenue itself stayed quiet, because a visible revenue fall
-  is already decomposed by `revenue_decline` into exactly this explanation, and a second
-  card repeating it word for word is the duplication everything else here avoids. What
+  rules: it fires only when revenue itself stayed quiet — quiet enough that
+  `revenue_decline` said nothing at all, including at its `normal` tier — because a
+  visible revenue fall is already decomposed by `revenue_decline` into exactly this
+  explanation, and a second card repeating it word for word is the duplication everything
+  else here avoids. What
   is left is the genuinely hidden case — the headline looks fine because bigger baskets
   covered for the customers who stopped coming.
 - **An empty period is reported as a missing import, not a 100% collapse.** A period
@@ -281,6 +301,13 @@ Two deliberate non-validations:
 - **Threshold bounds are sanity caps, not business rules.** The whole point of exposing
   them is that the business decides what counts as a problem — but a revenue-decline
   threshold above zero would fire on every growing branch, so the signs are pinned.
+
+The set now carries a `normal` firing point for each rule that has one
+(`revenue_decline_normal_pct`, `low_margin_normal_pct`, `margin_slip_normal_pp`,
+`dead_stock_normal_share_pct`, `single_item_basket_normal_share_pct`) alongside the
+`warning` and `critical` ones. A threshold set saved before those keys existed still
+returns a complete shape, since `_merged_over_default` lays the saved dict over the
+defaults — the same property that made adding them need no migration.
 
 In the form, the thresholds that are stored negative are entered positive: "revenue
 falls by more than 10%" rather than asking anyone to type `-10`. Weights are stored as
@@ -430,6 +457,28 @@ category chips on the line below it and the Refresh button in the header's actio
 the same furniture and the same places as the Sale, Inventory and Data Overview pages.
 Each chip shows its count under the current branch filter, so a chip's number always
 matches what clicking it produces.
+
+**Every branch appears, including the healthy ones.** Above the table sits one tile per
+retail branch — its overall score, its status band, and how many alerts it has here.
+A page that lists only problems can never answer *who is fine?*, and a branch that is
+simply absent from it reads as one that failed to load rather than one with nothing to
+act on. The score and the band are Overview's own, read off the same payload rather than
+recomputed: `STATUS_META` moved from `OverviewTab.tsx` to `dashboard/helpers.ts` so both
+screens call the same band "Healthy" in the same word and the same green. Tiles are
+ordered worst-first like the table beneath them (critical alerts, then alert count, then
+score), an unscored branch sorting last rather than as a 0 — the same "unmeasured is not
+zero" rule the score itself follows. A tile's count is the branch's whole alert count on
+this page, not the count under the selected category chip: the tile describes the branch,
+the chips describe the filter. Clicking a tile filters the table to that branch and
+clicking it again clears it, sharing state with the Branch selector, so a healthy tile is
+a control rather than decoration.
+
+**A branch that raised nothing gets one row saying so** — a green *Normal* badge and
+"Everything normal this period" — rather than no rows at all, for the same reason it gets
+a tile: absence is unreadable. It is shown only when no category chip is active, since
+under a chip "everything normal" would be a claim about one category worded as a claim
+about the branch. `normal` alerts themselves sort to the end of a branch's rows, so a
+notice that asks for nothing can never push a decision off the top of the list.
 
 **Data-quality alerts are excluded.** They are about the imported data being wrong
 rather than the business going wrong, and the Warning page already lists them row by row

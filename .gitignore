@@ -40,3 +40,6 @@ backend/.env
 
 # real business data exports (not code, not for repo history)
 retail_data/
+
+# Word lock files (created while a .docx is open)
+~$*

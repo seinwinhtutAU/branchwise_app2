@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.security import get_current_app_user
 from app.db.session import get_db
 from app.models.user import User, UserRole
-from app.services.settings import get_all_settings, set_setting
+from app.services.settings import get_all_settings, get_setting, set_setting
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -36,14 +36,19 @@ class EarlyWarningThresholds(BaseModel):
     counts as a problem — but a decline threshold above zero would fire on every growing
     branch, and a margin floor above 100% would fire on every branch there is."""
 
+    revenue_decline_normal_pct: float = Field(ge=-100, le=0)
     revenue_decline_warning_pct: float = Field(ge=-100, le=0)
     revenue_decline_critical_pct: float = Field(ge=-100, le=0)
+    low_margin_normal_pct: float = Field(ge=0, le=100)
     low_margin_warning_pct: float = Field(ge=0, le=100)
     low_margin_critical_pct: float = Field(ge=0, le=100)
+    margin_slip_normal_pp: float = Field(ge=-100, le=0)
     margin_slip_warning_pp: float = Field(ge=-100, le=0)
+    dead_stock_normal_share_pct: float = Field(ge=0, le=100)
     dead_stock_warning_share_pct: float = Field(ge=0, le=100)
     dead_stock_critical_share_pct: float = Field(ge=0, le=100)
     traffic_decline_warning_pct: float = Field(ge=-100, le=0)
+    single_item_basket_normal_share_pct: float = Field(ge=0, le=100)
     single_item_basket_warning_share_pct: float = Field(ge=0, le=100)
 
 
@@ -66,6 +71,22 @@ class AppSettingsUpdate(BaseModel):
     # See docs/branch_health.md. Whole-set updates (see each model's docstring).
     branch_health_weights: BranchHealthWeights | None = None
     early_warning_thresholds: EarlyWarningThresholds | None = None
+
+
+@router.get("/theme")
+def get_theme(db: Session = Depends(get_db)) -> dict[str, str]:
+    """The business-wide theme, and nothing else — the one setting the app needs before
+    anyone has signed in.
+
+    Deliberately unauthenticated. Every other setting sits behind a token, but the sign-in
+    screen itself has to be painted before there is a token to send, and until this
+    existed it could only guess: the last theme this device happened to cache, or the
+    operating system's, which is wrong on a fresh install and on any device where someone
+    changed the theme elsewhere. A colour preference is not information worth protecting,
+    and exposing only this one key — rather than opening GET /api/settings — keeps that
+    true no matter what settings are added later.
+    """
+    return {"theme": get_setting(db, "theme")}
 
 
 @router.get("")

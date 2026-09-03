@@ -5,7 +5,6 @@ import { useToast } from '@renderer/lib/useToast'
 import { cn } from '@renderer/lib/utils'
 import { Button } from '@renderer/components/ui/Button'
 import { Textarea } from '@renderer/components/ui/Textarea'
-import { CardHeader } from '@renderer/components/ui/Card'
 import { EmptyState } from '@renderer/components/ui/EmptyState'
 import { Spinner } from '@renderer/components/ui/Spinner'
 import { ChatIcon, SendIcon } from '@renderer/components/ui/icons'
@@ -44,10 +43,15 @@ function ChatBubble({ message }: { message: ChatMessage }): React.JSX.Element {
   )
 }
 
+// The conversation itself: the message list and the composer, sized to fill whatever
+// holds it. Its container is ChatLauncher's popup, which owns the header, the close
+// button and the open/closed state — this file only knows how to have a conversation.
+//
 // Chat history lives only in this component's state — there's no server-side chat-
-// session table yet (see backend/app/schemas/chat.py), so a reload or nav away starts
-// a fresh conversation.
-function ChatPage({ session, profile }: Props): React.JSX.Element {
+// session table yet (see backend/app/schemas/chat.py), so signing out or reloading
+// starts a fresh conversation. The launcher keeps this mounted while the popup is
+// closed, so closing the popup mid-conversation does not throw the thread away.
+function ChatPanel({ session, profile }: Props): React.JSX.Element {
   const showToast = useToast()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -97,22 +101,15 @@ function ChatPage({ session, profile }: Props): React.JSX.Element {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8rem)]">
-      <div className="bg-bg-subtle overflow-hidden mb-4">
-        <CardHeader
-          title="Chat"
-          description={`Ask about ${profile?.branch_name ?? 'your'} sales, inventory, purchases, or data-quality warnings.`}
-        />
-      </div>
-
-      <div className="flex-1 overflow-y-auto flex flex-col gap-3 px-1">
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex-1 overflow-y-auto flex flex-col gap-3 px-4 py-3">
         {messages.length === 0 ? (
           <EmptyState
             icon={<ChatIcon />}
             title="Ask me anything about your data"
-            description="Try one of these, or type your own question below."
+            description={`Ask about ${profile?.branch_name ?? 'your'} sales, inventory, purchases or warnings — or try one of these.`}
             action={
-              <div className="flex flex-wrap gap-2 justify-center max-w-md">
+              <div className="flex flex-wrap gap-2 justify-center">
                 {SUGGESTIONS.map((s) => (
                   <Button key={s} variant="secondary" size="sm" onClick={() => setInput(s)}>
                     {s}
@@ -134,7 +131,7 @@ function ChatPage({ session, profile }: Props): React.JSX.Element {
         <div ref={bottomRef} />
       </div>
 
-      <div className="flex items-end gap-2 pt-3 border-t border-border">
+      <div className="flex items-end gap-2 p-3 border-t border-border">
         <Textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -151,4 +148,4 @@ function ChatPage({ session, profile }: Props): React.JSX.Element {
   )
 }
 
-export default ChatPage
+export default ChatPanel

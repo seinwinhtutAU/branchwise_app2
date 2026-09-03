@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from 'react'
 import { Badge } from '@renderer/components/ui/Badge'
 import { Button } from '@renderer/components/ui/Button'
-import { LogoIcon, MenuIcon } from '@renderer/components/ui/icons'
+import { MenuIcon } from '@renderer/components/ui/icons'
+import { LogoChip, LogoWordmark } from '@renderer/components/ui/Logo'
 import type { Profile } from '@renderer/components/features/types'
 
 export interface NavItem {
@@ -76,10 +77,8 @@ export function AppShell({
   const sidebarContent = (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2.5 px-5 h-16 shrink-0 border-b border-border">
-        <div className="w-8 h-8 rounded-lg bg-brand text-white flex items-center justify-center shrink-0">
-          <LogoIcon className="w-4.5 h-4.5" />
-        </div>
-        <span className="font-semibold text-text-primary tracking-tight">Branchwise</span>
+        <LogoChip />
+        <LogoWordmark />
       </div>
 
       {workspaces.length > 1 && (
@@ -154,32 +153,6 @@ export function AppShell({
         })}
       </nav>
 
-      {pinnedNavItems.length > 0 && (
-        <div className="border-t border-border px-3 py-2 flex flex-col gap-1 shrink-0">
-          {pinnedNavItems.map((item) => {
-            const active = item.id === activeSection
-            return (
-              <button
-                key={item.id}
-                onClick={() => {
-                  onSectionChange(item.id)
-                  setMobileOpen(false)
-                }}
-                aria-current={active ? 'page' : undefined}
-                className={`flex items-center gap-3 h-10 px-3 rounded-md text-sm font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base ${
-                  active
-                    ? 'bg-brand-subtle text-brand'
-                    : 'text-text-secondary hover:bg-bg-raised hover:text-text-primary'
-                }`}
-              >
-                <span className="shrink-0">{item.icon}</span>
-                <span className="flex-1 text-left">{item.label}</span>
-              </button>
-            )
-          })}
-        </div>
-      )}
-
       <div className="border-t border-border p-4 flex flex-col gap-3 shrink-0">
         <div className="flex flex-col min-w-0">
           <span className="text-sm font-medium text-text-primary truncate">
@@ -194,6 +167,39 @@ export function AppShell({
             )}
           </div>
         </div>
+        {/* Settings and anything else pinned sit here as icons rather than as another
+            labelled row in the nav: they aren't places you go to work, they're things you
+            reach for occasionally, and a full-width row gave them the same weight as the
+            pages the job is actually done on. Icon-only needs a name for anyone not
+            reading the picture, hence the label on both `aria-label` and `title`. */}
+        {pinnedNavItems.length > 0 && (
+          <div className="flex items-center gap-1">
+            {pinnedNavItems.map((item) => {
+              const active = item.id === activeSection
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    onSectionChange(item.id)
+                    setMobileOpen(false)
+                  }}
+                  aria-current={active ? 'page' : undefined}
+                  aria-label={item.label}
+                  title={item.label}
+                  className={`w-9 h-9 rounded-md flex items-center justify-center transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base ${
+                    active
+                      ? 'bg-brand-subtle text-brand'
+                      : 'text-text-secondary hover:bg-bg-raised hover:text-text-primary'
+                  }`}
+                >
+                  {item.icon}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         <Button variant="secondary" size="sm" onClick={onSignOut} className="w-full">
           Sign out
         </Button>
@@ -238,7 +244,8 @@ export function AppShell({
         >
           <MenuIcon />
         </button>
-        <span className="font-semibold text-text-primary tracking-tight">Branchwise</span>
+        <LogoChip className="w-7 h-7 rounded-md" markClassName="w-4 h-4" />
+        <LogoWordmark />
       </div>
 
       {/* Mobile drawer */}

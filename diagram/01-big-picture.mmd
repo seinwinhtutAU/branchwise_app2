@@ -1,0 +1,16 @@
+%% BranchWise — from imported data to a decision
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Helvetica, Arial, sans-serif","fontSize":"15px","primaryColor":"#eef2ff","primaryTextColor":"#1e293b","primaryBorderColor":"#a5b4fc","lineColor":"#94a3b8","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1"},"flowchart":{"curve":"basis","nodeSpacing":28,"rankSpacing":42,"padding":8,"useMaxWidth":true}}%%
+flowchart LR
+    A["Imported POS data<br/>Sales · Inventory · Purchases"]:::data
+    A --> B["Dashboard<br/>the numbers"]
+    A --> C["Warning page<br/>is the data trustworthy?"]
+    B --> D["Health Score<br/>is this branch healthy?"]
+    C --> D
+    B --> E["Alerts<br/>what exactly is wrong?"]
+    C --> E
+    D --> F["Manager decides<br/>and acts"]:::good
+    E --> F
+    classDef crit fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
+    classDef warn fill:#fef3c7,stroke:#f59e0b,color:#78350f
+    classDef good fill:#dcfce7,stroke:#22c55e,color:#14532d
+    classDef data fill:#e0f2fe,stroke:#38bdf8,color:#0c4a6e

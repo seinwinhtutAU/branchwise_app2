@@ -1,6 +1,9 @@
-# Help (Retail)
+# User guide (Retail)
 
-This is the Help Center for the **Retail** side of the app.
+This was the in-app Help Center for the **Retail** side of the app. **The Help page has
+been removed from the app** — the chat assistant, now a floating button on every retail
+screen, is where a user asks these questions instead. The text is kept here as written
+reference, and as the material the assistant's answers should agree with.
 
 It explains how retail data is imported, how sales and profit are calculated, how warnings work, what each setting does, and how to use the chat assistant.
 

@@ -12,8 +12,11 @@ import { Skeleton } from '@renderer/components/ui/Skeleton'
 import { ChevronDownIcon, ChevronUpIcon, DashboardIcon, WarningIcon } from '@renderer/components/ui/icons'
 import { AlertExplanation, RefreshingHint } from './shared'
 import {
+  ACTIONABLE_SEVERITIES,
   EVIDENCE_LABEL,
   PERIOD_OPTIONS,
+  SEVERITY_META,
+  STATUS_META,
   dashboardUrl,
   dateRangeLabel,
   previousPeriodLabel,
@@ -52,17 +55,6 @@ const DIMENSION_EVIDENCE: Record<string, EvidenceTarget> = {
   inventory: 'inventory',
   customer: 'customer',
   data_quality: 'warnings'
-}
-
-const STATUS_META: Record<HealthStatus, { label: string; badge: 'success' | 'warning' | 'error'; bar: string; text: string; stroke: string }> = {
-  healthy: { label: 'Healthy', badge: 'success', bar: 'bg-success', text: 'text-success', stroke: 'stroke-success' },
-  needs_attention: { label: 'Needs attention', badge: 'warning', bar: 'bg-warning', text: 'text-warning', stroke: 'stroke-warning' },
-  critical: { label: 'Critical', badge: 'error', bar: 'bg-error', text: 'text-error', stroke: 'stroke-error' }
-}
-
-const SEVERITY_META: Record<AlertSeverity, { badge: 'error' | 'warning'; text: string; accent: string }> = {
-  critical: { badge: 'error', text: 'text-error', accent: 'border-l-error' },
-  warning: { badge: 'warning', text: 'text-warning', accent: 'border-l-warning' }
 }
 
 /**
@@ -115,6 +107,14 @@ function statusForScore(score: number | null): HealthStatus | null {
   if (score >= 60) return 'needs_attention'
   return 'critical'
 }
+
+/** The worst severity in a list, for a dot or a border that stands for all of them. */
+function worstSeverity(alerts: HealthAlert[]): AlertSeverity {
+  if (alerts.some((alert) => alert.severity === 'critical')) return 'critical'
+  if (alerts.some((alert) => alert.severity === 'warning')) return 'warning'
+  return 'normal'
+}
+
 
 function scoreTone(score: number | null): string {
   const status = statusForScore(score)
@@ -175,7 +175,11 @@ function BranchSummaryCard({
   }
 
   const meta = data.status ? STATUS_META[data.status] : null
-  const worst = data.alerts[0] ?? null
+  // Alerts arrive worst-first, so the first actionable one is the worst — and `normal`
+  // alerts are left out of the count for the same reason they are left out of the nav
+  // badge: a number a manager reacts to should only count what needs a decision.
+  const actionable = data.alerts.filter((alert) => ACTIONABLE_SEVERITIES.includes(alert.severity))
+  const worst = actionable[0] ?? null
 
   return (
     <Card className="flex flex-col gap-4">
@@ -218,13 +222,13 @@ function BranchSummaryCard({
       </div>
 
       <div className="flex items-center justify-between gap-3 pt-3 border-t border-border">
-        {data.alerts.length === 0 ? (
-          <span className="text-sm text-success">No warnings</span>
+        {actionable.length === 0 ? (
+          <span className="text-sm text-success">Nothing to act on</span>
         ) : (
           <span className="flex items-center gap-2 min-w-0 text-sm">
-            <WarningIcon className={cn('w-4 h-4 shrink-0', SEVERITY_META[data.alerts[0].severity].badge === 'error' ? 'text-error' : 'text-warning')} />
+            <WarningIcon className={cn('w-4 h-4 shrink-0', SEVERITY_META[actionable[0].severity].text)} />
             <span className="text-text-secondary shrink-0">
-              {data.alerts.length} {data.alerts.length === 1 ? 'alert' : 'alerts'}
+              {actionable.length} {actionable.length === 1 ? 'alert' : 'alerts'}
             </span>
             {worst && <span className="text-text-muted truncate">· {worst.summary}</span>}
           </span>
@@ -288,7 +292,7 @@ function MeasureRow({
                 title={alerts.map((alert) => alert.title).join(' · ')}
                 className={cn(
                   'w-1.5 h-1.5 rounded-full shrink-0',
-                  alerts.some((alert) => alert.severity === 'critical') ? 'bg-error' : 'bg-warning'
+                  SEVERITY_META[worstSeverity(alerts)].dot
                 )}
               />
             )}
@@ -360,12 +364,12 @@ function MeasureRow({
                   key={alert.id}
                   className={cn(
                     'border-l-4 pl-4 pt-3 border-t border-border',
-                    alert.severity === 'critical' ? 'border-l-error' : 'border-l-warning'
+                    SEVERITY_META[alert.severity].accent
                   )}
                 >
                   <div className="flex items-center gap-2 mb-2">
-                    <Badge variant={alert.severity === 'critical' ? 'error' : 'warning'}>
-                      {alert.severity === 'critical' ? 'Critical' : 'Warning'}
+                    <Badge variant={SEVERITY_META[alert.severity].badge}>
+                      {SEVERITY_META[alert.severity].label}
                     </Badge>
                     <span className="text-sm font-medium text-text-primary">{alert.title}</span>
                   </div>
@@ -508,7 +512,9 @@ function BranchDetail({
       .sort((a, b) => (a.score ?? 0) - (b.score ?? 0))[0] ?? null
   // Data-quality alerts are counted by the Warning page, not this pointer — same split
   // the Business Alerts page itself makes.
-  const businessAlertCount = data.alerts.filter((alert) => alert.dimension !== 'data_quality').length
+  const businessAlertCount = data.alerts.filter(
+    (alert) => alert.dimension !== 'data_quality' && ACTIONABLE_SEVERITIES.includes(alert.severity)
+  ).length
 
   return (
     <div className="flex flex-col gap-4">

@@ -1,7 +1,10 @@
-appId: com.electron.app
-productName: branchwise-app2
+appId: com.branchwise.app
+productName: BranchWise
 directories:
   buildResources: build
+# The app icon. electron-builder turns this one 1024px PNG into the .icns / .ico each
+# platform needs. Regenerate it with `npm run brand` after editing brand/branchwise-icon.svg.
+icon: build/icon.png
 files:
   - '!**/.vscode/*'
   - '!frontend/*'
@@ -20,6 +23,9 @@ nsis:
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  # macOS insets its icons on a fixed grid, so it gets the padded variant; Windows and
+  # Linux keep the full-bleed build/icon.png set above.
+  icon: build/icon-macos.png
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
