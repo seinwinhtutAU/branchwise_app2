@@ -1,5 +1,7 @@
 import datetime
 
+import pytest
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -243,6 +245,52 @@ def test_dead_stock_and_margin_have_a_normal_tier_below_their_warning_one():
     )
     assert slipping.severity == early_warning.NORMAL
     assert slipping.title == "Margin has edged down"
+
+
+def test_alerts_carry_their_figures_as_data_not_only_as_sentences():
+    """The UI shows the numbers as chips and as a split, so they travel as values. They
+    must be the same figures the sentences were built from — computed once, here."""
+    alert = _by_id(early_warning.evaluate(_snapshot(net_revenue=88_000.0)), "revenue_decline")
+    labels = {chip["label"]: chip for chip in alert.chips}
+    assert set(labels) == {"Transactions", "Average sale", "Revenue"}
+    assert labels["Revenue"]["value"] == -12.0
+    assert labels["Revenue"]["unit"] == "pct_change"
+
+    # The split is the evidence panel's whole claim: the parts sum to the actual change.
+    parts = sum(part["amount"] for part in alert.evidence["parts"])
+    assert alert.evidence["kind"] == "revenue_split"
+    assert parts == pytest.approx(alert.evidence["total_change"], abs=0.01)
+    assert alert.evidence["to_total"] - alert.evidence["from_total"] == pytest.approx(
+        alert.evidence["total_change"], abs=0.01
+    )
+
+
+def test_an_unmeasurable_figure_produces_no_chip_rather_than_a_zero():
+    """Same rule as the score itself: nothing measured is nothing shown, never a 0."""
+    alert = _by_id(
+        early_warning.evaluate(_snapshot(gross_margin_pct=8.0, previous_gross_margin_pct=None)),
+        "low_margin",
+    )
+    assert [chip["label"] for chip in alert.chips] == ["Gross margin"]
+    assert alert.evidence is None
+
+
+def test_every_rule_that_can_show_figures_does():
+    """A rule that quietly stops carrying its figures would leave an empty detail panel,
+    which looks identical to a rule that has none to show."""
+    cases = {
+        "revenue_decline": _snapshot(net_revenue=88_000.0),
+        "low_margin": _snapshot(gross_margin_pct=8.0),
+        "margin_slipping": _snapshot(gross_margin_pct=25.0, previous_gross_margin_pct=30.0),
+        "stockout_risk": _snapshot(critical_count=2),
+        "low_stock": _snapshot(low_count=3),
+        "watch_stock": _snapshot(watch_count=4),
+        "dead_stock": _snapshot(dead_stock_count=30),
+        "single_item_baskets": _snapshot(single_item_basket_share_pct=70.0),
+    }
+    for alert_id, snapshot in cases.items():
+        alert = _by_id(early_warning.evaluate(snapshot), alert_id)
+        assert alert.chips, f"{alert_id} carries no figures"
 
 
 def test_data_quality_alerts_reuse_the_warning_pages_own_titles_and_severities():

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Session } from '@supabase/supabase-js'
+import type { Session } from '@renderer/lib/auth'
 import { useCachedFetch } from '@renderer/lib/useCachedFetch'
 import { Button } from '@renderer/components/ui/Button'
 import { Card, CardHeader } from '@renderer/components/ui/Card'

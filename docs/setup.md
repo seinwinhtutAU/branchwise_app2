@@ -29,7 +29,7 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 
 ```
 PORT=8000
-DATABASE_URL=postgresql://...   # Supabase project's Postgres connection string (Session pooler URI works well)
+DATABASE_URL=postgresql://...   # Neon Postgres connection string (the pooled endpoint, with sslmode=require)
 SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 ```
 

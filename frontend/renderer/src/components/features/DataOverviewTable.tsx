@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { Session } from '@supabase/supabase-js'
-import { apiBaseUrl } from '@renderer/lib/supabaseClient'
+import type { Session } from '@renderer/lib/auth'
+import { apiBaseUrl } from '@renderer/lib/auth'
 import { useCachedFetch } from '@renderer/lib/useCachedFetch'
 import { cn } from '@renderer/lib/utils'
 import { useToast } from '@renderer/lib/useToast'

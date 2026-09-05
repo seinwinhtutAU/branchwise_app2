@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import type { Session } from '@supabase/supabase-js'
+import type { Session } from '@renderer/lib/auth'
 import { cn } from '@renderer/lib/utils'
 import { Spinner } from '@renderer/components/ui/Spinner'
 import { ChatIcon, CloseIcon } from '@renderer/components/ui/icons'

@@ -18,7 +18,9 @@
                  └──────────────────┘
 ```
 
-The renderer talks directly to Supabase Auth for sign-in/sign-up (via `@supabase/supabase-js`), and to the FastAPI backend for everything else, attaching the Supabase session's JWT as a Bearer token. The backend verifies that JWT against Supabase's JWKS endpoint and talks to the same Supabase project's Postgres database via SQLAlchemy.
+The renderer talks to the FastAPI backend and nothing else — including for sign-in, which the backend proxies to Neon Auth (see [auth-and-accounts.md](./auth-and-accounts.md)). Every request carries the auth JWT as a Bearer token. The backend verifies that JWT against Neon Auth's JWKS endpoint and talks to the application's Postgres database via SQLAlchemy.
+
+**Both the database and the auth are on Neon.** They were the same Supabase project until 2026-09-05, when the database was moved: the free plan's 5 GB monthly egress was the binding limit (storage was never close — the whole database is ~28 MB), and every dashboard query crossed from Supabase to the backend's own host. Auth followed two days later, when the Supabase project was shut down outright: Neon Auth cannot import Supabase's bcrypt password hashes, so the five accounts were recreated with new passwords. The move was a `pg_dump` of the `public` schema restored into Neon, with `DATABASE_URL` repointed; no application code changed. Note that egress is metered by Neon too — the durable fix is fewer rows crossing the wire, i.e. aggregating in SQL rather than pulling rows into Python.
 
 ## Repo layout
 

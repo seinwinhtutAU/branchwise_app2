@@ -1,0 +1,106 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Dashboard \u2014 branch health"
+    },
+    {
+      "file": "Alerts.dc.html",
+      "x": 1560,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Business Alerts"
+    },
+    {
+      "file": "SaleTable.dc.html",
+      "x": 0,
+      "y": 1060,
+      "w": 1440,
+      "h": 900,
+      "title": "Sale \u2014 data table"
+    },
+    {
+      "file": "SignIn.dc.html",
+      "x": 1560,
+      "y": 1060,
+      "w": 1440,
+      "h": 900,
+      "title": "Sign in"
+    },
+    {
+      "file": "PeriodOptions.dc.html",
+      "x": 3120,
+      "y": 0,
+      "w": 1440,
+      "h": 1040,
+      "title": "Period control \u2014 3 options"
+    },
+    {
+      "file": "AlertDetail.dc.html",
+      "x": 3120,
+      "y": 1180,
+      "w": 1100,
+      "h": 780,
+      "title": "Alert \u2014 evidence opened"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "brief",
+      "x": 0,
+      "y": -190,
+      "w": 620,
+      "text": "BranchWise UI sketch \u2014 same tokens as the app (indigo #6366f1, grey ramp, 8/12px radii), reorganised.\n\nWhat changes: a real page header (title + context + controls in one bar), the sidebar grouped into Decide / Daily data / Imports, score rings instead of a bare number, a KPI strip on the dashboard, and one severity colour language across alerts and tables.\n\nNumbers are sample data."
+    },
+    {
+      "id": "note-dashboard",
+      "x": 0,
+      "y": 940,
+      "w": 420,
+      "text": "Dashboard: KPI strip answers \"how did the business do\" before the per-branch cards answer \"which branch\". Three cards per row fills the width that is empty today, and the not-scored branch gets a real empty state instead of a blank card."
+    },
+    {
+      "id": "note-alerts",
+      "x": 1560,
+      "y": 940,
+      "w": 420,
+      "text": "Alerts keeps the table it has today \u2014 Severity, Category, Alert, Detail, Details \u2014 grouped under a full-width branch band.\n\nAn opened alert now shows three things instead of four paragraphs: one plain sentence saying what it means, the numbers as chips, and the action with its evidence button. The arithmetic sits behind \"How this was worked out\", so the depth is still there but nobody meets a wall of text."
+    },
+    {
+      "id": "note-table",
+      "x": 0,
+      "y": 2000,
+      "w": 420,
+      "text": "Tables: horizontal rules only (no spreadsheet grid), tabular numerals right-aligned, money bold and cost muted, flagged rows tinted with the reason as a chip, and a footer that says where you are in the data."
+    },
+    {
+      "id": "note-signin",
+      "x": 1560,
+      "y": 2000,
+      "w": 420,
+      "text": "Sign in: split layout \u2014 brand panel says what the app is for, form panel stays a plain 400px column. Demo accounts become quiet chips rather than a wall of buttons."
+    },
+    {
+      "id": "note-period",
+      "x": 3120,
+      "y": 1080,
+      "w": 460,
+      "text": "Three ways to handle the period, in the same header. Presets are the app's own: Today, Yesterday, 7 days, 30 days, plus a custom range.\n\nDashboard and Alerts currently show Option A. Tell me which one you want and it goes on every screen."
+    },
+    {
+      "id": "note-evidence",
+      "x": 3120,
+      "y": 2000,
+      "w": 460,
+      "text": "What sits behind \"How this was worked out\": the fall split into its three pieces, the two periods compared, and the rule that fired with a link to where its threshold is set.\n\nClosed by default \u2014 the manager reads one sentence, this is for anyone checking the number."
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}

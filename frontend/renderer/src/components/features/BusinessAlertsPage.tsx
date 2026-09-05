@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react'
-import type { Session } from '@supabase/supabase-js'
+import type { Session } from '@renderer/lib/auth'
 import { cn } from '@renderer/lib/utils'
 import { useCachedFetchMany } from '@renderer/lib/useCachedFetch'
 import type { BranchOption } from '@renderer/lib/useBranches'

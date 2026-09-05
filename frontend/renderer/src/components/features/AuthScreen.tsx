@@ -98,7 +98,7 @@ export function AuthScreen({
         {showDemoLogins && onDemoLogin && (
           <div className="mt-6">
             <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2 text-center">
-              Demo accounts · password 123456
+              Demo accounts · password 12345678
             </p>
             <div className="flex flex-wrap justify-center gap-2">
               {DEMO_ACCOUNTS.map((account) => (

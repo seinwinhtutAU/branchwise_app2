@@ -1,4 +1,4 @@
-import { apiBaseUrl } from '@renderer/lib/supabaseClient'
+import { apiBaseUrl } from '@renderer/lib/auth'
 
 // Non-component helpers shared by the dashboard tabs. Kept apart from shared.tsx
 // (components only) so Vite Fast Refresh can hot-swap that file in dev — a module
@@ -150,6 +150,29 @@ export interface HealthAlert {
   measure: string
   driver: string | null
   interpretation: string | null
+  /** The two or three figures behind the alert, as data — rendered as chips. */
+  chips: AlertChip[]
+  /** The decomposition behind it, for the "How this was worked out" panel. */
+  evidence: RevenueSplit | null
+}
+
+export interface AlertChip {
+  label: string
+  value: number
+  unit: 'pct' | 'pct_change' | 'pct_points' | 'count' | 'days'
+}
+
+/**
+ * A revenue movement split into the two causes that produced it, plus the small term
+ * where both moved at once. The three parts sum to `total_change` exactly — that is the
+ * property the evidence panel is claiming, and the backend has a test on it.
+ */
+export interface RevenueSplit {
+  kind: 'revenue_split'
+  from_total: number
+  to_total: number
+  total_change: number
+  parts: { label: string; amount: number }[]
 }
 
 export interface OverviewData {
@@ -157,6 +180,9 @@ export interface OverviewData {
   branch_name: string
   date_from: string
   date_to: string
+  /** The window this one is scored against — shown when an alert explains its working. */
+  previous_date_from: string
+  previous_date_to: string
   overall_score: number | null
   status: HealthStatus | null
   scored_weight: number

@@ -248,10 +248,15 @@ driver**, **Interpretation**, **What to do**.
 
 Driver and interpretation are separate sections rather than one paragraph because they
 are different kinds of claim — the driver is measured ("transactions −17.8%, average sale
-+7.9%"), the interpretation is the reading of it ("this is a footfall problem, not a
-basket-size one"). Running them together lets the second borrow the authority of the
++7.9%"), the interpretation is the reading of it ("this is a footfall problem, not an
+average-sale one"). Running them together lets the second borrow the authority of the
 first. The action sits apart, tinted and holding the evidence button, since it is the
 thing the whole alert exists to produce.
+
+A redesign of this panel — one sentence, the figures as chips, and the arithmetic behind a
+"How this was worked out" disclosure — was built and then reverted at the business's
+request; the four-part layout is what ships. `Alert.chips` and `Alert.evidence` (below)
+remain on the payload, so it can be picked up again without touching the engine.
 
 Percentages, money and counts inside those sentences are bolded, so a reader can take the
 number off the row at a glance and read the sentence only if they want the rest.
@@ -445,7 +450,10 @@ is why it is a nav section and not a sixth Dashboard tab.
 It is a **table, grouped by branch** — the same `TableContainer`/`Thead`/`Tbody` markup
 the Warning page uses, with a severity badge, a Details toggle in the last column, and an
 expanded row spanning every column, so the app's two lists of "things that are wrong"
-read the same way even though one is about the business and the other about the data.
+read the same way even though one is about the business and the other about the data. The
+table's own look is deliberately left alone as the page around it changes: gridlines,
+header tint and row colouring stay the app's standard, because the table is the part of
+this page a reader already knows from every other list.
 
 Each branch gets a full-width band naming it and its count, rather than a Branch column
 that would repeat the same name down every row. Branches are ordered by their worst
@@ -457,6 +465,19 @@ category chips on the line below it and the Refresh button in the header's actio
 the same furniture and the same places as the Sale, Inventory and Data Overview pages.
 Each chip shows its count under the current branch filter, so a chip's number always
 matches what clicking it produces.
+
+**An alert carries its figures as data, not only inside its sentences.** `Alert.chips`
+is the two or three numbers that make it legible at a glance (`{label, value, unit}` —
+`pct_change`/`pct_points` are movements, `pct`/`count`/`days` are levels), and
+`Alert.evidence` is the decomposition behind it (`kind: "revenue_split"`, the before and
+after totals, and the three parts that sum to the change). Both are filled by the rules
+from the same `explanation.py` results the sentences were built from, so the UI renders
+one set of numbers rather than recomputing a second — the "nothing is measured twice"
+rule applied across the wire. Nothing renders them today — the panel that used them was
+reverted (above) — but they cost one dataclass field each and mean a future panel reads
+figures rather than re-deriving them. A figure that could not be measured produces no chip at all
+rather than a zero, and a rule with nothing to decompose leaves `evidence` null, exactly
+as it already leaves `driver` empty.
 
 **Every branch appears, including the healthy ones.** Above the table sits one tile per
 retail branch — its overall score, its status band, and how many alerts it has here.

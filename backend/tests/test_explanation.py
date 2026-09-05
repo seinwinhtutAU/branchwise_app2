@@ -31,7 +31,7 @@ def test_the_three_effects_sum_exactly_to_the_actual_change(
     assert change.revenue_change == pytest.approx(revenue - previous_revenue)
 
 
-def test_a_fall_carried_by_lost_visits_is_attributed_to_visits():
+def test_a_fall_carried_by_lost_transactions_is_attributed_to_transactions():
     """The worked example this layer was designed around: revenue down ~11%, but
     transactions down far more and the average sale actually up."""
     change = explanation.decompose_revenue_change(88_694.0, 100_000.0, 82, 100)
@@ -44,7 +44,7 @@ def test_a_fall_carried_by_lost_visits_is_attributed_to_visits():
     driver, interpretation = explanation.describe_revenue_change(change)
     assert "Transactions are down 18.0%" in driver
     assert "average sale is up" in driver
-    assert "fewer visits" in interpretation
+    assert "fewer transactions" in interpretation
     assert "partly offset" in interpretation
 
 
@@ -53,7 +53,7 @@ def test_a_fall_carried_by_smaller_baskets_is_attributed_to_baskets():
     assert change is not None
     assert change.dominant == "basket"
     _driver, interpretation = explanation.describe_revenue_change(change)
-    assert "smaller baskets" in interpretation
+    assert "smaller average sale" in interpretation
 
 
 def test_two_effects_of_similar_size_are_reported_as_both_not_as_a_winner():

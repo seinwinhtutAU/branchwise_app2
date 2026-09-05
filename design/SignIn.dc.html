@@ -1,0 +1,117 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #6366f1; text-decoration: none; }
+    a:hover { color: #4f46e5; }
+    .num { font-variant-numeric: tabular-nums; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; background: #ffffff; color: #111827; overflow: hidden;">
+
+  <!-- Brand panel -->
+  <div style="width: 620px; flex-shrink: 0; background: #4f46e5; color: #ffffff; position: relative; display: flex; flex-direction: column; justify-content: space-between; padding: 44px 52px;">
+
+    <svg width="620" height="900" viewBox="0 0 620 900" fill="none" style="position: absolute; inset: 0; opacity: 0.16;">
+      <circle cx="120" cy="150" r="220" stroke="#ffffff" stroke-width="1.2"/>
+      <circle cx="480" cy="640" r="300" stroke="#ffffff" stroke-width="1.2"/>
+      <circle cx="520" cy="180" r="120" stroke="#ffffff" stroke-width="1.2"/>
+      <path d="M-40 720 L680 260" stroke="#ffffff" stroke-width="1.2"/>
+      <path d="M-40 800 L680 340" stroke="#ffffff" stroke-width="1.2"/>
+    </svg>
+
+    <div style="position: relative; display: flex; align-items: center; gap: 12px;">
+      <div style="width: 38px; height: 38px; border-radius: 10px; background: rgba(255,255,255,0.16); display: flex; align-items: center; justify-content: center;">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M12 3v6m0 0-4 3m4-3 4 3M8 12v4m8-4v4M8 20h.01M16 20h.01M12 20h.01" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div style="font-size: 19px; font-weight: 700; letter-spacing: -0.2px;">BranchWise</div>
+    </div>
+
+    <div style="position: relative; max-width: 460px;">
+      <div style="font-size: 40px; font-weight: 700; line-height: 1.15; letter-spacing: -1px; text-wrap: pretty;">Four branches, one honest picture.</div>
+      <div style="font-size: 15px; line-height: 1.65; color: rgba(255,255,255,0.82); margin-top: 18px;">Yesterday's POS files, cleaned overnight and scored by morning — so the branch that needs attention says so itself.</div>
+
+      <div style="display: flex; gap: 32px; margin-top: 36px;">
+        <div>
+          <div class="num" style="font-size: 26px; font-weight: 700; letter-spacing: -0.5px;">4</div>
+          <div style="font-size: 12px; color: rgba(255,255,255,0.72); margin-top: 2px;">branches</div>
+        </div>
+        <div>
+          <div class="num" style="font-size: 26px; font-weight: 700; letter-spacing: -0.5px;">641</div>
+          <div style="font-size: 12px; color: rgba(255,255,255,0.72); margin-top: 2px;">products tracked</div>
+        </div>
+        <div>
+          <div class="num" style="font-size: 26px; font-weight: 700; letter-spacing: -0.5px;">1 min</div>
+          <div style="font-size: 12px; color: rgba(255,255,255,0.72); margin-top: 2px;">of work a day</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="position: relative; font-size: 12px; color: rgba(255,255,255,0.6);">Retail &amp; wholesale · Myanmar</div>
+  </div>
+
+  <!-- Form panel -->
+  <div style="flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; background: #f9fafb;">
+    <div style="width: 400px;">
+
+      <div style="font-size: 24px; font-weight: 700; letter-spacing: -0.5px;">Sign in</div>
+      <div style="font-size: 14px; color: #6b7280; margin-top: 6px;">Manage your branch's data and health.</div>
+
+      <div style="display: flex; gap: 2px; padding: 3px; background: #f3f4f6; border-radius: 8px; margin-top: 22px;">
+        <div style="flex: 1; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: #ffffff; color: #111827; font-size: 13px; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">Sign in</div>
+        <div style="flex: 1; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: #6b7280; font-size: 13px; font-weight: 500;">Sign up</div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 14px; margin-top: 20px;">
+        <div>
+          <div style="font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 6px;">Email</div>
+          <div style="height: 40px; display: flex; align-items: center; padding: 0 12px; background: #ffffff; border: 1px solid rgba(0,0,0,0.08); border-radius: 8px; font-size: 14px; color: #111827;">admin@branchwise.app</div>
+        </div>
+        <div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <div style="font-size: 13px; font-weight: 500; color: #374151;">Password</div>
+            <div style="font-size: 12px; color: #6366f1; font-weight: 500;">Forgot?</div>
+          </div>
+          <div style="height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; background: #ffffff; border: 1px solid #6366f1; border-radius: 8px; box-shadow: 0 0 0 3px rgba(99,102,241,0.12);">
+            <span style="font-size: 14px; color: #111827; letter-spacing: 3px;">••••••••••</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" stroke="#9ca3af" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.6" stroke="#9ca3af" stroke-width="1.7"/></svg>
+          </div>
+        </div>
+
+        <div style="height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: #6366f1; color: #ffffff; font-size: 14px; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.05); margin-top: 4px;">Sign in</div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 12px; margin-top: 26px;">
+        <div style="flex: 1; height: 1px; background: rgba(0,0,0,0.08);"></div>
+        <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: #9ca3af;">Demo accounts</div>
+        <div style="flex: 1; height: 1px; background: rgba(0,0,0,0.08);"></div>
+      </div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px;">
+        <div style="height: 32px; padding: 0 12px; display: flex; align-items: center; gap: 7px; border-radius: 9999px; background: #ffffff; border: 1px solid rgba(0,0,0,0.08); font-size: 12px; color: #374151;">
+          <span style="width: 6px; height: 6px; border-radius: 9999px; background: #6366f1;"></span>Admin
+        </div>
+        <div style="height: 32px; padding: 0 12px; display: flex; align-items: center; gap: 7px; border-radius: 9999px; background: #ffffff; border: 1px solid rgba(0,0,0,0.08); font-size: 12px; color: #374151;">
+          <span style="width: 6px; height: 6px; border-radius: 9999px; background: #34d399;"></span>Ashley
+        </div>
+        <div style="height: 32px; padding: 0 12px; display: flex; align-items: center; gap: 7px; border-radius: 9999px; background: #ffffff; border: 1px solid rgba(0,0,0,0.08); font-size: 12px; color: #374151;">
+          <span style="width: 6px; height: 6px; border-radius: 9999px; background: #38bdf8;"></span>AungThitSar
+        </div>
+        <div style="height: 32px; padding: 0 12px; display: flex; align-items: center; gap: 7px; border-radius: 9999px; background: #ffffff; border: 1px solid rgba(0,0,0,0.08); font-size: 12px; color: #374151;">
+          <span style="width: 6px; height: 6px; border-radius: 9999px; background: #f472b6;"></span>Wholesale
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

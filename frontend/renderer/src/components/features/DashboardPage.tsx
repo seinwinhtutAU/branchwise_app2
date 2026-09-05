@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Session } from '@supabase/supabase-js'
+import type { Session } from '@renderer/lib/auth'
 import { cn } from '@renderer/lib/utils'
 import type { BranchOption } from '@renderer/lib/useBranches'
 import { CardHeader } from '@renderer/components/ui/Card'

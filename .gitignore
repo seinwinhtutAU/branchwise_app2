@@ -43,3 +43,7 @@ retail_data/
 
 # Word lock files (created while a .docx is open)
 ~$*
+
+# .env backups (they carry live credentials)
+.env.*
+*.env.bak*

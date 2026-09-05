@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import type { Session } from "@supabase/supabase-js";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import type { Session } from "@renderer/lib/auth";
 import {
   clearFetchCache,
   useCachedFetchMany,
@@ -11,7 +11,14 @@ import {
   type OverviewData,
 } from "@renderer/components/features/dashboard/helpers";
 import { ChatLauncher } from "@renderer/components/features/ChatLauncher";
-import { apiBaseUrl, supabase } from "@renderer/lib/supabaseClient";
+import {
+  apiBaseUrl,
+  loadStoredSession,
+  signIn,
+  signOut,
+  signUp,
+  startSessionRefresh,
+} from "@renderer/lib/auth";
 import { useToast } from "@renderer/lib/useToast";
 import { AuthScreen } from "@renderer/components/features/AuthScreen";
 import {
@@ -197,6 +204,11 @@ const WORKSPACE_SECTION_IDS: Record<Workspace, Set<string>> = {
 
 // Remembers which workspace an admin was last in, so they don't land back on Retail every
 // sign-in if they actually live in Wholesale.
+// The password every seeded account shares, for the one-click dev sign-in buttons.
+// Eight characters because Neon Auth refuses anything shorter — the old Supabase-era
+// "123456" is no longer a valid password there.
+const DEV_PASSWORD = "12345678";
+
 const WORKSPACE_STORAGE_KEY = "branchwise:lastWorkspace";
 
 // Every role sees Settings — the theme switcher living there applies universally, even
@@ -370,16 +382,19 @@ function App(): React.JSX.Element {
     [showBuyingPriceSource],
   );
 
+  // Restore the stored session on launch, then keep its access token fresh: a Neon Auth
+  // JWT lasts 15 minutes, so without this the app would start failing requests while
+  // someone was still looking at it. A refresh that fails means the session itself is
+  // gone, which is the only case that returns to the sign-in screen.
+  const sessionRef = useRef<Session | null>(null);
+  sessionRef.current = session;
+
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
-
-    const { data: subscription } = supabase.auth.onAuthStateChange(
-      (_event, newSession) => {
-        setSession(newSession);
-      },
+    setSession(loadStoredSession());
+    return startSessionRefresh(
+      () => sessionRef.current,
+      (next) => setSession(next),
     );
-
-    return () => subscription.subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -603,40 +618,34 @@ function App(): React.JSX.Element {
     setSubmitting(true);
     try {
       if (mode === "sign-in") {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) showToast("error", error.message);
+        setSession(await signIn(email, password));
       } else {
-        const { data, error } = await supabase.auth.signUp({ email, password });
-        if (error) {
-          showToast("error", error.message);
-          return;
-        }
-        if (!data.session) {
-          showToast(
-            "info",
-            "Account created — check your email to confirm before signing in.",
-          );
-          setMode("sign-in");
-        }
+        setSession(await signUp(email, password, email.split("@")[0]));
       }
+    } catch (error) {
+      showToast(
+        "error",
+        error instanceof Error ? error.message : "Sign-in failed",
+      );
     } finally {
       setSubmitting(false);
     }
   }
 
   async function handleDemoLogin(demoEmail: string): Promise<void> {
-    const { error } = await supabase.auth.signInWithPassword({
-      email: demoEmail,
-      password: "123456",
-    });
-    if (error) showToast("error", error.message);
+    try {
+      setSession(await signIn(demoEmail, DEV_PASSWORD));
+    } catch (error) {
+      showToast(
+        "error",
+        error instanceof Error ? error.message : "Sign-in failed",
+      );
+    }
   }
 
   async function handleSignOut(): Promise<void> {
-    await supabase.auth.signOut();
+    await signOut(session);
+    setSession(null);
     // Drop every cached page: the next account may be scoped to a different branch, and
     // serving it this one's numbers would be both wrong and a disclosure.
     clearFetchCache();

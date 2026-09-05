@@ -1,0 +1,303 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #6366f1; text-decoration: none; }
+    a:hover { color: #4f46e5; }
+    .num { font-variant-numeric: tabular-nums; }
+    .th { height: 40px; display: flex; align-items: center; padding: 0 18px; background: #f9fafb; border-bottom: 1px solid rgba(0,0,0,0.08); font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: #6b7280; }
+    .td { min-height: 50px; display: flex; align-items: center; padding: 0 18px; border-bottom: 1px solid rgba(0,0,0,0.08); font-size: 13px; }
+    .band { grid-column: 1 / -1; height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 18px; background: #eef2ff; border-bottom: 1px solid rgba(0,0,0,0.08); }
+    .badge { height: 22px; padding: 0 9px; display: inline-flex; align-items: center; border-radius: 9999px; font-size: 11px; font-weight: 600; }
+    .lbl { font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #9ca3af; }
+    .body { font-size: 13px; color: #374151; line-height: 1.6; margin-top: 4px; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; background: #f9fafb; color: #111827; overflow: hidden;">
+
+  <aside style="width: 256px; flex-shrink: 0; background: #ffffff; border-right: 1px solid rgba(0,0,0,0.08); display: flex; flex-direction: column;">
+    <div style="height: 64px; display: flex; align-items: center; gap: 10px; padding: 0 20px; border-bottom: 1px solid rgba(0,0,0,0.08);">
+      <div style="width: 32px; height: 32px; border-radius: 8px; background: #6366f1; display: flex; align-items: center; justify-content: center;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3v6m0 0-4 3m4-3 4 3M8 12v4m8-4v4M8 20h.01M16 20h.01M12 20h.01" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div style="font-size: 16px; font-weight: 700; letter-spacing: -0.2px;">Branch<span style="color: #6366f1;">Wise</span></div>
+    </div>
+
+    <div style="padding: 12px 12px 4px;">
+      <div style="display: flex; gap: 2px; padding: 3px; background: #f3f4f6; border-radius: 8px;">
+        <div style="flex: 1; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: #6366f1; color: #ffffff; font-size: 13px; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">Retail</div>
+        <div style="flex: 1; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: #6b7280; font-size: 13px; font-weight: 500;">Wholesale</div>
+      </div>
+    </div>
+
+    <nav style="flex: 1; overflow: hidden; padding: 8px 12px; display: flex; flex-direction: column; gap: 2px;">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: #9ca3af; padding: 12px 12px 6px;">Decide</div>
+
+      <div style="height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: 8px; color: #374151; font-size: 14px; font-weight: 500;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="8" rx="1.6" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="5" rx="1.6" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="14" width="7" height="7" rx="1.6" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="11" width="7" height="10" rx="1.6" stroke="currentColor" stroke-width="1.7"/></svg>
+        <span style="flex: 1;">Dashboard</span>
+      </div>
+
+      <div style="position: relative; height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: 8px; background: #eef2ff; color: #6366f1; font-size: 14px; font-weight: 600;">
+        <span style="position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: #6366f1;"></span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M18 8a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M10.5 18a1.8 1.8 0 0 0 3 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        <span style="flex: 1;">Business Alerts</span>
+        <span class="num" style="min-width: 20px; height: 20px; padding: 0 6px; border-radius: 9999px; background: #ef4444; color: #ffffff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center;">6</span>
+      </div>
+
+      <div style="height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: 8px; color: #374151; font-size: 14px; font-weight: 500;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 20V9m0 0-4 4m4-4 4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 5.5h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        <span style="flex: 1;">Warning</span>
+        <span class="num" style="min-width: 20px; height: 20px; padding: 0 6px; border-radius: 9999px; background: #fffbeb; color: #b45309; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center;">78</span>
+      </div>
+
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: #9ca3af; padding: 16px 12px 6px;">Daily data</div>
+      <div style="position: relative; height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: 8px; color: #374151; font-size: 14px; font-weight: 500;">
+        <span style="position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 9999px; background: #34d399;"></span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 5h2l2.2 9.5a2 2 0 0 0 2 1.5h6.9a2 2 0 0 0 2-1.5L20 8H6.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="10" cy="19" r="1.2" fill="currentColor"/><circle cx="17" cy="19" r="1.2" fill="currentColor"/></svg>
+        <span style="flex: 1;">Sale</span>
+      </div>
+      <div style="position: relative; height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: 8px; color: #374151; font-size: 14px; font-weight: 500;">
+        <span style="position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 9999px; background: #38bdf8;"></span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3 4 7.2v9.6L12 21l8-4.2V7.2L12 3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M4 7.2 12 11.5l8-4.3M12 11.5V21" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        <span style="flex: 1;">Inventory</span>
+      </div>
+      <div style="position: relative; height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: 8px; color: #374151; font-size: 14px; font-weight: 500;">
+        <span style="position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 9999px; background: #f472b6;"></span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 6h16v12H4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M4 10h16" stroke="currentColor" stroke-width="1.7"/></svg>
+        <span style="flex: 1;">Purchase</span>
+      </div>
+
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: #9ca3af; padding: 16px 12px 6px;">Imports</div>
+      <div style="height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: 8px; color: #374151; font-size: 14px; font-weight: 500;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 16V4m0 0L8 8m4-4 4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16v3h16v-3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        <span style="flex: 1;">Import</span>
+      </div>
+      <div style="height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: 8px; color: #374151; font-size: 14px; font-weight: 500;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 1 0 2.4-5.7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M4 4v4h4M12 8v4.5l3 1.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span style="flex: 1;">Import History</span>
+      </div>
+      <div style="height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: 8px; color: #374151; font-size: 14px; font-weight: 500;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 12h4l2.5-6 4 12 2.5-6h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span style="flex: 1;">Import Overview</span>
+      </div>
+      <div style="height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: 8px; color: #374151; font-size: 14px; font-weight: 500;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 20V10m7 10V4m7 16v-7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        <span style="flex: 1;">Data Overview</span>
+      </div>
+    </nav>
+
+    <div style="border-top: 1px solid rgba(0,0,0,0.08); padding: 12px; display: flex; align-items: center; gap: 10px;">
+      <div style="width: 34px; height: 34px; border-radius: 9999px; background: #eef2ff; color: #6366f1; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700;">AD</div>
+      <div style="flex: 1; min-width: 0;">
+        <div style="font-size: 13px; font-weight: 600;">Admin</div>
+        <div style="font-size: 11px; color: #6b7280;">All branches</div>
+      </div>
+      <div style="width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #6b7280; border: 1px solid rgba(0,0,0,0.08);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 8h9M18 8h1M5 16h3M12 16h7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="16" cy="8" r="2.2" stroke="currentColor" stroke-width="1.7"/><circle cx="10" cy="16" r="2.2" stroke="currentColor" stroke-width="1.7"/></svg>
+      </div>
+      <div style="width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #6b7280; border: 1px solid rgba(0,0,0,0.08);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M14 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M10 8l-4 4 4 4M6.5 12H15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+  </aside>
+
+  <main style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+
+    <header style="height: 68px; flex-shrink: 0; background: #ffffff; border-bottom: 1px solid rgba(0,0,0,0.08); display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 28px;">
+      <div>
+        <div style="font-size: 19px; font-weight: 700; letter-spacing: -0.3px; line-height: 1.2;">Business Alerts</div>
+        <div style="font-size: 13px; color: #6b7280; margin-top: 2px;">What needs attention today · 1–30 Aug 2026 vs. the 30 days before</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <!-- Option A — the range itself is the control; presets and custom dates live inside it -->
+        <div style="height: 36px; display: flex; align-items: center; gap: 9px; padding: 0 12px; border: 1px solid rgba(0,0,0,0.16); border-radius: 8px; background: #ffffff; font-size: 13px; font-weight: 600; color: #111827;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="4" y="5.5" width="16" height="15" rx="2.2" stroke="#6b7280" stroke-width="1.7"/><path d="M4 10h16M9 3.5v4M15 3.5v4" stroke="#6b7280" stroke-width="1.7" stroke-linecap="round"/></svg>
+          <span class="num">1 – 30 Aug 2026</span>
+          <span style="font-size: 12px; font-weight: 500; color: #6b7280;">Last 30 days</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="#6b7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div style="height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid rgba(0,0,0,0.08); border-radius: 8px; background: #ffffff; font-size: 13px; color: #374151;">
+          All branches
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="#6b7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div style="height: 36px; padding: 0 12px; display: flex; align-items: center; gap: 7px; border: 1px solid rgba(0,0,0,0.08); border-radius: 8px; background: #ffffff; font-size: 13px; font-weight: 500; color: #374151;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M20 12a8 8 0 1 1-2.4-5.7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M20 4v4h-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Refresh
+        </div>
+      </div>
+    </header>
+
+    <div style="flex: 1; overflow: hidden; padding: 20px 28px; display: flex; flex-direction: column; gap: 16px;">
+
+      <!-- Branch status strip -->
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;">
+        <div style="background: #ffffff; border: 1px solid #6366f1; border-radius: 10px; padding: 12px 14px; display: flex; align-items: center; gap: 12px;">
+          <div class="num" style="width: 40px; height: 40px; border-radius: 8px; background: #fef2f2; color: #ef4444; display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 700;">51</div>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-size: 14px; font-weight: 600;">Ashley</div>
+            <div style="font-size: 12px; color: #6b7280;">5 alerts · 2 critical</div>
+          </div>
+          <span style="height: 20px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 9999px; background: #fef2f2; color: #ef4444; font-size: 11px; font-weight: 600;">Critical</span>
+        </div>
+        <div style="background: #ffffff; border: 1px solid rgba(0,0,0,0.08); border-radius: 10px; padding: 12px 14px; display: flex; align-items: center; gap: 12px;">
+          <div class="num" style="width: 40px; height: 40px; border-radius: 8px; background: #fef2f2; color: #ef4444; display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 700;">50</div>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-size: 14px; font-weight: 600;">AungThitSar</div>
+            <div style="font-size: 12px; color: #6b7280;">7 alerts · 1 critical</div>
+          </div>
+          <span style="height: 20px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 9999px; background: #fef2f2; color: #ef4444; font-size: 11px; font-weight: 600;">Critical</span>
+        </div>
+        <div style="background: #ffffff; border: 1px solid rgba(0,0,0,0.08); border-radius: 10px; padding: 12px 14px; display: flex; align-items: center; gap: 12px;">
+          <div style="width: 40px; height: 40px; border-radius: 8px; background: #f3f4f6; color: #9ca3af; display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 700;">—</div>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-size: 14px; font-weight: 600;">Retail 3</div>
+            <div style="font-size: 12px; color: #047857;">Nothing to act on</div>
+          </div>
+          <span style="height: 20px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 9999px; background: #f3f4f6; color: #6b7280; font-size: 11px; font-weight: 600;">Not scored</span>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <div style="height: 30px; padding: 0 12px; display: flex; align-items: center; gap: 6px; border-radius: 9999px; background: #eef2ff; border: 1px solid #6366f1; color: #6366f1; font-size: 13px; font-weight: 600;">All <span class="num" style="color: #818cf8;">12</span></div>
+        <div style="height: 30px; padding: 0 12px; display: flex; align-items: center; gap: 6px; border-radius: 9999px; background: #ffffff; border: 1px solid rgba(0,0,0,0.08); color: #374151; font-size: 13px;">Sales <span class="num" style="color: #9ca3af;">3</span></div>
+        <div style="height: 30px; padding: 0 12px; display: flex; align-items: center; gap: 6px; border-radius: 9999px; background: #ffffff; border: 1px solid rgba(0,0,0,0.08); color: #374151; font-size: 13px;">Profit <span class="num" style="color: #9ca3af;">2</span></div>
+        <div style="height: 30px; padding: 0 12px; display: flex; align-items: center; gap: 6px; border-radius: 9999px; background: #ffffff; border: 1px solid rgba(0,0,0,0.08); color: #374151; font-size: 13px;">Inventory <span class="num" style="color: #9ca3af;">4</span></div>
+        <div style="height: 30px; padding: 0 12px; display: flex; align-items: center; gap: 6px; border-radius: 9999px; background: #ffffff; border: 1px solid rgba(0,0,0,0.08); color: #374151; font-size: 13px;">Customer <span class="num" style="color: #9ca3af;">3</span></div>
+        <div style="flex: 1;"></div>
+        <div style="font-size: 12px; color: #6b7280;">Counts follow the branch filter · critical first, then warning, then normal</div>
+      </div>
+
+      <!-- Alert list — the app's own table: severity, category, alert, detail, details toggle,
+           grouped by a full-width branch band. Horizontal rules only; no vertical gridlines. -->
+      <div style="flex: 1; min-height: 0; background: #ffffff; border: 1px solid rgba(0,0,0,0.08); border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);">
+        <div style="display: grid; grid-template-columns: 116px 108px minmax(0, 1fr) 330px 104px;">
+
+          <div class="th">Severity</div>
+          <div class="th">Category</div>
+          <div class="th">Alert</div>
+          <div class="th">Detail</div>
+          <div class="th" style="justify-content: flex-end;"></div>
+
+          <div class="band">
+            <span style="font-size: 13px; font-weight: 700; color: #111827;">Ashley</span>
+            <span class="num" style="height: 19px; padding: 0 7px; display: inline-flex; align-items: center; border-radius: 9999px; background: #ffffff; color: #6366f1; font-size: 11px; font-weight: 600;">5</span>
+            <span style="flex: 1;"></span>
+            <span style="font-size: 12px; color: #6b7280;">Score 51 · Critical</span>
+          </div>
+
+          <div class="td"><span class="badge" style="background: #fef2f2; color: #ef4444;">Critical</span></div>
+          <div class="td" style="color: #6b7280;">Inventory</div>
+          <div class="td" style="color: #111827; font-weight: 600;">Products are about to run out</div>
+          <div class="td" style="color: #ef4444; font-weight: 500;">1 product, 2 days of stock left</div>
+          <div class="td" style="justify-content: flex-end; color: #6366f1; font-weight: 500; gap: 4px;">Details
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+
+          <div class="td" style="border-bottom: none;"><span class="badge" style="background: #fffbeb; color: #b45309;">Warning</span></div>
+          <div class="td" style="border-bottom: none; color: #6b7280;">Sales</div>
+          <div class="td" style="border-bottom: none; color: #111827; font-weight: 600;">Revenue is falling</div>
+          <div class="td" style="border-bottom: none; color: #b45309; font-weight: 500;">Revenue down 12.9%</div>
+          <div class="td" style="border-bottom: none; justify-content: flex-end; color: #6366f1; font-weight: 500; gap: 4px;">Details
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M17 14l-5-5-5 5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+
+          <!-- Expanded detail row: one plain sentence, the numbers as chips, and the action.
+               The arithmetic behind it stays one click further in, so nobody meets a wall of text. -->
+          <div style="grid-column: 1 / -1; border-bottom: 1px solid rgba(0,0,0,0.08); background: #f9fafb; padding: 20px 18px 20px 22px;">
+            <div style="max-width: 760px; display: flex; flex-direction: column; gap: 16px;">
+
+              <div style="font-size: 15px; line-height: 1.6; color: #111827;">
+                Fewer people came in, but each spent a little more — so this is a <strong>footfall</strong> problem, not a pricing one.
+              </div>
+
+              <div style="display: flex; gap: 10px;">
+                <div style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 8px; background: #ffffff; border: 1px solid rgba(0,0,0,0.08);">
+                  <span style="font-size: 12px; color: #6b7280;">Visits</span>
+                  <span class="num" style="font-size: 13px; font-weight: 700; color: #ef4444;">−17.8%</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 8px; background: #ffffff; border: 1px solid rgba(0,0,0,0.08);">
+                  <span style="font-size: 12px; color: #6b7280;">Average sale</span>
+                  <span class="num" style="font-size: 13px; font-weight: 700; color: #047857;">+6.0%</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 8px; background: #ffffff; border: 1px solid rgba(0,0,0,0.08);">
+                  <span style="font-size: 12px; color: #6b7280;">Revenue</span>
+                  <span class="num" style="font-size: 13px; font-weight: 700; color: #ef4444;">−12.9%</span>
+                </div>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 14px; background: #eef2ff; border-radius: 10px; padding: 14px 16px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style="flex-shrink: 0;"><path d="M12 3a6 6 0 0 0-3.5 10.9V16h7v-2.1A6 6 0 0 0 12 3Z" stroke="#6366f1" stroke-width="1.7" stroke-linejoin="round"/><path d="M10 19h4" stroke="#6366f1" stroke-width="1.7" stroke-linecap="round"/></svg>
+                <div style="flex: 1; min-width: 0; font-size: 14px; color: #111827; line-height: 1.5;">
+                  Look at opening hours, staffing and promotion — not pricing.
+                </div>
+                <div style="height: 34px; padding: 0 14px; display: inline-flex; align-items: center; border-radius: 8px; background: #6366f1; color: #ffffff; font-size: 13px; font-weight: 600; white-space: nowrap; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">View Revenue →</div>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6b7280;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="#6b7280" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                How this was worked out
+              </div>
+            </div>
+          </div>
+
+          <div class="td"><span class="badge" style="background: #fffbeb; color: #b45309;">Warning</span></div>
+          <div class="td" style="color: #6b7280;">Inventory</div>
+          <div class="td" style="color: #111827; font-weight: 600;">Too much stock is not moving</div>
+          <div class="td" style="color: #b45309; font-weight: 500;">323 of 641 products not moving</div>
+          <div class="td" style="justify-content: flex-end; color: #6366f1; font-weight: 500; gap: 4px;">Details
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+
+          <div class="td"><span class="badge" style="background: #ecfdf5; color: #047857;">Normal</span></div>
+          <div class="td" style="color: #6b7280;">Inventory</div>
+          <div class="td" style="color: #111827; font-weight: 600;">Stock worth keeping an eye on</div>
+          <div class="td" style="color: #374151;">4 products between 7 and 14 days left</div>
+          <div class="td" style="justify-content: flex-end; color: #6366f1; font-weight: 500; gap: 4px;">Details
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+
+          <div class="band">
+            <span style="font-size: 13px; font-weight: 700; color: #111827;">AungThitSar</span>
+            <span class="num" style="height: 19px; padding: 0 7px; display: inline-flex; align-items: center; border-radius: 9999px; background: #ffffff; color: #6366f1; font-size: 11px; font-weight: 600;">7</span>
+            <span style="flex: 1;"></span>
+            <span style="font-size: 12px; color: #6b7280;">Score 50 · Critical</span>
+          </div>
+
+          <div class="td"><span class="badge" style="background: #fef2f2; color: #ef4444;">Critical</span></div>
+          <div class="td" style="color: #6b7280;">Sales</div>
+          <div class="td" style="color: #111827; font-weight: 600;">Revenue has fallen sharply</div>
+          <div class="td" style="color: #ef4444; font-weight: 500;">Revenue down 37.1%</div>
+          <div class="td" style="justify-content: flex-end; color: #6366f1; font-weight: 500; gap: 4px;">Details
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+
+          <div class="td" style="border-bottom: none;"><span class="badge" style="background: #fffbeb; color: #b45309;">Warning</span></div>
+          <div class="td" style="border-bottom: none; color: #6b7280;">Customer</div>
+          <div class="td" style="border-bottom: none; color: #111827; font-weight: 600;">Most visits buy only one thing</div>
+          <div class="td" style="border-bottom: none; color: #b45309; font-weight: 500;">64% of visits buy one item</div>
+          <div class="td" style="border-bottom: none; justify-content: flex-end; color: #6366f1; font-weight: 500; gap: 4px;">Details
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6b7280;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#9ca3af" stroke-width="1.7"/><path d="M12 11v5M12 8h.01" stroke="#9ca3af" stroke-width="1.7" stroke-linecap="round"/></svg>
+        Data problems are not listed here — they live on the Warning page, where the rows can be fixed.
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+</body>
+</html>
