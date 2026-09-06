@@ -19,8 +19,21 @@ policy needs no third-party entry (`https://*.supabase.co` is gone from it).
 The endpoints are in `app/routers/auth.py`: `login`, `signup`, `refresh`, `logout`. The
 app stores two things (`frontend/renderer/src/lib/auth.ts`): the short-lived
 `access_token` it sends to the API, and the long-lived opaque `session` that mints new
-ones. A Neon Auth JWT lasts **15 minutes**, so the app refreshes on a 10-minute timer;
-only a rejected *session* returns anyone to the sign-in screen.
+ones. A Neon Auth JWT lasts **15 minutes**, and the app keeps it fresh three ways, because any
+one of them alone leaves a hole:
+
+- **On launch**, immediately — a session restored from a previous run is almost always
+  carrying a dead token. Refreshing only on the timer meant the first ten minutes of every
+  session showed "Couldn't load" on every page, an expired-token error dressed up as
+  missing data.
+- **Before sending**, when the token's own `exp` says it has already passed. One refresh
+  serves every caller waiting on it, so a launch that fires six requests at once costs one
+  round trip, not six.
+- **After a 401**, refresh and replay the request once. `installAuthRetry` patches `fetch`
+  in one place rather than threading a retry through fifty call sites, and it is scoped
+  tightly: only this app's API, only a 401, only one retry.
+
+Only a rejected *session* returns anyone to the sign-in screen.
 
 The backend verifies each JWT (`app/core/security.py::get_current_user`) against Neon
 Auth's JWKS. Two differences from the Supabase era worth knowing: the algorithm is

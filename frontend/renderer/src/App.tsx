@@ -13,6 +13,7 @@ import {
 import { ChatLauncher } from "@renderer/components/features/ChatLauncher";
 import {
   apiBaseUrl,
+  installAuthRetry,
   loadStoredSession,
   signIn,
   signOut,
@@ -390,11 +391,21 @@ function App(): React.JSX.Element {
   sessionRef.current = session;
 
   useEffect(() => {
-    setSession(loadStoredSession());
-    return startSessionRefresh(
+    const stored = loadStoredSession();
+    setSession(stored);
+    sessionRef.current = stored;
+    const stopRetry = installAuthRetry(
       () => sessionRef.current,
       (next) => setSession(next),
     );
+    const stopRefresh = startSessionRefresh(
+      () => sessionRef.current,
+      (next) => setSession(next),
+    );
+    return () => {
+      stopRefresh();
+      stopRetry();
+    };
   }, []);
 
   useEffect(() => {

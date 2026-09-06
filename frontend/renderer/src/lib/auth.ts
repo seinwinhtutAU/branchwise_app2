@@ -125,17 +125,107 @@ export async function refreshSession(current: Session): Promise<Session | null> 
 }
 
 /**
- * Keeps `session.access_token` fresh for as long as the app is open. Returns a cleanup
- * function. `onSession(null)` means the session is gone for good.
+ * Keeps `session.access_token` fresh for as long as the app is open, and returns a
+ * cleanup function. `onSession(null)` means the session itself is gone for good.
+ *
+ * The token is refreshed **immediately**, not only on the timer: a stored session comes
+ * back from a previous run, where its 15-minute token has almost certainly expired. The
+ * first version of this waited for the timer, so every launch spent its first ten minutes
+ * showing "Couldn't load" on every page — the pages were fine, the token was stale.
  */
 export function startSessionRefresh(
   getSession: () => Session | null,
   onSession: (session: Session | null) => void
 ): () => void {
-  const timer = setInterval(async () => {
+  const refreshNow = async (): Promise<void> => {
     const current = getSession()
     if (!current) return
     onSession(await refreshSession(current))
-  }, REFRESH_INTERVAL_MS)
+  }
+  void refreshNow()
+  const timer = setInterval(refreshNow, REFRESH_INTERVAL_MS)
   return () => clearInterval(timer)
+}
+
+/** Seconds of slack, so a token about to expire in flight is treated as expired. */
+const EXPIRY_SKEW_SECONDS = 30
+
+function isExpired(token: string): boolean {
+  try {
+    const [, payload] = token.split('.')
+    const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: number }
+    if (!claims.exp) return false
+    return claims.exp - EXPIRY_SKEW_SECONDS <= Math.floor(Date.now() / 1000)
+  } catch {
+    // An unreadable token is not worth guessing about — send it and let the 401 path deal
+    // with whatever comes back.
+    return false
+  }
+}
+
+/**
+ * Refreshes and retries once when a call to our own API comes back 401.
+ *
+ * Every page fetches with the access token it was handed, so without this a token that
+ * expires mid-session turns into "Couldn't load" on whatever the reader touches next —
+ * an error about a token, shown as though the data were missing. Patching `fetch` once
+ * here beats threading a retry through fifty call sites, and it is scoped tightly: only
+ * requests to this app's API, only a 401, only one retry.
+ */
+export function installAuthRetry(
+  getSession: () => Session | null,
+  onSession: (session: Session | null) => void
+): () => void {
+  const original = window.fetch
+  // One refresh serves every caller that needs it: a launch fires half a dozen requests
+  // at once, and each starting its own refresh would be six round trips for one token.
+  let inFlight: Promise<Session | null> | null = null
+
+  const refreshOnce = async (current: Session): Promise<Session | null> => {
+    if (!inFlight) {
+      inFlight = refreshSession(current).then((next) => {
+        inFlight = null
+        onSession(next)
+        return next
+      })
+    }
+    return inFlight
+  }
+
+  const withToken = (
+    input: RequestInfo | URL,
+    init: RequestInit | undefined,
+    token: string
+  ): RequestInit => {
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+    headers.set('Authorization', `Bearer ${token}`)
+    return { ...init, headers }
+  }
+
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    const ours = url.startsWith(apiBaseUrl) && !url.includes('/api/auth/')
+
+    // A session restored from a previous run almost always carries a dead token, so
+    // renew it before spending a request on a 401 that is already known to be coming.
+    if (ours) {
+      const current = getSession()
+      if (current && isExpired(current.access_token)) {
+        const next = await refreshOnce(current)
+        if (next) return original(input, withToken(input, init, next.access_token))
+      }
+    }
+
+    const response = await original(input, init)
+    if (response.status !== 401 || !ours) return response
+
+    const current = getSession()
+    if (!current) return response
+    const next = await refreshOnce(current)
+    if (!next) return response
+    return original(input, withToken(input, init, next.access_token))
+  }
+  return () => {
+    window.fetch = original
+  }
 }
