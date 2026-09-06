@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { Session } from '@supabase/supabase-js'
-import { apiBaseUrl } from '@renderer/lib/supabaseClient'
+import type { Session } from '@renderer/lib/auth'
+import { apiBaseUrl } from '@renderer/lib/auth'
 import { applyTheme, cacheTheme, type ThemeMode } from '@renderer/lib/theme'
 
 // The Branch Health Score's dimension weights and the Early Warning rules' firing

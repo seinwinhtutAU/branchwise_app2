@@ -86,6 +86,14 @@ class Alert:
     # than staying quiet).
     driver: str | None = None
     interpretation: str | None = None
+    # The measured figures the sentences above were built from, carried out as data so
+    # the UI can show them as chips and as a split — the same numbers, never a second
+    # computation on the client (see docs/branch_health.md's "nothing is measured twice").
+    # `chips`: the two or three figures that make the alert legible at a glance.
+    # `evidence`: the decomposition behind it, for the "How this was worked out" panel —
+    # None on the rules with nothing to decompose, exactly like `driver`.
+    chips: tuple[dict, ...] = ()
+    evidence: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -146,6 +154,39 @@ def _period_phrase(snapshot: BranchSnapshot) -> str:
     if snapshot.period_days == 1:
         return "the day before"
     return f"the previous {snapshot.period_days} days"
+
+
+def _chip(label: str, value: float | None, unit: str) -> dict | None:
+    """One figure for the row of chips. `unit` tells the UI how to render and colour it:
+    `pct_change`/`pct_points` are movements (signed, with a direction), `pct` and `count`
+    are levels. A value that could not be measured produces no chip at all rather than a
+    zero — the same rule the score itself follows."""
+    if value is None:
+        return None
+    return {"label": label, "value": round(float(value), 2), "unit": unit}
+
+
+def _chips(*chips: dict | None) -> tuple[dict, ...]:
+    return tuple(chip for chip in chips if chip is not None)
+
+
+def _revenue_evidence(change: explanation.RevenueChange, snapshot: BranchSnapshot) -> dict:
+    """The revenue split as data. The three parts sum to `total_change` exactly (there is
+    a test on that property in test_explanation.py), which is the whole reason this can be
+    shown as evidence rather than as an opinion."""
+    return {
+        "kind": "revenue_split",
+        "from_total": snapshot.previous_net_revenue,
+        "to_total": snapshot.net_revenue,
+        "total_change": change.revenue_change,
+        "parts": [
+            {"label": "Fewer transactions" if change.transaction_effect < 0 else "More transactions",
+             "amount": round(change.transaction_effect, 2)},
+            {"label": "Smaller average sale" if change.basket_effect < 0 else "Bigger average sale",
+             "amount": round(change.basket_effect, 2)},
+            {"label": "Both at once", "amount": round(change.interaction_effect, 2)},
+        ],
+    }
 
 
 # --- Rules ----------------------------------------------------------------------------
@@ -231,6 +272,12 @@ def revenue_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert
             link="revenue",
             driver=driver,
             interpretation=interpretation,
+            chips=_chips(
+                _chip("Transactions", decomposed.transaction_growth_pct if decomposed else None, "pct_change"),
+                _chip("Average sale", decomposed.basket_growth_pct if decomposed else None, "pct_change"),
+                _chip("Revenue", growth, "pct_change"),
+            ),
+            evidence=_revenue_evidence(decomposed, snapshot) if decomposed else None,
         )
     ]
 
@@ -288,6 +335,17 @@ def margin_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]
                 link="cost",
                 driver=level_driver,
                 interpretation=level_interpretation,
+                chips=_chips(
+                    _chip("Gross margin", margin, "pct"),
+                    _chip(
+                        "Change",
+                        margin - snapshot.previous_gross_margin_pct
+                        if snapshot.previous_gross_margin_pct is not None
+                        and snapshot.previous_cost_coverage_pct >= MIN_COST_COVERAGE_PCT
+                        else None,
+                        "pct_points",
+                    ),
+                ),
             )
         ]
 
@@ -336,6 +394,10 @@ def margin_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]
             link="cost",
             driver=driver,
             interpretation=interpretation,
+            chips=_chips(
+                _chip("Gross margin", margin, "pct"),
+                _chip("Change", change, "pct_points"),
+            ),
         )
     ]
 
@@ -369,6 +431,10 @@ def stockout_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Aler
                 link="inventory",
                 driver=driver,
                 interpretation=interpretation,
+                chips=_chips(
+                    _chip("Products at risk", snapshot.critical_count, "count"),
+                    _chip("Days of stock left", CRITICAL_DAYS_OF_STOCK, "days"),
+                ),
             )
         ]
     if snapshot.low_count > 0:
@@ -388,6 +454,10 @@ def stockout_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Aler
                 link="inventory",
                 driver=driver,
                 interpretation=interpretation,
+                chips=_chips(
+                    _chip("Products running low", snapshot.low_count, "count"),
+                    _chip("Days of stock left", LOW_DAYS_OF_STOCK, "days"),
+                ),
             )
         ]
     if snapshot.watch_count > 0:
@@ -411,6 +481,10 @@ def stockout_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Aler
                 link="inventory",
                 driver=driver,
                 interpretation=interpretation,
+                chips=_chips(
+                    _chip("Products to watch", snapshot.watch_count, "count"),
+                    _chip("Days of stock left", WATCH_DAYS_OF_STOCK, "days"),
+                ),
             )
         ]
     return []
@@ -456,6 +530,10 @@ def dead_stock_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Al
                 "clearance price, and the ones not to reorder."
             ),
             link="inventory",
+            chips=_chips(
+                _chip("Not moving", snapshot.dead_stock_count, "count"),
+                _chip("Share of products", share, "pct"),
+            ),
         )
     ]
 
@@ -465,9 +543,9 @@ def traffic_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert
 
     Fires only when revenue itself stayed quiet enough not to raise its own alert. When
     revenue *is* visibly falling, `revenue_rule` already decomposes it and says whether
-    visits or baskets caused it — a second card repeating that same explanation would
+    transactions or the average sale caused it — a second card repeating that same explanation would
     be the exact duplication this engine avoids elsewhere. What is left here is the
-    genuinely hidden case: the headline looks fine because bigger baskets covered for
+    genuinely hidden case: the headline looks fine because a bigger average sale covered for
     the customers who stopped coming.
     """
     if not snapshot.previous_transaction_count or not snapshot.previous_avg_basket:
@@ -507,7 +585,7 @@ def traffic_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert
         Alert(
             id="traffic_decline",
             measure="transaction_growth_pct",
-            summary=f"Visits down {abs(transaction_growth):.1f}%",
+            summary=f"Transactions down {abs(transaction_growth):.1f}%",
             severity=WARNING,
             dimension="customer",
             title="Losing customers behind a steady revenue line",
@@ -524,6 +602,12 @@ def traffic_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert
             link="customer",
             driver=driver,
             interpretation=interpretation,
+            chips=_chips(
+                _chip("Transactions", transaction_growth, "pct_change"),
+                _chip("Average sale", basket_growth, "pct_change"),
+                _chip("Revenue", revenue_growth, "pct_change"),
+            ),
+            evidence=_revenue_evidence(decomposed, snapshot) if decomposed else None,
         )
     ]
 
@@ -550,25 +634,35 @@ def single_item_basket_rule(snapshot: BranchSnapshot, thresholds: Thresholds) ->
         Alert(
             id="single_item_baskets",
             measure="single_item_basket_share_pct",
-            summary=f"{share:.0f}% of visits buy one item",
+            summary=f"{share:.0f}% of transactions have one item",
             severity=severity,
             dimension="customer",
             title=(
-                "Many visits buy only one thing"
+                "Many transactions are a single item"
                 if severity == NORMAL
-                else "Most visits buy only one thing"
+                else "Most transactions are a single item"
             ),
             what_happened=f"{share:.0f}% of transactions in this period were a single line item.",
             recommended_action=(
-                "Nothing to act on yet. The Customer tab's items-per-basket histogram shows "
+                "Nothing to act on yet. The Customer tab's items-per-transaction histogram shows "
                 "whether this is how the branch has always sold."
                 if severity == NORMAL
-                else "Open the Customer tab's items-per-basket histogram. A high single-item share is "
+                else "Open the Customer tab's items-per-transaction histogram. A high single-item share is "
                 "usually a placement or bundling opportunity rather than a demand problem."
             ),
             link="customer",
             driver=driver,
             interpretation=interpretation,
+            chips=_chips(
+                _chip("Single-item transactions", share, "pct"),
+                _chip(
+                    "Change",
+                    share - snapshot.previous_single_item_basket_share_pct
+                    if snapshot.previous_transaction_count
+                    else None,
+                    "pct_points",
+                ),
+            ),
         )
     ]
 

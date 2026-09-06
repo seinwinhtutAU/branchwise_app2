@@ -127,43 +127,43 @@ def describe_revenue_change(change: RevenueChange) -> tuple[str, str]:
 
     # When the two effects oppose each other, revenue can still end up anywhere — so
     # these branches check the overall direction rather than assuming a fall. A branch
-    # whose revenue held up purely because bigger baskets covered for lost footfall is
+    # whose revenue held up purely because a bigger average sale covered for lost footfall is
     # in a genuinely different position from one whose revenue fell, and calling both
     # "the fall" would hide that.
     if transactions_hurt and not basket_hurt:
         interpretation = (
-            "The fall is driven by fewer visits — larger baskets partly offset it. The branch "
+            "The fall is driven by fewer transactions — a larger average sale partly offset it. The branch "
             "served fewer people, rather than the same people spending less."
             if change.revenue_change < 0
-            else "Revenue held up only because larger baskets made up for the lost visits — the "
+            else "Revenue held up only because a larger average sale made up for the lost transactions — the "
             "branch is serving fewer people than it was."
         )
     elif basket_hurt and not transactions_hurt:
         interpretation = (
-            "The fall is driven by smaller baskets — more visits partly offset it. Roughly as "
+            "The fall is driven by a smaller average sale — more transactions partly offset it. Roughly as "
             "many people came in, but each spent less."
             if change.revenue_change < 0
-            else "Revenue held up only because more visits made up for smaller baskets — each "
+            else "Revenue held up only because more transactions made up for a smaller average sale — each "
             "visit is worth less than it was."
         )
     elif transactions_hurt and basket_hurt:
         if change.dominant == "transactions":
             interpretation = (
-                "Both are down, but fewer visits account for most of the fall — this is a "
-                "footfall problem first and a basket-size problem second."
+                "Both are down, but fewer transactions account for most of the fall — this is a "
+                "footfall problem first and an average-sale problem second."
             )
         elif change.dominant == "basket":
             interpretation = (
-                "Both are down, but smaller baskets account for most of the fall — people are "
-                "still coming in, they are buying less each visit."
+                "Both are down, but the smaller average sale accounts for most of the fall — people are "
+                "still coming in, they are buying less each time."
             )
         else:
             interpretation = (
-                "Fewer visits and smaller baskets are contributing roughly equally, so neither "
+                "Fewer transactions and a smaller average sale are contributing roughly equally, so neither "
                 "one on its own explains the fall."
             )
     else:
-        interpretation = "Both visits and basket size moved in the branch's favour this period."
+        interpretation = "Both transactions and the average sale moved in the branch's favour this period."
 
     return driver, interpretation
 
@@ -402,13 +402,13 @@ def describe_basket_composition(
         )
     if change > 0:
         return (
-            f"Single-item visits rose {change:.0f} percentage points, from "
+            f"Single-item transactions rose {change:.0f} percentage points, from "
             f"{previous_single_item_share_pct:.0f}% to {single_item_share_pct:.0f}%.",
             "This is a recent shift, so it is worth finding what changed — a companion product "
             "out of stock, or a display that moved, will do this.",
         )
     return (
-        f"Single-item visits have fallen {abs(change):.0f} percentage points from "
+        f"Single-item transactions have fallen {abs(change):.0f} percentage points from "
         f"{previous_single_item_share_pct:.0f}%, but are still high.",
-        "The trend is going the right way; the level is still where baskets are worth building.",
+        "The trend is going the right way; the level is still where a bigger sale is worth building.",
     )

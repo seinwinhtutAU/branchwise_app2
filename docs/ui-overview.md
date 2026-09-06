@@ -111,7 +111,7 @@ Shown instead of the app shell whenever there's no active session. Centered card
 - White card containing:
   - A 2-tab segmented control: **Sign in** / **Sign up** (pill-style, active tab has a white pill + shadow inside a gray track).
   - A form: Email input, Password input (both full-width, labeled), and a full-width primary submit button (label changes to "Create account" in sign-up mode; shows an inline spinner while submitting).
-- Below the card, in dev builds only: a "Demo accounts · password 123456" section with 5 small pill buttons (Admin, Wholesale, AungThitSar, Ashley, Retail 3) that one-click sign in as seeded test accounts.
+- Below the card, in dev builds only: a "Demo accounts · password 12345678" section with 5 small pill buttons (Admin, Wholesale, AungThitSar, Ashley, Retail 3) that one-click sign in as seeded test accounts.
 
 No password-reset / forgot-password flow exists yet. Sign-up success (no immediate session, i.e. email confirmation required) shows a toast and flips back to the sign-in tab rather than showing a dedicated confirmation screen.
 
@@ -221,6 +221,32 @@ past the point where anyone could find anything in it:
 
 The two retail-only tabs (Data checks, Branch health) are hidden from a wholesale
 account, which has no Warning page or retail dashboard.
+
+## 3b. Wording: one name per thing
+
+The same idea had three names across the app — a sale slip was a *transaction* on the
+Revenue tab, a *visit* in an alert sentence and a *customer* in a chart label — which is
+exactly how a reader ends up wondering whether they are three different numbers.
+
+**The Dashboard's words are the app's words.** It is where these figures are first met
+and most often read, so everything else follows it rather than the other way round:
+
+| Idea | The word we use | Never |
+| --- | --- | --- |
+| One sale slip | **transaction** | visit, customer, footfall (in labels) |
+| What one transaction comes to, on average | **average sale** | basket, basket value |
+| How many lines are on one slip | **items per transaction** | items per basket, items per visit |
+| Transactions with one line only | **single-item transactions** | single-item baskets, single-item visits |
+| Money taken, after returns | **net revenue** (or **revenue**) | sales (which reads as "number of sales") |
+
+This governs tile captions, chart titles, the measure rows on the Overview page, and the
+alert sentences and chips — the alerts were the ones that had drifted, saying "visits"
+and "baskets" where the Dashboard says "transactions" and "average sale".
+
+It deliberately does **not** rename data: `transaction_count`, `avg_basket`,
+`single_item_basket_share_pct` and the rest keep their names in the API, the payloads and
+the database, since renaming those would churn the contract for a wording change and the
+mapping is one line of vocabulary, not a second meaning.
 
 ## 4. Reusable UI primitives (`components/ui/`)
 

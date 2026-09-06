@@ -10,7 +10,15 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./app.db"
 
+    # Logins moved from Supabase Auth to Neon Auth (managed Better Auth) on 2026-09-05,
+    # when the Supabase project was shut down. `supabase_url` is kept only so an older
+    # .env still loads; nothing reads it any more.
     supabase_url: str = ""
+
+    # The auth instance's base URL, e.g. https://<endpoint>.neonauth.<region>.aws.neon.tech/<db>/auth
+    neon_auth_base_url: str = ""
+    # Defaults to <base>/.well-known/jwks.json when left blank.
+    neon_auth_jwks_url: str = ""
 
     # Powers the retail chatbot (app/services/chat_agent.py). Left blank, the chat
     # endpoint responds with a clear "not configured" error instead of failing deep

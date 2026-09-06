@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { Session } from '@supabase/supabase-js'
-import { apiBaseUrl } from '@renderer/lib/supabaseClient'
+import type { Session } from '@renderer/lib/auth'
+import { apiBaseUrl } from '@renderer/lib/auth'
 import { invalidateImportedData } from '@renderer/lib/useCachedFetch'
 import { useToast } from '@renderer/lib/useToast'
 import { Button } from '@renderer/components/ui/Button'

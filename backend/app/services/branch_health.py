@@ -155,9 +155,9 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct_change",
                 0.3,
                 _GROWTH_BANDS,
-                definition="How many sales the branch made, against the period before it.",
+                definition="How many transactions the branch made, against the period before it.",
                 calculation=lambda s: (
-                    f"{s.transaction_count:,} sales this period, against "
+                    f"{s.transaction_count:,} transactions this period, against "
                     f"{s.previous_transaction_count:,} before."
                 ),
             ),
@@ -167,9 +167,9 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct_change",
                 0.2,
                 _GENTLE_GROWTH_BANDS,
-                definition="How much one customer spends in a single visit, against the period before.",
+                definition="How much a customer spends in one transaction, against the period before.",
                 calculation=lambda s: (
-                    f"{_ks(s.avg_basket)} per sale this period, against {_ks(s.previous_avg_basket)} before."
+                    f"{_ks(s.avg_basket)} per transaction this period, against {_ks(s.previous_avg_basket)} before."
                 ),
             ),
         ),
@@ -276,26 +276,26 @@ DIMENSIONS: tuple[Dimension, ...] = (
         sub_metrics=(
             SubMetric(
                 "items_per_basket_growth_pct",
-                "Items per basket growth",
+                "Items per transaction growth",
                 "pct_change",
                 0.55,
                 _GENTLE_GROWTH_BANDS,
-                definition="Whether customers are putting more or fewer different things in one sale.",
+                definition="Whether customers are putting more or fewer different things in one transaction.",
                 calculation=lambda s: (
-                    f"{s.avg_items_per_basket:.1f} items per sale this period, against "
+                    f"{s.avg_items_per_basket:.1f} items per transaction this period, against "
                     f"{s.previous_avg_items_per_basket:.1f} before."
                 ),
             ),
             SubMetric(
                 "single_item_basket_share_pct",
-                "Single-item baskets",
+                "Single-item transactions",
                 "pct",
                 0.45,
                 ((30.0, 100.0), (50.0, 75.0), (70.0, 40.0), (85.0, 0.0)),
-                definition="How many visits buy just one thing and leave.",
+                definition="How many transactions are one thing and nothing else.",
                 calculation=lambda s: (
                     f"{round(s.single_item_basket_share_pct / 100 * s.transaction_count):,} of "
-                    f"{s.transaction_count:,} sales had a single line."
+                    f"{s.transaction_count:,} transactions had a single line."
                     if s.transaction_count
                     else None
                 ),
