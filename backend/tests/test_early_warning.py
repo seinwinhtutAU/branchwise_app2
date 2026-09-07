@@ -351,7 +351,9 @@ def test_alerts_carry_their_figures_as_data_not_only_as_sentences():
     rows = {fact["label"]: fact for fact in alert.facts}
     assert set(rows) == {"Sales", "Customers served", "Average sale"}
     assert rows["Sales"]["after"] == "Ks 88,000"
-    assert rows["Sales"]["change"] == "-12.0%"
+    # A real minus sign: the same column carries "\u2212Ks 1,175,057" elsewhere, and a
+    # hyphen beside it looks like a different character, because it is.
+    assert rows["Sales"]["change"] == "\u221212.0%"
     # And the reader is told which days are being compared, since every one of those
     # movements is "against" something.
     assert alert.context is not None and " vs " in alert.context

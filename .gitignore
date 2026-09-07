@@ -50,3 +50,7 @@ retail_data/
 
 # JetBrains IDE settings (personal, not project configuration)
 .idea/
+
+# Diagram sources and their rendered images — presentation material, kept locally
+# (the repo already dropped the earlier presentation documents for the same reason).
+diagram/

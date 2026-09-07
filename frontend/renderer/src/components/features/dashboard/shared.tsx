@@ -5,6 +5,7 @@ import { Button } from '@renderer/components/ui/Button'
 import { Card } from '@renderer/components/ui/Card'
 import { Input } from '@renderer/components/ui/Input'
 import { Select } from '@renderer/components/ui/Select'
+import { TableContainer, Tbody, Td, Th, Thead, Tr } from '@renderer/components/ui/Table'
 import { ClipboardIcon } from '@renderer/components/ui/icons'
 import {
   EVIDENCE_LABEL,
@@ -63,7 +64,9 @@ function AlertSection({ label, children }: { label: string; children: React.Reac
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">{label}</span>
-      <p className="text-sm text-text-secondary">{children}</p>
+      {/* Capped for the same reason as the tables above: a line of prose running the full
+          width of the alerts table is hard to track back to the start of the next one. */}
+      <p className="text-sm text-text-secondary max-w-4xl">{children}</p>
     </div>
   )
 }
@@ -168,52 +171,121 @@ function AlertSplit({ split }: { split: RevenueSplit }): React.JSX.Element {
  * Every value arrives preformatted from the server, next to the sentences built from the
  * same figures, so a row can never round differently from the prose beside it.
  */
-function AlertFacts({ facts }: { facts: AlertFact[] }): React.JSX.Element {
+// Every table in an alert panel is one of the app's own tables — the bordered container,
+// the tinted header, the gridlines between cells — so a figure block here looks like the
+// Sale, Inventory and Import tables the same person reads all day, and like the
+// spreadsheet those numbers came out of. Capped in width on purpose: the Business Alerts
+// row this panel expands inside is as wide as that page's table, and a four-column figure
+// table stretched across all of it puts a label at one edge and its number at the other.
+function AlertTableShell({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return <TableContainer className="max-w-3xl">{children}</TableContainer>
+}
+
+/**
+ * A movement's change cell: an arrow for the way it went, coloured by whether that was
+ * good news.
+ *
+ * The two are deliberately different things. Cost of goods rising 14% is an *up* arrow —
+ * that is simply what the number did — painted red, because for that figure up is the
+ * wrong way. Colouring by the sign instead would tell the reader the opposite.
+ */
+function ChangeCell({ fact }: { fact: AlertFact }): React.JSX.Element {
+  if (!fact.change) {
+    // Nothing to compare against. A dash, never a zero: "0%" claims it did not move.
+    return <span className="text-text-muted">—</span>
+  }
+  const colour =
+    fact.tone === 'bad' ? 'text-error' : fact.tone === 'good' ? 'text-success' : 'text-text-muted'
   return (
-    <div className="flex flex-col">
-      {facts.map((fact) => (
-        <div
-          key={fact.label}
-          className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1.5 border-b border-border last:border-b-0"
-        >
-          <span className="w-40 shrink-0 text-sm text-text-muted">{fact.label}</span>
-          {fact.value !== undefined ? (
-            <span className="text-sm font-medium text-text-primary tabular-nums">{fact.value}</span>
-          ) : (
-            <>
-              {/* "was → is now", in that order, because the movement is the claim. The
-                  arrow carries it without a word: a label per column would triple the
-                  height of a block whose whole point is being scannable. */}
-              {fact.before && (
-                <>
-                  <span className="text-sm text-text-secondary tabular-nums">{fact.before}</span>
-                  <span className="text-text-muted" aria-hidden="true">
-                    →
-                  </span>
-                </>
-              )}
-              <span className="text-sm font-medium text-text-primary tabular-nums">{fact.after}</span>
-              {fact.change && (
-                <span
-                  className={cn(
-                    'text-sm tabular-nums',
-                    // The sign is not the verdict: cost of goods rising 14% is bad news
-                    // shown as a plus. Which way is up for a given figure is the rule's
-                    // business to know, so it sends `tone` and this only paints it.
-                    fact.tone === 'bad'
-                      ? 'text-error'
-                      : fact.tone === 'good'
-                        ? 'text-success'
-                        : 'text-text-muted'
-                  )}
-                >
-                  {fact.change}
-                </span>
-              )}
-            </>
-          )}
-        </div>
-      ))}
+    <span className={cn('inline-flex items-baseline gap-1 font-medium tabular-nums', colour)}>
+      {fact.direction && (
+        <>
+          <span aria-hidden="true" className="text-xs">
+            {fact.direction === 'up' ? '▲' : '▼'}
+          </span>
+          <span className="sr-only">{fact.direction === 'up' ? 'up' : 'down'} </span>
+        </>
+      )}
+      {fact.change}
+    </span>
+  )
+}
+
+/**
+ * The movements an alert is claiming, as a table: what each figure was last period, what
+ * it is now, and how far it moved.
+ *
+ * Named columns rather than "was → is now" on one line. The arrow said the same thing in
+ * less space, but a reader had to work out which figure was which, and the values did not
+ * line up under each other — which is the whole reason to put four numbers next to each
+ * other in the first place. The headers stay "Last period"/"This period" whatever period
+ * is selected: the exact days are already named above the table, and a header that
+ * changed with the period ("Last 7 days") would restate them in a worse place.
+ */
+function AlertMovements({ facts }: { facts: AlertFact[] }): React.JSX.Element {
+  return (
+    <AlertTableShell>
+      <Thead className="top-0">
+        <Tr>
+          <Th />
+          <Th className="text-right">Last period</Th>
+          <Th className="text-right">This period</Th>
+          <Th className="text-right">Change</Th>
+        </Tr>
+      </Thead>
+      <Tbody>
+        {facts.map((fact) => (
+          <Tr key={fact.label}>
+            <Td className="text-text-muted whitespace-nowrap">{fact.label}</Td>
+            <Td className="text-right tabular-nums text-text-secondary whitespace-nowrap">
+              {fact.before ?? '—'}
+            </Td>
+            <Td className="text-right tabular-nums font-medium whitespace-nowrap">{fact.after}</Td>
+            <Td className="text-right whitespace-nowrap">
+              <ChangeCell fact={fact} />
+            </Td>
+          </Tr>
+        ))}
+      </Tbody>
+    </AlertTableShell>
+  )
+}
+
+/**
+ * The facts that are not movements — "Products affected · 3 of 908" — as a two-column
+ * table. No header row: the left column *is* the label, and a header over it would only
+ * say "label" twice.
+ */
+function AlertValues({ facts }: { facts: AlertFact[] }): React.JSX.Element {
+  return (
+    <AlertTableShell>
+      <Tbody>
+        {facts.map((fact) => (
+          <Tr key={fact.label}>
+            <Td className="text-text-muted whitespace-nowrap w-48">{fact.label}</Td>
+            <Td className="font-medium">{fact.value}</Td>
+          </Tr>
+        ))}
+      </Tbody>
+    </AlertTableShell>
+  )
+}
+
+/**
+ * An alert's figures. Two tables rather than one, because the two kinds of row do not
+ * share columns: a movement has a previous value and a change, a plain fact has neither,
+ * and forcing them together leaves a table with two empty columns down one half.
+ *
+ * Most alerts produce only one of the two. Single-item baskets is the one that produces
+ * both, and there the movements lead — they are what the alert is claiming.
+ */
+function AlertFacts({ facts }: { facts: AlertFact[] }): React.JSX.Element {
+  const movements = facts.filter((fact) => fact.value === undefined)
+  const values = facts.filter((fact) => fact.value !== undefined)
+  return (
+    <div className="flex flex-col gap-3">
+      {movements.length > 0 && <AlertMovements facts={movements} />}
+      {values.length > 0 && <AlertValues facts={values} />}
     </div>
   )
 }
@@ -230,45 +302,34 @@ function AlertFacts({ facts }: { facts: AlertFact[] }): React.JSX.Element {
 function AlertTableBlock({ table }: { table: AlertTable }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-1">
-      {/* Its own horizontal scroll: a long product name must never widen the page. */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr>
-              {table.columns.map((column) => (
-                <th
-                  key={column.label}
+      <AlertTableShell>
+        <Thead className="top-0">
+          <Tr>
+            {table.columns.map((column) => (
+              <Th key={column.label} className={column.align === 'right' ? 'text-right' : undefined}>
+                {column.label}
+              </Th>
+            ))}
+          </Tr>
+        </Thead>
+        <Tbody>
+          {table.rows.map((row) => (
+            <Tr key={row[0]}>
+              {row.map((cell, index) => (
+                <Td
+                  key={table.columns[index]?.label ?? index}
                   className={cn(
-                    'py-1.5 pr-4 last:pr-0 text-xs font-semibold uppercase tracking-wide text-text-muted border-b border-border whitespace-nowrap',
-                    column.align === 'right' ? 'text-right' : 'text-left'
+                    'whitespace-nowrap',
+                    table.columns[index]?.align === 'right' && 'text-right tabular-nums'
                   )}
                 >
-                  {column.label}
-                </th>
+                  {cell}
+                </Td>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {table.rows.map((row) => (
-              <tr key={row[0]}>
-                {row.map((cell, index) => (
-                  <td
-                    key={table.columns[index]?.label ?? index}
-                    className={cn(
-                      'py-1.5 pr-4 last:pr-0 border-b border-border last:border-b-0 whitespace-nowrap',
-                      table.columns[index]?.align === 'right'
-                        ? 'text-right tabular-nums text-text-primary'
-                        : 'text-left text-text-primary'
-                    )}
-                  >
-                    {cell}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </Tr>
+          ))}
+        </Tbody>
+      </AlertTableShell>
       {table.note && <span className="text-xs text-text-muted">{table.note}</span>}
     </div>
   )

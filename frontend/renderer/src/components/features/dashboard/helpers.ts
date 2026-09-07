@@ -182,6 +182,9 @@ export interface AlertFact {
    * alone doesn't say (cost of goods up 14% is a plus and bad). Null when it is neither,
    * or when nothing moved. */
   tone?: 'good' | 'bad' | null
+  /** Which way it moved, which is a different question from whether that was good — the
+   * panel draws the arrow from this and takes its colour from `tone`. */
+  direction?: 'up' | 'down' | null
 }
 
 export interface AlertTable {

@@ -192,12 +192,18 @@ def _ks_change(amount: float) -> str:
     return f"{'−' if amount < 0 else '+'}{_ks(abs(amount))}"
 
 
+def _minus(text: str) -> str:
+    """A real minus sign, not a hyphen. Both appear in the same column of the same table
+    ("−Ks 1,175,057" beside "-5.6 points") and the difference is visible."""
+    return text.replace("-", "\u2212")
+
+
 def _pct(value: float) -> str:
-    return f"{value:.1f}%"
+    return _minus(f"{value:.1f}%")
 
 
 def _signed_pct(value: float) -> str:
-    return f"{value:+.1f}%"
+    return _minus(f"{value:+.1f}%")
 
 
 def _day(iso: str) -> str:
@@ -251,9 +257,21 @@ def _movement(
     so it says so here and the UI just renders the verdict.
     """
     tone = None
+    direction = None
     if delta is not None and change is not None and delta != 0:
         tone = "good" if (delta > 0) == higher_is_better else "bad"
-    return {"label": label, "before": before, "after": after, "change": change, "tone": tone}
+        # Which way it moved, kept separate from whether that was good: the panel draws an
+        # arrow for the direction and colours it by the verdict, so cost of goods rising
+        # reads as an up arrow in red rather than as a plus sign in green.
+        direction = "up" if delta > 0 else "down"
+    return {
+        "label": label,
+        "before": before,
+        "after": after,
+        "change": change,
+        "tone": tone,
+        "direction": direction,
+    }
 
 
 def _facts(*facts: dict | None) -> tuple[dict, ...]:
@@ -362,7 +380,7 @@ def _margin_facts(snapshot: BranchSnapshot) -> tuple[dict, ...]:
             "Margin",
             _pct(snapshot.previous_gross_margin_pct) if comparable else None,
             _pct(snapshot.gross_margin_pct or 0.0),
-            f"{(snapshot.gross_margin_pct or 0.0) - snapshot.previous_gross_margin_pct:+.1f} points"
+            _minus(f"{(snapshot.gross_margin_pct or 0.0) - snapshot.previous_gross_margin_pct:+.1f} points")
             if comparable
             else None,
             (snapshot.gross_margin_pct or 0.0) - snapshot.previous_gross_margin_pct
@@ -918,7 +936,7 @@ def single_item_basket_rule(snapshot: BranchSnapshot, thresholds: Thresholds) ->
                     if snapshot.previous_transaction_count
                     else None,
                     _pct(share),
-                    f"{share - snapshot.previous_single_item_basket_share_pct:+.1f} points"
+                    _minus(f"{share - snapshot.previous_single_item_basket_share_pct:+.1f} points")
                     if snapshot.previous_transaction_count
                     else None,
                     share - snapshot.previous_single_item_basket_share_pct

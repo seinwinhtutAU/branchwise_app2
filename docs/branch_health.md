@@ -253,12 +253,20 @@ figures laid out and labelled, in the order a reader asks for them:
    point-in-time fact, so they read the latest count and a fixed sales window whatever
    period is on screen). Without this line a reader comparing a July period against a
    stock alert has no way to know they are not the same days.
-2. **The figures** (`Alert.facts`) — one labelled row each, either a single value
-   ("Products affected · 3 of 908") or a movement ("Cost of goods · Ks 16,672,916 →
-   Ks 19,016,273 · +14.1%"). This is the panel's main content, and it exists because the
-   business asked to *see the data*: a sentence saying the margin fell is a claim, while
-   sales, cost of goods, what was kept and the margin — each with its previous value — is
-   that claim with its working attached, checkable against the shop's own books.
+2. **The figures** (`Alert.facts`), as tables. This is the panel's main content, and it
+   exists because the business asked to *see the data*: a sentence saying the margin fell
+   is a claim, while sales, cost of goods, what was kept and the margin — each with its
+   previous value — is that claim with its working attached, checkable against the shop's
+   own books. Two shapes, because the two kinds of row do not share columns:
+   **movements** get a four-column table headed *Last period · This period · Change*, and
+   **plain facts** ("Products affected · 3 of 908") a two-column key-value table with no
+   header, since the left column already is the label. An alert producing both (single-item
+   baskets) shows the movements first, as that is what it is claiming. The headers stay
+   "Last period"/"This period" whatever period is selected — the exact days are named in
+   the line above, and a header that changed with the period would restate them worse.
+   Both tables are width-capped: the row this panel expands inside is as wide as the
+   Business Alerts table, and a four-column figure table stretched across all of it puts a
+   label at one edge and its number at the other.
 3. **The products** (`Alert.table`), for an alert about a list rather than a number: the
    few with the least cover left, each with what is on the shelf, what sold in the last
    30 days, and how long that lasts, plus "78 more on the Inventory tab" when the list was
