@@ -47,3 +47,6 @@ retail_data/
 # .env backups (they carry live credentials)
 .env.*
 *.env.bak*
+
+# JetBrains IDE settings (personal, not project configuration)
+.idea/

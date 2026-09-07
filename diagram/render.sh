@@ -18,9 +18,10 @@ for f in "$here"/*.mmd; do
   name="$(basename "$f" .mmd)"
   echo "rendering $name"
   # -b white gives a solid background so the image drops cleanly into slides/Word.
-  # -s 3 renders at 3x for a sharp PNG on a projector.
-  "$mmdc" -i "$f" -o "$out/$name.png" -b white -s 3 -p "$here/puppeteer-config.json" --quiet
-  "$mmdc" -i "$f" -o "$out/$name.svg" -b white     -p "$here/puppeteer-config.json" --quiet
+  # -w 1600 renders on a wide canvas, so a left-to-right diagram is not squeezed into
+  # the default narrow one; -s 2 on top of that keeps the PNG sharp on a projector.
+  "$mmdc" -i "$f" -o "$out/$name.png" -b white -w 1600 -s 2 -p "$here/puppeteer-config.json" --quiet
+  "$mmdc" -i "$f" -o "$out/$name.svg" -b white -w 1600      -p "$here/puppeteer-config.json" --quiet
 done
 
 echo "done — images are in $out"

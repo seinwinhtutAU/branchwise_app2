@@ -68,19 +68,43 @@ function formatMoney(value: number): string {
   return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-// Files are expected daily, so "fresh" has a narrow window: today is fine, yesterday
-// is a soft warning (maybe just not uploaded yet today), anything older — or never
-// imported — is a real gap worth someone's attention.
+function daysSince(iso: string): number {
+  return Math.floor((Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function agoLabel(iso: string): string {
+  const days = daysSince(iso)
+  if (days <= 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  return `${days} days ago`
+}
+
+// Sales and inventory files are exported every day, so "fresh" has a narrow window:
+// today is fine, yesterday is a soft warning (maybe just not uploaded yet today),
+// anything older — or never imported — is a real gap worth someone's attention.
 function freshnessBadge(iso: string | null): { variant: 'success' | 'warning' | 'error'; label: string } {
   if (!iso) return { variant: 'error', label: 'Never imported' }
-  const days = Math.floor((Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24))
+  const days = daysSince(iso)
   if (days <= 0) return { variant: 'success', label: 'Today' }
   if (days === 1) return { variant: 'warning', label: 'Yesterday' }
   return { variant: 'error', label: `${days} days ago` }
 }
 
-function FreshnessCell({ iso }: { iso: string | null }): React.JSX.Element {
-  const { variant, label } = freshnessBadge(iso)
+// Purchases only happen when a branch actually restocks, which isn't every day, so an
+// old purchase import means "nothing was bought", not "someone forgot to upload".
+// Show when it last happened, but never grade it as late.
+function occasionalBadge(iso: string | null): { variant: 'default'; label: string } {
+  return { variant: 'default', label: iso ? agoLabel(iso) : 'None yet' }
+}
+
+function FreshnessCell({
+  iso,
+  expectedDaily = true
+}: {
+  iso: string | null
+  expectedDaily?: boolean
+}): React.JSX.Element {
+  const { variant, label } = expectedDaily ? freshnessBadge(iso) : occasionalBadge(iso)
   return (
     <div className="flex flex-col gap-1">
       <Badge variant={variant}>{label}</Badge>
@@ -237,7 +261,12 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
                   <Th>Branch</Th>
                   <Th>Sales</Th>
                   <Th>Inventory</Th>
-                  <Th>Purchase</Th>
+                  <Th>
+                    Purchase
+                    <span className="ml-1 font-normal normal-case text-xs text-text-muted">
+                      (not daily)
+                    </span>
+                  </Th>
                 </Tr>
               </Thead>
               <Tbody>
@@ -251,7 +280,7 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
                       <FreshnessCell iso={row.inventory_last_imported_at} />
                     </Td>
                     <Td>
-                      <FreshnessCell iso={row.purchase_last_imported_at} />
+                      <FreshnessCell iso={row.purchase_last_imported_at} expectedDaily={false} />
                     </Td>
                   </Tr>
                 ))}

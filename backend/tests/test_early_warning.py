@@ -18,6 +18,13 @@ def _snapshot(**overrides) -> BranchSnapshot:
     """A branch with nothing wrong with it. Every test changes one thing and asserts
     which alert that one thing raised, so a failure names the rule that broke."""
     base = dict(
+        # Real dates, because an alert states which days it is describing and which it
+        # compares against — a snapshot without them would quietly test a panel missing
+        # its first line.
+        date_from="2026-08-09",
+        date_to="2026-09-07",
+        previous_date_from="2026-07-10",
+        previous_date_to="2026-08-08",
         net_revenue=110_000.0,
         previous_net_revenue=100_000.0,
         transaction_count=110,
@@ -41,6 +48,7 @@ def _snapshot(**overrides) -> BranchSnapshot:
         at_risk_count=0,
         at_risk_demand_driven_count=0,
         at_risk_leading_item=None,
+        at_risk_top_items=(),
         avg_items_per_basket=3.0,
         previous_avg_items_per_basket=3.0,
         single_item_basket_share_pct=20.0,
@@ -188,6 +196,93 @@ def test_stockout_beats_low_stock_rather_than_firing_alongside_it():
     assert low[0].severity == early_warning.WARNING
 
 
+def test_stock_alert_hands_over_the_products_and_what_can_be_counted_on_the_shelf():
+    """A count of low products is unactionable on its own: nobody reorders eighty lines
+    off one sentence. The table names the few with the least cover left and, for each,
+    the two figures the shop can verify by looking — how many are there and how many
+    sold — plus how long that lasts. It says how many it left out, so five rows under a
+    count of eighty never read as the whole list."""
+    items = (
+        {
+            "stock_code": "BEV-014",
+            "description": "Coffee Mix",
+            "days_left": 1.8,
+            "status": "Critical",
+            "on_hand_qty": 10.0,
+            "sold_recent_qty": 150,
+            "demand_ratio": 2.4,
+            "selling_faster": True,
+        },
+        {
+            "stock_code": "SOP-200",
+            "description": "Soap 200g",
+            "days_left": 6.2,
+            "status": "Low",
+            "on_hand_qty": 40.0,
+            "sold_recent_qty": 195,
+            "demand_ratio": 0.9,
+            "selling_faster": False,
+        },
+    )
+    alert = _by_id(
+        early_warning.evaluate(
+            _snapshot(
+                low_count=80,
+                at_risk_count=80,
+                at_risk_leading_item=dict(items[0]),
+                at_risk_top_items=items,
+            )
+        ),
+        "low_stock",
+    )
+    assert alert.table is not None
+    assert [column["label"] for column in alert.table["columns"]] == [
+        "Product",
+        "In shop",
+        "Sold 30d",
+        "Lasts",
+    ]
+    assert alert.table["rows"][0] == ["BEV-014 · Coffee Mix", "10", "150", "2 days"]
+    assert alert.table["note"] == "78 more on the Inventory tab"
+
+
+def test_stock_alert_says_nothing_about_products_selling_faster():
+    """The demand/drawdown split was removed on purpose (see _stock_why): at shoe-shop
+    volumes it rested on a handful of sales and read far firmer than the evidence."""
+    alert = _by_id(early_warning.evaluate(_snapshot(low_count=2, at_risk_count=2)), "low_stock")
+    assert "faster" not in (alert.driver or "")
+    assert alert.interpretation is None
+    assert alert.evidence is None
+
+
+def test_the_customer_alert_carries_no_revenue_split():
+    """It is an alert about people, not about money moving between two causes. The
+    business asked for the "where the Ks came from" bars to go from this one; the revenue
+    alert still has them, because there the money *is* the subject."""
+    alert = _by_id(
+        early_warning.evaluate(
+            _snapshot(transaction_count=60, previous_transaction_count=100, avg_basket=1834.0)
+        ),
+        "traffic_decline",
+    )
+    assert alert.evidence is None
+    assert [fact["label"] for fact in alert.facts] == [
+        "Sales",
+        "Customers served",
+        "Average sale",
+        "Items per sale",
+    ]
+
+
+def test_a_stock_alert_with_nothing_at_risk_carries_no_table():
+    """`watch_stock` is the one stock alert raised without a Critical or Low product
+    behind it, so there is no shortlist to show — and an empty table would read as
+    "no products" rather than "there is nothing to order yet"."""
+    alert = _by_id(early_warning.evaluate(_snapshot(watch_count=4)), "watch_stock")
+    assert alert.table is None
+    assert alert.evidence is None
+
+
 def test_dead_stock_fires_on_share_not_raw_count():
     """Twelve dead SKUs is nothing in a 1,000-product shop and serious in a 40-product
     one, so the rule has to read the proportion."""
@@ -248,13 +343,18 @@ def test_dead_stock_and_margin_have_a_normal_tier_below_their_warning_one():
 
 
 def test_alerts_carry_their_figures_as_data_not_only_as_sentences():
-    """The UI shows the numbers as chips and as a split, so they travel as values. They
-    must be the same figures the sentences were built from — computed once, here."""
+    """The detail panel lays the figures out as labelled rows, so they travel as data.
+    They must be the same figures the sentences were built from — computed once, here,
+    and formatted here too, so a row can never round differently from the sentence beside
+    it."""
     alert = _by_id(early_warning.evaluate(_snapshot(net_revenue=88_000.0)), "revenue_decline")
-    labels = {chip["label"]: chip for chip in alert.chips}
-    assert set(labels) == {"Transactions", "Average sale", "Revenue"}
-    assert labels["Revenue"]["value"] == -12.0
-    assert labels["Revenue"]["unit"] == "pct_change"
+    rows = {fact["label"]: fact for fact in alert.facts}
+    assert set(rows) == {"Sales", "Customers served", "Average sale"}
+    assert rows["Sales"]["after"] == "Ks 88,000"
+    assert rows["Sales"]["change"] == "-12.0%"
+    # And the reader is told which days are being compared, since every one of those
+    # movements is "against" something.
+    assert alert.context is not None and " vs " in alert.context
 
     # The split is the evidence panel's whole claim: the parts sum to the actual change.
     parts = sum(part["amount"] for part in alert.evidence["parts"])
@@ -265,13 +365,19 @@ def test_alerts_carry_their_figures_as_data_not_only_as_sentences():
     )
 
 
-def test_an_unmeasurable_figure_produces_no_chip_rather_than_a_zero():
-    """Same rule as the score itself: nothing measured is nothing shown, never a 0."""
+def test_an_unmeasurable_figure_is_left_blank_rather_than_shown_as_a_zero():
+    """Same rule as the score itself: nothing measured is nothing shown, never a 0. With
+    no comparable previous margin, every row still appears — the figures for *this*
+    period are real — but nothing claims what they were before or by how much they
+    moved."""
     alert = _by_id(
         early_warning.evaluate(_snapshot(gross_margin_pct=8.0, previous_gross_margin_pct=None)),
         "low_margin",
     )
-    assert [chip["label"] for chip in alert.chips] == ["Gross margin"]
+    for fact in alert.facts:
+        assert fact["after"] is not None
+        assert fact["before"] is None
+        assert fact["change"] is None
     assert alert.evidence is None
 
 
@@ -290,7 +396,7 @@ def test_every_rule_that_can_show_figures_does():
     }
     for alert_id, snapshot in cases.items():
         alert = _by_id(early_warning.evaluate(snapshot), alert_id)
-        assert alert.chips, f"{alert_id} carries no figures"
+        assert alert.facts, f"{alert_id} carries no figures"
 
 
 def test_data_quality_alerts_reuse_the_warning_pages_own_titles_and_severities():

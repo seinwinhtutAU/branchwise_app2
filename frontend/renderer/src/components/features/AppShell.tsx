@@ -4,6 +4,7 @@ import { Button } from '@renderer/components/ui/Button'
 import { MenuIcon } from '@renderer/components/ui/icons'
 import { LogoChip, LogoWordmark } from '@renderer/components/ui/Logo'
 import type { Profile } from '@renderer/components/features/types'
+import { ConnectionBanner } from '@renderer/components/features/ConnectionBanner'
 
 export interface NavItem {
   id: string
@@ -262,6 +263,9 @@ export function AppShell({
       )}
 
       <div className="flex-1 min-w-0">
+        {/* Above the content rather than inside it, so it is the same one line whichever
+            page is open — and so no page has to know about the network to explain itself. */}
+        <ConnectionBanner />
         <main className="w-full px-4 sm:px-6 py-8 flex flex-col gap-8">{children}</main>
       </div>
     </div>

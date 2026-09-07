@@ -181,7 +181,7 @@ export function InventoryPage({ session, branchOptions, initialTab }: Props): Re
           session={session}
           endpoint="/api/inventory"
           title="Inventory"
-          description="Current stock on hand, from each product's most recent inventory snapshot."
+          description="Current stock on hand, as of each branch's most recent inventory count."
           icon={<InventoryIcon />}
           columns={INVENTORY_COLUMNS}
           filters={inventoryFilters}

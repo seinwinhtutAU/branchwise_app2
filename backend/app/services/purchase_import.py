@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from app.services.import_common import NumericRule, clean_text, parse_number, read_raw_grid
+from app.services.import_common import NumericRule, clean_description, clean_text, parse_number, read_raw_grid
 
 OUTPUT_COLUMNS = [
     "StockCode",
@@ -50,7 +50,7 @@ def parse_purchase_export_from_grid(rows: list[list[str]]) -> pd.DataFrame:
         records.append(
             {
                 "StockCode": row[0].strip(),
-                "Description": clean_text(row[1]),
+                "Description": clean_description(row[1]),
                 "Location": clean_text(row[2]),
                 "Quantity": parse_number(row[4]),
                 "UOM": row[5].strip(),

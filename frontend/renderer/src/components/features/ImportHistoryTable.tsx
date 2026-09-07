@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Session } from '@renderer/lib/auth'
 import { apiBaseUrl } from '@renderer/lib/auth'
-import { invalidateImportedData, useCachedFetch } from '@renderer/lib/useCachedFetch'
+import { invalidateCachedPages, useCachedFetch } from '@renderer/lib/useCachedFetch'
 import { useToast } from '@renderer/lib/useToast'
 import { cn } from '@renderer/lib/utils'
 import { useImportFilePicker } from '@renderer/lib/useImportFilePicker'
@@ -183,8 +183,8 @@ function ImportHistoryTable({
       }
       // The batch's sale/inventory/purchase rows are gone, so every cached page is now
       // wrong — including this one, which refetches itself as a result. See
-      // invalidateImportedData.
-      invalidateImportedData()
+      // invalidateCachedPages.
+      invalidateCachedPages()
     } catch {
       showToast('error', 'Revert failed — is the backend running?')
     } finally {

@@ -21,7 +21,9 @@ Both "Import freshness" (the original per-branch, per-import-type "when was this
 
 ### 1. Upload freshness — implemented, unchanged behavior
 
-Per retail branch, per import type: a badge for when it was last confirmed — Today (success), Yesterday (warning), "N days ago" or "Never imported" (error) — plus the exact timestamp. Reuses `GET /api/imports/freshness` as-is.
+Per retail branch, per import type: a badge for when it was last confirmed, plus the exact timestamp. Reuses `GET /api/imports/freshness` as-is — the endpoint just reports the last confirmed time per type and does no grading; how late counts as late is a frontend decision.
+
+**Sales and Inventory are graded as daily** — Today (success), Yesterday (warning, maybe just not uploaded yet today), "N days ago" or "Never imported" (error). **Purchase is not.** The business only buys stock when it restocks, not every day, so a purchase import that is a week old means "nothing was bought that week," not "someone stopped uploading" — grading it daily made a normal branch look permanently red. Its cell shows the same "N days ago"/"None yet" wording in a neutral badge, and the column header is marked "(not daily)" so the missing color isn't read as a bug. No longer threshold was substituted, because any number would be arbitrary: purchasing frequency isn't fixed, and this table has no way to know when a branch *should* have restocked.
 
 ### 2. Batches to review — implemented (all three import types, each with its own check)
 

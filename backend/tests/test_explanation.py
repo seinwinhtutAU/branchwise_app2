@@ -184,12 +184,14 @@ def test_low_margin_alert_explains_whether_the_level_is_new():
     assert alert.interpretation is not None and "standing level" in alert.interpretation
 
 
-def test_alerts_with_nothing_to_decompose_leave_the_why_empty():
+def test_alerts_with_nothing_to_decompose_name_no_cause():
     """Better an empty field than an invented cause — a dead-stock count has no two
-    components to split it into."""
+    components to split it into, so nothing here says *why* those products stopped
+    selling. The line it does carry says what the count means for the business, which is
+    a judgement about money, not a claim about a cause."""
     alert = _by_id(early_warning.evaluate(_snapshot(dead_stock_count=40)), "dead_stock")
-    assert alert.driver is None
     assert alert.interpretation is None
+    assert alert.driver is not None and "money sitting still" in alert.driver
 
 
 # --- stock risk -----------------------------------------------------------------------
@@ -260,7 +262,7 @@ def test_nothing_at_risk_means_nothing_to_explain():
     assert explanation.classify_stock_risk(3, 1, None) is None
 
 
-def test_stock_alert_carries_the_reason_it_is_at_risk():
+def test_stock_alert_explains_itself_by_how_long_the_stock_lasts():
     alert = _by_id(
         early_warning.evaluate(
             _snapshot(
@@ -272,8 +274,10 @@ def test_stock_alert_carries_the_reason_it_is_at_risk():
         ),
         "stockout_risk",
     )
-    assert alert.driver is not None and "BEV-014" in alert.driver
-    assert alert.interpretation is not None and "larger quantities" in alert.interpretation
+    # The "why" stays with what is solidly measured — how long the stock lasts — rather
+    # than naming a cause behind it; see early_warning._stock_why.
+    assert alert.driver is not None and "days of stock left" in alert.driver
+    assert alert.interpretation is None
     # And the headline reads as a sentence, not a form letter.
     assert "1 product has" in alert.what_happened
     assert "product(s)" not in alert.what_happened

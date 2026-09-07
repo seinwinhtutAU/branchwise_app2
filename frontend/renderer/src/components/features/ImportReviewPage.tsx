@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Session } from '@renderer/lib/auth'
 import { apiBaseUrl } from '@renderer/lib/auth'
-import { invalidateImportedData } from '@renderer/lib/useCachedFetch'
+import { useConnectionStatus } from '@renderer/lib/connection'
+import { RequestTimeoutError } from '@renderer/lib/network'
+import { invalidateCachedPages } from '@renderer/lib/useCachedFetch'
 import { useToast } from '@renderer/lib/useToast'
 import { Button } from '@renderer/components/ui/Button'
 import { Input } from '@renderer/components/ui/Input'
@@ -54,6 +56,16 @@ function ImportReviewPage({ session, profile, pending, queuePosition, onBack, on
 
   const [confirming, setConfirming] = useState(false)
 
+  // A confirm that never reached the server, held so the connection coming back finishes
+  // it instead of the importer having to notice and press the button again. The file is
+  // already in memory here, so "queued" costs nothing — but it lives only as long as this
+  // screen: closing the app means picking the file again.
+  const [waitingForConnection, setWaitingForConnection] = useState(false)
+  const connection = useConnectionStatus()
+  // A reimport reverts the old batch first. If that part succeeded and only the upload
+  // failed, the retry must not revert a second time — the batch is already gone.
+  const alreadyReverted = useRef(false)
+
   useEffect(() => {
     if (!needsBranchSelection) return
     fetch(`${apiBaseUrl}/api/branches`, {
@@ -105,10 +117,11 @@ function ImportReviewPage({ session, profile, pending, queuePosition, onBack, on
     setBranchRequiredError(false)
 
     setConfirming(true)
-    let removedPrevious = false
+    setWaitingForConnection(false)
+    let removedPrevious = alreadyReverted.current
 
     try {
-      if (revertBatchId) {
+      if (revertBatchId && !alreadyReverted.current) {
         // replaced=true marks the old batch REIMPORTED rather than REVERTED/"Removed" —
         // see ImportBatchStatus. The inline note below (not a blocking confirm() popup)
         // is the warning here; the user already chose to pick a replacement file.
@@ -125,6 +138,7 @@ function ImportReviewPage({ session, profile, pending, queuePosition, onBack, on
           return
         }
         removedPrevious = true
+        alreadyReverted.current = true
       }
 
       const formData = new FormData()
@@ -152,19 +166,42 @@ function ImportReviewPage({ session, profile, pending, queuePosition, onBack, on
       // Sales/inventory/purchase data just changed, so every cached dashboard and
       // Warning page is out of date. This is the honest invalidation signal in this app
       // — a confirmed or reverted import is the only thing that moves that data.
-      invalidateImportedData()
+      invalidateCachedPages()
       onConfirmed(body)
-    } catch {
+    } catch (error) {
+      // A request that timed out may have been saved anyway — the answer just never came
+      // back. Purchase imports in particular are not idempotent (see the import docs), so
+      // sending this file again on the app's own initiative could double-count a whole
+      // batch. That one is for a person to decide, after looking at Import History.
+      if (error instanceof RequestTimeoutError) {
+        showToast(
+          'error',
+          removedPrevious
+            ? 'The server stopped responding while saving. Check Import History before importing this file again — it may already be in.'
+            : 'The server stopped responding. Check Import History before importing this file again — it may already have been saved.'
+        )
+        return
+      }
+      // Nothing left the machine at all, so this is the connection rather than the file.
+      // Hold on to it and send it again once the link is usable — an import is the one
+      // thing in this app that can't just be re-read later from cache.
+      setWaitingForConnection(true)
       showToast(
-        'error',
-        removedPrevious
-          ? "Removed the previous import, but saving the new file failed — is the backend running? Import it again from here."
-          : 'Import failed — is the backend running?'
+        'info',
+        'No connection — this file will be sent automatically when the connection is back. Keep this window open.'
       )
     } finally {
       setConfirming(false)
     }
   }
+
+  // The retry itself. Fires when the connection store stops reporting an outage, which
+  // the network layer discovers on its own by probing the database every few seconds.
+  useEffect(() => {
+    if (!waitingForConnection || confirming || connection === 'offline') return
+    void handleConfirm()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waitingForConnection, confirming, connection])
 
   return (
     <div className="flex flex-col gap-4 animate-fade-in motion-reduce:animate-none">
@@ -202,6 +239,13 @@ function ImportReviewPage({ session, profile, pending, queuePosition, onBack, on
           value={((queuePosition.index - 1) / queuePosition.total) * 100}
           className="max-w-sm"
         />
+      )}
+
+      {waitingForConnection && (
+        <p className="text-sm text-warning bg-warning-subtle rounded-md px-3 py-2">
+          Waiting for the connection — this file will be imported automatically as soon as it
+          is back. Leaving this screen or closing the app cancels it.
+        </p>
       )}
 
       {revertBatchId && (

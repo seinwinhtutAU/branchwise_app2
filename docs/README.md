@@ -8,6 +8,7 @@ A desktop app for a Myanmar retail business with one wholesale branch and three 
 - [Data import pipeline](./data-import.md) — cleaning and persisting POS exports
 - [Auth & accounts](./auth-and-accounts.md) — how login works, seeded accounts
 - [Retail dashboard](./retail_dashboard.md) — the per-branch Revenue/Cost/Inventory/Customer tabs and how each number is computed
+- [Business alerts](./business-alerts.md) — every alert condition in plain language, with a worked example for each
 - [Branch health score](./branch_health.md) — the Overview tab's 0-100 score per dimension, its weight/band table, and how it handles data it can't measure
 - [Import health](./import_health.md) — checks on whether an import's cleaning/confirm step behaved correctly
 - [UI overview](./ui-overview.md) — design system and component conventions

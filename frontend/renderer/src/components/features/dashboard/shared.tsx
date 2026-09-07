@@ -10,11 +10,16 @@ import {
   EVIDENCE_LABEL,
   PERIOD_OPTIONS,
   WEEKDAY_LABELS,
+  formatCount,
   formatShortDate,
+  type AlertFact,
+  type AlertTable,
   type EvidenceTarget,
   type HealthAlert,
   type PeriodKey,
-  type SaleWarningRow
+  type RevenueSplit,
+  type SaleWarningRow,
+  type SubMetric
 } from './helpers'
 import type { PeriodRange } from './usePeriodRange'
 
@@ -64,14 +69,233 @@ function AlertSection({ label, children }: { label: string; children: React.Reac
 }
 
 /**
- * The body of an alert, in the four parts a reader actually asks for in order: what
- * happened, what appears to have driven it, what that means, and what to do about it.
+ * One measure's raw value — a measure row on the Overview tab, or a figure in an alert's
+ * chip row.
  *
- * Driver and interpretation are separate sections rather than one paragraph because they
- * are different kinds of claim — the driver is measured ("transactions −17.8%, average
- * sale +7.9%"), the interpretation is the reading of it ("this is a footfall problem, not
- * a basket-size one"). Running them together lets the second borrow the authority of the
- * first.
+ * A movement gets a green/red direction arrow and a signed number — the same ▲/▼ and the
+ * same colours the stat tiles use elsewhere on the dashboard, so a reader meets one
+ * visual language for "this went up" across the whole app.
+ *
+ * The colour follows the *direction*, not whether the movement was good: on single-item
+ * basket share a rise is a problem, so green means "went up" rather than "went well". The
+ * score beside it, or the alert around it, is what judges.
+ *
+ * "Percentage points" is written out. `pp` is correct and standard, and nobody outside
+ * finance reads it.
+ */
+export function MeasureValue({
+  value,
+  unit
+}: {
+  value: number
+  unit: SubMetric['unit']
+}): React.JSX.Element {
+  switch (unit) {
+    case 'pct_change':
+    case 'pct_points':
+      return (
+        <span className={cn('inline-flex items-baseline gap-1', value >= 0 ? 'text-success' : 'text-error')}>
+          <span aria-hidden="true" className="text-xs">
+            {value >= 0 ? '▲' : '▼'}
+          </span>
+          <span className="sr-only">{value >= 0 ? 'up' : 'down'} </span>
+          {value >= 0 ? '+' : '−'}
+          {Math.abs(value).toFixed(1)}
+          {unit === 'pct_change' ? '%' : ' points'}
+        </span>
+      )
+    case 'pct':
+      return <>{value.toFixed(1)}%</>
+    case 'days':
+      return <>{Math.round(value).toLocaleString()} days</>
+    case 'rate':
+      return <>{value.toFixed(1)} per 100</>
+    case 'count':
+      return <>{Math.round(value).toLocaleString()}</>
+  }
+}
+
+/**
+ * The movement drawn rather than described: each part as a bar, with the amount beside
+ * it.
+ *
+ * The parts sum to the total change exactly (the backend has a test on that property),
+ * which is the whole reason this can be shown as evidence instead of as an opinion. Bars
+ * are scaled against the largest part rather than against the total, since one part can
+ * pull the other way and a share-of-total bar would then run backwards.
+ */
+function AlertSplit({ split }: { split: RevenueSplit }): React.JSX.Element {
+  const widest = Math.max(...split.parts.map((part) => Math.abs(part.amount)), 1)
+  const fell = split.total_change < 0
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+        {`Where the Ks ${formatCount(Math.abs(split.total_change))} ${fell ? 'went' : 'came from'}`}
+      </span>
+      <div className="flex flex-col gap-1">
+        {split.parts.map((part) => (
+          <div key={part.label} className="flex items-center gap-3 text-sm">
+            <span className="w-44 shrink-0 text-text-secondary">{part.label}</span>
+            <span className="flex-1 min-w-[3rem] h-2 rounded-full bg-bg-base overflow-hidden">
+              <span
+                className={cn('block h-full rounded-full', part.amount < 0 ? 'bg-error' : 'bg-success')}
+                style={{ width: `${(Math.abs(part.amount) / widest) * 100}%` }}
+              />
+            </span>
+            <span
+              className={cn(
+                'w-32 shrink-0 text-right tabular-nums font-medium',
+                part.amount < 0 ? 'text-error' : 'text-success'
+              )}
+            >
+              {part.amount < 0 ? '−' : '+'} Ks {formatCount(Math.abs(part.amount))}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The alert's figures, laid out as labelled rows.
+ *
+ * This is the part the business asked for by name: not a sentence claiming the margin
+ * fell, but the sales, the cost of goods, what was kept, and the margin — each with what
+ * it was before and by how much it moved — so the claim can be checked rather than taken.
+ * A row with no `before` is simply a fact ("Products affected · 3 of 908").
+ *
+ * Every value arrives preformatted from the server, next to the sentences built from the
+ * same figures, so a row can never round differently from the prose beside it.
+ */
+function AlertFacts({ facts }: { facts: AlertFact[] }): React.JSX.Element {
+  return (
+    <div className="flex flex-col">
+      {facts.map((fact) => (
+        <div
+          key={fact.label}
+          className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1.5 border-b border-border last:border-b-0"
+        >
+          <span className="w-40 shrink-0 text-sm text-text-muted">{fact.label}</span>
+          {fact.value !== undefined ? (
+            <span className="text-sm font-medium text-text-primary tabular-nums">{fact.value}</span>
+          ) : (
+            <>
+              {/* "was → is now", in that order, because the movement is the claim. The
+                  arrow carries it without a word: a label per column would triple the
+                  height of a block whose whole point is being scannable. */}
+              {fact.before && (
+                <>
+                  <span className="text-sm text-text-secondary tabular-nums">{fact.before}</span>
+                  <span className="text-text-muted" aria-hidden="true">
+                    →
+                  </span>
+                </>
+              )}
+              <span className="text-sm font-medium text-text-primary tabular-nums">{fact.after}</span>
+              {fact.change && (
+                <span
+                  className={cn(
+                    'text-sm tabular-nums',
+                    // The sign is not the verdict: cost of goods rising 14% is bad news
+                    // shown as a plus. Which way is up for a given figure is the rule's
+                    // business to know, so it sends `tone` and this only paints it.
+                    fact.tone === 'bad'
+                      ? 'text-error'
+                      : fact.tone === 'good'
+                        ? 'text-success'
+                        : 'text-text-muted'
+                  )}
+                >
+                  {fact.change}
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * The products behind an alert that is about a list rather than a number.
+ *
+ * A count of eighty low products is unactionable on its own — nobody reorders eighty lines
+ * off one sentence. These are the few with the least cover left, each with the two figures
+ * the shop can verify by walking to the shelf (how many are there, how many sold) and the
+ * one it cannot (how long that lasts). The note says how many were left out, so five rows
+ * under a count of eighty never read as the whole list.
+ */
+function AlertTableBlock({ table }: { table: AlertTable }): React.JSX.Element {
+  return (
+    <div className="flex flex-col gap-1">
+      {/* Its own horizontal scroll: a long product name must never widen the page. */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr>
+              {table.columns.map((column) => (
+                <th
+                  key={column.label}
+                  className={cn(
+                    'py-1.5 pr-4 last:pr-0 text-xs font-semibold uppercase tracking-wide text-text-muted border-b border-border whitespace-nowrap',
+                    column.align === 'right' ? 'text-right' : 'text-left'
+                  )}
+                >
+                  {column.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {table.rows.map((row) => (
+              <tr key={row[0]}>
+                {row.map((cell, index) => (
+                  <td
+                    key={table.columns[index]?.label ?? index}
+                    className={cn(
+                      'py-1.5 pr-4 last:pr-0 border-b border-border last:border-b-0 whitespace-nowrap',
+                      table.columns[index]?.align === 'right'
+                        ? 'text-right tabular-nums text-text-primary'
+                        : 'text-left text-text-primary'
+                    )}
+                  >
+                    {cell}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {table.note && <span className="text-xs text-text-muted">{table.note}</span>}
+    </div>
+  )
+}
+
+/**
+ * The body of an alert: which days it covers, the figures, the products behind them, why,
+ * and the one thing to do about it.
+ *
+ * The order is the order the question is actually asked in. The figures lead, laid out as
+ * labelled rows rather than buried in prose, because the business asked to *see the data*
+ * — a sentence saying the margin fell is a claim, and four rows showing sales, cost of
+ * goods, what was kept and the margin is that claim with its working attached. The dates
+ * sit above them, since every one of those movements is "against" something, and the stock
+ * rules in particular ignore the period control entirely (they read the latest count and a
+ * fixed sales window) — this line is where a reader can see that rather than assume
+ * otherwise.
+ *
+ * `driver` and `interpretation` are merged into one "Why". They are different kinds of
+ * claim — one measured, one a reading of it — but a reader asks them as a single question,
+ * and two headings for one thought is how this panel used to read like a report. The
+ * measured half still leads the paragraph, so the reading never borrows its authority
+ * silently.
+ *
+ * `what_happened` is deliberately *not* shown any more: it was a sentence stating the same
+ * figures now sitting in the rows above, and the two together read as the panel saying
+ * everything twice. It stays on the payload for the collapsed row and the branch cards.
  *
  * The action sits apart, tinted and holding the button, because it is the thing the whole
  * alert exists to produce.
@@ -83,25 +307,36 @@ export function AlertExplanation({
   alert: HealthAlert
   onOpenEvidence: (target: EvidenceTarget) => void
 }): React.JSX.Element {
+  const why = [alert.driver, alert.interpretation].filter(Boolean).join(' ')
   return (
-    <div className="grid gap-4 md:grid-cols-3">
-      <div className="md:col-span-2 flex flex-col gap-3">
-        <AlertSection label="What happened">{withNumbersEmphasised(alert.what_happened)}</AlertSection>
-        {alert.driver && (
-          <AlertSection label="Possible driver">{withNumbersEmphasised(alert.driver)}</AlertSection>
-        )}
-        {alert.interpretation && (
-          <AlertSection label="Interpretation">{withNumbersEmphasised(alert.interpretation)}</AlertSection>
-        )}
-      </div>
+    <div className="flex flex-col gap-4 py-1">
+      {alert.context && (
+        <span className="text-xs text-text-muted">{alert.context}</span>
+      )}
 
-      <div className="rounded-lg border border-border-brand bg-brand-subtle p-3 flex flex-col gap-2 self-start">
+      {/* `?? []` rather than `.length` directly: the page cache is on disk now, so a
+          payload written by an older version of the app can outlive it, and a detail
+          panel is exactly where that first shows — it did, as a blank red page. */}
+      {(alert.facts ?? []).length > 0 ? (
+        <AlertFacts facts={alert.facts} />
+      ) : (
+        // Data-quality alerts carry no figures of their own — they hand the Warning
+        // page's own count straight through, and that sentence is all there is.
+        <AlertSection label="What happened">{withNumbersEmphasised(alert.what_happened)}</AlertSection>
+      )}
+
+      {alert.table && <AlertTableBlock table={alert.table} />}
+      {alert.evidence?.kind === 'revenue_split' && <AlertSplit split={alert.evidence} />}
+
+      {why && <AlertSection label="Why">{withNumbersEmphasised(why)}</AlertSection>}
+
+      <div className="rounded-lg border border-border-brand bg-brand-subtle p-3 flex flex-wrap items-center gap-x-6 gap-y-2">
         <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-brand">
           <ClipboardIcon className="w-3.5 h-3.5" />
           What to do
         </span>
-        <p className="text-sm text-text-primary">{alert.recommended_action}</p>
-        <Button variant="secondary" size="sm" className="self-start" onClick={() => onOpenEvidence(alert.link)}>
+        <p className="flex-1 min-w-[16rem] text-sm text-text-primary">{alert.recommended_action}</p>
+        <Button variant="secondary" size="sm" onClick={() => onOpenEvidence(alert.link)}>
           {EVIDENCE_LABEL[alert.link]} →
         </Button>
       </div>

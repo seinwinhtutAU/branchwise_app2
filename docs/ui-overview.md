@@ -47,9 +47,13 @@ the app feel slow.
 
 The cache key is the full request URL, so any change to period, date range or branch is
 a different key and fetches properly. Beyond that a cached entry is reused until one of
-four things happens: `invalidateImportedData()` is called (from confirming an import in
-`ImportReviewPage` and from reverting one in `ImportHistoryTable` — those are the only
-things in this app that change the sale/inventory/purchase data these pages read);
+four things happens: `invalidateCachedPages()` is called (from confirming an import in
+`ImportReviewPage`, from reverting one in `ImportHistoryTable` — the only things that
+change the sale/inventory/purchase data these pages read — and from saving any business
+setting other than the theme in `appSettings.updateSettings`, since a health weight, an
+alert threshold or a check window changes what the server computes *from* that data, and
+without it an admin could save a new weight and return to a dashboard still scored under
+the old one);
 `useImportedDataWatch` (called once in `App.tsx`) notices that *someone else* changed it,
 by polling `GET /api/imports/data-version` every minute and on window focus — a token
 built from the newest created/reverted import-batch timestamps and the batch count,
@@ -174,7 +178,7 @@ Same open questions as Data Overview apply here (no pagination/filter/search, on
 ### 3.9 Import Overview (`ImportOverviewPage`)
 One nav item, two tabs (`OverviewTabBar`, same pill visual as Dashboard's tab bar): **Import freshness** and **Import Health**. A single "Refresh" button above the tabs reloads both regardless of which is active. See `docs/import_health.md` for the full design rationale (that doc's title reflects the "Import Health" tab/feature specifically; "Import Overview" is the nav item both tabs share).
 
-- **Import freshness tab** — at-a-glance per-branch import recency (`GET /api/imports/freshness`): Branch, Sales, Inventory, Purchase, each cell a colored freshness badge (green "Today", amber "Yesterday", red "N days ago" or "Never imported") plus the exact localized timestamp underneath.
+- **Import freshness tab** — at-a-glance per-branch import recency (`GET /api/imports/freshness`): Branch, Sales, Inventory, Purchase, each cell a badge plus the exact localized timestamp underneath. Sales and Inventory are expected daily and are graded by color (green "Today", amber "Yesterday", red "N days ago" or "Never imported"). Purchase isn't — the business only imports a purchase file when it actually restocks — so it shows the same recency wording in a neutral badge under a "Purchase (not daily)" header, never flagged as late.
 - **Import Health tab** — checks whether the cleaning/confirm step itself behaved correctly for a given upload, not the data already saved (that's Warning, below). A "Period" select (7/30/90 days, pinned to the right end of the tab row, this tab only) plus 3 stat tiles (batches checked, batches flagged, slip-total mismatches) backed by `GET /api/imports/health?days=`.
   - **Batches to review** — one table across all three import types, each with its own failure mode: Sales flags an anomalously high skip rate (its slip_id dedup is per-branch, so a spike means something's off); Purchase flags two same-branch batches with suspiciously matching totals (it has no dedup at all, so a re-upload silently double-counts); Inventory flags a batch whose stock-code count falls far below that branch's recent baseline (a sign of a partial/bad parse, since it intentionally keeps full snapshot history rather than deduping). Each row has "View in History →" (jumping to that batch, same as Warning's Source Import link) and "Dismiss" (marks the flag handled without touching the batch's data — for a historical flag whose gap was already patched by a separate batch).
   - **Slip-total mismatches** (Sales only) — a slip whose line items don't sum to its own printed subtotal row; this was previously computed during parsing but only ever reached a server log, never a screen.

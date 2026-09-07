@@ -316,8 +316,13 @@ def get_import_freshness(
     user: User = Depends(get_current_app_user), db: Session = Depends(get_db)
 ) -> list[dict]:
     """Per branch, when sales/inventory/purchase were each last successfully
-    confirmed — since files are expected daily, this surfaces a branch that
-    quietly stopped uploading, not just whether an individual import worked.
+    confirmed — surfacing a branch that quietly stopped uploading, not just
+    whether an individual import worked.
+
+    Only the timestamps are reported; deciding how late is "late" is left to the
+    caller, because it differs per type. Sales and inventory are exported daily,
+    but a purchase file only appears when a branch actually restocks, so an old
+    purchase import is normal rather than a gap (the UI shows it ungraded).
     """
     branches_query = list_retail_branches(db)
     if user.branch_id is not None:

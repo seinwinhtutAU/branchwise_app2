@@ -65,6 +65,36 @@ def clean_text(value: str) -> str:
     return text
 
 
+def title_case(text: str) -> str:
+    """Product names as a person would write them: "golden duck" -> "Golden Duck".
+
+    POS operators type descriptions however they please, so the same shelf ends up with
+    "lily", "Lily", "NIKE", "adidas" and "CLassic" side by side, and every screen in the
+    app shows that inconsistency back to the reader. One capital letter per word is what
+    the business asked for, so that is exactly the rule: first letter up, the rest down.
+
+    Two things are deliberately left alone. Myanmar text has no upper and lower case at
+    all, so it passes through untouched by definition. Words containing a digit are
+    skipped too ("3D", "500ML"), since those read as codes or sizes rather than words and
+    lowercasing them ("3d", "500Ml") looks like a mistake.
+
+    The cost is a handful of run-together brand names — "AandFicth" becomes "Aandficth" —
+    because nothing in the text says where one word ends and the next begins. That is the
+    trade for fixing the far more common "NIKE"/"adidas"/"CLassic" case, and it is only
+    the display label: `stock_code` remains the key that identifies a product.
+    """
+    return " ".join(
+        word if any(character.isdigit() for character in word) else word.capitalize()
+        for word in text.split()
+    )
+
+
+def clean_description(value: str) -> str:
+    """`clean_text` plus the title-casing above — what every import runs a product
+    description through, so a name is stored the same way whichever file it arrived in."""
+    return title_case(clean_text(value))
+
+
 def read_raw_grid(file_bytes: bytes, filename: str) -> list[list[str]]:
     """Read a raw POS export (csv/xls/xlsx) into a grid of string cells, unmodified."""
     ext = Path(filename).suffix.lower()

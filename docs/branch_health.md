@@ -118,13 +118,15 @@ changes. Every alert carries `title`, `what_happened`, `recommended_action`, a
 `severity`, the `dimension` it belongs to, and the `link` naming the tab holding its
 evidence.
 
-**There are three severities, and only two of them ask for anything.** `critical` is act
-today, `warning` is act soon, and `normal` is a movement drifting the wrong way that is
-not worth doing anything about yet — a margin down a point, a product with a fortnight of
+**There are three severities, and only two of them ask for anything.** The axis is
+whether the alert **requires a decision**, not how quickly someone should move:
+`critical` requires a decision now, `warning` requires one but the business chooses when
+to make it, and `normal` requires no decision at all — a movement drifting the wrong way
+that is only there so it can be seen starting — a margin down a point, a product with a fortnight of
 cover left. A third level is normally how an alert list turns into noise, and the reason
 it does not here is that **nothing counts it**: the nav badge, the Business Alerts branch
 tiles and the Overview branch cards all count criticals and warnings only, so the number
-a manager reacts to still means "things to act on", while the list itself can show the
+a manager reacts to still means "decisions waiting", while the list itself can show the
 drift that used to produce no row at all. A `normal` alert's `recommended_action` says as
 much in its first words ("Nothing to act on yet…"), and there is a test asserting it.
 
@@ -225,15 +227,15 @@ against the margin). A low margin *level* is a different question again, and
 margin thin for months is a pricing decision to revisit; one that was healthy last
 period is an event to investigate.
 
-**Stock risk decomposes the same way**, because days left = on hand ÷ recent selling
-rate. A product hits the threshold either because its stock fell or because its sales
-rose, and those call for different responses — reorder sooner, versus reorder *more*.
-`classify_stock_risk` compares each at-risk product's recent daily rate against its own
-rate over the 60 days before that (backed out of the 30- and 90-day velocity figures
-`_stock_summary` already computes, so it costs no extra query), and calls the risk
-`demand`, `drawdown` or `mixed` by the same 65% dominance rule. A product that sold
-nothing at all in the earlier window counts as new demand rather than getting a ratio —
-dividing by zero aside, "new" is the stronger signal of the two.
+**Stock risk can be decomposed the same way** — days left = on hand ÷ recent selling
+rate, so a product hits the threshold either because its stock fell or because its sales
+rose — and `classify_stock_risk` still does it, comparing each at-risk product's recent
+daily rate against its own rate over the 60 days before that. **No alert uses it any
+more.** At this business's volumes the comparison rests on a handful of sales (one
+product's "0.6× its earlier rate" came from 5 sales against 18 in the previous two
+months), and the business asked for it to go rather than have a sentence claim more than
+the data supports. The stock alert's "why" is now how long the stock lasts, and nothing
+about why.
 
 **A high single-item basket share** gets the `low_margin` treatment, since it is also a
 level rather than a movement: the question that changes the decision is whether it is
@@ -242,21 +244,72 @@ jumped from 45% to 78% has an event to find — a companion product out of stock
 display that moved. Its drift threshold is 5 percentage points rather than margin's 1,
 because basket composition moves with the weather and the day of the week.
 
-In the UI (`AlertExplanation` in `dashboard/shared.tsx`) an opened alert reads as four
-labelled parts, in the order a reader asks for them: **What happened**, **Possible
-driver**, **Interpretation**, **What to do**.
+In the UI (`AlertExplanation` in `dashboard/shared.tsx`) an opened alert shows its
+figures laid out and labelled, in the order a reader asks for them:
 
-Driver and interpretation are separate sections rather than one paragraph because they
-are different kinds of claim — the driver is measured ("transactions −17.8%, average sale
-+7.9%"), the interpretation is the reading of it ("this is a footfall problem, not an
-average-sale one"). Running them together lets the second borrow the authority of the
-first. The action sits apart, tinted and holding the evidence button, since it is the
-thing the whole alert exists to produce.
+1. **The dates** (`Alert.context`) — "9 Aug – 7 Sep 2026 vs 10 Jul – 8 Aug 2026" for the
+   rules that follow the period control, and "stock count of 6 Sep · sold in the last 30
+   days" for the stock rules, which deliberately ignore it (current stock is a
+   point-in-time fact, so they read the latest count and a fixed sales window whatever
+   period is on screen). Without this line a reader comparing a July period against a
+   stock alert has no way to know they are not the same days.
+2. **The figures** (`Alert.facts`) — one labelled row each, either a single value
+   ("Products affected · 3 of 908") or a movement ("Cost of goods · Ks 16,672,916 →
+   Ks 19,016,273 · +14.1%"). This is the panel's main content, and it exists because the
+   business asked to *see the data*: a sentence saying the margin fell is a claim, while
+   sales, cost of goods, what was kept and the margin — each with its previous value — is
+   that claim with its working attached, checkable against the shop's own books.
+3. **The products** (`Alert.table`), for an alert about a list rather than a number: the
+   few with the least cover left, each with what is on the shelf, what sold in the last
+   30 days, and how long that lasts, plus "78 more on the Inventory tab" when the list was
+   capped (`AT_RISK_SHORTLIST_LIMIT`). A branch with eighty low products gets one true,
+   unactionable sentence otherwise; nobody reorders eighty lines off a count.
+4. **The revenue split** (`Alert.evidence`, `kind: revenue_split`) — on the revenue alert
+   only, since that is the one whose subject is the money itself. The customer alert
+   (`traffic_decline`) had it too and the business asked for it to go: that alert is about
+   people, and a bar chart of where the Kyat came from answers a question its reader is
+   not asking. Where it does appear:
+   each part as a bar with its amount, scaled against the largest part rather than the
+   total, since one part can pull the other way and a share-of-total bar would run
+   backwards. The parts sum to the total change exactly, which is the property that lets
+   this be shown as evidence at all.
+5. **Why**, then **What to do** — the latter tinted and holding the evidence button, since
+   it is the thing the whole alert exists to produce.
 
-A redesign of this panel — one sentence, the figures as chips, and the arithmetic behind a
-"How this was worked out" disclosure — was built and then reverted at the business's
-request; the four-part layout is what ships. `Alert.chips` and `Alert.evidence` (below)
-remain on the payload, so it can be picked up again without touching the engine.
+**Values are formatted on the server, not the client.** Every fact arrives as a finished
+string ("Ks 19,016,273", "-5.6 points"), built beside the sentences from the same figures.
+Formatting them twice is how a panel ends up showing "32.8%" next to a sentence saying
+"33%".
+
+**A movement's colour is the rule's verdict, not its sign.** Cost of goods rising 14% is a
+plus sign and bad news, so each fact carries a `tone` decided where the figure's meaning is
+known; the panel only paints it. This was caught in review with "+14.1%" rendered green.
+
+**`what_happened` is no longer shown here.** It states in a sentence exactly what the rows
+above it now show, and the two together read as the panel saying everything twice. It stays
+on the payload for the collapsed row, the branch cards, and the data-quality alerts, which
+carry no figures of their own and fall back to it.
+
+**Why is one block, not two.** Driver and interpretation are different kinds of claim —
+the driver is measured ("transactions −17.8%, average sale +7.9%"), the interpretation is
+the reading of it ("this is a footfall problem, not an average-sale one") — but a reader
+asks them as a single question, and two stacked headings for one thought is what made this
+panel read like a report. The measured half still leads the paragraph, so the reading never
+borrows its authority silently.
+
+**The chip row is gone**, along with the stock alert's demand/drawdown evidence block. The
+chips showed two or three of the same figures the fact rows now carry in full, and keeping
+both would have been the duplication this engine avoids everywhere else. The
+demand/drawdown split — "selling faster than before → order more" against "simply run down
+→ order sooner" — was removed at the business's request: at this shop's volumes it rests on
+a handful of sales, and a sentence like "selling 0.6× its earlier rate" reads far firmer
+than the evidence under it. `explanation.classify_stock_risk` still exists and is still
+tested, but no alert uses it.
+
+The layout above was reviewed by the business as a text mock before any of it was built,
+after two earlier attempts (a disclosure holding the arithmetic, then a numbered
+step-by-step) were rejected for reading like a developer's working rather than a shop
+owner's summary.
 
 Percentages, money and counts inside those sentences are bolded, so a reader can take the
 number off the row at a glance and read the sentence only if they want the rest.
@@ -393,8 +446,9 @@ mostly dead stock rather than stockouts. Nothing is hidden and nothing is summar
 - **How it scores** — the band table itself, rendered from `SubMetric.bands`, with this
   period's value marked on it.
 
-**And the alert about that measure, if there is one** — its severity, what happened,
-the driver, the interpretation and what to do, in full. Every alert names the
+**And the alert about that measure, if there is one** — the same `AlertExplanation` panel
+the Business Alerts page uses, in full: its figures, the split behind them, what happened,
+why, and what to do. Every alert names the
 `SubMetric.key` it concerns (`Alert.measure`), so it appears inside the row holding the
 very number it is talking about. A row with an alert waiting inside carries a small
 severity dot next to its name; without it the row looks like every other one and nobody
@@ -466,18 +520,17 @@ the same furniture and the same places as the Sale, Inventory and Data Overview 
 Each chip shows its count under the current branch filter, so a chip's number always
 matches what clicking it produces.
 
-**An alert carries its figures as data, not only inside its sentences.** `Alert.chips`
-is the two or three numbers that make it legible at a glance (`{label, value, unit}` —
-`pct_change`/`pct_points` are movements, `pct`/`count`/`days` are levels), and
-`Alert.evidence` is the decomposition behind it (`kind: "revenue_split"`, the before and
-after totals, and the three parts that sum to the change). Both are filled by the rules
-from the same `explanation.py` results the sentences were built from, so the UI renders
-one set of numbers rather than recomputing a second — the "nothing is measured twice"
-rule applied across the wire. Nothing renders them today — the panel that used them was
-reverted (above) — but they cost one dataclass field each and mean a future panel reads
-figures rather than re-deriving them. A figure that could not be measured produces no chip at all
-rather than a zero, and a rule with nothing to decompose leaves `evidence` null, exactly
-as it already leaves `driver` empty.
+**An alert carries its figures as data, not only inside its sentences.** `Alert.facts`
+is the labelled rows the detail panel shows — a single value (`{label, value}`) or a
+movement (`{label, before, after, change, tone}`) — `Alert.table` is the products behind a
+list-shaped alert, and `Alert.evidence` is the revenue decomposition (`kind:
+"revenue_split"`, the before and after totals, and the three parts that sum to the
+change). All are filled by the rules from the same `explanation.py` results the sentences
+were built from, so the UI renders one set of numbers rather than recomputing a second —
+the "nothing is measured twice" rule applied across the wire, extended to formatting: the
+values arrive as finished strings, because formatting them twice is how a row ends up
+disagreeing with the sentence beside it. A figure that could not be measured leaves its
+`before`/`change` empty rather than showing a zero.
 
 **Every branch appears, including the healthy ones.** Above the table sits one tile per
 retail branch — its overall score, its status band, and how many alerts it has here.

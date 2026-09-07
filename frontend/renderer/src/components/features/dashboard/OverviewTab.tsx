@@ -10,7 +10,7 @@ import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/u
 import { EmptyState } from '@renderer/components/ui/EmptyState'
 import { Skeleton } from '@renderer/components/ui/Skeleton'
 import { ChevronDownIcon, ChevronUpIcon, DashboardIcon, WarningIcon } from '@renderer/components/ui/icons'
-import { AlertExplanation, RefreshingHint } from './shared'
+import { AlertExplanation, MeasureValue, RefreshingHint } from './shared'
 import {
   ACTIONABLE_SEVERITIES,
   EVIDENCE_LABEL,
@@ -55,46 +55,6 @@ const DIMENSION_EVIDENCE: Record<string, EvidenceTarget> = {
   inventory: 'inventory',
   customer: 'customer',
   data_quality: 'warnings'
-}
-
-/**
- * One measure's raw value.
- *
- * A movement gets a green/red direction arrow and a signed number — the same ▲/▼ and the
- * same colours the stat tiles use elsewhere on the dashboard, so a reader meets one
- * visual language for "this went up" across the whole app.
- *
- * The colour follows the *direction*, not whether the movement was good: on one measure
- * here — single-item basket share — a rise is a problem, so green means "went up" rather
- * than "went well". The Score column beside it is the one that judges.
- *
- * "Percentage points" is written out. `pp` is correct and standard, and nobody outside
- * finance reads it.
- */
-function SubMetricValue({ value, unit }: { value: number; unit: SubMetric['unit'] }): React.JSX.Element {
-  switch (unit) {
-    case 'pct_change':
-    case 'pct_points':
-      return (
-        <span className={cn('inline-flex items-baseline gap-1', value >= 0 ? 'text-success' : 'text-error')}>
-          <span aria-hidden="true" className="text-xs">
-            {value >= 0 ? '▲' : '▼'}
-          </span>
-          <span className="sr-only">{value >= 0 ? 'up' : 'down'} </span>
-          {value >= 0 ? '+' : '−'}
-          {Math.abs(value).toFixed(1)}
-          {unit === 'pct_change' ? '%' : ' points'}
-        </span>
-      )
-    case 'pct':
-      return <>{value.toFixed(1)}%</>
-    case 'days':
-      return <>{Math.round(value).toLocaleString()} days</>
-    case 'rate':
-      return <>{value.toFixed(1)} per 100</>
-    case 'count':
-      return <>{Math.round(value).toLocaleString()}</>
-  }
 }
 
 // The same thresholds the backend uses for a dimension's status (see health_status),
@@ -304,7 +264,7 @@ function MeasureRow({
           </button>
         </Td>
         <Td className="text-right tabular-nums text-text-primary whitespace-nowrap">
-          {subMetric.value === null ? '—' : <SubMetricValue value={subMetric.value} unit={subMetric.unit} />}
+          {subMetric.value === null ? '—' : <MeasureValue value={subMetric.value} unit={subMetric.unit} />}
         </Td>
         <Td className={cn('text-right tabular-nums font-medium whitespace-nowrap', scoreTone(subMetric.score))}>
           {subMetric.score === null ? '—' : Math.round(subMetric.score)}
@@ -344,14 +304,14 @@ function MeasureRow({
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-0.5">
                   {subMetric.bands.map(([bandValue, bandScore]) => (
                     <span key={bandValue} className="text-text-secondary tabular-nums">
-                      <SubMetricValue value={bandValue} unit={subMetric.unit} />
+                      <MeasureValue value={bandValue} unit={subMetric.unit} />
                       <span className="text-text-muted"> → {Math.round(bandScore)}</span>
                     </span>
                   ))}
                 </div>
                 {subMetric.value !== null && subMetric.score !== null && (
                   <p className="text-text-primary mt-1">
-                    This period: <SubMetricValue value={subMetric.value} unit={subMetric.unit} /> →{' '}
+                    This period: <MeasureValue value={subMetric.value} unit={subMetric.unit} /> →{' '}
                     <span className={cn('font-medium', scoreTone(subMetric.score))}>
                       {Math.round(subMetric.score)}
                     </span>

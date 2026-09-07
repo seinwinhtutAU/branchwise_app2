@@ -54,9 +54,11 @@ def test_synthetic_keys_and_date(tmp_path: Path):
     assert df.iloc[2]["LineNo"] == 2
 
 
+# "Multi Line", not "Multi line": descriptions are title-cased on the way in (see
+# import_common.clean_description) — what this test is about is the newline collapsing.
 def test_multiline_description_collapsed(tmp_path: Path):
     df = parse_pos_sale_export(_write_sample(tmp_path))
-    assert df.iloc[1]["Description"] == "Multi line"
+    assert df.iloc[1]["Description"] == "Multi Line"
 
 
 def test_totals_and_footer_rows_excluded(tmp_path: Path):

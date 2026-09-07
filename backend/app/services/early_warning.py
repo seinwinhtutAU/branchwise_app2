@@ -17,13 +17,15 @@ same conversation, so a single margin rule reports whichever is worse rather tha
 rules firing about one number and burying everything else. An alert list a manager
 learns to skim is worthless.
 
-**Three severities, only two of which ask for anything.** `critical` is act today,
-`warning` is act soon, and `normal` is a movement drifting the wrong way that is not
-worth doing anything about yet — a margin down a point, a product with a fortnight of
-cover left. The reason a third level does not turn the page into noise is that nothing
-counts it: the nav badge, the branch tiles and the Overview cards all count criticals
-and warnings only, so the number a manager reacts to still means "things to act on",
-while the list itself can show the drift that produced no alert at all before.
+**Three severities, only two of which ask for anything.** The axis is whether the alert
+**requires a decision**, not how fast someone should move. `critical` requires a decision
+now, `warning` requires one but the business chooses when to make it, and `normal`
+requires no decision at all — a movement drifting the wrong way that is only there so it
+can be seen starting: a margin down a point, a product with a fortnight of cover left.
+The reason a third level does not turn the page into noise is that nothing counts it: the
+nav badge, the branch tiles and the Overview cards all count criticals and warnings only,
+so the number a manager reacts to still means "decisions waiting", while the list itself
+can show the drift that produced no alert at all before.
 
 **Data-integrity alerts delegate to app/services/data_quality.py entirely**, down to
 that check's own title and severity (carried on the snapshot as `data_issue_sections`).
@@ -44,6 +46,7 @@ from app.services.dashboard import (
     CRITICAL_DAYS_OF_STOCK,
     DEAD_STOCK_WINDOW_DAYS,
     LOW_DAYS_OF_STOCK,
+    STOCK_VELOCITY_WINDOW_DAYS,
     WATCH_DAYS_OF_STOCK,
 )
 
@@ -51,8 +54,8 @@ CRITICAL = "critical"
 WARNING = "warning"
 NORMAL = "normal"
 
-# Sort order only, not a score: act today, then act soon, then the notices that ask for
-# nothing. `normal` earns its place because it is never counted — see the module
+# Sort order only, not a score: a decision now, then a decision whose timing is yours,
+# then the notices that require no decision at all. `normal` earns its place because it is never counted — see the module
 # docstring — so the list can carry a drift without inflating the number beside the nav
 # item, which is what a third level usually breaks.
 _SEVERITY_RANK = {CRITICAL: 0, WARNING: 1, NORMAL: 2}
@@ -86,14 +89,28 @@ class Alert:
     # than staying quiet).
     driver: str | None = None
     interpretation: str | None = None
-    # The measured figures the sentences above were built from, carried out as data so
-    # the UI can show them as chips and as a split — the same numbers, never a second
-    # computation on the client (see docs/branch_health.md's "nothing is measured twice").
-    # `chips`: the two or three figures that make the alert legible at a glance.
-    # `evidence`: the decomposition behind it, for the "How this was worked out" panel —
-    # None on the rules with nothing to decompose, exactly like `driver`.
-    chips: tuple[dict, ...] = ()
+    # A revenue movement split into the parts that produced it (`kind: revenue_split`),
+    # drawn as bars under the figures. None on every other rule — carried out as data so
+    # the client never recomputes it (see docs/branch_health.md's "nothing is measured
+    # twice").
     evidence: dict | None = None
+    # The alert detail panel, as data.
+    #
+    # `chips` and `evidence` above were built for a glanceable summary; what the business
+    # actually asked for is the figures themselves, laid out and labelled, so the reader
+    # can check the claim rather than take it. These three carry that:
+    #
+    # `context`: the days behind the alert — "9 Aug – 7 Sep 2026 vs 10 Jul – 8 Aug 2026",
+    #   or, for the stock rules, the count date and the sales window, because those
+    #   rules deliberately ignore the period on screen.
+    # `facts`: labelled rows. Either a single value ({label, value}) or a movement
+    #   ({label, before, after, change}). Preformatted strings, because the sentences
+    #   beside them are built here too and the two must never disagree about rounding.
+    # `table`: the products behind an alert that is about a list rather than a number —
+    #   {columns: [{label, align}], rows: [[cell, ...]], note}.
+    context: str | None = None
+    facts: tuple[dict, ...] = ()
+    table: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -156,18 +173,225 @@ def _period_phrase(snapshot: BranchSnapshot) -> str:
     return f"the previous {snapshot.period_days} days"
 
 
-def _chip(label: str, value: float | None, unit: str) -> dict | None:
-    """One figure for the row of chips. `unit` tells the UI how to render and colour it:
-    `pct_change`/`pct_points` are movements (signed, with a direction), `pct` and `count`
-    are levels. A value that could not be measured produces no chip at all rather than a
-    zero — the same rule the score itself follows."""
-    if value is None:
+# --- The detail panel's figures -------------------------------------------------------
+#
+# Everything here formats for a shop owner, not a developer: whole Kyat, whole units, one
+# decimal on a percentage, and no per-day rates — this business sells shoes, so "0.17 a
+# day" describes nothing anyone in the shop would recognise.
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _ks(amount: float) -> str:
+    return f"Ks {amount:,.0f}"
+
+
+def _ks_change(amount: float) -> str:
+    """The sign goes in front of the whole amount — "−Ks 1,175,057" — rather than inside
+    it, where "Ks -1,175,057" reads like a typo."""
+    return f"{'−' if amount < 0 else '+'}{_ks(abs(amount))}"
+
+
+def _pct(value: float) -> str:
+    return f"{value:.1f}%"
+
+
+def _signed_pct(value: float) -> str:
+    return f"{value:+.1f}%"
+
+
+def _day(iso: str) -> str:
+    """"2026-09-07" -> "7 Sep". The year is stated once, at the end of the range."""
+    year, month, day = (int(part) for part in iso.split("-"))
+    return f"{day} {_MONTHS[month - 1]}"
+
+
+def _date_range(start: str | None, end: str | None) -> str | None:
+    if not start or not end:
         return None
-    return {"label": label, "value": round(float(value), 2), "unit": unit}
+    return f"{_day(start)} – {_day(end)} {end.split('-')[0]}"
 
 
-def _chips(*chips: dict | None) -> tuple[dict, ...]:
-    return tuple(chip for chip in chips if chip is not None)
+def _period_context(snapshot: BranchSnapshot) -> str | None:
+    """The two stretches being compared, for the rules that follow the period on screen."""
+    current = _date_range(snapshot.date_from, snapshot.date_to)
+    previous = _date_range(snapshot.previous_date_from, snapshot.previous_date_to)
+    if current is None:
+        return None
+    return f"{current} vs {previous}" if previous else current
+
+
+def _stock_context(snapshot: BranchSnapshot) -> str:
+    """Stock rules read the latest count and a fixed sales window, so they say so —
+    they are the alerts the period control does *not* move, and a reader comparing them
+    against a July period would otherwise have no way to know that."""
+    counted_phrase = f"stock count of {_day(snapshot.stock_as_of[:10])}" if snapshot.stock_as_of else "latest stock count"
+    return f"{counted_phrase} · sold in the last {STOCK_VELOCITY_WINDOW_DAYS} days"
+
+
+def _fact(label: str, value: str | None) -> dict | None:
+    """One labelled figure. None value means it could not be measured, and an unmeasured
+    figure is left out rather than shown as a zero — the same rule the score follows."""
+    return None if value is None else {"label": label, "value": value}
+
+
+def _movement(
+    label: str,
+    before: str | None,
+    after: str,
+    change: str | None,
+    delta: float | None = None,
+    higher_is_better: bool = True,
+) -> dict:
+    """A figure and what it was before it moved, plus whether the move was good news.
+
+    The direction alone cannot be coloured: sales rising is good, cost of goods rising is
+    not, and a panel that paints "+14.1%" green because it is positive tells the reader
+    the opposite of what happened. Only the rule knows which way is up for its own figure,
+    so it says so here and the UI just renders the verdict.
+    """
+    tone = None
+    if delta is not None and change is not None and delta != 0:
+        tone = "good" if (delta > 0) == higher_is_better else "bad"
+    return {"label": label, "before": before, "after": after, "change": change, "tone": tone}
+
+
+def _facts(*facts: dict | None) -> tuple[dict, ...]:
+    return tuple(fact for fact in facts if fact is not None)
+
+
+def _low_stock_table(snapshot: BranchSnapshot) -> dict | None:
+    """The products behind a stock alert, with the two numbers the shop can verify on the
+    shelf and one it cannot: how many are there, how many sold, how long that lasts.
+
+    Days left is rounded to whole days on purpose. Half a day is below the precision of a
+    once-a-day stock count, and nobody orders differently for 6.4 days than for 6.
+    """
+    if not snapshot.at_risk_top_items:
+        return None
+    rows = [
+        [
+            f"{item['stock_code']} · {item['description']}",
+            f"{item['on_hand_qty']:,.0f}",
+            f"{item['sold_recent_qty']:,.0f}",
+            f"{item['days_left']:.0f} days",
+        ]
+        for item in snapshot.at_risk_top_items
+    ]
+    hidden = snapshot.at_risk_count - len(rows)
+    return {
+        "columns": [
+            {"label": "Product", "align": "left"},
+            {"label": "In shop", "align": "right"},
+            {"label": f"Sold {STOCK_VELOCITY_WINDOW_DAYS}d", "align": "right"},
+            {"label": "Lasts", "align": "right"},
+        ],
+        "rows": rows,
+        # The shortlist is capped, and a manager who sees five rows under a count of
+        # eighty should be told the rest are on the Inventory tab, not left to assume.
+        "note": f"{hidden} more on the Inventory tab" if hidden > 0 else None,
+    }
+
+
+def _sales_facts(snapshot: BranchSnapshot) -> tuple[dict, ...]:
+    """What a sales or footfall alert is made of: the money, the people, and what each
+    person spent. Every one of the three is a movement, because that is the claim."""
+    revenue_growth = _growth(snapshot.net_revenue, snapshot.previous_net_revenue)
+    transaction_growth = _growth(snapshot.transaction_count, snapshot.previous_transaction_count)
+    basket_growth = _growth(snapshot.avg_basket, snapshot.previous_avg_basket)
+    return _facts(
+        _movement(
+            "Sales",
+            _ks(snapshot.previous_net_revenue) if snapshot.previous_net_revenue else None,
+            _ks(snapshot.net_revenue),
+            _signed_pct(revenue_growth) if revenue_growth is not None else None,
+            revenue_growth,
+        ),
+        _movement(
+            "Customers served",
+            f"{snapshot.previous_transaction_count:,}" if snapshot.previous_transaction_count else None,
+            f"{snapshot.transaction_count:,}",
+            _signed_pct(transaction_growth) if transaction_growth is not None else None,
+            transaction_growth,
+        ),
+        _movement(
+            "Average sale",
+            _ks(snapshot.previous_avg_basket) if snapshot.previous_avg_basket else None,
+            _ks(snapshot.avg_basket),
+            _signed_pct(basket_growth) if basket_growth is not None else None,
+            basket_growth,
+        ),
+    )
+
+
+def _margin_facts(snapshot: BranchSnapshot) -> tuple[dict, ...]:
+    """The margin, shown as the subtraction it is: what came in, what the goods cost, and
+    what was left. A percentage alone is the one number a shop owner cannot check."""
+    kept = snapshot.net_revenue - snapshot.estimated_cogs
+    previous_kept = snapshot.previous_net_revenue - snapshot.previous_estimated_cogs
+    comparable = (
+        snapshot.previous_gross_margin_pct is not None
+        and snapshot.previous_cost_coverage_pct >= MIN_COST_COVERAGE_PCT
+    )
+    revenue_growth = _growth(snapshot.net_revenue, snapshot.previous_net_revenue)
+    cogs_growth = _growth(snapshot.estimated_cogs, snapshot.previous_estimated_cogs)
+    return _facts(
+        _movement(
+            "Sales",
+            _ks(snapshot.previous_net_revenue) if comparable else None,
+            _ks(snapshot.net_revenue),
+            _signed_pct(revenue_growth) if comparable and revenue_growth is not None else None,
+            revenue_growth if comparable else None,
+        ),
+        _movement(
+            "Cost of goods",
+            _ks(snapshot.previous_estimated_cogs) if comparable else None,
+            _ks(snapshot.estimated_cogs),
+            _signed_pct(cogs_growth) if comparable and cogs_growth is not None else None,
+            cogs_growth if comparable else None,
+            higher_is_better=False,
+        ),
+        _movement(
+            "You keep",
+            _ks(previous_kept) if comparable else None,
+            _ks(kept),
+            _ks_change(kept - previous_kept) if comparable else None,
+            kept - previous_kept if comparable else None,
+        ),
+        _movement(
+            "Margin",
+            _pct(snapshot.previous_gross_margin_pct) if comparable else None,
+            _pct(snapshot.gross_margin_pct or 0.0),
+            f"{(snapshot.gross_margin_pct or 0.0) - snapshot.previous_gross_margin_pct:+.1f} points"
+            if comparable
+            else None,
+            (snapshot.gross_margin_pct or 0.0) - snapshot.previous_gross_margin_pct
+            if comparable
+            else None,
+        ),
+    )
+
+
+def _growth(current: float, previous: float) -> float | None:
+    """None rather than 0 when there is nothing to grow from — see branch_health."""
+    if not previous:
+        return None
+    return (current - previous) / previous * 100
+
+
+def _stock_facts(snapshot: BranchSnapshot, count: int, days_threshold: int) -> tuple[dict, ...]:
+    """The two lines above a stock table: how many products, and which one goes first."""
+    leading = snapshot.at_risk_leading_item
+    return _facts(
+        _fact("Products affected", f"{count:,} of {snapshot.sku_count:,}"),
+        _fact("We flag under", f"{days_threshold} days"),
+        _fact(
+            "Soonest to run out",
+            f"{leading['stock_code']} · {leading['description']} — {leading['days_left']:.0f} days"
+            if leading and count > 1
+            else None,
+        ),
+    )
 
 
 def _revenue_evidence(change: explanation.RevenueChange, snapshot: BranchSnapshot) -> dict:
@@ -272,12 +496,9 @@ def revenue_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert
             link="revenue",
             driver=driver,
             interpretation=interpretation,
-            chips=_chips(
-                _chip("Transactions", decomposed.transaction_growth_pct if decomposed else None, "pct_change"),
-                _chip("Average sale", decomposed.basket_growth_pct if decomposed else None, "pct_change"),
-                _chip("Revenue", growth, "pct_change"),
-            ),
             evidence=_revenue_evidence(decomposed, snapshot) if decomposed else None,
+            context=_period_context(snapshot),
+            facts=_sales_facts(snapshot),
         )
     ]
 
@@ -335,17 +556,8 @@ def margin_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]
                 link="cost",
                 driver=level_driver,
                 interpretation=level_interpretation,
-                chips=_chips(
-                    _chip("Gross margin", margin, "pct"),
-                    _chip(
-                        "Change",
-                        margin - snapshot.previous_gross_margin_pct
-                        if snapshot.previous_gross_margin_pct is not None
-                        and snapshot.previous_cost_coverage_pct >= MIN_COST_COVERAGE_PCT
-                        else None,
-                        "pct_points",
-                    ),
-                ),
+                context=_period_context(snapshot),
+                facts=_margin_facts(snapshot),
             )
         ]
 
@@ -394,22 +606,31 @@ def margin_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]
             link="cost",
             driver=driver,
             interpretation=interpretation,
-            chips=_chips(
-                _chip("Gross margin", margin, "pct"),
-                _chip("Change", change, "pct_points"),
-            ),
+            context=_period_context(snapshot),
+            facts=_margin_facts(snapshot),
         )
     ]
 
 
-def stockout_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]:
-    # Days left = on hand ÷ recent selling rate, so this decomposes like revenue does:
-    # a product hits the threshold either because its stock fell or because its sales
-    # rose, and the two call for different responses (reorder sooner vs. reorder more).
-    risk = explanation.classify_stock_risk(
-        snapshot.at_risk_count, snapshot.at_risk_demand_driven_count, snapshot.at_risk_leading_item
+def _stock_why(count: int, days_threshold: int) -> tuple[str, None]:
+    """Why a stock alert fired, in one sentence.
+
+    This deliberately does *not* split the products into "selling faster" and "simply run
+    down". The engine can measure that split and once said it here, but the business asked
+    for it to go: with shoe-shop volumes the comparison rests on a handful of sales, and
+    the sentence it produced ("selling 0.6× its earlier rate") read as a claim far firmer
+    than the evidence under it. What is left is the part that is solidly measured — how
+    much is on the shelf, how much sold, and how long that lasts.
+    """
+    subject = "this has" if count == 1 else "each of these has"
+    return (
+        f"At the rate they sold this month, {subject} less than {days_threshold} days of "
+        "stock left — the point where a product is worth putting on the next order.",
+        None,
     )
-    driver, interpretation = explanation.describe_stock_risk(risk) if risk else (None, None)
+
+
+def stockout_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]:
 
     if snapshot.critical_count > 0:
         return [
@@ -429,12 +650,11 @@ def stockout_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Aler
                     "products to reorder first are at the top."
                 ),
                 link="inventory",
-                driver=driver,
-                interpretation=interpretation,
-                chips=_chips(
-                    _chip("Products at risk", snapshot.critical_count, "count"),
-                    _chip("Days of stock left", CRITICAL_DAYS_OF_STOCK, "days"),
-                ),
+                driver=_stock_why(snapshot.critical_count, CRITICAL_DAYS_OF_STOCK)[0],
+                interpretation=None,
+                context=_stock_context(snapshot),
+                facts=_stock_facts(snapshot, snapshot.critical_count, CRITICAL_DAYS_OF_STOCK),
+                table=_low_stock_table(snapshot),
             )
         ]
     if snapshot.low_count > 0:
@@ -452,12 +672,11 @@ def stockout_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Aler
                 ),
                 recommended_action="Open the Inventory tab's low-stock table and plan the next order.",
                 link="inventory",
-                driver=driver,
-                interpretation=interpretation,
-                chips=_chips(
-                    _chip("Products running low", snapshot.low_count, "count"),
-                    _chip("Days of stock left", LOW_DAYS_OF_STOCK, "days"),
-                ),
+                driver=_stock_why(snapshot.low_count, LOW_DAYS_OF_STOCK)[0],
+                interpretation=None,
+                context=_stock_context(snapshot),
+                facts=_stock_facts(snapshot, snapshot.low_count, LOW_DAYS_OF_STOCK),
+                table=_low_stock_table(snapshot),
             )
         ]
     if snapshot.watch_count > 0:
@@ -479,12 +698,10 @@ def stockout_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Aler
                     "regular order rather than a special one."
                 ),
                 link="inventory",
-                driver=driver,
-                interpretation=interpretation,
-                chips=_chips(
-                    _chip("Products to watch", snapshot.watch_count, "count"),
-                    _chip("Days of stock left", WATCH_DAYS_OF_STOCK, "days"),
-                ),
+                driver=_stock_why(snapshot.watch_count, WATCH_DAYS_OF_STOCK)[0],
+                interpretation=None,
+                context=_stock_context(snapshot),
+                facts=_stock_facts(snapshot, snapshot.watch_count, WATCH_DAYS_OF_STOCK),
             )
         ]
     return []
@@ -530,9 +747,33 @@ def dead_stock_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Al
                 "clearance price, and the ones not to reorder."
             ),
             link="inventory",
-            chips=_chips(
-                _chip("Not moving", snapshot.dead_stock_count, "count"),
-                _chip("Share of products", share, "pct"),
+            driver=(
+                f"Stock that has not sold in {DEAD_STOCK_WINDOW_DAYS} days is money sitting "
+                "still instead of turning over — and it is the stock most likely to be "
+                "reordered out of habit."
+            ),
+            context=(
+                f"stock count of {_day(snapshot.stock_as_of[:10])} · sales of the last "
+                f"{DEAD_STOCK_WINDOW_DAYS} days"
+                if snapshot.stock_as_of
+                else f"latest stock count · sales of the last {DEAD_STOCK_WINDOW_DAYS} days"
+            ),
+            facts=_facts(
+                _fact("Products not moving", f"{snapshot.dead_stock_count:,} of {snapshot.sku_count:,}"),
+                _fact("Share of your products", _pct(share)),
+                _fact("Not sold in", f"{DEAD_STOCK_WINDOW_DAYS} days or more"),
+                _fact(
+                    "Stock on hand worth",
+                    f"{_ks(snapshot.estimated_stock_value)} (whole branch)"
+                    if snapshot.estimated_stock_value
+                    else None,
+                ),
+                _fact(
+                    "Stock will last",
+                    f"{snapshot.days_of_inventory_on_hand:,.0f} days at today's selling rate"
+                    if snapshot.days_of_inventory_on_hand
+                    else None,
+                ),
             ),
         )
     ]
@@ -602,12 +843,28 @@ def traffic_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert
             link="customer",
             driver=driver,
             interpretation=interpretation,
-            chips=_chips(
-                _chip("Transactions", transaction_growth, "pct_change"),
-                _chip("Average sale", basket_growth, "pct_change"),
-                _chip("Revenue", revenue_growth, "pct_change"),
+            # No revenue split on this one, at the business's request: this alert is about
+            # people, and a bar chart of where the Kyat came from answers a question the
+            # reader is not asking here. The four rows below carry what it is about —
+            # sales, customers, average sale, items per sale.
+            context=_period_context(snapshot),
+            facts=_sales_facts(snapshot)
+            + _facts(
+                _movement(
+                    "Items per sale",
+                    f"{snapshot.previous_avg_items_per_basket:.2f}"
+                    if snapshot.previous_avg_items_per_basket
+                    else None,
+                    f"{snapshot.avg_items_per_basket:.2f}",
+                    _signed_pct(
+                        _growth(snapshot.avg_items_per_basket, snapshot.previous_avg_items_per_basket)
+                    )
+                    if _growth(snapshot.avg_items_per_basket, snapshot.previous_avg_items_per_basket)
+                    is not None
+                    else None,
+                    _growth(snapshot.avg_items_per_basket, snapshot.previous_avg_items_per_basket),
+                ),
             ),
-            evidence=_revenue_evidence(decomposed, snapshot) if decomposed else None,
         )
     ]
 
@@ -653,15 +910,31 @@ def single_item_basket_rule(snapshot: BranchSnapshot, thresholds: Thresholds) ->
             link="customer",
             driver=driver,
             interpretation=interpretation,
-            chips=_chips(
-                _chip("Single-item transactions", share, "pct"),
-                _chip(
-                    "Change",
+            context=_period_context(snapshot),
+            facts=_facts(
+                _movement(
+                    "Sales with one item only",
+                    _pct(snapshot.previous_single_item_basket_share_pct)
+                    if snapshot.previous_transaction_count
+                    else None,
+                    _pct(share),
+                    f"{share - snapshot.previous_single_item_basket_share_pct:+.1f} points"
+                    if snapshot.previous_transaction_count
+                    else None,
                     share - snapshot.previous_single_item_basket_share_pct
                     if snapshot.previous_transaction_count
                     else None,
-                    "pct_points",
+                    higher_is_better=False,
                 ),
+                _movement(
+                    "Items per sale",
+                    f"{snapshot.previous_avg_items_per_basket:.2f}"
+                    if snapshot.previous_avg_items_per_basket
+                    else None,
+                    f"{snapshot.avg_items_per_basket:.2f}",
+                    None,
+                ),
+                _fact("Sales counted", f"{snapshot.transaction_count:,}"),
             ),
         )
     ]

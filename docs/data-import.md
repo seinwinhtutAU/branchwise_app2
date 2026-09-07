@@ -30,6 +30,26 @@ Myanmar retail software historically used **Zawgyi**, a pre-2019, non-Unicode-co
 
 `is_zawgyi` calls `pyidaungsu`'s underlying fasttext model directly (`pds.f.f.predict(...)`) instead of its public `detect()` function, because that public wrapper crashes under the numpy version this project uses (`np.array(x, copy=False)` — a numpy 2.x incompatibility in an old release of `fasttext`).
 
+## Product name casing
+
+POS operators type descriptions however they like, so the same brand arrives as "lily",
+"LiLy", "NIKE", "adidas" and "CLassic" — and every screen shows that inconsistency back to
+the reader. Each import runs its Description column through `import_common.clean_description`,
+which is `clean_text` plus `title_case`: one capital per word, the rest lowercase.
+
+Two exceptions. Myanmar text has no upper and lower case, so it passes through unchanged.
+A word containing a digit is left alone ("500ML", "3D"), since those read as sizes or codes
+and lowercasing them looks like a typo. The known cost is run-together brand names —
+"AandFicth" becomes "Aandficth" — because nothing in the text marks the word boundary;
+that is the trade for fixing the far more common all-caps/all-lowercase case. Only the
+display label changes: `stock_code` stays the key that identifies a product.
+
+Rows imported before this rule keep their old casing until re-imported, so
+`backend/scripts/titlecase_product_descriptions.py` applies the same function to the
+existing `products` table. It is a dry run by default and prints every change; `--apply`
+saves. Wholesale order/voucher lines are deliberately untouched — those descriptions are
+typed by hand in the app, where the person entering them chooses the casing.
+
 ## Preview vs. confirm
 
 - `POST /api/imports/{sales,inventory,purchase}` — parses the upload and returns both the raw grid (`origin`) and the cleaned rows (`clean`), for the user to review. Nothing is written to the database.

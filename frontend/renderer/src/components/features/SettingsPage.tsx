@@ -633,7 +633,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         <Card>
           <CardHeader
             title="Early warning thresholds"
-            description="When each alert is raised. Normal is a notice that asks for nothing today, warning is act soon, critical is act now. Lower the numbers to hear about problems sooner; raise them to only be told about the serious ones."
+            description="When each alert is raised. Normal is a notice that needs no decision, warning needs a decision but you choose when, critical needs one now. Lower the numbers to hear about problems sooner; raise them to only be told about the serious ones."
           />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {WARNING_THRESHOLD_FIELDS.map((field) => (

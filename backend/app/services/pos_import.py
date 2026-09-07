@@ -5,8 +5,9 @@ from pathlib import Path
 import pandas as pd
 
 from app.services.import_common import (
-    SUPPORTED_EXTENSIONS,
     NumericRule,
+    SUPPORTED_EXTENSIONS,
+    clean_description,
     clean_text,
     parse_number,
     read_raw_grid,
@@ -220,7 +221,7 @@ def parse_pos_sale_export_from_grid(
                     "LineNo": line_no,
                     "LineID": f"{slip_id}-{str(line_no).zfill(2)}",
                     "StockCode": row[1].strip(),
-                    "Description": clean_text(row[2]),
+                    "Description": clean_description(row[2]),
                     "Location": clean_text(row[3]),
                     "Selling_Price": parse_number(row[4]),
                     "Qty": parse_number(row[5]),

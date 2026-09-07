@@ -50,17 +50,38 @@ function toSession(body: AuthResponse, fallbackEmail: string): Session {
   }
 }
 
+/**
+ * The server answered, and the answer was no — wrong password, revoked session, expired
+ * session. Told apart from "the request never got there", because only this one means the
+ * person has to sign in again; the other just means the internet is down, and signing
+ * someone out for that would be the app punishing them for their connection.
+ */
+export class AuthRejectedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AuthRejectedError'
+  }
+}
+
 async function post(path: string, payload: unknown): Promise<AuthResponse> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  })
+  let response: Response
+  try {
+    response = await fetch(`${apiBaseUrl}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+  } catch {
+    // Nothing came back at all. Deliberately *not* an AuthRejectedError.
+    throw new Error('No connection — check the internet and try again.')
+  }
   const body = await response.json().catch(() => null)
   if (!response.ok) {
     // The backend forwards Neon Auth's own message ("Invalid email or password"), which
     // is what the sign-in screen should show.
-    throw new Error(body?.detail ?? body?.message ?? `Sign-in failed (${response.status})`)
+    throw new AuthRejectedError(
+      body?.detail ?? body?.message ?? `Sign-in failed (${response.status})`
+    )
   }
   return body as AuthResponse
 }
@@ -112,6 +133,13 @@ export async function signOut(session: Session | null): Promise<void> {
  * A fresh access token from the stored session, or null when the session itself has
  * expired or been revoked — which is the only case that should send someone back to the
  * sign-in screen.
+ *
+ * A refresh that simply couldn't reach the server returns the session unchanged. This
+ * matters more than it looks: the refresh runs immediately at launch, so treating its
+ * failure as "signed out" meant that opening the app on a branch machine with no
+ * connection dropped straight to the sign-in screen — where signing in was impossible
+ * too, since that needs the network as well. Keeping the session lets the app open on
+ * its saved data and pick the connection up when it returns.
  */
 export async function refreshSession(current: Session): Promise<Session | null> {
   try {
@@ -119,8 +147,8 @@ export async function refreshSession(current: Session): Promise<Session | null> 
     const next: Session = { ...current, access_token: body.access_token }
     storeSession(next)
     return next
-  } catch {
-    return null
+  } catch (error) {
+    return error instanceof AuthRejectedError ? null : current
   }
 }
 

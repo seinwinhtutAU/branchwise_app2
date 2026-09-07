@@ -39,6 +39,7 @@ from app.services.settings import get_branch_health_weights, get_early_warning_t
 from app.services.dashboard import (
     DEAD_STOCK_WINDOW_DAYS,
     LOW_DAYS_OF_STOCK,
+    STOCK_VELOCITY_WINDOW_DAYS,
     PeriodKey,
     PeriodRange,
     _basket_stats,
@@ -61,6 +62,11 @@ NEEDS_ATTENTION_SCORE = 60.0
 # the business and is not worth a quarter of the score — the dimension is dropped and
 # the reason surfaced, rather than quietly scoring a guess.
 MIN_COST_COVERAGE_PCT = 50.0
+
+# How many at-risk products an alert names outright. Five is what fits in the alert panel
+# without turning it into the Inventory tab's low-stock table, which is where the rest of
+# them live and where the alert's own button goes.
+AT_RISK_SHORTLIST_LIMIT = 5
 
 
 def _ks(amount: float) -> str:
@@ -397,6 +403,11 @@ class BranchSnapshot:
     at_risk_count: int
     at_risk_demand_driven_count: int
     at_risk_leading_item: dict | None
+    # The few most urgent of those, so an alert can hand over a shortlist instead of a
+    # count: "80 products are low" is true and unactionable, and nobody reorders eighty
+    # lines off one sentence. Capped at AT_RISK_SHORTLIST_LIMIT — the rest stay on the
+    # Inventory tab, which is what the alert's button opens.
+    at_risk_top_items: tuple[dict, ...]
     # Customer
     avg_items_per_basket: float
     previous_avg_items_per_basket: float
@@ -413,6 +424,16 @@ class BranchSnapshot:
     data_issue_sections: tuple[dict, ...]
     records_checked: int
     period_days: int
+    # The days behind every figure above, as ISO dates. Carried so an alert can say
+    # which stretch it is describing and which one it compares against — a manager
+    # reading "margin fell 3.5 points" needs to know 3.5 points since *when*.
+    # Optional so a hand-built snapshot (the tests, and any caller that only wants a
+    # score) stays a few keywords rather than a date-keeping exercise; an alert with no
+    # dates simply omits the line naming them.
+    date_from: str | None = None
+    date_to: str | None = None
+    previous_date_from: str | None = None
+    previous_date_to: str | None = None
 
 
 def _growth_pct(current: float, previous: float) -> float | None:
@@ -461,9 +482,11 @@ def _line_counts(db: Session, branch_id: str, start: date, end: date) -> int:
     return int(sale_lines) + int(purchase_lines)
 
 
-def _summarise_stock_risk(low_stock_items: list[dict]) -> tuple[int, int, dict | None]:
+def _summarise_stock_risk(
+    low_stock_items: list[dict],
+) -> tuple[int, int, dict | None, tuple[dict, ...]]:
     """Count how many products at risk of running out are doing so because they sped up,
-    and pick the most urgent one to name.
+    name the most urgent one, and keep the first few as a shortlist.
 
     "At risk" is Critical or Low, not Watch — Watch is a two-week heads-up that raises
     no alert, so including it would let a comfortable product dilute the ratio that
@@ -473,17 +496,19 @@ def _summarise_stock_risk(low_stock_items: list[dict]) -> tuple[int, int, dict |
     """
     at_risk = [item for item in low_stock_items if item["status"] in {"Critical", "Low"}]
     if not at_risk:
-        return 0, 0, None
+        return 0, 0, None, ()
 
     demand_driven = 0
     leading: dict | None = None
+    shortlist: list[dict] = []
     for item in at_risk:
         baseline = item["baseline_daily_velocity"]
         # No baseline sales at all means demand that is entirely new rather than demand
         # that grew — a ratio would divide by zero, and "new" is the stronger signal of
         # the two anyway.
         ratio = item["daily_velocity"] / baseline if baseline > 0 else None
-        if ratio is None or ratio >= explanation.DEMAND_SPIKE_RATIO:
+        selling_faster = ratio is None or ratio >= explanation.DEMAND_SPIKE_RATIO
+        if selling_faster:
             demand_driven += 1
         if leading is None:
             leading = {
@@ -493,7 +518,28 @@ def _summarise_stock_risk(low_stock_items: list[dict]) -> tuple[int, int, dict |
                 "status": item["status"],
                 "demand_ratio": ratio,
             }
-    return len(at_risk), demand_driven, leading
+        if len(shortlist) < AT_RISK_SHORTLIST_LIMIT:
+            shortlist.append(
+                {
+                    "stock_code": item["stock_code"],
+                    "description": item["description"],
+                    "days_left": item["days_left"],
+                    "status": item["status"],
+                    # What the shop can see for itself — how many are on the shelf, and
+                    # how many left it over the window the days-left figure is based on.
+                    # Sent as whole units rather than the per-day rate behind them: this
+                    # business sells shoes, and "0.17 a day" describes nothing anyone in
+                    # the shop recognises.
+                    "on_hand_qty": item["on_hand_qty"],
+                    "sold_recent_qty": round(item["daily_velocity"] * STOCK_VELOCITY_WINDOW_DAYS),
+                    "demand_ratio": ratio,
+                    # Carried as a decided fact rather than left to the reader to work
+                    # out from the ratio, so the shortlist and the count above it can
+                    # never disagree about which products are selling faster.
+                    "selling_faster": selling_faster,
+                }
+            )
+    return len(at_risk), demand_driven, leading, tuple(shortlist)
 
 
 def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> BranchSnapshot:
@@ -527,9 +573,12 @@ def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> Br
         else None
     )
 
-    at_risk_count, at_risk_demand_driven_count, at_risk_leading_item = _summarise_stock_risk(
-        stock["low_stock_items"]
-    )
+    (
+        at_risk_count,
+        at_risk_demand_driven_count,
+        at_risk_leading_item,
+        at_risk_top_items,
+    ) = _summarise_stock_risk(stock["low_stock_items"])
 
     avg_items, single_share, _txn, _hist = _basket_stats(
         db, branch_id, period_range.start, period_range.end
@@ -585,6 +634,7 @@ def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> Br
         at_risk_count=at_risk_count,
         at_risk_demand_driven_count=at_risk_demand_driven_count,
         at_risk_leading_item=at_risk_leading_item,
+        at_risk_top_items=at_risk_top_items,
         avg_items_per_basket=avg_items,
         previous_avg_items_per_basket=prev_avg_items,
         single_item_basket_share_pct=single_share,
@@ -595,6 +645,10 @@ def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> Br
         records_checked=_line_counts(db, branch_id, period_range.start, period_range.end)
         + stock["sku_count"],
         period_days=period_days,
+        date_from=period_range.start.isoformat(),
+        date_to=period_range.end.isoformat(),
+        previous_date_from=period_range.previous_start.isoformat(),
+        previous_date_to=period_range.previous_end.isoformat(),
     )
 
 

@@ -20,6 +20,8 @@ import {
   signUp,
   startSessionRefresh,
 } from "@renderer/lib/auth";
+import { clearLastKnown, forgetLastKnown, readLastKnown, writeLastKnown } from "@renderer/lib/lastKnown";
+import { installNetworkResilience } from "@renderer/lib/network";
 import { useToast } from "@renderer/lib/useToast";
 import { AuthScreen } from "@renderer/components/features/AuthScreen";
 import {
@@ -321,7 +323,12 @@ const PURCHASE_COLUMNS: DataTableColumn<PurchaseRow>[] = [
 
 function App(): React.JSX.Element {
   const showToast = useToast();
-  const [session, setSession] = useState<Session | null>(null);
+  // Restored synchronously rather than in an effect, so the very first render already
+  // knows there is a session. Setting it a tick later meant every launch had one render
+  // with `session === null`, and the profile effect below reads that as "signed out" and
+  // wipes the remembered profile — which is fine online (the fetch refills it) and breaks
+  // the app offline, where nothing refills it.
+  const [session, setSession] = useState<Session | null>(() => loadStoredSession());
   // Notices imports and reverts done by other accounts on other machines, so their
   // work invalidates this browser's cached pages too (see useImportedDataWatch).
   useImportedDataWatch(session);
@@ -339,7 +346,12 @@ function App(): React.JSX.Element {
   // and coming back should return to the branch you were reading, not to the branch list.
   // Only "← All branches" clears it.
   const [overviewBranchId, setOverviewBranchId] = useState<string | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  // Seeded from the last time the server answered, so a launch on a dead connection still
+  // knows the role and branch — without which an admin account renders as a branch-scoped
+  // retail one and every page below it loads the wrong thing (see lib/lastKnown.ts).
+  const [profile, setProfile] = useState<Profile | null>(() =>
+    readLastKnown<Profile>("profile"),
+  );
   const [profileLoading, setProfileLoading] = useState(false);
   const [rawSection, setSection] = useState<Section>("import");
   const [workspace, setWorkspace] = useState<Workspace>(() => {
@@ -391,19 +403,21 @@ function App(): React.JSX.Element {
   sessionRef.current = session;
 
   useEffect(() => {
-    const stored = loadStoredSession();
-    setSession(stored);
-    sessionRef.current = stored;
     const stopRetry = installAuthRetry(
       () => sessionRef.current,
       (next) => setSession(next),
     );
+    // Installed *after* the auth patch on purpose, so the wrappers nest as
+    // network → auth → real fetch: a read retried after a dropout still passes through
+    // the token-refresh layer on its way out.
+    const stopNetwork = installNetworkResilience();
     const stopRefresh = startSessionRefresh(
       () => sessionRef.current,
       (next) => setSession(next),
     );
     return () => {
       stopRefresh();
+      stopNetwork();
       stopRetry();
     };
   }, []);
@@ -423,9 +437,18 @@ function App(): React.JSX.Element {
     fetch(`${apiBaseUrl}/api/me`, {
       headers: { Authorization: `Bearer ${session.access_token}` },
     })
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setProfile)
-      .catch(() => setProfile(null))
+      .then(async (r) => (r.ok ? ((await r.json()) as Profile) : null))
+      .then((fetched) => {
+        setProfile(fetched);
+        // The server answered: whatever it said is now the truth to remember, including
+        // "this account has no profile".
+        if (fetched) writeLastKnown("profile", fetched);
+        else forgetLastKnown("profile");
+      })
+      .catch(() => {
+        // Couldn't reach the server. Keep whatever we last knew rather than deciding the
+        // account has no role — that decision is what breaks the app while offline.
+      })
       .finally(() => setProfileLoading(false));
     // `profile` is read to decide whether this is the first load; adding it to the deps
     // would re-fetch every time the fetch itself sets it.
@@ -660,6 +683,8 @@ function App(): React.JSX.Element {
     // Drop every cached page: the next account may be scoped to a different branch, and
     // serving it this one's numbers would be both wrong and a disclosure.
     clearFetchCache();
+    clearLastKnown();
+    setProfile(null);
     setOverviewBranchId(null);
     setMe(null);
   }

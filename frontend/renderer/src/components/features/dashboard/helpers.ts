@@ -150,16 +150,46 @@ export interface HealthAlert {
   measure: string
   driver: string | null
   interpretation: string | null
-  /** The two or three figures behind the alert, as data — rendered as chips. */
-  chips: AlertChip[]
-  /** The decomposition behind it, for the "How this was worked out" panel. */
-  evidence: RevenueSplit | null
+  /** A revenue movement split into the parts that produced it, drawn as bars under the
+   * figures. Null on every other rule. */
+  evidence: AlertEvidence | null
+  /** The days behind the alert: "9 Aug – 7 Sep 2026 vs 10 Jul – 8 Aug 2026", or, for the
+   * stock rules, the count date and sales window — those deliberately ignore the period
+   * control, and this is where the reader can see that. */
+  context: string | null
+  /** The alert's figures, labelled and preformatted by the server (see
+   * early_warning.Alert) — the detail panel's main content. */
+  facts: AlertFact[]
+  /** The products behind an alert about a list rather than a number. */
+  table: AlertTable | null
 }
 
-export interface AlertChip {
+/**
+ * One labelled row of the detail panel: either a single value, or a movement carrying
+ * what it was before and by how much it changed.
+ *
+ * Values arrive as finished strings rather than numbers. That is deliberate: the alert's
+ * own sentences are built on the server from the same figures, and formatting them twice
+ * is how a panel ends up saying "32.8%" beside a sentence that says "33%".
+ */
+export interface AlertFact {
   label: string
-  value: number
-  unit: 'pct' | 'pct_change' | 'pct_points' | 'count' | 'days'
+  value?: string
+  before?: string | null
+  after?: string
+  change?: string | null
+  /** Whether the movement was good or bad news — decided by the rule, since the sign
+   * alone doesn't say (cost of goods up 14% is a plus and bad). Null when it is neither,
+   * or when nothing moved. */
+  tone?: 'good' | 'bad' | null
+}
+
+export interface AlertTable {
+  columns: { label: string; align: 'left' | 'right' }[]
+  /** Cells in column order, already formatted. */
+  rows: string[][]
+  /** "78 more on the Inventory tab", when the list was capped. */
+  note: string | null
 }
 
 /**
@@ -174,6 +204,8 @@ export interface RevenueSplit {
   total_change: number
   parts: { label: string; amount: number }[]
 }
+
+export type AlertEvidence = RevenueSplit
 
 export interface OverviewData {
   branch_id: string

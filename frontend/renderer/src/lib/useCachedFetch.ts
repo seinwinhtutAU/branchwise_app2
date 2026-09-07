@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { Session } from '@renderer/lib/auth'
 import { apiBaseUrl } from '@renderer/lib/auth'
+import { getConnectionStatus } from '@renderer/lib/connection'
 import { useToast } from '@renderer/lib/useToast'
 import { useLatestRequest } from '@renderer/lib/useLatestRequest'
 
@@ -19,9 +20,11 @@ import { useLatestRequest } from '@renderer/lib/useLatestRequest'
  * period, date range or branch is a different key and fetches properly. Beyond that, a
  * cached entry is reused until one of three things happens:
  *
- *  1. `invalidateImportedData()` is called — which is the honest signal in this app,
- *     because confirming or reverting an import is the *only* thing that changes the
- *     sales, inventory, purchase and warning data these pages read.
+ *  1. `invalidateCachedPages()` is called — by confirming or reverting an import, which
+ *     is the only thing that changes the sales, inventory, purchase and warning *data*
+ *     these pages read, and by saving a business setting, which changes what the server
+ *     computes *from* that data: a health weight moves every score, a threshold decides
+ *     which alerts exist, a check window decides what the Warning page counts.
  *  2. `useImportedDataWatch` notices someone *else* changed the data — it polls a cheap
  *     token from GET /api/imports/data-version, which is what closes the multi-account
  *     case that rule 1 can't see.
@@ -55,6 +58,113 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>()
 
+/**
+ * The cache above also survives closing the app.
+ *
+ * In memory alone it only helped within one run: on a branch machine with a weak
+ * connection, *opening* the app was the worst moment — every page a skeleton, every
+ * request queued behind the same slow link. Writing the cache to disk means a launch
+ * shows yesterday's numbers immediately and revalidates behind them, which is the same
+ * bargain the in-memory cache already makes ("stale data beats a skeleton"), extended
+ * across restarts.
+ *
+ * Freshness is not guessed at: the server's own data-version token is stored next to the
+ * cache, so the first poll after launch compares against what this machine last saw and
+ * invalidates everything if anyone imported in the meantime (see useImportedDataWatch).
+ */
+// The suffix is a shape version, not a cache-busting decoration: **bump it whenever an
+// API payload these pages read changes shape**. Cached entries outlive an app update, so
+// without a bump the new UI renders yesterday's payload and falls over on a field that
+// did not exist then — which is exactly how v1 ended (the alert detail panel reading
+// `facts` on an alert saved before alerts had any).
+const STORAGE_KEY = 'branchwise:page-cache:v2'
+const VERSION_TOKEN_KEY = 'branchwise:data-version'
+
+// Restored entries older than this are dropped on load. A week-old dashboard is not
+// worth showing even for the second before it refreshes.
+const PERSIST_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+// localStorage is a handful of MB in total and shared with the session and settings, so
+// the cache stays well inside it: anything huge is skipped rather than evicting
+// everything else, and the whole set is trimmed to the newest entries that fit.
+const PERSIST_MAX_ENTRY_BYTES = 512 * 1024
+const PERSIST_MAX_TOTAL_BYTES = 3 * 1024 * 1024
+// Confirming an import can fill several entries in a second; writing once after things
+// settle keeps that off the UI thread.
+const PERSIST_DEBOUNCE_MS = 1000
+
+interface PersistedEntry {
+  url: string
+  data: unknown
+  fetchedAt: number
+}
+
+function loadPersistedCache(): void {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return
+    const entries = JSON.parse(raw) as PersistedEntry[]
+    if (!Array.isArray(entries)) return
+    const cutoff = Date.now() - PERSIST_MAX_AGE_MS
+    for (const entry of entries) {
+      if (!entry?.url || entry.fetchedAt < cutoff) continue
+      // Restored at the *current* in-memory version, so a later invalidation (a colleague's
+      // import, this account's own confirm) discards them exactly like live entries.
+      cache.set(entry.url, { data: entry.data, fetchedAt: entry.fetchedAt, version: dataVersion })
+    }
+  } catch {
+    // Unreadable or unparseable: start empty rather than fail to boot.
+  }
+}
+
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+
+function persistCacheNow(): void {
+  persistTimer = null
+  try {
+    // Newest first, so the trim below keeps what the reader is most likely to open next.
+    const candidates = [...cache.entries()]
+      .map(([url, entry]) => ({ url, data: entry.data, fetchedAt: entry.fetchedAt }))
+      .sort((a, b) => b.fetchedAt - a.fetchedAt)
+
+    const kept: PersistedEntry[] = []
+    let total = 0
+    for (const candidate of candidates) {
+      const size = JSON.stringify(candidate).length
+      if (size > PERSIST_MAX_ENTRY_BYTES) continue
+      if (total + size > PERSIST_MAX_TOTAL_BYTES) break
+      kept.push(candidate)
+      total += size
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(kept))
+  } catch {
+    // Out of quota or storage disabled. The in-memory cache is unaffected; this run just
+    // won't hand anything to the next one.
+  }
+}
+
+function schedulePersist(): void {
+  if (persistTimer) return
+  persistTimer = setTimeout(persistCacheNow, PERSIST_DEBOUNCE_MS)
+}
+
+/** The server data-version token this machine last saw, from a previous run. */
+function loadDataVersionToken(): string | null {
+  try {
+    return localStorage.getItem(VERSION_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+function storeDataVersionToken(token: string): void {
+  try {
+    localStorage.setItem(VERSION_TOKEN_KEY, token)
+  } catch {
+    // Not fatal: without it, the next launch simply treats its restored cache as stale
+    // on the first poll and refetches.
+  }
+}
+
 // Bumped whenever the underlying data changes. Entries carry the version they were
 // fetched at, so one bump invalidates every cached page at once without having to know
 // which URLs any of them used.
@@ -72,12 +182,21 @@ function getDataVersion(): number {
   return dataVersion
 }
 
+// Runs once, at import time — after `dataVersion` above exists, since restored entries
+// are stamped with it.
+loadPersistedCache()
+
 /**
- * Call after anything that changes imported retail data — confirming an import, or
- * reverting one. Every cached page becomes stale, and any that is currently on screen
- * refetches immediately while still showing what it has.
+ * Call after anything that changes what the server would now return: confirming or
+ * reverting an import, or saving a business setting that feeds a computed page (the
+ * branch health weights, the alert thresholds, the check and list windows). Every cached
+ * page becomes stale, and any that is currently on screen refetches immediately while
+ * still showing what it has.
+ *
+ * The theme is the one setting that calls nothing here, since it changes only how the
+ * page is painted — a light/dark toggle refetching every dashboard would be absurd.
  */
-export function invalidateImportedData(): void {
+export function invalidateCachedPages(): void {
   dataVersion += 1
   listeners.forEach((listener) => listener())
 }
@@ -85,7 +204,17 @@ export function invalidateImportedData(): void {
 /** Call on sign-out: the next account may not even be allowed to see this branch's data. */
 export function clearFetchCache(): void {
   cache.clear()
-  invalidateImportedData()
+  // Including the copy on disk — otherwise the next launch would restore the previous
+  // account's branch data straight back onto the screen.
+  try {
+    if (persistTimer) clearTimeout(persistTimer)
+    persistTimer = null
+    localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(VERSION_TOKEN_KEY)
+  } catch {
+    // Nothing to do: an unwritable store had nothing of the old account in it either.
+  }
+  invalidateCachedPages()
 }
 
 export interface CachedFetch<T> {
@@ -131,12 +260,23 @@ export function useCachedFetch<T>(
       }
       const body = (await response.json()) as T
       cache.set(url, { data: body, fetchedAt: Date.now(), version })
+      schedulePersist()
       setData(body)
       setFailed(false)
     } catch {
       if (signal.aborted) return
       if (!isBackground) setFailed(true)
-      showToast('error', `Failed to load the ${label} — is the backend running?`)
+      // On a weak connection this fires on every page the reader opens, and the
+      // connection banner is already saying why — stacking six identical toasts on top
+      // of numbers that are still perfectly readable only adds noise. A page with
+      // nothing to show still explains itself.
+      if (getConnectionStatus() === 'offline') {
+        if (!isBackground) {
+          showToast('error', `No connection — the ${label} couldn't be loaded`)
+        }
+      } else {
+        showToast('error', `Failed to load the ${label} — is the backend running?`)
+      }
     } finally {
       setIsRefreshing(false)
     }
@@ -206,15 +346,22 @@ export function useCachedFetchMany<T>(
   // its contents rarely do.
   const key = urls.join('|')
 
-  async function run(): Promise<void> {
+  // `force` is what the Refresh button passes: a manual refresh has to refetch even when
+  // every entry is cached and inside STALE_MS, or the button silently does nothing —
+  // which is exactly what it did until this argument existed. The single-URL hook's
+  // `reload` already bypassed the freshness check by calling `run` directly; this is the
+  // same rule, spelled out for the several-URL version.
+  async function run(force = false): Promise<void> {
     if (!session) return
     const fresh: Record<string, T> = {}
     const stale: string[] = []
     for (const url of urls) {
       const entry = cache.get(url)
       if (entry !== undefined && entry.version === version) {
+        // Kept on screen while it refetches, forced or not — stale data still beats a
+        // skeleton, and a refresh that blanked the page would be worse than no refresh.
         fresh[url] = entry.data as T
-        if (Date.now() - entry.fetchedAt >= STALE_MS) stale.push(url)
+        if (force || Date.now() - entry.fetchedAt >= STALE_MS) stale.push(url)
       } else {
         stale.push(url)
       }
@@ -239,6 +386,7 @@ export function useCachedFetchMany<T>(
           }
           const body = (await response.json()) as T
           cache.set(url, { data: body, fetchedAt: Date.now(), version })
+          schedulePersist()
           return [url, body] as const
         } catch {
           failures += 1
@@ -248,7 +396,9 @@ export function useCachedFetchMany<T>(
     )
     setIsRefreshing(false)
     setFailedCount(failures)
-    if (failures > 0) showToast('error', `Couldn't load ${failures} of ${urls.length} for the ${label}`)
+    if (failures > 0 && getConnectionStatus() !== 'offline') {
+      showToast('error', `Couldn't load ${failures} of ${urls.length} for the ${label}`)
+    }
     const loaded = Object.fromEntries(results.filter((row): row is readonly [string, T] => row !== null))
     setData((previous) => ({ ...previous, ...loaded }))
   }
@@ -267,14 +417,14 @@ export function useCachedFetchMany<T>(
     isLoading: urls.length > 0 && Object.keys(data).length === 0 && failedCount === 0,
     isRefreshing,
     failedCount,
-    reload: () => void run()
+    reload: () => void run(true)
   }
 }
 
 /**
  * Watches for imports done by *other* accounts, on other machines.
  *
- * `invalidateImportedData` covers this client's own confirms and reverts, but a
+ * `invalidateCachedPages` covers this client's own confirms and reverts, but a
  * business with three retail branches has several people importing, and nothing about
  * their work reaches this browser. So this polls a cheap version token and invalidates
  * when it moves. Call it once, high up, for the whole app.
@@ -283,7 +433,10 @@ export function useCachedFetchMany<T>(
  * to the app after a while and should not be reading yesterday's dashboard.
  */
 export function useImportedDataWatch(session: Session | null): void {
-  const seen = useRef<string | null>(null)
+  // Seeded from disk, not from null, so the cache restored at launch is checked against
+  // what this machine last saw rather than being trusted blindly: if a colleague
+  // imported while the app was closed, the very first poll notices and refetches.
+  const seen = useRef<string | null>(loadDataVersionToken())
 
   useEffect(() => {
     if (!session) {
@@ -306,9 +459,10 @@ export function useImportedDataWatch(session: Session | null): void {
         if (cancelled) return
         // The very first reading is the baseline, not a change.
         if (!resyncOnly && seen.current !== null && seen.current !== version) {
-          invalidateImportedData()
+          invalidateCachedPages()
         }
         seen.current = version
+        storeDataVersionToken(version)
       } catch {
         // Offline or the backend is down — the next tick tries again. A failed check is
         // not worth a toast; whatever is on screen is still the best we have.

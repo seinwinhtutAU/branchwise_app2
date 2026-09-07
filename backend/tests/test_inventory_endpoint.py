@@ -48,6 +48,36 @@ def _make_snapshot(
     db_session.commit()
 
 
+def test_a_product_missing_from_the_latest_count_is_not_current_stock(
+    authed_client: TestClient, db_session: Session
+):
+    """An inventory export is a full stock list, so a product that stops appearing in it
+    has stopped being stocked. Showing its last known figure made the Inventory page mix
+    dates — a row stamped 4 Sep sitting inside the 5 Sep count — and quietly inflated
+    stock value and dead stock with goods that were no longer on the list."""
+    branch = Branch(name="Retail 1", phone_number="000", address="TBD")
+    db_session.add(branch)
+    db_session.flush()
+    _make_user(db_session, branch=branch)
+
+    counted = _make_product(db_session, "STILL-STOCKED")
+    dropped = _make_product(db_session, "NO-LONGER-LISTED")
+
+    yesterday = dt.datetime(2026, 9, 4, 8, 15)
+    today = dt.datetime(2026, 9, 5, 19, 20)
+    _make_snapshot(db_session, product=counted, branch=branch, on_hand_qty=4, snapshot_at=yesterday)
+    _make_snapshot(db_session, product=dropped, branch=branch, on_hand_qty=1, snapshot_at=yesterday)
+    _make_snapshot(db_session, product=counted, branch=branch, on_hand_qty=3, snapshot_at=today)
+
+    rows = authed_client.get("/api/inventory").json()
+    by_code = {row["StockCode"]: row for row in rows}
+
+    assert "NO-LONGER-LISTED" not in by_code
+    assert float(by_code["STILL-STOCKED"]["On_Hand_Qty"]) == 3
+    # Every row on the page comes from the same count, so no date can be older than it.
+    assert {row["Snapshot_At"] for row in rows} == {today.isoformat()}
+
+
 def test_only_latest_snapshot_per_product_returned(authed_client: TestClient, db_session: Session):
     branch = Branch(name="Retail 1", phone_number="000", address="TBD")
     db_session.add(branch)

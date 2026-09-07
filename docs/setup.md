@@ -20,8 +20,6 @@ Two separate `.env` files — don't mix them up:
 **Repo root `.env`** (copy from `.env.example`) — used by the Electron renderer (Vite):
 
 ```
-VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-VITE_SUPABASE_ANON_KEY=YOUR_ANON_KEY
 VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
@@ -30,12 +28,13 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 PORT=8000
 DATABASE_URL=postgresql://...   # Neon Postgres connection string (the pooled endpoint, with sslmode=require)
-SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+NEON_AUTH_BASE_URL=https://<endpoint>.neonauth.<region>.aws.neon.tech/<db>/auth   # Neon console → branch → Auth
+NEON_AUTH_JWKS_URL=<the JWKS URL shown beside it>
 ```
 
-The Supabase URL/anon key are on the Supabase dashboard under Project Settings → API. The Postgres connection string is under Project Settings → Database → Connection string.
+Both the database and the auth values come from the Neon console: the connection string under the project's **Connect** button (use the pooled endpoint, `sslmode=require`), and the two auth URLs under **branch → Auth**.
 
-Auth verification uses Supabase's JWKS endpoint (asymmetric ES256 signing keys), not a shared secret — no JWT secret needs to be configured. See [auth-and-accounts.md](./auth-and-accounts.md).
+Auth verification uses Neon Auth's JWKS endpoint (EdDSA/Ed25519 signing keys), not a shared secret — no JWT secret needs to be configured. See [auth-and-accounts.md](./auth-and-accounts.md).
 
 ## Database
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Session } from '@renderer/lib/auth'
 import { apiBaseUrl } from '@renderer/lib/auth'
 import { applyTheme, cacheTheme, type ThemeMode } from '@renderer/lib/theme'
+import { invalidateCachedPages } from '@renderer/lib/useCachedFetch'
 
 // The Branch Health Score's dimension weights and the Early Warning rules' firing
 // points (see docs/branch_health.md). Both are stored and updated as a whole set, not
@@ -115,6 +116,13 @@ export function useAppSettings(session: Session | null): {
     setSettings(body)
     applyTheme(body.theme)
     cacheTheme(body.theme)
+    // Every setting except the theme changes what the server computes for pages this app
+    // has already cached — the health weights change every score, a threshold changes
+    // which alerts exist at all, a window changes what the Warning page and the
+    // sale/purchase lists count. Without this, an admin could save a new weight and go
+    // back to a dashboard still showing yesterday's scores, for up to a day. The theme is
+    // excluded because it changes only how the page is painted.
+    if (Object.keys(patch).some((key) => key !== 'theme')) invalidateCachedPages()
     return body
   }
 

@@ -42,9 +42,11 @@ def test_numeric_fields_parsed(tmp_path: Path):
     assert row["Selling_Price"] == 34500.0
 
 
+# "Multi Line", not "Multi line": descriptions are title-cased on the way in (see
+# import_common.clean_description) — what this test is about is the newline collapsing.
 def test_multiline_description_collapsed(tmp_path: Path):
     df = parse_inventory_export(_write_sample(tmp_path))
-    assert df.iloc[1]["Description"] == "Multi line"
+    assert df.iloc[1]["Description"] == "Multi Line"
 
 
 def test_header_grand_total_and_footer_excluded(tmp_path: Path):

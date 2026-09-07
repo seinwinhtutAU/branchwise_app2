@@ -136,6 +136,7 @@ def _snapshot(**overrides) -> branch_health.BranchSnapshot:
         at_risk_count=0,
         at_risk_demand_driven_count=0,
         at_risk_leading_item=None,
+        at_risk_top_items=(),
         avg_items_per_basket=3.0,
         previous_avg_items_per_basket=3.0,
         single_item_basket_share_pct=20.0,
