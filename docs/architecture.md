@@ -31,7 +31,7 @@ frontend/
   renderer/         React app (Vite)
     src/
       lib/          Supabase client setup, theme, warning-window preference
-      components/   one component per screen (import, history, warnings, wholesale orders/vouchers, settings, ...)
+      components/   one component per screen (import, history, warnings, settings, ...)
 backend/
   app/
     main.py         FastAPI app factory, mounts routers
@@ -54,17 +54,22 @@ Root `package.json` orchestrates both halves (`npm run dev:all` runs the Electro
 `routers/` are thin — they handle HTTP concerns (auth dependency, file upload, status codes) and delegate to `services/`. `services/` hold the actual logic and don't know about FastAPI at all, which is why they're independently unit-testable (see `backend/tests/test_pos_import.py` etc., which call service functions directly rather than going through HTTP).
 
 Three kinds of services:
+
 - **`*_import.py`** (`pos_import`, `inventory_import`, `purchase_import`) — parse a raw POS export into a clean pandas DataFrame. Pure functions, no database access.
 - **`*_persist.py`** (`sales_persist`, `inventory_persist`, `purchase_persist`) — take a cleaned DataFrame and write it to the database.
 - **`data_quality.py`** — reads already-persisted retail data (sales/inventory/purchases) and runs data-quality checks over it (bad numeric values, missing inventory records, snapshot reconciliation), backing `GET /api/warnings`. See [database-schema.md](./database-schema.md) and [known-limitations.md](./known-limitations.md) for what it checks and its known gaps.
 
-`wholesale.py` (service) and `orders.py`/`factory_vouchers.py` (routers) are a separate case: the wholesale customer-orders/factory-vouchers workflow is entered inline through the UI rather than imported from a file, so there's no `*_import.py`/`*_persist.py` split for it — the router and service together handle validation, auto-pricing, and persistence directly.
+Wholesale uses the same router/service split, but it is a workflow rather than an import
+pipeline: `services/wholesale/` owns colour parsing, units, references, receiving and
+shipment rules; the feature services own transactions. Its five screens persist to the
+same Neon database. Only outgoing customer deliveries are rows; incoming stock is read
+from opened receiving packages, and all stock/order figures are derived on request.
 
 `import_common.py` holds logic shared across all three import types: reading csv/xls/xlsx into a raw grid, numeric parsing, Zawgyi-aware Myanmar text cleaning, and batched product upsert. See [data-import.md](./data-import.md) for the full pipeline.
 
 ## Frontend structure
 
-`App.tsx` handles auth state (sign in/up, demo login buttons in dev) and, once signed in, renders a role-dependent sidebar nav (`AppShell`) plus one component per section. Retail/admin accounts see Import, Import History, Import Overview, Data Overview, Sale, Inventory, Purchase, and Warning; wholesale accounts see only Customer Orders and Factory Vouchers instead (a completely separate workflow — own product-code namespace, no shared `products` table, entered inline rather than imported); admin sees both sets. Every role also sees Settings (theme switcher + the Warning check-window preference, the latter hidden for wholesale since it has no Warning page).
+`App.tsx` handles auth state (sign in/up, demo login buttons in dev) and, once signed in, renders a role-dependent sidebar nav (`AppShell`) plus one component per section. Retail/admin accounts see Import, Import History, Import Overview, Data Overview, Sale, Inventory, Purchase, and Warning; wholesale accounts see Customer Orders, Supplier Vouchers, Delivery, Receiving, and Inventory; admin sees both sets. Every role also sees Settings. Sign-out clears both the in-memory and persisted GET cache before another account can see a prior branch's pages.
 
 The retail Import section renders `FileImportCard` — one per import type (sales/inventory/purchase), parameterized by `endpoint` and `label` — which hands off to `ImportReviewPage` for the actual upload → preview → confirm flow, including the branch picker shown when the signed-in account has no assigned branch.
 
@@ -91,7 +96,7 @@ socket was not. SQLite (used by the tests and early development) keeps its old s
 the same technique `installAuthRetry` already uses for expired tokens, and installed
 after it so the wrappers nest network → auth → real fetch. Reads (`GET`/`HEAD`) get a
 45-second budget and two retries backing off 0.5s then 2s; writes get five minutes and
-**no** retry, because a confirm, revert, or wholesale order that may already have been
+**no** retry, because a confirm or revert that may already have been
 applied server-side must never be sent twice by the app itself. A request cut off for
 taking too long throws `RequestTimeoutError` rather than a bare abort, which is what lets
 callers tell "it never left the machine" (safe to send again) from "no answer came back"
@@ -115,13 +120,13 @@ request that comes back marks the connection `online` (or `slow` past six second
 that fails at the transport level marks it `offline`, and HTTP errors never do, since
 those travelled the wire perfectly well. While offline the network layer polls
 `GET /api/health/db` — unauthenticated, one `SELECT 1`, and specifically a check of the
-*database* rather than of the local backend — every five seconds, so the banner clears
+_database_ rather than of the local backend — every five seconds, so the banner clears
 itself when the link returns instead of waiting for the next click. Pages stop toasting
 individual failures while that banner is up.
 
 **Who you are is remembered too** (`lib/lastKnown.ts`). The profile from `/api/me` and
 the branch lists are kept in `localStorage` and seeded into state at first render, because
-they decide *which* pages exist rather than what's on them: without the profile an admin
+they decide _which_ pages exist rather than what's on them: without the profile an admin
 account looks branch-scoped, and the Dashboard renders a single branch's detail page —
 "couldn't load" — while every branch card sits unused in the page cache. A failed
 `/api/me` now keeps the last known profile instead of replacing it with "no role"; only
@@ -141,6 +146,6 @@ its saved data.
 The one thing that cannot fall back to cache is an import, so `ImportReviewPage` holds a
 file whose confirm never reached the server and sends it automatically once the
 connection is back, telling the reader it is waiting. That queue lives in memory only:
-closing the app means picking the file again. A confirm that *timed out* is deliberately
+closing the app means picking the file again. A confirm that _timed out_ is deliberately
 not retried — purchase imports are not idempotent (see `data-import.md`), so the message
 sends the reader to Import History to check before importing again.

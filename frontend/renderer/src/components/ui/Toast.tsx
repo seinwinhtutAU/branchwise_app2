@@ -1,22 +1,22 @@
-import { cn } from '@renderer/lib/utils'
+import { cn } from "@renderer/lib/utils";
 
-export type ToastVariant = 'success' | 'error' | 'info'
+export type ToastVariant = "success" | "error" | "info";
 
 export interface ToastData {
-  id: string
-  variant: ToastVariant
-  message: string
+  id: string;
+  variant: ToastVariant;
+  message: string;
 }
 
 interface ToastProps extends ToastData {
-  onDismiss: (id: string) => void
+  onDismiss: (id: string) => void;
 }
 
 const variantStyles: Record<ToastVariant, string> = {
-  success: 'bg-success-subtle text-success',
-  error: 'bg-error-subtle text-error',
-  info: 'bg-info-subtle text-info'
-}
+  success: "bg-success-subtle text-success",
+  error: "bg-error-subtle text-error",
+  info: "bg-info-subtle text-info",
+};
 
 const variantIcons: Record<ToastVariant, React.JSX.Element> = {
   success: (
@@ -45,21 +45,36 @@ const variantIcons: Record<ToastVariant, React.JSX.Element> = {
       strokeLinecap="round"
       strokeLinejoin="round"
     />
-  )
-}
+  ),
+};
 
 // Pure primitive — no skeleton/empty state (exempt per rubric).
-export function Toast({ id, variant, message, onDismiss }: ToastProps): React.JSX.Element {
+export function Toast({
+  id,
+  variant,
+  message,
+  onDismiss,
+}: ToastProps): React.JSX.Element {
   return (
     <div
-      role={variant === 'error' ? 'alert' : 'status'}
+      role={variant === "error" ? "alert" : "status"}
       className={cn(
-        'flex items-start gap-3 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-bg-base shadow-lg p-3 pl-3',
-        'animate-slide-up motion-reduce:animate-none'
+        "flex items-start gap-3 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-bg-base shadow-lg p-3 pl-3",
+        "animate-slide-up motion-reduce:animate-none",
       )}
     >
-      <span className={cn('w-6 h-6 rounded-full flex items-center justify-center shrink-0', variantStyles[variant])}>
-        <svg viewBox="0 0 24 24" fill="none" className="w-3.5 h-3.5" aria-hidden="true">
+      <span
+        className={cn(
+          "w-6 h-6 rounded-full flex items-center justify-center shrink-0",
+          variantStyles[variant],
+        )}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          className="w-3.5 h-3.5"
+          aria-hidden="true"
+        >
           {variantIcons[variant]}
         </svg>
       </span>
@@ -69,7 +84,12 @@ export function Toast({ id, variant, message, onDismiss }: ToastProps): React.JS
         aria-label="Dismiss"
         className="text-text-muted hover:text-text-secondary transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded shrink-0 mt-0.5"
       >
-        <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" aria-hidden="true">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          className="w-4 h-4"
+          aria-hidden="true"
+        >
           <path
             d="M6 6l12 12M18 6L6 18"
             stroke="currentColor"
@@ -80,5 +100,5 @@ export function Toast({ id, variant, message, onDismiss }: ToastProps): React.JS
         </svg>
       </button>
     </div>
-  )
+  );
 }

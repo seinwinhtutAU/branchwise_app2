@@ -10,9 +10,9 @@ Where they appear:
 - **Dashboard → Overview** — the same alerts for the one branch on screen, sitting next
   to the measure each one is talking about.
 
-Where they don't: the **Warning** page is a different job. Business Alerts is *the
-business going wrong*; Warning is *the imported data being wrong*. Data-quality alerts
-are computed (see rule 8 below) but hidden on the Business Alerts page, because Warning
+Where they don't: the **Warning** page is a different job. Business Alerts is _the
+business going wrong_; Warning is _the imported data being wrong_. Data-quality alerts
+are computed (see rule 7 below) but hidden on the Business Alerts page, because Warning
 already lists those row by row with the tools to fix them.
 
 This doc is the plain-language companion to [`branch_health.md`](./branch_health.md),
@@ -62,7 +62,7 @@ the day before is mostly noise — a single quiet Tuesday would read as a sales 
 window. A custom range of 1–14 March compares against 15–28 February.
 
 **One exception: stock.** Current stock is a point-in-time fact with no period control
-on its own tab, so the stockout and dead-stock rules always describe *today's* shelf,
+on its own tab, so the stockout and dead-stock rules always describe _today's_ shelf,
 whichever period the rest of the page is showing.
 
 ## 3. The three severities
@@ -71,11 +71,11 @@ The three levels say **whether the alert requires a decision** — not how quick
 should move. Two alerts can both need attention this week and still sit at different
 levels, because one leaves the business a choice about when and the other doesn't.
 
-| Severity | Means | Counted anywhere? |
-| --- | --- | --- |
-| **critical** | A decision is required now | Yes |
-| **warning** | A decision is required, but you choose when | Yes |
-| **normal** | No decision required — a drift, shown so it can be seen starting | **No** |
+| Severity     | Means                                                            | Counted anywhere? |
+| ------------ | ---------------------------------------------------------------- | ----------------- |
+| **critical** | A decision is required now                                       | Yes               |
+| **warning**  | A decision is required, but you choose when                      | Yes               |
+| **normal**   | No decision required — a drift, shown so it can be seen starting | **No**            |
 
 A third level is usually how an alert list turns into noise. It doesn't here because
 nothing counts `normal`: the nav badge, the branch tiles and the Overview cards all
@@ -88,19 +88,18 @@ yet."
 
 Default thresholds; all of them are tunable in Settings.
 
-| # | Alert | Fires when | Severity |
-| --- | --- | --- | --- |
-| 1 | No sales recorded | No sales at all this period, after a period that had them | critical |
-| 2 | Revenue decline | Revenue growth ≤ −5% (≤ −10% and ≤ −20% escalate) | normal / warning / critical |
-| 3a | Low margin | Gross margin < 15% (< 10% and < 5% escalate) | normal / warning / critical |
-| 3b | Margin slipping | Margin fell ≥ 1 percentage point (≥ 3 escalates) | normal / warning |
-| 4a | Stockout risk | Any product with ≤ 3 days of stock left | critical |
-| 4b | Low stock | Any product with ≤ 7 days of stock left | warning |
-| 4c | Watch stock | Any product with 7–14 days of stock left | normal |
-| 5 | Dead stock | ≥ 5% of stocked products with no sale in 90 days (≥ 10% and ≥ 25% escalate) | normal / warning / critical |
-| 6 | Traffic decline | Transactions down ≥ 10% while the average sale rose **and** revenue itself stayed quiet | warning |
-| 7 | Single-item baskets | ≥ 45% of transactions were one line item (≥ 60% escalates) | normal / warning |
-| 8 | Data quality | Any Warning-page check found rows for this branch and period | that check's own severity |
+| #   | Alert                         | Fires when                                                                              | Severity                    |
+| --- | ----------------------------- | --------------------------------------------------------------------------------------- | --------------------------- |
+| 1   | No sales recorded             | No sales at all this period, after a period that had them                               | critical                    |
+| 2   | Revenue decline               | Revenue growth ≤ −5% (≤ −10% and ≤ −20% escalate)                                       | normal / warning / critical |
+| 3a  | Low margin                    | Gross margin < 15% (< 10% and < 5% escalate)                                            | normal / warning / critical |
+| 3b  | Margin lower than last period | Margin fell ≥ 1% (≥ 3% escalates)                                                       | normal / warning            |
+| 4a  | Stockout risk                 | Any product with ≤ 3 days of stock left                                                 | critical                    |
+| 4b  | Low stock                     | Any product with ≤ 7 days of stock left                                                 | warning                     |
+| 4c  | Watch stock                   | Any product with 7–14 days of stock left                                                | normal                      |
+| 5   | Dead stock                    | ≥ 5% of stocked products with no sale in 90 days (≥ 10% and ≥ 25% escalate)             | normal / warning / critical |
+| 6   | Traffic decline               | Transactions down ≥ 10% while the average sale rose **and** revenue itself stayed quiet | warning                     |
+| 7   | Data quality                  | Any Warning-page check found rows for this branch and period                            | that check's own severity   |
 
 A branch can raise at most one alert from each numbered group: 3a and 3b are one margin
 rule reporting whichever is worse, and 4a/4b/4c is one stock rule reporting the worst
@@ -119,8 +118,8 @@ same conversation, and two cards about one number would bury everything else.
 nobody imported, not a shop that sold nothing. Reporting it as a 100% revenue collapse
 would send a manager to investigate the shop floor over a missing upload.
 
-> *No sales recorded in this period — not a single sale is recorded for this branch in
-> this period, after the previous 30 days had sales.*
+> _No sales recorded in this period — not a single sale is recorded for this branch in
+> this period, after the previous 30 days had sales._
 > **Do:** check Import History for this branch; this period's sales file has most likely
 > not been imported yet.
 
@@ -153,30 +152,30 @@ movement it is named as the cause; otherwise the alert says both.
 
 **Worked example.**
 
-| | Now (30 days) | Before (30 days) |
-| --- | --- | --- |
-| Net revenue | 7,920,000 Ks | 10,000,000 Ks |
-| Transactions | 800 | 1,000 |
-| Average sale | 9,900 Ks | 10,000 Ks |
+|              | Now (30 days) | Before (30 days) |
+| ------------ | ------------- | ---------------- |
+| Net revenue  | 7,920,000 Ks  | 10,000,000 Ks    |
+| Transactions | 800           | 1,000            |
+| Average sale | 9,900 Ks      | 10,000 Ks        |
 
 Growth = (7,920,000 − 10,000,000) ÷ 10,000,000 = **−20.8%** → critical.
 
 Split:
 
-| Part | Arithmetic | Amount |
-| --- | --- | --- |
-| Fewer transactions | −200 × 10,000 | −2,000,000 Ks |
-| Smaller average sale | −100 × 1,000 | −100,000 Ks |
-| Both at once | −200 × −100 | +20,000 Ks |
-| **Total** | | **−2,080,000 Ks** |
+| Part                 | Arithmetic    | Amount            |
+| -------------------- | ------------- | ----------------- |
+| Fewer transactions   | −200 × 10,000 | −2,000,000 Ks     |
+| Smaller average sale | −100 × 1,000  | −100,000 Ks       |
+| Both at once         | −200 × −100   | +20,000 Ks        |
+| **Total**            |               | **−2,080,000 Ks** |
 
 The three parts add to the actual change exactly. Transactions account for 95% of it,
 comfortably past the 65% mark, so transactions are named as the cause:
 
-> *Revenue has fallen sharply — net revenue is down 20.8% against the previous 30 days.
+> _Revenue has fallen sharply — net revenue is down 20.8% against the previous 30 days.
 > Transactions are down 20.0% and the average sale is down 1.0%. Both are down, but fewer
 > transactions account for most of the fall — this is a footfall problem first and an
-> average-sale problem second.*
+> average-sale problem second._
 > **Do:** open the Revenue tab's daily trend to see when the drop started, then compare
 > top products against the previous period.
 
@@ -196,37 +195,36 @@ alarm on a figure describing a minority of the business.
 **3a — Low margin (a level).** Fires when gross margin < 15%. Under 10% → `warning`;
 under 5% → `critical`.
 
-The useful "why" for a level is *whether it is new*: a margin thin for months is a
+The useful "why" for a level is _whether it is new_: a margin thin for months is a
 pricing decision to revisit; one that was healthy last period is an event to find. A
-move under 1 percentage point counts as unchanged (sub-point drift on an estimated
-figure is noise).
+move under 1% counts as unchanged (drift that small on an estimated figure is noise).
 
 **Worked example.** Revenue 8,000,000 Ks, estimated cost 7,400,000 Ks, 82% of revenue
 priced. Margin = (8,000,000 − 7,400,000) ÷ 8,000,000 = **7.5%** → under 10, at or above
-5 → `warning`. Previous period was 12.0%, so the change is −4.5 points:
+5 → `warning`. Previous period was 12.0%, so the change is −4.5%:
 
-> *Margin is below a healthy level — estimated gross margin is 7.5%, under the 10% level
-> this business treats as healthy. Margin fell 4.5 percentage points, from 12.0% to 7.5%.
+> _Margin is below a healthy level — estimated gross margin is 7.5%, under the 10% level
+> this business treats as healthy. Margin fell 4.5%, from 12.0% to 7.5%.
 > This is a recent move, so it is worth finding what changed this period rather than
-> treating it as the branch's normal level.*
+> treating it as the branch's normal level._
 > **Do:** open the Cost tab's profit ranking; the products dragging it down sit at the
 > bottom.
 
-**3b — Margin slipping (a movement).** Only checked when the margin is *not* already
-below 15%. Fires when the margin fell ≥ 1 percentage point against the previous period;
-≥ 3 points → `warning`, otherwise `normal`. Needs a previous margin that also passed the
+**3b — Margin lower than last period (a movement).** Only checked when the margin is
+_not_ already below 15%. Fires when the margin fell ≥ 1% against the previous period;
+≥ 3% → `warning`, otherwise `normal`. Needs a previous margin that also passed the
 50% coverage gate.
 
 The why is a race between two growth rates — what the branch sold for, and what it paid
 for what it sold — which says more than any algebraic split of the ratio would.
 
-**Worked example.** Margin 18.2% now, 21.5% before → −3.3 points → `warning`. Revenue
+**Worked example.** Margin 18.2% now, 21.5% before → −3.3% → `warning`. Revenue
 grew 4% while estimated cost grew 9%:
 
-> *Margin is slipping — estimated gross margin fell 3.3 percentage points against the
+> _Margin lower than last period — estimated gross margin fell 3.3% against the
 > previous 30 days, from 21.5% to 18.2%. Revenue is up 4.0% and cost of goods is up 9.0%.
 > Costs grew faster than sales, so the branch is selling more without keeping more of it
-> — that points at buying prices or the mix of what sold, not at demand.*
+> — that points at buying prices or the mix of what sold, not at demand._
 > **Do:** open the Cost tab's revenue-versus-cost chart — the gap between the two lines
 > is the margin.
 
@@ -254,7 +252,7 @@ these has less than 7 days of stock left — the point where a product is worth 
 the next order."
 
 The alert used to go further and split the products into two orders — the ones selling
-faster than before (order *more*) and the ones simply run down (order *sooner*), measured
+faster than before (order _more_) and the ones simply run down (order _sooner_), measured
 by comparing each product's recent 30-day rate against its own earlier 60-day rate. That
 was removed at the business's request. At this shop's volumes the comparison rests on a
 handful of sales — one product's "0.6× its earlier rate" came from 5 sales against 18 —
@@ -263,25 +261,25 @@ only what is solidly measured: what is on the shelf, what sold, and how long tha
 
 **Worked example.** Latest snapshot, three products:
 
-| Product | On hand | Sold in 30d | Days left | Band |
-| --- | --- | --- | --- | --- |
-| Coffee mix | 10 | 150 | 2 days | Critical |
-| Soap 200g | 40 | 195 | 6 days | Low |
-| Rice 5kg | 60 | 150 | 12 days | Watch |
+| Product    | On hand | Sold in 30d | Days left | Band     |
+| ---------- | ------- | ----------- | --------- | -------- |
+| Coffee mix | 10      | 150         | 2 days    | Critical |
+| Soap 200g  | 40      | 195         | 6 days    | Low      |
+| Rice 5kg   | 60      | 150         | 12 days   | Watch    |
 
 One Critical → `critical`. The alert names both the Critical and the Low product (Watch
 raises no alert of its own), soonest to run out first:
 
-> *Products are about to run out — 1 product has 3 days of stock or less left at its
-> recent selling rate.*
+> _Products are about to run out — 1 product has 3 days of stock or less left at its
+> recent selling rate._
 >
-> | Product | In shop | Sold 30d | Lasts |
-> | --- | --- | --- | --- |
-> | CM-100 · Coffee mix | 10 | 150 | 2 days |
-> | SOP-200 · Soap 200g | 40 | 195 | 6 days |
+> | Product             | In shop | Sold 30d | Lasts  |
+> | ------------------- | ------- | -------- | ------ |
+> | CM-100 · Coffee mix | 10      | 150      | 2 days |
+> | SOP-200 · Soap 200g | 40      | 195      | 6 days |
 >
-> *At the rate they sold this month, each of these has less than 3 days of stock left —
-> the point where a product is worth putting on the next order.*
+> _At the rate they sold this month, each of these has less than 3 days of stock left —
+> the point where a product is worth putting on the next order._
 > **Do:** open the Inventory tab's low-stock table — it is sorted by days left.
 
 ### Rule 5 — Dead stock (normal / warning / critical)
@@ -306,8 +304,8 @@ to split it into, and inventing a cause for one would be worse than staying quie
 **Worked example.** 420 products with stock on hand, 63 of them with no sale in 90 days.
 63 ÷ 420 = **15%** → past 10, under 25 → `warning`.
 
-> *Too much stock is not moving — 63 of 420 products (15%) still have stock on the shelf
-> but have not sold once in 90 days.*
+> _Too much stock is not moving — 63 of 420 products (15%) still have stock on the shelf
+> but have not sold once in 90 days._
 > **Do:** open the Inventory tab's dead-stock table. These are the candidates for a
 > clearance price, and the ones not to reorder.
 
@@ -321,7 +319,7 @@ covered for the customers who stopped coming.**
 1. Revenue itself stayed quiet — growth above −5%, quiet enough that rule 2 said nothing
    at all, including at its `normal` tier.
 2. Transactions are down 10% or more.
-3. The average sale went *up*.
+3. The average sale went _up_.
 
 **Why the first condition.** When revenue is visibly falling, rule 2 already decomposes
 it and says whether transactions or the average sale caused it. A second card repeating
@@ -331,68 +329,48 @@ from an ordinary week.
 
 **Worked example.**
 
-| | Now | Before |
-| --- | --- | --- |
-| Net revenue | 9,900,000 Ks | 10,000,000 Ks |
-| Transactions | 880 | 1,000 |
-| Average sale | 11,250 Ks | 10,000 Ks |
+|              | Now          | Before        |
+| ------------ | ------------ | ------------- |
+| Net revenue  | 9,900,000 Ks | 10,000,000 Ks |
+| Transactions | 880          | 1,000         |
+| Average sale | 11,250 Ks    | 10,000 Ks     |
 
 Revenue −1% (quiet ✓), transactions −12% (≤ −10 ✓), average sale +12.5% (up ✓) →
 `warning`. Split: fewer transactions = −120 × 10,000 = −1,200,000 Ks; bigger average
 sale = +1,250 × 1,000 = +1,250,000 Ks; both at once = −150,000 Ks. They add to the
 −100,000 Ks the revenue line actually moved.
 
-> *Losing customers behind a steady revenue line — net revenue is down 1.0% against the
+> _Fewer customers than before — net revenue is down 1.0% against the
 > previous 30 days, so the headline doesn't look alarming — but the two movements
 > underneath it are pulling in opposite directions. Transactions are down 12.0% and the
 > average sale is up 12.5%. The fall is driven by fewer transactions — a larger average
 > sale partly offset it. The branch served fewer people, rather than the same people
-> spending less.*
+> spending less._
 > **Do:** open the Customer tab's busy-hours heatmap to see which days and hours lost
 > footfall.
 
-### Rule 7 — Single-item baskets (normal / warning)
-
-**The number.** The share of this period's transactions that contained exactly one line
-item. Under 45%: nothing. 45–60%: `normal`. 60% or more: `warning`.
-
-**The why**, like a low margin, turns on whether it is new: a branch that has always sold
-this way has a layout and bundling question; one that jumped has an event to find — a
-companion product out of stock, or a display that moved. This figure is noisier than
-margin (it moves with the weather and the day of the week), so it takes a **5 point**
-move before it counts as having changed rather than drifted.
-
-**Worked example.** 1,000 transactions, 640 of them a single line → **64%** → `warning`.
-Previous period was 47%, a +17 point jump:
-
-> *Most transactions are a single item — 64% of transactions in this period were a single
-> line item. Single-item transactions rose 17 percentage points, from 47% to 64%. This is
-> a recent shift, so it is worth finding what changed.*
-> **Do:** open the Customer tab's items-per-transaction histogram. A high single-item
-> share is usually a placement or bundling opportunity rather than a demand problem.
-
-### Rule 8 — Data quality (that check's own severity)
+### Rule 7 — Data quality (that check's own severity)
 
 One alert per Warning-page check that found rows for this branch in this period, carrying
 **that check's own title and severity**. This engine holds no second opinion about what
 counts as a data problem or how bad one is — it surfaces what Warning already found and
 links back to it.
 
-| Warning check | Severity |
-| --- | --- |
-| Sale — fix these numbers | warning |
-| Inventory — fix these numbers | warning |
-| Purchase — fix these numbers | warning |
-| Inventory — add missing records | warning |
-| Daily inventory check — verify by hand | warning |
-| Daily inventory check — recount these | **critical** |
+| Warning check                          | Severity     |
+| -------------------------------------- | ------------ |
+| Sale — fix these numbers               | warning      |
+| Inventory — fix these numbers          | warning      |
+| Purchase — fix these numbers           | warning      |
+| Inventory — add missing records        | warning      |
+| Daily inventory check — verify by hand | warning      |
+| Daily inventory check — recount these  | **critical** |
 
 **Worked example.** The daily reconciliation check found 4 products whose latest snapshot
 doesn't match previous snapshot + purchases − sales:
 
-> *Daily inventory check — recount these: 4 rows flagged. The latest inventory snapshot
+> _Daily inventory check — recount these: 4 rows flagged. The latest inventory snapshot
 > doesn't match what it should be (previous snapshot + purchases − sales since then) —
-> recount the stock or check for a missing import.*
+> recount the stock or check for a missing import._
 > **Do:** open the Warning page. Most of these are fixed by reverting the import that
 > carried them and confirming a corrected file.
 
@@ -407,11 +385,11 @@ Silence is a designed answer here, not a gap. A rule says nothing when:
 
 - **The measure is healthy** — inside the band, as above.
 - **There is no previous period to compare against.** A branch's first imported week has
-  no growth. The app records that as *unmeasured*, never as 0% — saying "0%" would score
+  no growth. The app records that as _unmeasured_, never as 0% — saying "0%" would score
   a brand-new branch as merely flat.
 - **Cost coverage is under 50%** — both margin conditions stay quiet.
 - **Another rule owns the subject.** Traffic decline stands down when revenue is
-  visibly falling; margin slipping stands down when the margin is already below the
+  visibly falling; the margin movement alert stands down when the margin is already below the
   floor; low stock stands down when something is Critical.
 - **The branch is wholesale.** These alerts are retail-only — the wholesale branch runs
   the customer-order / factory-voucher workflow and has no sales, inventory or purchase
@@ -435,13 +413,13 @@ setting), with no code change.
 Every figure an alert prints traces back to imported POS data, through the same code the
 dashboard tabs use:
 
-| Figure | Source |
-| --- | --- |
-| Net revenue, transactions, average sale | Confirmed sales imports, over the selected period |
-| Estimated cost, gross margin, cost coverage | Sales lines priced at the point-in-time buying price from purchase imports |
-| Stock on hand, days left, dead stock | The branch's newest inventory snapshot, plus 30-day and 90-day selling rates |
-| Basket composition | Line counts per sales slip |
-| Data-quality counts | The Warning page's own checks, scoped to this branch and period |
+| Figure                                      | Source                                                                       |
+| ------------------------------------------- | ---------------------------------------------------------------------------- |
+| Net revenue, transactions, average sale     | Confirmed sales imports, over the selected period                            |
+| Estimated cost, gross margin, cost coverage | Sales lines priced at the point-in-time buying price from purchase imports   |
+| Stock on hand, days left, dead stock        | The branch's newest inventory snapshot, plus 30-day and 90-day selling rates |
+| Basket composition                          | Line counts per sales slip                                                   |
+| Data-quality counts                         | The Warning page's own checks, scoped to this branch and period              |
 
 Related: [`branch_health.md`](./branch_health.md) (the health score and the engine's
 design), [`retail_dashboard.md`](./retail_dashboard.md) (each tab's numbers),

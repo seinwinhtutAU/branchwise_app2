@@ -1,0 +1,440 @@
+{
+  "_comment": "The wholesale demo data, transcribed once from the front-end seed arrays (frontend/renderer/src/components/features/wholesale/*.ts) so each phase's backend can be seeded with the same business the screens have always shown. As each screen's slice moves onto the real database, its SEED_* array is deleted from the TypeScript and its section here gains write support in scripts/seed_wholesale_demo.py.",
+  "shipments": [
+    {
+      "shipment_no": "SHP-260827-0001",
+      "voucher_no": "VCH-260825-0001",
+      "supplier_name": "Goody Factory",
+      "cargo_name": "Shwe Moe Cargo",
+      "final_location": "Bogyoke Rd, Mawlamyine",
+      "sent_date": "2026-08-27",
+      "total_packages": 10,
+      "total_pairs": 300,
+      "total_unit": "set",
+      "packages_sent_by_cargo": 10,
+      "final_received_packages": 7,
+      "legs": [
+        {
+          "stop_name": "Yangon",
+          "carrier_name": "U Hla Myint",
+          "packages_received": 10,
+          "packages_sent": 7
+        }
+      ]
+    },
+    {
+      "shipment_no": "SHP-260830-0001",
+      "voucher_no": "VCH-260828-0001",
+      "supplier_name": "Lek",
+      "cargo_name": "Ayar Cargo",
+      "final_location": "Zay Gyi St, Magway",
+      "sent_date": "2026-08-30",
+      "total_packages": 8,
+      "total_pairs": 162,
+      "total_unit": "set",
+      "packages_sent_by_cargo": 8,
+      "final_received_packages": 8,
+      "legs": [
+        {
+          "stop_name": "Yangon",
+          "carrier_name": "Ko Zaw Lin",
+          "packages_received": 8,
+          "packages_sent": 8
+        }
+      ]
+    },
+    {
+      "shipment_no": "SHP-260903-0001",
+      "voucher_no": "VCH-260901-0001",
+      "supplier_name": "Panda Shoes",
+      "cargo_name": "Tiger Cargo",
+      "final_location": "Zay Gyi St, Magway",
+      "sent_date": "2026-09-03",
+      "total_packages": 20,
+      "total_pairs": 396,
+      "total_unit": "set",
+      "packages_sent_by_cargo": 0,
+      "final_received_packages": 0,
+      "legs": []
+    },
+    {
+      "shipment_no": "SHP-260906-0001",
+      "voucher_no": "VCH-260905-0001",
+      "supplier_name": "Maldini",
+      "cargo_name": "Shwe Moe Cargo",
+      "final_location": "Bogyoke Rd, Mawlamyine",
+      "sent_date": "2026-09-06",
+      "total_packages": 6,
+      "total_pairs": 120,
+      "total_unit": "set",
+      "packages_sent_by_cargo": 6,
+      "final_received_packages": 6,
+      "legs": [
+        {
+          "stop_name": "Yangon",
+          "carrier_name": "Ma Khin Khin",
+          "packages_received": 6,
+          "packages_sent": 6
+        }
+      ]
+    }
+  ],
+  "vouchers": [
+    {
+      "voucher_no": "VCH-260825-0001",
+      "supplier_name": "Goody Factory",
+      "voucher_date": "2026-08-25",
+      "total_packages": 10,
+      "cargo_name": "Shwe Moe Cargo",
+      "lines": [
+        {
+          "stock_code": "A1001",
+          "description": "Men's leather sandal",
+          "group": "man",
+          "color_qty": "black90p,white60p",
+          "unit": "pair",
+          "qty": 150,
+          "buying_price": 18000
+        },
+        {
+          "stock_code": "A1002",
+          "description": "Men's slipper",
+          "group": "man",
+          "color_qty": "white80p,pink70p",
+          "unit": "pair",
+          "qty": 150,
+          "buying_price": 20000
+        }
+      ],
+      "payments": [
+        {
+          "date": "2026-08-25",
+          "amount": 2000000,
+          "note": "Advance to the factory"
+        }
+      ]
+    },
+    {
+      "voucher_no": "VCH-260828-0001",
+      "supplier_name": "Lek",
+      "voucher_date": "2026-08-28",
+      "total_packages": 8,
+      "cargo_name": "Ayar Cargo",
+      "lines": [
+        {
+          "stock_code": "B2001",
+          "description": "Ladies' flat sandal",
+          "group": "lady",
+          "color_qty": "brown102p,black60p",
+          "unit": "pair",
+          "qty": 162,
+          "buying_price": 19500
+        }
+      ],
+      "payments": [
+        {
+          "date": "2026-08-28",
+          "amount": 2000000,
+          "note": "Advance"
+        },
+        {
+          "date": "2026-09-04",
+          "amount": 1120000,
+          "note": "On arrival"
+        }
+      ]
+    },
+    {
+      "voucher_no": "VCH-260901-0001",
+      "supplier_name": "Panda Shoes",
+      "voucher_date": "2026-09-01",
+      "total_packages": 20,
+      "cargo_name": "Tiger Cargo",
+      "lines": [
+        {
+          "stock_code": "C3001",
+          "description": "Kids' school shoe",
+          "group": "child",
+          "color_qty": "navy120p,black78p",
+          "unit": "pair",
+          "qty": 198,
+          "buying_price": 17000
+        },
+        {
+          "stock_code": "C3002",
+          "description": "Kids' sandal",
+          "group": "child",
+          "color_qty": "red100p,white98p",
+          "unit": "pair",
+          "qty": 198,
+          "buying_price": 17000
+        }
+      ],
+      "payments": []
+    },
+    {
+      "voucher_no": "VCH-260905-0001",
+      "supplier_name": "Maldini",
+      "voucher_date": "2026-09-05",
+      "total_packages": 6,
+      "cargo_name": "Shwe Moe Cargo",
+      "lines": [
+        {
+          "stock_code": "D4001",
+          "description": "Ladies' rubber slipper",
+          "group": "lady",
+          "color_qty": "beige120p",
+          "unit": "pair",
+          "qty": 120,
+          "buying_price": 19000
+        }
+      ],
+      "payments": [
+        {
+          "date": "2026-09-05",
+          "amount": 1200000,
+          "note": "Advance"
+        }
+      ]
+    }
+  ],
+  "receivings": [
+    {
+      "receiving_no": "RCV-260908-0001",
+      "shipment_no": "SHP-260827-0001",
+      "gate": "Bogyoke Rd, Mawlamyine",
+      "received_date": "2026-09-08",
+      "total_unit": "set",
+      "total_qty": 50,
+      "costs": [
+        {
+          "stage": "Shwe Moe Cargo",
+          "carrier": "Shwe Moe Cargo",
+          "kind": "Cargo fee",
+          "amount": 240000,
+          "note": ""
+        },
+        {
+          "stage": "Yangon",
+          "carrier": "U Hla Myint",
+          "kind": "Carrier fee",
+          "amount": 80000,
+          "note": ""
+        },
+        {
+          "stage": "Bogyoke Rd, Mawlamyine",
+          "carrier": "Gate porters",
+          "kind": "Porters",
+          "amount": 15000,
+          "note": "Four men, an hour"
+        }
+      ],
+      "packages": [
+        {
+          "package_no": 1,
+          "opened": true,
+          "received_date": "2026-09-08",
+          "note": "",
+          "items": [
+            {
+              "stock_code": "A1001",
+              "description": "Men's leather sandal",
+              "group": "man",
+              "color_qty": "black3s",
+              "qty": 3,
+              "unit": "set"
+            },
+            {
+              "stock_code": "A1002",
+              "description": "Men's slipper",
+              "group": "man",
+              "color_qty": "white1s",
+              "qty": 1,
+              "unit": "set"
+            }
+          ]
+        },
+        {
+          "package_no": 2,
+          "opened": true,
+          "received_date": "2026-09-08",
+          "note": "",
+          "items": [
+            {
+              "stock_code": "A1001",
+              "description": "Men's leather sandal",
+              "group": "man",
+              "color_qty": "black4s",
+              "qty": 4,
+              "unit": "set"
+            }
+          ]
+        },
+        {
+          "package_no": 3,
+          "opened": true,
+          "received_date": "2026-09-11",
+          "note": "",
+          "items": [
+            {
+              "stock_code": "A1002",
+              "description": "Men's slipper",
+              "group": "man",
+              "color_qty": "white2s",
+              "qty": 2,
+              "unit": "set"
+            },
+            {
+              "stock_code": "A1001",
+              "description": "Men's leather sandal",
+              "group": "man",
+              "color_qty": "black2s",
+              "qty": 2,
+              "unit": "set"
+            }
+          ]
+        },
+        {
+          "package_no": 4,
+          "opened": true,
+          "received_date": "2026-09-11",
+          "note": "One set short",
+          "items": [
+            {
+              "stock_code": "A1002",
+              "description": "Men's slipper",
+              "group": "man",
+              "color_qty": "white3s",
+              "qty": 3,
+              "unit": "set"
+            }
+          ]
+        },
+        {
+          "package_no": 5,
+          "opened": false,
+          "received_date": null,
+          "note": "",
+          "items": []
+        },
+        {
+          "package_no": 6,
+          "opened": false,
+          "received_date": null,
+          "note": "",
+          "items": []
+        },
+        {
+          "package_no": 7,
+          "opened": false,
+          "received_date": null,
+          "note": "",
+          "items": []
+        }
+      ]
+    },
+    {
+      "receiving_no": "RCV-260904-0001",
+      "shipment_no": "SHP-260830-0001",
+      "gate": "Zay Gyi St, Magway",
+      "received_date": "2026-09-04",
+      "total_unit": "set",
+      "total_qty": 27,
+      "costs": [
+        {
+          "stage": "Ayar Cargo",
+          "carrier": "Ayar Cargo",
+          "kind": "Cargo fee",
+          "amount": 280000,
+          "note": ""
+        }
+      ],
+      "packages": [
+        {"package_no": 1, "opened": true, "received_date": "2026-09-04", "note": "", "items": [{"stock_code": "B2001", "description": "Ladies' flat sandal", "group": "lady", "color_qty": "brown3s", "qty": 3, "unit": "set"}]},
+        {"package_no": 2, "opened": true, "received_date": "2026-09-04", "note": "", "items": [{"stock_code": "B2001", "description": "Ladies' flat sandal", "group": "lady", "color_qty": "black3s", "qty": 3, "unit": "set"}]},
+        {"package_no": 3, "opened": true, "received_date": "2026-09-04", "note": "", "items": [{"stock_code": "B2001", "description": "Ladies' flat sandal", "group": "lady", "color_qty": "brown3s", "qty": 3, "unit": "set"}]},
+        {"package_no": 4, "opened": true, "received_date": "2026-09-04", "note": "", "items": [{"stock_code": "B2001", "description": "Ladies' flat sandal", "group": "lady", "color_qty": "black3s", "qty": 3, "unit": "set"}]},
+        {"package_no": 5, "opened": true, "received_date": "2026-09-04", "note": "", "items": [{"stock_code": "B2001", "description": "Ladies' flat sandal", "group": "lady", "color_qty": "brown3s", "qty": 3, "unit": "set"}]},
+        {"package_no": 6, "opened": true, "received_date": "2026-09-04", "note": "", "items": [{"stock_code": "B2001", "description": "Ladies' flat sandal", "group": "lady", "color_qty": "black3s", "qty": 3, "unit": "set"}]},
+        {"package_no": 7, "opened": true, "received_date": "2026-09-04", "note": "", "items": [{"stock_code": "B2001", "description": "Ladies' flat sandal", "group": "lady", "color_qty": "brown3s", "qty": 3, "unit": "set"}]},
+        {"package_no": 8, "opened": true, "received_date": "2026-09-04", "note": "", "items": [{"stock_code": "B2001", "description": "Ladies' flat sandal", "group": "lady", "color_qty": "brown6s", "qty": 6, "unit": "set"}]}
+      ]
+    },
+    {
+      "receiving_no": "RCV-260909-0001",
+      "shipment_no": "SHP-260906-0001",
+      "gate": "Bogyoke Rd, Mawlamyine",
+      "received_date": "2026-09-09",
+      "total_unit": "set",
+      "total_qty": 20,
+      "costs": [
+        {
+          "stage": "Shwe Moe Cargo",
+          "carrier": "Shwe Moe Cargo",
+          "kind": "Cargo fee",
+          "amount": 150000,
+          "note": ""
+        }
+      ],
+      "packages": [
+        {"package_no": 1, "opened": false, "received_date": null, "note": "", "items": []},
+        {"package_no": 2, "opened": false, "received_date": null, "note": "", "items": []},
+        {"package_no": 3, "opened": false, "received_date": null, "note": "", "items": []},
+        {"package_no": 4, "opened": false, "received_date": null, "note": "", "items": []},
+        {"package_no": 5, "opened": false, "received_date": null, "note": "", "items": []},
+        {"package_no": 6, "opened": false, "received_date": null, "note": "", "items": []}
+      ]
+    }
+  ],
+  "orders": [
+    {
+      "order_no": "ORD-260908-0001",
+      "customer_name": "Ko Kaung Htet",
+      "customer_phone": "09-7800-34567",
+      "customer_address": "Zay Gyi Market, Magway",
+      "order_date": "2026-09-08",
+      "lines": [
+        {"stock_code": "C3001", "description": "Kids' school shoe", "group": "child", "supplier_name": "Panda Shoes", "color_qty": "navy60p,black42p", "qty": 102, "unit": "pair", "selling_price": 29000},
+        {"stock_code": "C3002", "description": "Kids' sandal", "group": "child", "supplier_name": "Panda Shoes", "color_qty": "red50p,white52p", "qty": 102, "unit": "pair", "selling_price": 29000}
+      ],
+      "payments": []
+    },
+    {
+      "order_no": "ORD-260909-0001",
+      "customer_name": "KKNN",
+      "customer_phone": "09-4500-45678",
+      "customer_address": "Shwe Taung St, Mawlamyine",
+      "order_date": "2026-09-09",
+      "lines": [
+        {"stock_code": "D4001", "description": "Ladies' rubber slipper", "group": "lady", "supplier_name": "Maldini", "color_qty": "beige60p", "qty": 60, "unit": "pair", "selling_price": 29000}
+      ],
+      "payments": [{"date": "2026-09-09", "amount": 1160000, "note": "Deposit"}]
+    },
+    {
+      "order_no": "ORD-260910-0001",
+      "customer_name": "MPPA",
+      "customer_phone": "09-7800-67890",
+      "customer_address": "78th St, Mandalay",
+      "order_date": "2026-09-10",
+      "cancelled": true,
+      "lines": [
+        {"stock_code": "B2002", "description": "Ladies' heel sandal", "group": "lady", "supplier_name": "Lek", "color_qty": "black90p", "qty": 90, "unit": "pair", "selling_price": 27000}
+      ],
+      "payments": []
+    },
+    {
+      "order_no": "ORD-260911-0001",
+      "customer_name": "Ma Su Su Hlaing",
+      "customer_phone": "09-4500-12345",
+      "customer_address": "No. 24, Bogyoke Rd, Mawlamyine",
+      "order_date": "2026-09-11",
+      "lines": [
+        {"stock_code": "A1001", "description": "Men's leather sandal", "group": "man", "supplier_name": "Goody Factory", "color_qty": "black3s", "qty": 3, "unit": "set", "selling_price": 28000}
+      ],
+      "payments": [{"date": "2026-09-11", "amount": 42000, "note": "Deposit"}]
+    }
+  ],
+  "outgoing": [
+    {"seed_key": "seed:delivery:ORD-260911-0001:A1001", "order_no": "ORD-260911-0001", "stock_code": "A1001", "color_qty": "black1s", "qty": 1, "unit": "set", "location": "Bogyoke Rd, Mawlamyine", "date": "2026-09-11"}
+  ]
+}

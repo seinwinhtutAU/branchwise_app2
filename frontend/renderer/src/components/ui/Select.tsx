@@ -1,19 +1,26 @@
-import { forwardRef, type SelectHTMLAttributes } from 'react'
-import { cn } from '@renderer/lib/utils'
+import { forwardRef, type ReactNode, type SelectHTMLAttributes } from "react";
+import { cn } from "@renderer/lib/utils";
 
 interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
-  label?: string
-  error?: string
+  label?: ReactNode;
+  error?: string;
 }
 
 // Pure primitive — no skeleton/empty state (exempt per rubric).
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
   ({ label, error, className, id, children, ...props }, ref) => {
-    const selectId = id ?? label?.toLowerCase().replace(/\s+/g, '-')
+    const selectId =
+      id ??
+      (typeof label === "string"
+        ? label.toLowerCase().replace(/\s+/g, "-")
+        : undefined);
     return (
       <div className="flex flex-col gap-1.5">
         {label && (
-          <label htmlFor={selectId} className="text-sm font-medium text-text-secondary">
+          <label
+            htmlFor={selectId}
+            className="text-sm font-medium text-text-secondary"
+          >
             {label}
           </label>
         )}
@@ -22,12 +29,14 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
             ref={ref}
             id={selectId}
             className={cn(
-              'w-full h-10 rounded-md border bg-bg-base pl-3 pr-9 text-sm text-text-primary appearance-none',
-              'transition-all duration-150',
-              'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base focus:border-transparent',
-              'disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-bg-subtle',
-              error ? 'border-error focus-visible:ring-error' : 'border-border hover:border-border-strong',
-              className
+              "w-full h-10 rounded-md border bg-bg-base pl-3 pr-9 text-sm text-text-primary appearance-none",
+              "transition-all duration-150",
+              "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base focus:border-transparent",
+              "disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-bg-subtle",
+              error
+                ? "border-error focus-visible:ring-error"
+                : "border-border hover:border-border-strong",
+              className,
             )}
             aria-invalid={!!error}
             {...props}
@@ -51,7 +60,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
         </div>
         {error && <p className="text-xs text-error">{error}</p>}
       </div>
-    )
-  }
-)
-Select.displayName = 'Select'
+    );
+  },
+);
+Select.displayName = "Select";

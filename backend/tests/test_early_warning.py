@@ -1,6 +1,5 @@
 import datetime
 
-import pytest
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -53,6 +52,10 @@ def _snapshot(**overrides) -> BranchSnapshot:
         previous_avg_items_per_basket=3.0,
         single_item_basket_share_pct=20.0,
         previous_single_item_basket_share_pct=20.0,
+        trading_days=30,
+        previous_trading_days=30,
+        products_sold=120,
+        previous_products_sold=120,
         data_issue_count=0,
         critical_data_issue_count=0,
         data_issue_sections=(),
@@ -88,7 +91,6 @@ def test_every_alert_carries_an_action_and_somewhere_to_look():
             gross_margin_pct=4.0,
             critical_count=3,
             dead_stock_count=40,
-            single_item_basket_share_pct=80.0,
             data_issue_sections=(
                 {"id": "sale_numeric", "title": "Sale — fix these numbers", "description": "d", "severity": "warning", "count": 2},
             ),
@@ -145,7 +147,7 @@ def test_a_normal_alert_still_carries_an_action_and_never_reads_as_urgent():
 
 def test_normal_alerts_sort_below_the_ones_that_need_a_decision():
     alerts = early_warning.evaluate(
-        _snapshot(net_revenue=94_000.0, critical_count=2, single_item_basket_share_pct=55.0)
+        _snapshot(net_revenue=94_000.0, critical_count=2, low_count=3)
     )
     severities = [alert.severity for alert in alerts]
     assert severities == sorted(severities, key=lambda s: early_warning._SEVERITY_RANK[s])
@@ -252,20 +254,18 @@ def test_stock_alert_says_nothing_about_products_selling_faster():
     alert = _by_id(early_warning.evaluate(_snapshot(low_count=2, at_risk_count=2)), "low_stock")
     assert "faster" not in (alert.driver or "")
     assert alert.interpretation is None
-    assert alert.evidence is None
 
 
-def test_the_customer_alert_carries_no_revenue_split():
-    """It is an alert about people, not about money moving between two causes. The
-    business asked for the "where the Ks came from" bars to go from this one; the revenue
-    alert still has them, because there the money *is* the subject."""
+def test_the_customer_alert_carries_the_figures_about_people():
+    """It is an alert about people, not about money moving between two causes, so what it
+    shows is the trade itself: how much was sold, to how many, and how big each sale
+    was."""
     alert = _by_id(
         early_warning.evaluate(
             _snapshot(transaction_count=60, previous_transaction_count=100, avg_basket=1834.0)
         ),
         "traffic_decline",
     )
-    assert alert.evidence is None
     assert [fact["label"] for fact in alert.facts] == [
         "Sales",
         "Customers served",
@@ -280,7 +280,6 @@ def test_a_stock_alert_with_nothing_at_risk_carries_no_table():
     "no products" rather than "there is nothing to order yet"."""
     alert = _by_id(early_warning.evaluate(_snapshot(watch_count=4)), "watch_stock")
     assert alert.table is None
-    assert alert.evidence is None
 
 
 def test_dead_stock_fires_on_share_not_raw_count():
@@ -302,18 +301,6 @@ def test_traffic_alert_needs_both_halves_of_the_pattern():
     # Transactions down, baskets down too — ordinary decline, not the footfall pattern.
     ordinary = early_warning.evaluate(_snapshot(transaction_count=85, avg_basket=900.0, net_revenue=76_500.0))
     assert "traffic_decline" not in _ids(ordinary)
-
-
-def test_single_item_basket_share_fires_above_its_threshold():
-    assert early_warning.evaluate(_snapshot(single_item_basket_share_pct=40.0)) == []
-    normal = _by_id(
-        early_warning.evaluate(_snapshot(single_item_basket_share_pct=55.0)), "single_item_baskets"
-    )
-    assert normal.severity == early_warning.NORMAL
-    warning = _by_id(
-        early_warning.evaluate(_snapshot(single_item_basket_share_pct=70.0)), "single_item_baskets"
-    )
-    assert warning.severity == early_warning.WARNING
 
 
 def test_stock_reports_only_the_worst_of_its_three_levels():
@@ -339,7 +326,7 @@ def test_dead_stock_and_margin_have_a_normal_tier_below_their_warning_one():
         "margin_slipping",
     )
     assert slipping.severity == early_warning.NORMAL
-    assert slipping.title == "Margin has edged down"
+    assert slipping.title == "Margin a little lower than last period"
 
 
 def test_alerts_carry_their_figures_as_data_not_only_as_sentences():
@@ -358,14 +345,6 @@ def test_alerts_carry_their_figures_as_data_not_only_as_sentences():
     # movements is "against" something.
     assert alert.context is not None and " vs " in alert.context
 
-    # The split is the evidence panel's whole claim: the parts sum to the actual change.
-    parts = sum(part["amount"] for part in alert.evidence["parts"])
-    assert alert.evidence["kind"] == "revenue_split"
-    assert parts == pytest.approx(alert.evidence["total_change"], abs=0.01)
-    assert alert.evidence["to_total"] - alert.evidence["from_total"] == pytest.approx(
-        alert.evidence["total_change"], abs=0.01
-    )
-
 
 def test_an_unmeasurable_figure_is_left_blank_rather_than_shown_as_a_zero():
     """Same rule as the score itself: nothing measured is nothing shown, never a 0. With
@@ -380,7 +359,6 @@ def test_an_unmeasurable_figure_is_left_blank_rather_than_shown_as_a_zero():
         assert fact["after"] is not None
         assert fact["before"] is None
         assert fact["change"] is None
-    assert alert.evidence is None
 
 
 def test_every_rule_that_can_show_figures_does():
@@ -394,7 +372,6 @@ def test_every_rule_that_can_show_figures_does():
         "low_stock": _snapshot(low_count=3),
         "watch_stock": _snapshot(watch_count=4),
         "dead_stock": _snapshot(dead_stock_count=30),
-        "single_item_baskets": _snapshot(single_item_basket_share_pct=70.0),
     }
     for alert_id, snapshot in cases.items():
         alert = _by_id(early_warning.evaluate(snapshot), alert_id)
@@ -570,8 +547,6 @@ def test_saved_thresholds_reach_the_overview_endpoint(authed_client: TestClient,
                 "dead_stock_warning_share_pct": 10.0,
                 "dead_stock_critical_share_pct": 25.0,
                 "traffic_decline_warning_pct": -10.0,
-                "single_item_basket_normal_share_pct": 45.0,
-                "single_item_basket_warning_share_pct": 60.0,
             }
         },
     )
@@ -593,7 +568,7 @@ def test_a_threshold_set_saved_before_a_rule_existed_still_works(
     set_setting(db_session, "early_warning_thresholds", {"revenue_decline_warning_pct": -4.0})
     thresholds = get_early_warning_thresholds(db_session)
     assert thresholds["revenue_decline_warning_pct"] == -4.0
-    assert thresholds["single_item_basket_warning_share_pct"] == 60.0
+    assert thresholds["traffic_decline_warning_pct"] == -10.0
     assert early_warning.Thresholds(**thresholds).dead_stock_warning_share_pct == 10.0
 
 
@@ -613,7 +588,6 @@ def test_every_alert_names_a_measure_that_exists():
             low_count=2,
             dead_stock_count=323,
             sku_count=629,
-            single_item_basket_share_pct=70.0,
             gross_margin_pct=6.0,
             previous_gross_margin_pct=6.2,
             at_risk_count=3,

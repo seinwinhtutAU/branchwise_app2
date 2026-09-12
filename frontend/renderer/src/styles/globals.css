@@ -47,8 +47,8 @@
 
   /* Typography */
   --font-sans:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Roboto, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, monospace;
+    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
 
   /* Radius */
   --radius-sm: 4px;
@@ -58,7 +58,72 @@
   --radius-full: 9999px;
 }
 
-:root[data-theme='dark'] {
+/* The four stages a shipment passes through, each needing to be told apart at a glance on
+   the Delivery screen's journey cards and tracking table. Solid colours rather than
+   opacity steps of one hue, so no two stages ever read as the same block. */
+:root {
+  --color-journey-supplier: #0f172a;
+  --color-journey-cargo: #6d28d9;
+  --color-journey-stop: #1d4ed8;
+  --color-journey-final: #15803d;
+
+  /* The faint wash under each stage's name band, so a card reads as one piece of its
+     stage rather than as a coloured strip sitting on plain white. */
+  --color-journey-supplier-soft: #f1f5f9;
+  --color-journey-cargo-soft: #f5f3ff;
+  --color-journey-stop-soft: #eff6ff;
+  --color-journey-final-soft: #f0fdf4;
+}
+
+:root[data-theme="dark"] {
+  --color-journey-supplier: #334155;
+  --color-journey-cargo: #7c3aed;
+  --color-journey-stop: #2563eb;
+  --color-journey-final: #16a34a;
+
+  --color-journey-supplier-soft: rgba(148, 163, 184, 0.1);
+  --color-journey-cargo-soft: rgba(124, 58, 237, 0.14);
+  --color-journey-stop-soft: rgba(37, 99, 235, 0.14);
+  --color-journey-final-soft: rgba(22, 163, 74, 0.14);
+}
+
+/* Wholesale is blue-on-white rather than the retail indigo. Rather than repainting
+   every component, the workspace re-points the brand and surface tokens the primitives
+   already read, so one class on the shell turns the whole workspace blue — buttons,
+   focus rings, active nav item, progress bars and badges included. */
+.workspace-wholesale {
+  --color-brand: #2563eb;
+  --color-brand-hover: #1d4ed8;
+  --color-brand-active: #1e40af;
+  --color-brand-subtle: #eff6ff;
+
+  --color-info: #2563eb;
+  --color-info-subtle: #f2f7ff;
+
+  /* Surfaces stay white; the greys behind them pick up the faintest blue so the page
+     reads as one family instead of blue accents dropped on neutral grey. */
+  --color-bg-subtle: #f7faff;
+  --color-bg-raised: #eaf2fe;
+  --color-border: rgba(37, 99, 235, 0.14);
+  --color-border-strong: rgba(37, 99, 235, 0.3);
+}
+
+:root[data-theme="dark"] .workspace-wholesale {
+  --color-brand: #60a5fa;
+  --color-brand-hover: #93c5fd;
+  --color-brand-active: #bfdbfe;
+  --color-brand-subtle: rgba(37, 99, 235, 0.18);
+
+  --color-info: #60a5fa;
+  --color-info-subtle: rgba(37, 99, 235, 0.14);
+
+  --color-bg-subtle: #121a2a;
+  --color-bg-raised: #1a2438;
+  --color-border: rgba(96, 165, 250, 0.16);
+  --color-border-strong: rgba(96, 165, 250, 0.32);
+}
+
+:root[data-theme="dark"] {
   --color-bg-base: #0f1117;
   --color-bg-subtle: #161b27;
   --color-bg-raised: #1e2535;
@@ -91,7 +156,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
+  :root:not([data-theme="light"]) {
     --color-bg-base: #0f1117;
     --color-bg-subtle: #161b27;
     --color-bg-raised: #1e2535;
@@ -128,4 +193,18 @@ body {
   background: var(--color-bg-subtle);
   color: var(--color-text-primary);
   font-family: var(--font-sans);
+}
+
+/* A number field the reader types a whole figure into — a price, a quantity — rather
+   than nudging one unit at a time. The browser's spinner arrows only take up room in
+   the field and invite a click that would change the number by one. */
+.no-spinner {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }

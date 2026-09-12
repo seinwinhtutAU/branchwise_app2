@@ -9,12 +9,14 @@ App type: Electron desktop app (fixed-ish window, but layout is responsive down 
 Defined as CSS variables in `frontend/renderer/src/styles/globals.css`, consumed via Tailwind utility classes (e.g. `bg-bg-base`, `text-text-primary`, `border-border`, `bg-brand`).
 
 **Backgrounds** (3 layers of depth)
+
 - `bg-base` (#ffffff light / #0f1117 dark) — cards, inputs, the main content surface
 - `bg-subtle` (#f9fafb light / #161b27 dark) — page background, table header row, tab-strip track
 - `bg-raised` (#f3f4f6 light / #1e2535 dark) — hover states, skeleton blocks, default badges
 - `bg-overlay` — subtle black/white wash (currently barely used)
 
 **Text**
+
 - `text-primary` #111827 / #f9fafb — headings, body, table cell values
 - `text-secondary` #374151 / #d1d5db — nav labels, form labels
 - `text-muted` #6b7280 / #9ca3af — descriptions, placeholders, table headers, timestamps
@@ -40,7 +42,7 @@ This is a fairly generic "shadcn-adjacent" indigo SaaS palette — competent but
 
 `frontend/renderer/src/lib/useCachedFetch.ts` backs the dashboard tabs and the Warning
 page. It exists because `App.tsx` renders each section as `{section === 'x' && ...}` and
-`DashboardPage` does the same per tab — so navigating away *unmounts* the component and
+`DashboardPage` does the same per tab — so navigating away _unmounts_ the component and
 destroys its state, and coming back was always a fresh mount: skeleton, refetch, wait.
 On the heaviest page that was a couple of seconds every single time, which is what made
 the app feel slow.
@@ -51,10 +53,10 @@ four things happens: `invalidateCachedPages()` is called (from confirming an imp
 `ImportReviewPage`, from reverting one in `ImportHistoryTable` — the only things that
 change the sale/inventory/purchase data these pages read — and from saving any business
 setting other than the theme in `appSettings.updateSettings`, since a health weight, an
-alert threshold or a check window changes what the server computes *from* that data, and
+alert threshold or a check window changes what the server computes _from_ that data, and
 without it an admin could save a new weight and return to a dashboard still scored under
 the old one);
-`useImportedDataWatch` (called once in `App.tsx`) notices that *someone else* changed it,
+`useImportedDataWatch` (called once in `App.tsx`) notices that _someone else_ changed it,
 by polling `GET /api/imports/data-version` every minute and on window focus — a token
 built from the newest created/reverted import-batch timestamps and the batch count,
 scoped to the branch the account can see, so another branch's import doesn't invalidate
@@ -78,7 +80,7 @@ profile-loading effect. That effect used to set `profileLoading` every time, and
 `profileLoading` renders a full-screen spinner — unmounting every page below it. The
 visible symptom was that switching to another app and back reset the Dashboard to its
 first tab, closed whichever branch was open, and cleared every table filter. The spinner
-now shows only on the *first* load, when there is no profile yet; later refreshes happen
+now shows only on the _first_ load, when there is no profile yet; later refreshes happen
 silently behind whatever is on screen.
 
 **State a user navigates back to belongs above the thing that unmounts.** `App.tsx` renders
@@ -101,14 +103,16 @@ Two states depending on viewport:
 Main content area: `padding: 32px 16–24px`, vertical stack (`gap-8`) of a page title + optional description, then the section's content.
 
 **Navigation items are role-dependent**, all implemented (no more "Coming soon" placeholders):
+
 - **Retail/admin** accounts see: Import, Import History, Import Overview, Data Overview, Sale, Inventory, Purchase, Warning (badge showing the open warning count).
-- **Wholesale** accounts see only: Customer Orders, Factory Vouchers — a fully separate workflow, not the retail list above.
+- **Wholesale** accounts see only: Wholesale — one item rendering an empty placeholder. The old Customer Orders / Factory Vouchers / arrival screens were removed on 2026-09-11 while that workflow is redesigned (see `diagram/wholesale/erd.mmd`).
 - **Admin** sees both sets combined (it already sees every branch's retail data elsewhere).
 - **Every role** additionally sees Settings, appended last.
 
 ## 3. Screens
 
 ### 3.1 Auth screen (`AuthScreen`)
+
 Shown instead of the app shell whenever there's no active session. Centered card layout, max-width ~384px, vertically centered on the page.
 
 - App mark (indigo rounded-square icon, a simple house/building glyph) + "Branchwise" title + subtitle "Sign in to manage your branch's data".
@@ -120,19 +124,23 @@ Shown instead of the app shell whenever there's no active session. Centered card
 No password-reset / forgot-password flow exists yet. Sign-up success (no immediate session, i.e. email confirmation required) shows a toast and flips back to the sign-in tab rather than showing a dedicated confirmation screen.
 
 ### 3.2 Import ("Import data") — landing section, default on login
+
 Page description: "Upload a POS export to preview the cleaned data before saving it."
 
 Three upload cards in a responsive grid (Sales + Purchase side-by-side on ≥small screens, Inventory full-width below):
+
 - **FileImportCard**: card header = small indigo icon chip + type label ("Sales" / "Purchase" / "Inventory") + one-line description of what kind of report it expects. Body is a large dashed-border drop-zone-style button ("Click to choose a file", accepts .csv/.xls/.xlsx) — note it's click-to-browse only, not an actual drag-and-drop target despite the visual styling suggesting one. While uploading, the drop-zone is replaced by 3 pulsing skeleton bars.
 - On successful upload/parse, the app navigates (in-place, not a route change) to the **Import Review** page.
 
 ### 3.3 Import Review page (`ImportReviewPage`)
+
 Reached right after picking a file; shows the parsed-but-not-yet-saved data so the user can sanity-check it before committing.
 
 - Back button (chevron) + "Review {Sales/Purchase/Inventory} import" heading + filename subtitle.
 - The shared **Import data table** (see 3.6) with an extra controls row injected above the table: a Branch `<select>` (only shown for users with no fixed branch, i.e. admin accounts — required field, shows a validation error if the user hits Confirm without picking one) + "Confirm Import" primary button (loading state while saving) + "Cancel" ghost button (returns to the Import section, discarding the pending file).
 
 ### 3.4 Import History (`ImportHistoryTable`)
+
 List of every confirmed import batch, each row clickable to drill into detail.
 
 - Header: title + description ("Every confirmed upload, with the option to revert a mistaken one.") + a "Refresh" secondary button (top-right).
@@ -141,6 +149,7 @@ List of every confirmed import batch, each row clickable to drill into detail.
 - Clicking anywhere on a row (other than the Revert button) opens the Import History Detail page for that batch.
 
 ### 3.5 Import History Detail (`ImportHistoryDetailPage`)
+
 Read-only view of one past import batch — same visual shape as the Review page, minus the ability to confirm/re-save.
 
 - Back button + "{Type} import" heading + filename.
@@ -150,6 +159,7 @@ Read-only view of one past import batch — same visual shape as the Review page
 - The same shared **Import data table** below (read-only, no controls row).
 
 ### 3.6 Shared "Import data" table (`ImportDataView`)
+
 Used by both the Review page and the History Detail page — this is the core "did the cleaning pipeline get this right" artifact in the app.
 
 - A 2-tab segmented control: **Cleaned data** / **Original data**.
@@ -159,6 +169,7 @@ Used by both the Review page and the History Detail page — this is the core "d
 - This is a wide, dense, horizontally-scrolling spreadsheet-style table (sticky header, sticky first column, gridlines on every cell) — for large imports (hundreds of rows) this is effectively a raw data dump with no pagination, filtering, or search.
 
 ### 3.7 Data Overview (`DataOverviewTable`)
+
 A single wide merged table: sales line items joined with inventory and purchase data by stock code — the closest thing the app has to an "analytics/reporting" view today.
 
 - Header + description explaining the color coding + Refresh button. Same loading-skeleton / error-empty-state / zero-rows-empty-state pattern as Import History.
@@ -167,6 +178,7 @@ A single wide merged table: sales line items joined with inventory and purchase 
 - No filtering, sorting, date-range picker, search, or per-branch breakdown yet — it's every row, unpaginated, in one flat table. This is the most likely place a redesign would want to introduce real dashboard/analytics UI (charts, KPI tiles, filters) rather than a raw joined table.
 
 ### 3.8 Sale, Inventory, Purchase (list tables)
+
 These three nav sections each render a flat, unfiltered table of the corresponding data type, backed by their own `GET /api/sales` / `/api/inventory` / `/api/purchases` endpoints (distinct from the merged Data Overview endpoint) — same shared visual pattern as Data Overview minus the source-color strips, since each table is single-sourced. Header + description + Refresh button; loading skeleton, load-failure empty state, zero-rows empty state, and a dense right-aligned-numbers gridline table, all via one generic `SimpleDataTable` component.
 
 - **Sale**: Branch, Date, Time, Slip Number, Stock Code, Description, Selling Price, Qty, UOM, Discount Amount, Amount, Net Amount, Buying Price, **Profit**, **Profit Margin %** — profit/margin are computed server-side the same way as in Data Overview (latest known purchase price, falling back to the latest inventory snapshot price).
@@ -176,6 +188,7 @@ These three nav sections each render a flat, unfiltered table of the correspondi
 Same open questions as Data Overview apply here (no pagination/filter/search, one flat table per section) — these are functional first passes, not a finished analytics UI.
 
 ### 3.9 Import Overview (`ImportOverviewPage`)
+
 One nav item, two tabs (`OverviewTabBar`, same pill visual as Dashboard's tab bar): **Import freshness** and **Import Health**. A single "Refresh" button above the tabs reloads both regardless of which is active. See `docs/import_health.md` for the full design rationale (that doc's title reflects the "Import Health" tab/feature specifically; "Import Overview" is the nav item both tabs share).
 
 - **Import freshness tab** — at-a-glance per-branch import recency (`GET /api/imports/freshness`): Branch, Sales, Inventory, Purchase, each cell a badge plus the exact localized timestamp underneath. Sales and Inventory are expected daily and are graded by color (green "Today", amber "Yesterday", red "N days ago" or "Never imported"). Purchase isn't — the business only imports a purchase file when it actually restocks — so it shows the same recency wording in a neutral badge under a "Purchase (not daily)" header, never flagged as late.
@@ -184,6 +197,7 @@ One nav item, two tabs (`OverviewTabBar`, same pill visual as Dashboard's tab ba
   - **Slip-total mismatches** (Sales only) — a slip whose line items don't sum to its own printed subtotal row; this was previously computed during parsing but only ever reached a server log, never a screen.
 
 ### 3.10 Warning (`WarningsPage`)
+
 Data-quality issues found in already-imported retail data, backed by `GET /api/warnings`. Retail/admin only — not shown to wholesale accounts (no sale/inventory/purchase data to check).
 
 - Header + description, a 5-tab segmented control (**All** / **Daily check** / **Sale** / **Inventory** / **Purchase**) grouping the backend's individual checks into broader categories, and a sidebar nav badge (red pill, count of all open rows across every check) that updates on load and after any import is confirmed.
@@ -191,19 +205,14 @@ Data-quality issues found in already-imported retail data, backed by `GET /api/w
 - A row can expand (chevron toggle) into a bordered **Details** grid of every other field the check returned, with the offending field(s) visually called out; if the row is traceable to one confirmed import, the grid includes a "Source Import" link that jumps to Import History with that batch's row highlighted, ready to revert.
 - Checks covered: bad numeric values on sale/inventory/purchase lines; stock codes sold or purchased with no inventory record yet; and the daily inventory reconciliation (latest snapshot vs. previous snapshot + purchases − sales since then), split into a "recount these" (mismatch) and a separate "verify by hand" (mixed-unit, can't reliably auto-check) group.
 
-### 3.11 Customer Orders (`CustomerOrdersPage`) — wholesale
-Inline spreadsheet-style entry for wholesale customer orders, grouped by order (header: order number, date, customer name, remark) with one editable row per product line underneath.
+### 3.11 Wholesale (`WholesalePlaceholder` in `App.tsx`)
 
-- Each line: product code, description, factory name, first/second commit qty (informational), a color/qty shorthand field (e.g. `5R/3B`, parsed and totaled automatically into `total_qty`), received qty, unit, buying price (read-only once set by a matching factory voucher), and a colored **status pill** (Not started / Waiting / Complete) that doubles as a native `<select>` when clicked.
-- Existing-row cells are borderless until hovered/focused (reads as a clean spreadsheet); a "New" draft row instead has a visible border by default so it reads as an empty form waiting to be filled. Only two fields are required to commit a new line; an incomplete required cell tints red only after a failed submit attempt, not on load.
-- A line's `buying_price`/`status` become read-only once a matching Factory Voucher line has priced it (matched by branch + product code) — editing then happens from the Factory Vouchers side.
+An empty state, nothing more: an icon, "Wholesale is being rebuilt", and a line saying
+the old screens were taken out while the new workflow is designed. It exists so a
+wholesale account still lands somewhere and the workspace tab does not vanish.
 
-### 3.12 Factory Vouchers (`FactoryVouchersPage`) — wholesale
-Same inline spreadsheet pattern as Customer Orders, for factory vouchers (header: voucher number, date, factory name, remark; lines: product code, qty, buying price, color/qty shorthand, discount per set).
+### 3.12 Settings (`SettingsPage`)
 
-- Adding a voucher line auto-prices and matches every open (`not_start`) Customer Order line with the same product code in the same branch, flipping those lines to `waiting` — this is the primary way Customer Order lines get priced, described further in [architecture.md](./architecture.md).
-
-### 3.13 Settings (`SettingsPage`)
 Business-wide preferences — the same for every account and device. Every role reaches
 the page; only an admin account sees anything editable (the server enforces this too).
 
@@ -228,20 +237,20 @@ account, which has no Warning page or retail dashboard.
 
 ## 3b. Wording: one name per thing
 
-The same idea had three names across the app — a sale slip was a *transaction* on the
-Revenue tab, a *visit* in an alert sentence and a *customer* in a chart label — which is
+The same idea had three names across the app — a sale slip was a _transaction_ on the
+Revenue tab, a _visit_ in an alert sentence and a _customer_ in a chart label — which is
 exactly how a reader ends up wondering whether they are three different numbers.
 
 **The Dashboard's words are the app's words.** It is where these figures are first met
 and most often read, so everything else follows it rather than the other way round:
 
-| Idea | The word we use | Never |
-| --- | --- | --- |
-| One sale slip | **transaction** | visit, customer, footfall (in labels) |
-| What one transaction comes to, on average | **average sale** | basket, basket value |
-| How many lines are on one slip | **items per transaction** | items per basket, items per visit |
-| Transactions with one line only | **single-item transactions** | single-item baskets, single-item visits |
-| Money taken, after returns | **net revenue** (or **revenue**) | sales (which reads as "number of sales") |
+| Idea                                      | The word we use                  | Never                                    |
+| ----------------------------------------- | -------------------------------- | ---------------------------------------- |
+| One sale slip                             | **transaction**                  | visit, customer, footfall (in labels)    |
+| What one transaction comes to, on average | **average sale**                 | basket, basket value                     |
+| How many lines are on one slip            | **items per transaction**        | items per basket, items per visit        |
+| Transactions with one line only           | **single-item transactions**     | single-item baskets, single-item visits  |
+| Money taken, after returns                | **net revenue** (or **revenue**) | sales (which reads as "number of sales") |
 
 This governs tile captions, chart titles, the measure rows on the Overview page, and the
 alert sentences and chips — the alerts were the ones that had drifted, saying "visits"
@@ -273,5 +282,5 @@ mapping is one line of vocabulary, not a second meaning.
 - **Sale/Inventory/Purchase are functional first passes, not finished** — same dense unfiltered table pattern as Data Overview, so they're fair game for a real redesign rather than a from-scratch build.
 - **Dark mode has a visible in-app toggle now** — the Settings page's Appearance card (Light/Dark/System), on top of the existing token-level support (`data-theme="dark"` + `prefers-color-scheme`).
 - **Role-based branch context** is a persistent bit of state (shown in the sidebar footer, and drives the branch-picker requirement on import) — any new layout should keep "who am I / which branch am I acting as" visible.
-- **There's still no home/dashboard screen for retail/admin** — first thing a retail/admin user sees after login is the Import upload cards. Wholesale accounts have no Import section at all (their nav has no `import` entry), so they land on Customer Orders instead.
-- **Wholesale is a second, mostly-disjoint app inside the same shell** — Customer Orders/Factory Vouchers share the visual language (cards, tables, badges) but not the underlying data model or nav with the retail import/reporting screens; a redesign should treat it as its own flow rather than assume every screen is reachable from every role.
+- **There's still no home/dashboard screen for retail/admin** — first thing a retail/admin user sees after login is the Import upload cards. Wholesale accounts have no Import section at all (their nav has no `import` entry), so they land on the empty Wholesale placeholder instead.
+- **Wholesale is being rebuilt from nothing** — its screens are gone and only an empty placeholder remains. When it returns it will be a second, mostly-disjoint app inside the same shell: its own data model (`diagram/wholesale/erd.mmd`) and its own nav, sharing only the visual language. Treat it as its own flow rather than assuming every screen is reachable from every role.

@@ -1,40 +1,51 @@
-import { useEffect, useState } from 'react'
-import type { Session } from '@renderer/lib/auth'
-import { apiBaseUrl } from '@renderer/lib/auth'
-import { cn } from '@renderer/lib/utils'
-import { useToast } from '@renderer/lib/useToast'
-import type { AppSettings, BranchHealthWeights, EarlyWarningThresholds } from '@renderer/lib/appSettings'
-import type { ThemeMode } from '@renderer/lib/theme'
-import { Card, CardHeader } from '@renderer/components/ui/Card'
-import { Input } from '@renderer/components/ui/Input'
-import { Select } from '@renderer/components/ui/Select'
-import { Skeleton } from '@renderer/components/ui/Skeleton'
-import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
-import { ThemeSwitcher } from '@renderer/components/ui/ThemeSwitcher'
-import type { Profile } from '@renderer/components/features/types'
+import { useEffect, useState } from "react";
+import type { Session } from "@renderer/lib/auth";
+import { apiBaseUrl } from "@renderer/lib/auth";
+import { cn } from "@renderer/lib/utils";
+import { useToast } from "@renderer/lib/useToast";
+import type {
+  AppSettings,
+  BranchHealthWeights,
+  EarlyWarningThresholds,
+} from "@renderer/lib/appSettings";
+import type { ThemeMode } from "@renderer/lib/theme";
+import { Card, CardHeader } from "@renderer/components/ui/Card";
+import { Input } from "@renderer/components/ui/Input";
+import { Select } from "@renderer/components/ui/Select";
+import { Skeleton } from "@renderer/components/ui/Skeleton";
+import {
+  TableContainer,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
+} from "@renderer/components/ui/Table";
+import { ThemeSwitcher } from "@renderer/components/ui/ThemeSwitcher";
+import type { Profile } from "@renderer/components/features/types";
 
 interface Props {
-  session: Session
-  profile: Profile | null
+  session: Session;
+  profile: Profile | null;
   // Every AppSettings field below is business-wide (app_settings table) — only an admin
   // account can change any of them (enforced server-side too), so their cards only
   // render for admin. `settings` is null until the fetch resolves.
-  isAdmin: boolean
-  settings: AppSettings | null
-  onUpdateSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>
+  isAdmin: boolean;
+  settings: AppSettings | null;
+  onUpdateSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>;
 }
 
-type DateFormat = 'MDY' | 'DMY'
+type DateFormat = "MDY" | "DMY";
 const DATE_FORMAT_LABELS: Record<DateFormat, string> = {
-  MDY: 'Month first (MM/DD/YYYY)',
-  DMY: 'Day first (DD/MM/YYYY)'
-}
+  MDY: "Month first (MM/DD/YYYY)",
+  DMY: "Day first (DD/MM/YYYY)",
+};
 
 interface BranchDateFormats {
-  id: string
-  name: string
-  sale_date_format: DateFormat
-  inventory_date_format: DateFormat
+  id: string;
+  name: string;
+  sale_date_format: DateFormat;
+  inventory_date_format: DateFormat;
 }
 
 // A free-typed day count — text rather than type="number" so there's no native up/down
@@ -47,34 +58,34 @@ function DayCountField({
   max,
   disabled,
   zeroMeans,
-  onCommit
+  onCommit,
 }: {
-  label: string
-  value: number | undefined
-  min: number
-  max: number
-  disabled: boolean
-  zeroMeans?: string
-  onCommit: (value: number) => void
+  label: string;
+  value: number | undefined;
+  min: number;
+  max: number;
+  disabled: boolean;
+  zeroMeans?: string;
+  onCommit: (value: number) => void;
 }): React.JSX.Element {
-  const [draft, setDraft] = useState(value !== undefined ? String(value) : '')
+  const [draft, setDraft] = useState(value !== undefined ? String(value) : "");
   useEffect(() => {
-    if (value !== undefined) setDraft(String(value))
-  }, [value])
+    if (value !== undefined) setDraft(String(value));
+  }, [value]);
 
   function commit(): void {
-    if (value === undefined) return
-    const parsed = Math.trunc(Number(draft))
-    if (Number.isFinite(parsed) && draft.trim() !== '') {
-      const clamped = Math.min(Math.max(parsed, min), max)
-      setDraft(String(clamped))
-      if (clamped !== value) onCommit(clamped)
+    if (value === undefined) return;
+    const parsed = Math.trunc(Number(draft));
+    if (Number.isFinite(parsed) && draft.trim() !== "") {
+      const clamped = Math.min(Math.max(parsed, min), max);
+      setDraft(String(clamped));
+      if (clamped !== value) onCommit(clamped);
     } else {
-      setDraft(String(value))
+      setDraft(String(value));
     }
   }
 
-  const hint = zeroMeans && value === 0 ? zeroMeans : `${min}–${max} days`
+  const hint = zeroMeans && value === 0 ? zeroMeans : `${min}–${max} days`;
 
   return (
     <Input
@@ -85,14 +96,14 @@ function DayCountField({
       hint={hint}
       value={draft}
       disabled={disabled || value === undefined}
-      onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
+      onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
       onBlur={commit}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') e.currentTarget.blur()
+        if (e.key === "Enter") e.currentTarget.blur();
       }}
       className="max-w-xs"
     />
-  )
+  );
 }
 
 // DayCountField's decimal sibling, for the Branch Health weights and Early Warning
@@ -106,30 +117,30 @@ function NumberField({
   min,
   max,
   disabled,
-  onCommit
+  onCommit,
 }: {
-  label: string
-  hint: string
-  value: number | undefined
-  min: number
-  max: number
-  disabled: boolean
-  onCommit: (value: number) => void
+  label: string;
+  hint: string;
+  value: number | undefined;
+  min: number;
+  max: number;
+  disabled: boolean;
+  onCommit: (value: number) => void;
 }): React.JSX.Element {
-  const [draft, setDraft] = useState(value !== undefined ? String(value) : '')
+  const [draft, setDraft] = useState(value !== undefined ? String(value) : "");
   useEffect(() => {
-    if (value !== undefined) setDraft(String(value))
-  }, [value])
+    if (value !== undefined) setDraft(String(value));
+  }, [value]);
 
   function commit(): void {
-    if (value === undefined) return
-    const parsed = Number(draft)
-    if (Number.isFinite(parsed) && draft.trim() !== '') {
-      const clamped = Math.min(Math.max(parsed, min), max)
-      setDraft(String(clamped))
-      if (clamped !== value) onCommit(clamped)
+    if (value === undefined) return;
+    const parsed = Number(draft);
+    if (Number.isFinite(parsed) && draft.trim() !== "") {
+      const clamped = Math.min(Math.max(parsed, min), max);
+      setDraft(String(clamped));
+      if (clamped !== value) onCommit(clamped);
     } else {
-      setDraft(String(value))
+      setDraft(String(value));
     }
   }
 
@@ -141,71 +152,125 @@ function NumberField({
       hint={hint}
       value={draft}
       disabled={disabled || value === undefined}
-      onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ''))}
+      onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ""))}
       onBlur={commit}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') e.currentTarget.blur()
+        if (e.key === "Enter") e.currentTarget.blur();
       }}
     />
-  )
+  );
 }
 
-const HEALTH_WEIGHT_FIELDS: { key: keyof BranchHealthWeights; label: string }[] = [
-  { key: 'sales', label: 'Sales' },
-  { key: 'profit', label: 'Profit' },
-  { key: 'inventory', label: 'Inventory' },
-  { key: 'customer', label: 'Customer' },
-  { key: 'data_quality', label: 'Data Quality' }
-]
+const HEALTH_WEIGHT_FIELDS: {
+  key: keyof BranchHealthWeights;
+  label: string;
+}[] = [
+  { key: "sales", label: "Sales" },
+  { key: "profit", label: "Profit" },
+  { key: "inventory", label: "Inventory" },
+  { key: "customer", label: "Customer" },
+  { key: "data_quality", label: "Data Quality" },
+];
 
 // `negative: true` means the field is shown as a positive number and stored as its
 // negative — "revenue falls by more than 10%" rather than asking anyone to type "-10".
 const WARNING_THRESHOLD_FIELDS: {
-  key: keyof EarlyWarningThresholds
-  label: string
-  hint: string
-  negative?: boolean
+  key: keyof EarlyWarningThresholds;
+  label: string;
+  hint: string;
+  negative?: boolean;
 }[] = [
-  { key: 'revenue_decline_normal_pct', label: 'Revenue normal — falls more than', hint: '%', negative: true },
-  { key: 'revenue_decline_warning_pct', label: 'Revenue warning — falls more than', hint: '%', negative: true },
-  { key: 'revenue_decline_critical_pct', label: 'Revenue critical — falls more than', hint: '%', negative: true },
-  { key: 'low_margin_normal_pct', label: 'Margin normal — below', hint: '%' },
-  { key: 'low_margin_warning_pct', label: 'Margin warning — below', hint: '%' },
-  { key: 'low_margin_critical_pct', label: 'Margin critical — below', hint: '%' },
-  { key: 'margin_slip_normal_pp', label: 'Margin slip normal — falls more than', hint: 'percentage points', negative: true },
-  { key: 'margin_slip_warning_pp', label: 'Margin slip warning — falls more than', hint: 'percentage points', negative: true },
-  { key: 'dead_stock_normal_share_pct', label: 'Dead stock normal — above', hint: '% of products' },
-  { key: 'dead_stock_warning_share_pct', label: 'Dead stock warning — above', hint: '% of products' },
-  { key: 'dead_stock_critical_share_pct', label: 'Dead stock critical — above', hint: '% of products' },
-  { key: 'traffic_decline_warning_pct', label: 'Footfall warning — visits fall more than', hint: '%', negative: true },
-  { key: 'single_item_basket_normal_share_pct', label: 'Single-item baskets normal — above', hint: '% of visits' },
-  { key: 'single_item_basket_warning_share_pct', label: 'Single-item baskets warning — above', hint: '% of visits' }
-]
+  {
+    key: "revenue_decline_normal_pct",
+    label: "Revenue normal — falls more than",
+    hint: "%",
+    negative: true,
+  },
+  {
+    key: "revenue_decline_warning_pct",
+    label: "Revenue warning — falls more than",
+    hint: "%",
+    negative: true,
+  },
+  {
+    key: "revenue_decline_critical_pct",
+    label: "Revenue critical — falls more than",
+    hint: "%",
+    negative: true,
+  },
+  { key: "low_margin_normal_pct", label: "Margin normal — below", hint: "%" },
+  { key: "low_margin_warning_pct", label: "Margin warning — below", hint: "%" },
+  {
+    key: "low_margin_critical_pct",
+    label: "Margin critical — below",
+    hint: "%",
+  },
+  {
+    key: "margin_slip_normal_pp",
+    label: "Margin slip normal — falls more than",
+    hint: "%",
+    negative: true,
+  },
+  {
+    key: "margin_slip_warning_pp",
+    label: "Margin slip warning — falls more than",
+    hint: "%",
+    negative: true,
+  },
+  {
+    key: "dead_stock_normal_share_pct",
+    label: "Dead stock normal — above",
+    hint: "% of products",
+  },
+  {
+    key: "dead_stock_warning_share_pct",
+    label: "Dead stock warning — above",
+    hint: "% of products",
+  },
+  {
+    key: "dead_stock_critical_share_pct",
+    label: "Dead stock critical — above",
+    hint: "% of products",
+  },
+  {
+    key: "traffic_decline_warning_pct",
+    label: "Footfall warning — visits fall more than",
+    hint: "%",
+    negative: true,
+  },
+];
 
-type SettingsTab = 'general' | 'checks' | 'pricing' | 'health' | 'branches'
+type SettingsTab = "general" | "checks" | "pricing" | "health" | "branches";
 
 // Ten stacked cards was one long scroll with no shape to it, so related settings are
 // grouped and the groups are tabs — same pill control the Dashboard and Import Overview
 // already use, so this reads as the app's existing pattern rather than a new one.
-const SETTINGS_TABS: { id: SettingsTab; label: string; retailOnly?: boolean }[] = [
-  { id: 'general', label: 'General' },
-  { id: 'checks', label: 'Data checks', retailOnly: true },
-  { id: 'pricing', label: 'Buying price' },
-  { id: 'health', label: 'Branch health', retailOnly: true },
-  { id: 'branches', label: 'Branches' }
-]
+const SETTINGS_TABS: {
+  id: SettingsTab;
+  label: string;
+  retailOnly?: boolean;
+}[] = [
+  { id: "general", label: "General" },
+  { id: "checks", label: "Data checks", retailOnly: true },
+  { id: "pricing", label: "Buying price" },
+  { id: "health", label: "Branch health", retailOnly: true },
+  { id: "branches", label: "Branches" },
+];
 
 function SettingsTabBar({
   tabs,
   activeTab,
-  onSelect
+  onSelect,
 }: {
-  tabs: { id: SettingsTab; label: string }[]
-  activeTab: SettingsTab
-  onSelect: (tab: SettingsTab) => void
+  tabs: { id: SettingsTab; label: string }[];
+  activeTab: SettingsTab;
+  onSelect: (tab: SettingsTab) => void;
 }): React.JSX.Element {
   return (
-    <div role="tablist" className="flex flex-wrap gap-1 p-1 rounded-lg bg-bg-subtle w-fit">
+    <div
+      role="tablist"
+      className="flex flex-wrap gap-1 p-1 rounded-lg bg-bg-subtle w-fit"
+    >
       {tabs.map((tab) => (
         <button
           key={tab.id}
@@ -214,102 +279,111 @@ function SettingsTabBar({
           aria-selected={activeTab === tab.id}
           onClick={() => onSelect(tab.id)}
           className={cn(
-            'flex items-center gap-1.5 h-8 px-4 rounded-md text-sm font-medium transition-all duration-150',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1',
+            "flex items-center gap-1.5 h-8 px-4 rounded-md text-sm font-medium transition-all duration-150",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1",
             activeTab === tab.id
-              ? 'bg-brand-subtle text-brand shadow-sm'
-              : 'text-text-muted hover:text-text-secondary'
+              ? "bg-brand-subtle text-brand shadow-sm"
+              : "text-text-muted hover:text-text-secondary",
           )}
         >
           {tab.label}
         </button>
       ))}
     </div>
-  )
+  );
 }
 
-export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSettings }: Props): React.JSX.Element {
-  const showToast = useToast()
+export function SettingsPage({
+  session,
+  profile,
+  isAdmin,
+  settings,
+  onUpdateSettings,
+}: Props): React.JSX.Element {
+  const showToast = useToast();
   // Wholesale accounts never see the Warning tab (no sale/inventory/purchase data), so the
   // check-window setting has nothing to apply to for them.
-  const isWholesale = profile?.role === 'wholesale'
-  const [tab, setTab] = useState<SettingsTab>('general')
+  const isWholesale = profile?.role === "wholesale";
+  const [tab, setTab] = useState<SettingsTab>("general");
 
-  const [branches, setBranches] = useState<BranchDateFormats[] | null>(null)
+  const [branches, setBranches] = useState<BranchDateFormats[] | null>(null);
   // Tracks which specific AppSettings key (or "branch-id:field" pair) is mid-save — as a
   // set rather than one flag per field, so saving one control doesn't disable another's.
-  const [savingKeys, setSavingKeys] = useState<Set<string>>(new Set())
+  const [savingKeys, setSavingKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!isAdmin) return
-    let cancelled = false
+    if (!isAdmin) return;
+    let cancelled = false;
     fetch(`${apiBaseUrl}/api/branches`, {
-      headers: { Authorization: `Bearer ${session.access_token}` }
+      headers: { Authorization: `Bearer ${session.access_token}` },
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((body: BranchDateFormats[] | null) => {
-        if (!cancelled && body) setBranches(body)
+        if (!cancelled && body) setBranches(body);
       })
       .catch(() => {
         // Leaves the table on its loading skeleton rather than guessing a value.
-      })
+      });
     return () => {
-      cancelled = true
-    }
-  }, [isAdmin, session])
+      cancelled = true;
+    };
+  }, [isAdmin, session]);
 
   async function handleSettingChange<K extends keyof AppSettings>(
     key: K,
     value: AppSettings[K],
     successMessage: string,
-    errorMessage: string
+    errorMessage: string,
   ): Promise<void> {
-    setSavingKeys((prev) => new Set(prev).add(key))
+    setSavingKeys((prev) => new Set(prev).add(key));
     try {
-      await onUpdateSettings({ [key]: value } as Partial<AppSettings>)
-      showToast('success', successMessage)
+      await onUpdateSettings({ [key]: value } as Partial<AppSettings>);
+      showToast("success", successMessage);
     } catch {
-      showToast('error', errorMessage)
+      showToast("error", errorMessage);
     } finally {
       setSavingKeys((prev) => {
-        const next = new Set(prev)
-        next.delete(key)
-        return next
-      })
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
   }
 
   async function handleBranchDateFormatChange(
     branchId: string,
-    field: 'sale_date_format' | 'inventory_date_format',
-    format: DateFormat
+    field: "sale_date_format" | "inventory_date_format",
+    format: DateFormat,
   ): Promise<void> {
-    const fieldKey = `${branchId}:${field}`
-    const previous = branches
+    const fieldKey = `${branchId}:${field}`;
+    const previous = branches;
     setBranches(
-      (current) => current?.map((b) => (b.id === branchId ? { ...b, [field]: format } : b)) ?? current
-    )
-    setSavingKeys((prev) => new Set(prev).add(fieldKey))
+      (current) =>
+        current?.map((b) =>
+          b.id === branchId ? { ...b, [field]: format } : b,
+        ) ?? current,
+    );
+    setSavingKeys((prev) => new Set(prev).add(fieldKey));
     try {
       const response = await fetch(`${apiBaseUrl}/api/branches/${branchId}`, {
-        method: 'PUT',
+        method: "PUT",
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ [field]: format })
-      })
-      if (!response.ok) throw new Error('Request failed')
-      showToast('success', 'Branch date format updated')
+        body: JSON.stringify({ [field]: format }),
+      });
+      if (!response.ok) throw new Error("Request failed");
+      showToast("success", "Branch date format updated");
     } catch {
-      setBranches(previous)
-      showToast('error', "Couldn't update branch date format")
+      setBranches(previous);
+      showToast("error", "Couldn't update branch date format");
     } finally {
       setSavingKeys((prev) => {
-        const next = new Set(prev)
-        next.delete(fieldKey)
-        return next
-      })
+        const next = new Set(prev);
+        next.delete(fieldKey);
+        return next;
+      });
     }
   }
 
@@ -322,7 +396,9 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
 
       {isAdmin && (
         <SettingsTabBar
-          tabs={SETTINGS_TABS.filter((option) => !option.retailOnly || !isWholesale)}
+          tabs={SETTINGS_TABS.filter(
+            (option) => !option.retailOnly || !isWholesale,
+          )}
           activeTab={tab}
           onSelect={setTab}
         />
@@ -337,20 +413,28 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && tab === 'general' && (
+      {isAdmin && tab === "general" && (
         <Card>
-          <CardHeader title="Appearance" description="Business-wide — applies to every signed-in account." />
+          <CardHeader
+            title="Appearance"
+            description="Business-wide — applies to every signed-in account."
+          />
           <ThemeSwitcher
-            theme={settings?.theme ?? 'system'}
-            disabled={!settings || savingKeys.has('theme')}
+            theme={settings?.theme ?? "system"}
+            disabled={!settings || savingKeys.has("theme")}
             onThemeChange={(theme: ThemeMode) =>
-              handleSettingChange('theme', theme, 'Theme updated', "Couldn't update theme")
+              handleSettingChange(
+                "theme",
+                theme,
+                "Theme updated",
+                "Couldn't update theme",
+              )
             }
           />
         </Card>
       )}
 
-      {isAdmin && !isWholesale && tab === 'checks' && (
+      {isAdmin && !isWholesale && tab === "checks" && (
         <Card>
           <CardHeader
             title="Daily check windows"
@@ -366,13 +450,13 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
                   value={settings.sale_warning_window_days}
                   min={1}
                   max={365}
-                  disabled={savingKeys.has('sale_warning_window_days')}
+                  disabled={savingKeys.has("sale_warning_window_days")}
                   onCommit={(days) =>
                     handleSettingChange(
-                      'sale_warning_window_days',
+                      "sale_warning_window_days",
                       days,
-                      'Sale check window updated',
-                      "Couldn't update sale check window"
+                      "Sale check window updated",
+                      "Couldn't update sale check window",
                     )
                   }
                 />
@@ -387,13 +471,13 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
                   value={settings.purchase_warning_window_days}
                   min={1}
                   max={365}
-                  disabled={savingKeys.has('purchase_warning_window_days')}
+                  disabled={savingKeys.has("purchase_warning_window_days")}
                   onCommit={(days) =>
                     handleSettingChange(
-                      'purchase_warning_window_days',
+                      "purchase_warning_window_days",
                       days,
-                      'Purchase check window updated',
-                      "Couldn't update purchase check window"
+                      "Purchase check window updated",
+                      "Couldn't update purchase check window",
                     )
                   }
                 />
@@ -403,7 +487,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && !isWholesale && tab === 'general' && (
+      {isAdmin && !isWholesale && tab === "general" && (
         <Card>
           <CardHeader
             title="Sale & Purchase list default range"
@@ -419,13 +503,13 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
                   value={settings.sale_list_window_days}
                   min={1}
                   max={365}
-                  disabled={savingKeys.has('sale_list_window_days')}
+                  disabled={savingKeys.has("sale_list_window_days")}
                   onCommit={(days) =>
                     handleSettingChange(
-                      'sale_list_window_days',
+                      "sale_list_window_days",
                       days,
-                      'Sale list default range updated',
-                      "Couldn't update sale list default range"
+                      "Sale list default range updated",
+                      "Couldn't update sale list default range",
                     )
                   }
                 />
@@ -440,13 +524,13 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
                   value={settings.purchase_list_window_days}
                   min={1}
                   max={365}
-                  disabled={savingKeys.has('purchase_list_window_days')}
+                  disabled={savingKeys.has("purchase_list_window_days")}
                   onCommit={(days) =>
                     handleSettingChange(
-                      'purchase_list_window_days',
+                      "purchase_list_window_days",
                       days,
-                      'Purchase list default range updated',
-                      "Couldn't update purchase list default range"
+                      "Purchase list default range updated",
+                      "Couldn't update purchase list default range",
                     )
                   }
                 />
@@ -456,7 +540,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && !isWholesale && tab === 'general' && (
+      {isAdmin && !isWholesale && tab === "general" && (
         <Card>
           <CardHeader
             title="Buying Price Source column"
@@ -468,14 +552,14 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
             ) : (
               <Select
                 label="Visibility"
-                value={settings.show_buying_price_source ? 'shown' : 'hidden'}
-                disabled={savingKeys.has('show_buying_price_source')}
+                value={settings.show_buying_price_source ? "shown" : "hidden"}
+                disabled={savingKeys.has("show_buying_price_source")}
                 onChange={(e) =>
                   handleSettingChange(
-                    'show_buying_price_source',
-                    e.target.value === 'shown',
-                    'Buying Price Source column visibility updated',
-                    "Couldn't update column visibility"
+                    "show_buying_price_source",
+                    e.target.value === "shown",
+                    "Buying Price Source column visibility updated",
+                    "Couldn't update column visibility",
                   )
                 }
               >
@@ -487,7 +571,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && tab === 'pricing' && (
+      {isAdmin && tab === "pricing" && (
         <Card>
           <CardHeader
             title="Purchase price lookback days"
@@ -503,13 +587,13 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
                 min={0}
                 max={365}
                 zeroMeans="None (exact date only)"
-                disabled={savingKeys.has('purchase_lookback_window_days')}
+                disabled={savingKeys.has("purchase_lookback_window_days")}
                 onCommit={(days) =>
                   handleSettingChange(
-                    'purchase_lookback_window_days',
+                    "purchase_lookback_window_days",
                     days,
-                    'Purchase price lookback days updated',
-                    "Couldn't update purchase price lookback days"
+                    "Purchase price lookback days updated",
+                    "Couldn't update purchase price lookback days",
                   )
                 }
               />
@@ -518,7 +602,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && tab === 'pricing' && (
+      {isAdmin && tab === "pricing" && (
         <Card>
           <CardHeader
             title="Inventory price lookback days"
@@ -534,13 +618,13 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
                 min={0}
                 max={365}
                 zeroMeans="None (exact date only)"
-                disabled={savingKeys.has('stock_lookback_window_days')}
+                disabled={savingKeys.has("stock_lookback_window_days")}
                 onCommit={(days) =>
                   handleSettingChange(
-                    'stock_lookback_window_days',
+                    "stock_lookback_window_days",
                     days,
-                    'Inventory price lookback days updated',
-                    "Couldn't update inventory price lookback days"
+                    "Inventory price lookback days updated",
+                    "Couldn't update inventory price lookback days",
                   )
                 }
               />
@@ -549,7 +633,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && tab === 'pricing' && (
+      {isAdmin && tab === "pricing" && (
         <Card>
           <CardHeader
             title="Inventory price forward days"
@@ -565,13 +649,13 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
                 min={0}
                 max={365}
                 zeroMeans="None (exact date only)"
-                disabled={savingKeys.has('stock_forward_fallback_window_days')}
+                disabled={savingKeys.has("stock_forward_fallback_window_days")}
                 onCommit={(days) =>
                   handleSettingChange(
-                    'stock_forward_fallback_window_days',
+                    "stock_forward_fallback_window_days",
                     days,
-                    'Inventory price forward days updated',
-                    "Couldn't update inventory price forward days"
+                    "Inventory price forward days updated",
+                    "Couldn't update inventory price forward days",
                   )
                 }
               />
@@ -580,7 +664,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && !isWholesale && tab === 'health' && (
+      {isAdmin && !isWholesale && tab === "health" && (
         <Card>
           <CardHeader
             title="Branch health weights"
@@ -597,16 +681,23 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
                     hint="% of the score"
                     // Stored as a fraction, shown as a percentage — nobody reasons
                     // about a weight of 0.25.
-                    value={Math.round(settings.branch_health_weights[field.key] * 1000) / 10}
+                    value={
+                      Math.round(
+                        settings.branch_health_weights[field.key] * 1000,
+                      ) / 10
+                    }
                     min={0}
                     max={100}
-                    disabled={savingKeys.has('branch_health_weights')}
+                    disabled={savingKeys.has("branch_health_weights")}
                     onCommit={(percent) =>
                       handleSettingChange(
-                        'branch_health_weights',
-                        { ...settings.branch_health_weights, [field.key]: percent / 100 },
-                        'Branch health weights updated',
-                        "Couldn't update branch health weights"
+                        "branch_health_weights",
+                        {
+                          ...settings.branch_health_weights,
+                          [field.key]: percent / 100,
+                        },
+                        "Branch health weights updated",
+                        "Couldn't update branch health weights",
                       )
                     }
                   />
@@ -616,10 +707,13 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
           </div>
           {settings && (
             <p className="text-sm text-text-muted mt-4">
-              Currently adding up to{' '}
+              Currently adding up to{" "}
               <span className="font-medium text-text-secondary tabular-nums">
                 {Math.round(
-                  Object.values(settings.branch_health_weights).reduce((sum, weight) => sum + weight, 0) * 100
+                  Object.values(settings.branch_health_weights).reduce(
+                    (sum, weight) => sum + weight,
+                    0,
+                  ) * 100,
                 )}
                 %
               </span>
@@ -629,7 +723,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && !isWholesale && tab === 'health' && (
+      {isAdmin && !isWholesale && tab === "health" && (
         <Card>
           <CardHeader
             title="Early warning thresholds"
@@ -644,19 +738,21 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
                   <NumberField
                     label={field.label}
                     hint={field.hint}
-                    value={Math.abs(settings.early_warning_thresholds[field.key])}
+                    value={Math.abs(
+                      settings.early_warning_thresholds[field.key],
+                    )}
                     min={0}
                     max={100}
-                    disabled={savingKeys.has('early_warning_thresholds')}
+                    disabled={savingKeys.has("early_warning_thresholds")}
                     onCommit={(entered) =>
                       handleSettingChange(
-                        'early_warning_thresholds',
+                        "early_warning_thresholds",
                         {
                           ...settings.early_warning_thresholds,
-                          [field.key]: field.negative ? -entered : entered
+                          [field.key]: field.negative ? -entered : entered,
                         },
-                        'Early warning thresholds updated',
-                        "Couldn't update early warning thresholds"
+                        "Early warning thresholds updated",
+                        "Couldn't update early warning thresholds",
                       )
                     }
                   />
@@ -667,7 +763,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
 
-      {isAdmin && tab === 'branches' && (
+      {isAdmin && tab === "branches" && (
         <Card>
           <CardHeader
             title="Branch date formats"
@@ -692,40 +788,48 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
                       <Select
                         aria-label={`${branch.name} sale date format`}
                         value={branch.sale_date_format}
-                        disabled={savingKeys.has(`${branch.id}:sale_date_format`)}
+                        disabled={savingKeys.has(
+                          `${branch.id}:sale_date_format`,
+                        )}
                         onChange={(e) =>
                           handleBranchDateFormatChange(
                             branch.id,
-                            'sale_date_format',
-                            e.target.value as DateFormat
+                            "sale_date_format",
+                            e.target.value as DateFormat,
                           )
                         }
                       >
-                        {(Object.keys(DATE_FORMAT_LABELS) as DateFormat[]).map((format) => (
-                          <option key={format} value={format}>
-                            {DATE_FORMAT_LABELS[format]}
-                          </option>
-                        ))}
+                        {(Object.keys(DATE_FORMAT_LABELS) as DateFormat[]).map(
+                          (format) => (
+                            <option key={format} value={format}>
+                              {DATE_FORMAT_LABELS[format]}
+                            </option>
+                          ),
+                        )}
                       </Select>
                     </Td>
                     <Td>
                       <Select
                         aria-label={`${branch.name} inventory date format`}
                         value={branch.inventory_date_format}
-                        disabled={savingKeys.has(`${branch.id}:inventory_date_format`)}
+                        disabled={savingKeys.has(
+                          `${branch.id}:inventory_date_format`,
+                        )}
                         onChange={(e) =>
                           handleBranchDateFormatChange(
                             branch.id,
-                            'inventory_date_format',
-                            e.target.value as DateFormat
+                            "inventory_date_format",
+                            e.target.value as DateFormat,
                           )
                         }
                       >
-                        {(Object.keys(DATE_FORMAT_LABELS) as DateFormat[]).map((format) => (
-                          <option key={format} value={format}>
-                            {DATE_FORMAT_LABELS[format]}
-                          </option>
-                        ))}
+                        {(Object.keys(DATE_FORMAT_LABELS) as DateFormat[]).map(
+                          (format) => (
+                            <option key={format} value={format}>
+                              {DATE_FORMAT_LABELS[format]}
+                            </option>
+                          ),
+                        )}
                       </Select>
                     </Td>
                   </Tr>
@@ -736,7 +840,7 @@ export function SettingsPage({ session, profile, isAdmin, settings, onUpdateSett
         </Card>
       )}
     </div>
-  )
+  );
 }
 
-export default SettingsPage
+export default SettingsPage;

@@ -1,18 +1,22 @@
-import { cn } from '@renderer/lib/utils'
+import { cn } from "@renderer/lib/utils";
 
 interface ProgressBarProps {
   /** 0–100. Values outside that range are clamped. */
-  value: number
-  label?: string
-  className?: string
+  value: number;
+  label?: string;
+  className?: string;
 }
 
 // Pure primitive — no skeleton/empty state of its own (a bar at 0% already reads as
 // "nothing done yet", which is the empty state).
-export function ProgressBar({ value, label, className }: ProgressBarProps): React.JSX.Element {
-  const pct = Math.max(0, Math.min(100, value))
+export function ProgressBar({
+  value,
+  label,
+  className,
+}: ProgressBarProps): React.JSX.Element {
+  const pct = Math.max(0, Math.min(100, value));
   return (
-    <div className={cn('flex flex-col gap-1.5', className)}>
+    <div className={cn("flex flex-col gap-1.5", className)}>
       {label && <span className="text-sm text-text-secondary">{label}</span>}
       <div
         role="progressbar"
@@ -28,5 +32,5 @@ export function ProgressBar({ value, label, className }: ProgressBarProps): Reac
         />
       </div>
     </div>
-  )
+  );
 }

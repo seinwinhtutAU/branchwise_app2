@@ -15,20 +15,20 @@
  * Cleared on sign-out, since the next account is not this one.
  */
 
-const PREFIX = 'branchwise:last-known:'
+const PREFIX = "branchwise:last-known:";
 
 export function readLastKnown<T>(key: string): T | null {
   try {
-    const raw = localStorage.getItem(PREFIX + key)
-    return raw ? (JSON.parse(raw) as T) : null
+    const raw = localStorage.getItem(PREFIX + key);
+    return raw ? (JSON.parse(raw) as T) : null;
   } catch {
-    return null
+    return null;
   }
 }
 
 export function writeLastKnown<T>(key: string, value: T): void {
   try {
-    localStorage.setItem(PREFIX + key, JSON.stringify(value))
+    localStorage.setItem(PREFIX + key, JSON.stringify(value));
   } catch {
     // Storage full or disabled — this run is unaffected, the next one just starts blank.
   }
@@ -36,7 +36,7 @@ export function writeLastKnown<T>(key: string, value: T): void {
 
 export function forgetLastKnown(key: string): void {
   try {
-    localStorage.removeItem(PREFIX + key)
+    localStorage.removeItem(PREFIX + key);
   } catch {
     // Nothing stored means nothing to forget.
   }
@@ -46,7 +46,7 @@ export function forgetLastKnown(key: string): void {
 export function clearLastKnown(): void {
   try {
     for (const key of Object.keys(localStorage)) {
-      if (key.startsWith(PREFIX)) localStorage.removeItem(key)
+      if (key.startsWith(PREFIX)) localStorage.removeItem(key);
     }
   } catch {
     // As above.

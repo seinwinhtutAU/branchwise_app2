@@ -2,23 +2,24 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import (
-    allocation,
     auth,
     branches,
     chat,
     dashboard,
     data_overview,
-    factory_vouchers,
     health,
     import_health,
     imports,
     inventory,
-    orders,
     purchases,
     sales,
     settings,
-    warehouse_receipts,
     warnings,
+    wholesale_receivings,
+    wholesale_shipments,
+    wholesale_supplier_vouchers,
+    wholesale_orders,
+    wholesale_inventory,
 )
 
 
@@ -34,21 +35,22 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(auth.router)
-    app.include_router(orders.router)
     app.include_router(inventory.router)
-    app.include_router(allocation.router)
     app.include_router(imports.router)
     app.include_router(import_health.router)
     app.include_router(branches.router)
     app.include_router(data_overview.router)
     app.include_router(sales.router)
     app.include_router(purchases.router)
-    app.include_router(factory_vouchers.router)
-    app.include_router(warehouse_receipts.router)
     app.include_router(warnings.router)
     app.include_router(settings.router)
     app.include_router(chat.router)
     app.include_router(dashboard.router)
+    app.include_router(wholesale_shipments.router)
+    app.include_router(wholesale_receivings.router)
+    app.include_router(wholesale_supplier_vouchers.router)
+    app.include_router(wholesale_orders.router)
+    app.include_router(wholesale_inventory.router)
 
     return app
 

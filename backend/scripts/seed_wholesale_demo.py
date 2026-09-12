@@ -1,0 +1,458 @@
+"""Loads the wholesale demo data into Postgres, so the screens show the same working
+business as the front-end's in-memory seed arrays once a phase's screen moves onto the
+real database. See scripts/data/wholesale_demo.json for the data itself, transcribed once
+from the TypeScript seed arrays; each phase adds its own section to both files.
+
+Safe by default: the script refuses a branch that already has wholesale rows, so a demo
+load can never silently mix with a person's work. Pass --force to run its idempotent
+mode (existing demo references are skipped), or --wipe to explicitly replace only this
+branch's wholesale rows. --dry-run prints what would happen without writing anything.
+
+Touches the real database, so this must run with --directory, not --project (see
+CLAUDE.md's note on backend/.env only being read that way).
+
+    uv run --directory backend python scripts/seed_wholesale_demo.py --branch "Wholesale"
+    uv run --directory backend python scripts/seed_wholesale_demo.py --branch "Wholesale" --force
+    uv run --directory backend python scripts/seed_wholesale_demo.py --branch "Wholesale" --wipe
+    uv run --directory backend python scripts/seed_wholesale_demo.py --branch "Wholesale" --dry-run
+"""
+
+import argparse
+import json
+import sys
+from datetime import date
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from app.db.session import SessionLocal  # noqa: E402
+from app.models.branch import Branch  # noqa: E402
+from app.models.user import User  # noqa: E402
+from app.models.wholesale import (  # noqa: E402
+    ProductGroup,
+    CustomerOrder,
+    CustomerOrderLine,
+    Receiving,
+    ReceivingCost,
+    ReceivingItem,
+    ReceivingPackage,
+    Shipment,
+    ShipmentLeg,
+    SupplierVoucher,
+    SupplierVoucherLine,
+    WholesalePayment,
+    WholesaleStockMovement,
+    WholesaleUnit,
+)
+from app.services.wholesale.colors import colors_as_json  # noqa: E402
+from app.services.wholesale.units import to_pairs  # noqa: E402
+
+DATA_FILE = Path(__file__).parent / "data" / "wholesale_demo.json"
+
+
+def _resolve_branch(db, name_or_id: str) -> Branch:
+    branch = db.get(Branch, name_or_id) or db.query(Branch).filter(Branch.name == name_or_id).one_or_none()
+    if branch is None:
+        raise SystemExit(f"No branch found matching {name_or_id!r} — check the name or id and try again.")
+    return branch
+
+
+def _seed_shipments(db, branch: Branch, shipments: list[dict], *, dry_run: bool) -> int:
+    existing_nos = {
+        row[0]
+        for row in db.query(Shipment.shipment_no).filter(Shipment.branch_id == branch.id).all()
+    }
+    created = 0
+    for entry in shipments:
+        if entry["shipment_no"] in existing_nos:
+            print(f"  skip {entry['shipment_no']} — already seeded")
+            continue
+        print(f"  {'would create' if dry_run else 'create'} {entry['shipment_no']}")
+        if dry_run:
+            created += 1
+            continue
+        shipment = Shipment(
+            branch_id=branch.id,
+            shipment_no=entry["shipment_no"],
+            voucher_no=entry["voucher_no"],
+            supplier_name=entry["supplier_name"],
+            cargo_name=entry["cargo_name"],
+            final_location=entry["final_location"],
+            sent_date=date.fromisoformat(entry["sent_date"]),
+            total_packages=entry["total_packages"],
+            total_pairs=entry["total_pairs"],
+            total_unit=entry["total_unit"],
+            packages_sent_by_cargo=entry["packages_sent_by_cargo"],
+            final_received_packages=entry["final_received_packages"],
+            legs=[
+                ShipmentLeg(
+                    leg_order=index + 1,
+                    stop_name=leg["stop_name"],
+                    carrier_name=leg["carrier_name"],
+                    packages_received=leg["packages_received"],
+                    packages_sent=leg["packages_sent"],
+                )
+                for index, leg in enumerate(entry["legs"])
+            ],
+        )
+        db.add(shipment)
+        created += 1
+    return created
+
+
+def _seed_vouchers(
+    db, branch: Branch, vouchers: list[dict], *, dry_run: bool, actor_id: str
+) -> int:
+    existing_nos = {
+        row[0]
+        for row in db.query(SupplierVoucher.voucher_no)
+        .filter(SupplierVoucher.branch_id == branch.id)
+        .all()
+    }
+    created = 0
+    for entry in vouchers:
+        if entry["voucher_no"] in existing_nos:
+            print(f"  skip {entry['voucher_no']} — already seeded")
+            continue
+        print(f"  {'would create' if dry_run else 'create'} {entry['voucher_no']}")
+        if dry_run:
+            created += 1
+            continue
+        lines = []
+        for line in entry["lines"]:
+            unit = WholesaleUnit(line["unit"])
+            color_qty = line["color_qty"].strip()
+            lines.append(
+                SupplierVoucherLine(
+                    stock_code=line["stock_code"],
+                    description=line["description"],
+                    product_group=ProductGroup(line["group"]),
+                    color_qty=color_qty,
+                    colors=colors_as_json(color_qty),
+                    unit=unit,
+                    wanted_pairs=to_pairs(line["qty"], unit),
+                    buying_price=line["buying_price"],
+                )
+            )
+        payments = [
+            WholesalePayment(
+                branch_id=branch.id,
+                paid_on=date.fromisoformat(payment["date"]),
+                amount=payment["amount"],
+                note=payment["note"],
+                recorded_by_user_id=actor_id,
+            )
+            for payment in entry["payments"]
+        ]
+        db.add(
+            SupplierVoucher(
+                branch_id=branch.id,
+                voucher_no=entry["voucher_no"],
+                supplier_name=entry["supplier_name"],
+                voucher_date=date.fromisoformat(entry["voucher_date"]),
+                cargo_name=entry["cargo_name"],
+                total_packages=entry["total_packages"],
+                lines=lines,
+                payments=payments,
+            )
+        )
+        created += 1
+    return created
+
+
+def _seed_receivings(
+    db,
+    branch: Branch,
+    receivings: list[dict],
+    *,
+    dry_run: bool,
+    planned_shipment_nos: set[str] | None = None,
+) -> int:
+    existing_nos = {
+        row[0]
+        for row in db.query(Receiving.receiving_no)
+        .filter(Receiving.branch_id == branch.id)
+        .all()
+    }
+    shipments = {
+        row.shipment_no: row
+        for row in db.query(Shipment).filter(Shipment.branch_id == branch.id).all()
+    }
+    created = 0
+    for entry in receivings:
+        if entry["receiving_no"] in existing_nos:
+            print(f"  skip {entry['receiving_no']} — already seeded")
+            continue
+        shipment = shipments.get(entry["shipment_no"])
+        if shipment is None:
+            if dry_run and entry["shipment_no"] in (planned_shipment_nos or set()):
+                print(f"  would create {entry['receiving_no']}")
+                created += 1
+                continue
+            raise SystemExit(
+                f"Cannot seed {entry['receiving_no']}: shipment "
+                f"{entry['shipment_no']} is missing for {branch.name}."
+            )
+        print(f"  {'would create' if dry_run else 'create'} {entry['receiving_no']}")
+        if dry_run:
+            created += 1
+            continue
+        unit = WholesaleUnit(entry["total_unit"])
+        packages = []
+        for package in entry["packages"]:
+            items = []
+            for item in package["items"]:
+                item_unit = WholesaleUnit(item["unit"])
+                color_qty = item["color_qty"].strip()
+                items.append(
+                    ReceivingItem(
+                        stock_code=item["stock_code"],
+                        description=item["description"],
+                        product_group=ProductGroup(item["group"]),
+                        color_qty=color_qty,
+                        colors=colors_as_json(color_qty),
+                        unit=item_unit,
+                        qty_pairs=to_pairs(item["qty"], item_unit),
+                    )
+                )
+            packages.append(
+                ReceivingPackage(
+                    package_no=package["package_no"],
+                    opened=package["opened"],
+                    received_date=(
+                        date.fromisoformat(package["received_date"])
+                        if package["received_date"]
+                        else None
+                    ),
+                    note=package["note"],
+                    items=items,
+                )
+            )
+        costs = [ReceivingCost(**cost) for cost in entry["costs"]]
+        db.add(
+            Receiving(
+                branch_id=branch.id,
+                receiving_no=entry["receiving_no"],
+                shipment_id=shipment.id,
+                shipment_no=shipment.shipment_no,
+                voucher_no=shipment.voucher_no,
+                supplier_name=shipment.supplier_name,
+                gate=entry["gate"],
+                received_date=date.fromisoformat(entry["received_date"]),
+                total_packages=len(packages),
+                total_pairs=to_pairs(entry["total_qty"], unit),
+                total_unit=unit,
+                packages=packages,
+                costs=costs,
+            )
+        )
+        created += 1
+    return created
+
+
+def _seed_orders(db, branch: Branch, orders: list[dict], *, dry_run: bool, actor_id: str) -> int:
+    existing_nos = {
+        row[0]
+        for row in db.query(CustomerOrder.order_no).filter(CustomerOrder.branch_id == branch.id).all()
+    }
+    created = 0
+    for entry in orders:
+        if entry["order_no"] in existing_nos:
+            print(f"  skip {entry['order_no']} — already seeded")
+            continue
+        print(f"  {'would create' if dry_run else 'create'} {entry['order_no']}")
+        if dry_run:
+            created += 1
+            continue
+        lines = []
+        for line in entry["lines"]:
+            unit = WholesaleUnit(line["unit"])
+            color_qty = line["color_qty"].strip()
+            lines.append(
+                CustomerOrderLine(
+                    stock_code=line["stock_code"], description=line["description"],
+                    product_group=ProductGroup(line["group"]), supplier_name=line["supplier_name"],
+                    color_qty=color_qty, colors=colors_as_json(color_qty), unit=unit,
+                    wanted_pairs=to_pairs(line["qty"], unit), selling_price=line["selling_price"],
+                )
+            )
+        payments = [
+            WholesalePayment(
+                branch_id=branch.id, paid_on=date.fromisoformat(payment["date"]),
+                amount=payment["amount"], note=payment["note"], recorded_by_user_id=actor_id,
+            )
+            for payment in entry.get("payments", [])
+        ]
+        db.add(
+            CustomerOrder(
+                branch_id=branch.id, order_no=entry["order_no"],
+                customer_name=entry["customer_name"], customer_phone=entry["customer_phone"],
+                customer_address=entry["customer_address"], order_date=date.fromisoformat(entry["order_date"]),
+                cancelled=entry.get("cancelled", False), lines=lines, payments=payments,
+            )
+        )
+        created += 1
+    return created
+
+
+def _seed_outgoing(db, branch: Branch, movements: list[dict], *, dry_run: bool, actor_id: str) -> int:
+    existing = {
+        row[0] for row in db.query(WholesaleStockMovement.note).filter(WholesaleStockMovement.branch_id == branch.id).all()
+    }
+    orders = {
+        order.order_no: order for order in db.query(CustomerOrder).filter(CustomerOrder.branch_id == branch.id).all()
+    }
+    created = 0
+    for entry in movements:
+        if entry["seed_key"] in existing:
+            print(f"  skip delivery {entry['seed_key']} — already seeded")
+            continue
+        order = orders.get(entry["order_no"])
+        if order is None:
+            raise SystemExit(f"Cannot seed delivery {entry['seed_key']}: order {entry['order_no']} is missing.")
+        print(f"  {'would create' if dry_run else 'create'} delivery {entry['seed_key']}")
+        if dry_run:
+            created += 1
+            continue
+        color_qty = entry["color_qty"].strip()
+        source = next(line for line in order.lines if line.stock_code == entry["stock_code"])
+        db.add(WholesaleStockMovement(
+            branch_id=branch.id, order_id=order.id, stock_code=source.stock_code,
+            description=source.description, product_group=source.product_group,
+            color_qty=color_qty, colors=colors_as_json(color_qty),
+            qty_pairs=to_pairs(entry["qty"], WholesaleUnit(entry["unit"])),
+            location=entry["location"], delivered_on=date.fromisoformat(entry["date"]),
+            note=entry["seed_key"], recorded_by_user_id=actor_id,
+        ))
+        created += 1
+    return created
+
+
+def _seed_actor_id(db, branch: Branch) -> str:
+    user = (
+        db.query(User)
+        .filter(User.branch_id == branch.id)
+        .order_by(User.email)
+        .first()
+    )
+    return user.id if user else "seed-demo"
+
+
+def _wipe(db, branch: Branch, *, dry_run: bool) -> None:
+    shipment_count = db.query(Shipment).filter(Shipment.branch_id == branch.id).count()
+    voucher_count = db.query(SupplierVoucher).filter(SupplierVoucher.branch_id == branch.id).count()
+    receiving_count = db.query(Receiving).filter(Receiving.branch_id == branch.id).count()
+    order_count = db.query(CustomerOrder).filter(CustomerOrder.branch_id == branch.id).count()
+    outgoing_count = db.query(WholesaleStockMovement).filter(WholesaleStockMovement.branch_id == branch.id).count()
+    action = "would delete" if dry_run else "deleting"
+    print(
+        f"  {action} {shipment_count} shipment(s), {voucher_count} voucher(s), "
+        f"{receiving_count} receiving(s), {order_count} customer order(s), and {outgoing_count} delivery row(s) for {branch.name}"
+    )
+    if not dry_run:
+        # Child rows use ON DELETE CASCADE; receivings go first because shipments use
+        # RESTRICT once a gate record exists.
+        db.query(Receiving).filter(Receiving.branch_id == branch.id).delete(
+            synchronize_session=False
+        )
+        db.query(WholesaleStockMovement).filter(WholesaleStockMovement.branch_id == branch.id).delete(
+            synchronize_session=False
+        )
+        db.query(CustomerOrder).filter(CustomerOrder.branch_id == branch.id).delete(
+            synchronize_session=False
+        )
+        db.query(SupplierVoucher).filter(SupplierVoucher.branch_id == branch.id).delete(
+            synchronize_session=False
+        )
+        db.query(Shipment).filter(Shipment.branch_id == branch.id).delete()
+
+
+def _has_wholesale_rows(db, branch: Branch) -> bool:
+    return any(
+        db.query(model.id).filter(model.branch_id == branch.id).first() is not None
+        for model in (Shipment, SupplierVoucher, Receiving, CustomerOrder, WholesaleStockMovement)
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--branch", required=True, help="The wholesale branch's name or id")
+    parser.add_argument("--wipe", action="store_true", help="Delete this branch's wholesale rows first")
+    parser.add_argument("--force", action="store_true", help="Allow an idempotent seed into a branch that already has wholesale rows")
+    parser.add_argument("--dry-run", action="store_true", help="Print what would happen, write nothing")
+    args = parser.parse_args()
+
+    data = json.loads(DATA_FILE.read_text())
+
+    db = SessionLocal()
+    try:
+        branch = _resolve_branch(db, args.branch)
+        print(f"Seeding wholesale demo data for {branch.name} ({branch.id})")
+
+        if _has_wholesale_rows(db, branch) and not (args.force or args.wipe):
+            raise SystemExit(
+                f"{branch.name} already has wholesale rows. Refusing to mix demo data with them; use --force to skip existing references or --wipe to replace wholesale demo rows."
+            )
+
+        if args.wipe:
+            _wipe(db, branch, dry_run=args.dry_run)
+
+        created_shipments = _seed_shipments(
+            db, branch, data["shipments"], dry_run=args.dry_run
+        )
+        if not args.dry_run:
+            # SessionLocal deliberately disables autoflush; make the shipment rows
+            # visible to the receiving lookup before building dependent rows.
+            db.flush()
+        created_vouchers = _seed_vouchers(
+            db,
+            branch,
+            data.get("vouchers", []),
+            dry_run=args.dry_run,
+            actor_id=_seed_actor_id(db, branch),
+        )
+        created_receivings = _seed_receivings(
+            db,
+            branch,
+            data.get("receivings", []),
+            dry_run=args.dry_run,
+            planned_shipment_nos={
+                entry["shipment_no"] for entry in data.get("shipments", [])
+            },
+        )
+        created_orders = _seed_orders(
+            db,
+            branch,
+            data.get("orders", []),
+            dry_run=args.dry_run,
+            actor_id=_seed_actor_id(db, branch),
+        )
+        if not args.dry_run:
+            db.flush()
+        created_outgoing = _seed_outgoing(
+            db, branch, data.get("outgoing", []), dry_run=args.dry_run,
+            actor_id=_seed_actor_id(db, branch),
+        )
+
+        if args.dry_run:
+            db.rollback()
+            print(
+                "Dry run — "
+                f"{created_shipments} shipment(s), "
+                f"{created_vouchers} voucher(s), and "
+                f"{created_receivings} receiving(s), {created_orders} customer order(s), and {created_outgoing} delivery row(s) would be created. Nothing was written."
+            )
+        else:
+            db.commit()
+            print(
+                "Done — "
+                f"{created_shipments} shipment(s), "
+                f"{created_vouchers} voucher(s), and "
+                f"{created_receivings} receiving(s), {created_orders} customer order(s), and {created_outgoing} delivery row(s) created."
+            )
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    main()

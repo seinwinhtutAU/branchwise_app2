@@ -144,7 +144,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
         key="sales",
         label="Sales",
         weight=0.25,
-        description="Is the branch selling more or less than it was in the previous period of the same length?",
+        description="Is the branch selling more than it was, and still selling across its range?",
         sub_metrics=(
             SubMetric(
                 "revenue_growth_pct",
@@ -167,15 +167,23 @@ DIMENSIONS: tuple[Dimension, ...] = (
                     f"{s.previous_transaction_count:,} before."
                 ),
             ),
+            # Related to the transaction count above but not the same question, and the
+            # Customer dimension's transactions-per-open-day is a third: that one asks
+            # how busy a normal day is, the one above asks whether the branch sold more
+            # in total, and this asks whether it is still selling across its range.
+            # Revenue holding up on a shrinking handful of products is a different
+            # situation from revenue holding up across the shop, and only this tells
+            # them apart.
             SubMetric(
-                "avg_basket_growth_pct",
-                "Average sale growth",
+                "products_sold_growth_pct",
+                "Products sold",
                 "pct_change",
                 0.2,
                 _GENTLE_GROWTH_BANDS,
-                definition="How much a customer spends in one transaction, against the period before.",
+                definition="How many different products actually sold, against the period before it.",
                 calculation=lambda s: (
-                    f"{_ks(s.avg_basket)} per transaction this period, against {_ks(s.previous_avg_basket)} before."
+                    f"{s.products_sold:,} different products sold this period, against "
+                    f"{s.previous_products_sold:,} before."
                 ),
             ),
         ),
@@ -274,35 +282,44 @@ DIMENSIONS: tuple[Dimension, ...] = (
         key="customer",
         label="Customer",
         weight=0.15,
-        description="Are shoppers buying more per visit, or making smaller, single-item trips?",
-        # Deliberately no transaction-count sub-metric here even though footfall is a
-        # customer-side idea: it is already 30% of the Sales dimension, and counting
-        # the same movement twice would let one bad week hit the overall score through
-        # two doors at once.
+        description="How busy is a normal trading day, and is a visit worth more than it was?",
+        # Basket composition (items per transaction, single-item share) used to live here
+        # and was dropped: this business sells shoes, and a customer buying one pair and
+        # leaving is how the shop normally sells, not a problem to score.
+        #
+        # The two that replaced it are deliberately a pair. On its own, what a visit is
+        # worth swung the whole dimension on one figure that moves with the mix of what
+        # happened to sell that fortnight. Half each means neither a quiet spell of
+        # cheaper pairs nor a slow week can take the dimension down alone.
+        #
+        # Still no raw transaction-count sub-metric: that is already 40% of the Sales
+        # dimension. Sales *per open day* is a different question — how busy a normal
+        # day is — and it is the half of it that survives a closed week or an import
+        # that never arrived.
         sub_metrics=(
             SubMetric(
-                "items_per_basket_growth_pct",
-                "Items per transaction growth",
+                "avg_basket_growth_pct",
+                "Average sale value",
                 "pct_change",
-                0.55,
+                0.5,
                 _GENTLE_GROWTH_BANDS,
-                definition="Whether customers are putting more or fewer different things in one transaction.",
+                definition="How much a customer spends in one transaction, against the period before.",
                 calculation=lambda s: (
-                    f"{s.avg_items_per_basket:.1f} items per transaction this period, against "
-                    f"{s.previous_avg_items_per_basket:.1f} before."
+                    f"{_ks(s.avg_basket)} per transaction this period, against {_ks(s.previous_avg_basket)} before."
                 ),
             ),
             SubMetric(
-                "single_item_basket_share_pct",
-                "Single-item transactions",
-                "pct",
-                0.45,
-                ((30.0, 100.0), (50.0, 75.0), (70.0, 40.0), (85.0, 0.0)),
-                definition="How many transactions are one thing and nothing else.",
+                "avg_daily_sales_growth_pct",
+                "Transactions per day",
+                "pct_change",
+                0.5,
+                _GENTLE_GROWTH_BANDS,
+                definition="How many transactions the branch makes on a day it is open, against the period before.",
                 calculation=lambda s: (
-                    f"{round(s.single_item_basket_share_pct / 100 * s.transaction_count):,} of "
-                    f"{s.transaction_count:,} transactions had a single line."
-                    if s.transaction_count
+                    f"{s.transaction_count / s.trading_days:.1f} transactions a day this period "
+                    f"({s.transaction_count:,} over {s.trading_days:,} open days), against "
+                    f"{s.previous_transaction_count / s.previous_trading_days:.1f} before."
+                    if s.trading_days and s.previous_trading_days
                     else None
                 ),
             ),
@@ -413,6 +430,16 @@ class BranchSnapshot:
     previous_avg_items_per_basket: float
     single_item_basket_share_pct: float
     previous_single_item_basket_share_pct: float
+    # Days the branch actually sold anything, not days on the calendar. Sales ÷ trading
+    # days is what makes "how busy is a normal day here" comparable across periods that
+    # contain a different number of closed days — and it is why a week the shop was shut
+    # doesn't read as customers walking away.
+    trading_days: int
+    previous_trading_days: int
+    # Distinct products that actually sold. A branch can hold its revenue while its
+    # range quietly narrows to a few lines, and nothing else on the snapshot notices.
+    products_sold: int
+    previous_products_sold: int
     # Data quality
     data_issue_count: int
     critical_data_issue_count: int
@@ -426,7 +453,7 @@ class BranchSnapshot:
     period_days: int
     # The days behind every figure above, as ISO dates. Carried so an alert can say
     # which stretch it is describing and which one it compares against — a manager
-    # reading "margin fell 3.5 points" needs to know 3.5 points since *when*.
+    # reading "margin fell 3.5%" needs to know 3.5% since *when*.
     # Optional so a hand-built snapshot (the tests, and any caller that only wants a
     # score) stays a few keywords rather than a date-keeping exercise; an alert with no
     # dates simply omits the line naming them.
@@ -455,6 +482,30 @@ def _coverage_pct(priced_net_revenue: float, net_revenue: float) -> float:
     if not net_revenue:
         return 0.0
     return priced_net_revenue / net_revenue * 100
+
+
+def _trading_days(db: Session, branch_id: str, start: date, end: date) -> int:
+    """Days in the window that carry at least one sale. Deliberately not the calendar
+    length of the period: a branch closed for a public holiday, or one whose file for a
+    day was never imported, should not look like a branch nobody visited."""
+    return (
+        db.query(func.count(func.distinct(Sale.sale_date)))
+        .filter(Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end)
+        .scalar()
+        or 0
+    )
+
+
+def _products_sold(db: Session, branch_id: str, start: date, end: date) -> int:
+    """Distinct products with at least one sale line in the window — the breadth of what
+    the branch actually sold, not how much of it."""
+    return (
+        db.query(func.count(func.distinct(SaleLine.product_id)))
+        .join(Sale, SaleLine.sale_id == Sale.id)
+        .filter(Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end)
+        .scalar()
+        or 0
+    )
 
 
 def _line_counts(db: Session, branch_id: str, start: date, end: date) -> int:
@@ -639,6 +690,14 @@ def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> Br
         previous_avg_items_per_basket=prev_avg_items,
         single_item_basket_share_pct=single_share,
         previous_single_item_basket_share_pct=prev_single_share,
+        trading_days=_trading_days(db, branch_id, period_range.start, period_range.end),
+        previous_trading_days=_trading_days(
+            db, branch_id, period_range.previous_start, period_range.previous_end
+        ),
+        products_sold=_products_sold(db, branch_id, period_range.start, period_range.end),
+        previous_products_sold=_products_sold(
+            db, branch_id, period_range.previous_start, period_range.previous_end
+        ),
         data_issue_count=data_issue_count,
         critical_data_issue_count=critical_data_issue_count,
         data_issue_sections=data_issue_sections,
@@ -679,7 +738,21 @@ def sub_metric_values(snapshot: BranchSnapshot) -> dict[str, float | None]:
         "transaction_growth_pct": _growth_pct(
             float(snapshot.transaction_count), float(snapshot.previous_transaction_count)
         ),
+        "products_sold_growth_pct": _growth_pct(
+            float(snapshot.products_sold), float(snapshot.previous_products_sold)
+        ),
         "avg_basket_growth_pct": _growth_pct(snapshot.avg_basket, snapshot.previous_avg_basket),
+        # Sales per open day rather than raw sales: the Sales dimension already scores the
+        # raw movement, and dividing by the days the shop actually traded is what stops a
+        # short month, a holiday or a missing day's import from reading as lost customers.
+        "avg_daily_sales_growth_pct": (
+            _growth_pct(
+                snapshot.transaction_count / snapshot.trading_days,
+                snapshot.previous_transaction_count / snapshot.previous_trading_days,
+            )
+            if snapshot.trading_days and snapshot.previous_trading_days
+            else None
+        ),
         "gross_margin_pct": snapshot.gross_margin_pct if profit_measurable else None,
         "margin_growth_pp": margin_growth_pp,
         "dead_stock_share_pct": (
@@ -691,14 +764,6 @@ def sub_metric_values(snapshot: BranchSnapshot) -> dict[str, float | None]:
             else None
         ),
         "days_of_inventory_on_hand": snapshot.days_of_inventory_on_hand,
-        "items_per_basket_growth_pct": _growth_pct(
-            snapshot.avg_items_per_basket, snapshot.previous_avg_items_per_basket
-        ),
-        # Not a growth figure — a level. A branch where most visits are one-item trips
-        # has a basket-building problem whether or not that got worse this period.
-        "single_item_basket_share_pct": (
-            snapshot.single_item_basket_share_pct if snapshot.transaction_count else None
-        ),
         "data_issue_rate_per_100": (
             snapshot.data_issue_count / snapshot.records_checked * 100
             if snapshot.records_checked

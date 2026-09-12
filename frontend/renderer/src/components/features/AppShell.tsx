@@ -1,61 +1,62 @@
-import { useState, type ReactNode } from 'react'
-import { Badge } from '@renderer/components/ui/Badge'
-import { Button } from '@renderer/components/ui/Button'
-import { MenuIcon } from '@renderer/components/ui/icons'
-import { LogoChip, LogoWordmark } from '@renderer/components/ui/Logo'
-import type { Profile } from '@renderer/components/features/types'
-import { ConnectionBanner } from '@renderer/components/features/ConnectionBanner'
+import { useState, type ReactNode } from "react";
+import { cn } from "@renderer/lib/utils";
+import { Badge } from "@renderer/components/ui/Badge";
+import { Button } from "@renderer/components/ui/Button";
+import { MenuIcon } from "@renderer/components/ui/icons";
+import { LogoChip, LogoWordmark } from "@renderer/components/ui/Logo";
+import type { Profile } from "@renderer/components/features/types";
+import { ConnectionBanner } from "@renderer/components/features/ConnectionBanner";
 
 export interface NavItem {
-  id: string
-  label: string
-  icon: ReactNode
-  dotColor?: string
-  badgeCount?: number
+  id: string;
+  label: string;
+  icon: ReactNode;
+  dotColor?: string;
+  badgeCount?: number;
 }
 
 export interface WorkspaceTab {
-  id: string
-  label: string
-  badgeCount?: number
+  id: string;
+  label: string;
+  badgeCount?: number;
   // Which accent the tab gets when active — omit for the neutral default. Reuses the same
   // brand/info vocabulary as roleBadgeVariant below so a workspace's color matches its
   // role badge elsewhere in the UI (e.g. wholesale is 'info' in both places).
-  color?: 'brand' | 'info'
+  color?: "brand" | "info";
 }
 
 interface AppShellProps {
-  navItems: NavItem[]
-  activeSection: string
-  onSectionChange: (id: string) => void
+  navItems: NavItem[];
+  activeSection: string;
+  onSectionChange: (id: string) => void;
   // Only rendered when there's more than one workspace to switch between — a
   // role scoped to a single workspace (retail-only, wholesale-only) never needs
   // the control, since there's nothing to switch to.
-  workspaces?: WorkspaceTab[]
-  activeWorkspace?: string
-  onWorkspaceChange?: (id: string) => void
+  workspaces?: WorkspaceTab[];
+  activeWorkspace?: string;
+  onWorkspaceChange?: (id: string) => void;
   // Rendered below the main nav list behind its own divider, so cross-cutting
   // items (Settings) stay reachable no matter which workspace is active instead
   // of scrolling past whichever workspace's items happen to be showing.
-  pinnedNavItems?: NavItem[]
-  email: string | null | undefined
-  profile: Profile | null
-  onSignOut: () => void
-  children: ReactNode
-  debugAction?: { label: string; onClick: () => void }
-  debugResult?: string | null
+  pinnedNavItems?: NavItem[];
+  email: string | null | undefined;
+  profile: Profile | null;
+  onSignOut: () => void;
+  children: ReactNode;
+  debugAction?: { label: string; onClick: () => void };
+  debugResult?: string | null;
 }
 
-const roleBadgeVariant: Record<string, 'brand' | 'info' | 'default'> = {
-  admin: 'brand',
-  wholesale: 'info',
-  retail: 'default'
-}
+const roleBadgeVariant: Record<string, "brand" | "info" | "default"> = {
+  admin: "brand",
+  wholesale: "info",
+  retail: "default",
+};
 
-const workspaceActiveClasses: Record<'brand' | 'info', string> = {
-  brand: 'bg-brand text-white shadow-sm',
-  info: 'bg-info text-white shadow-sm'
-}
+const workspaceActiveClasses: Record<"brand" | "info", string> = {
+  brand: "bg-brand text-white shadow-sm",
+  info: "bg-info text-white shadow-sm",
+};
 
 // Layout wrapper — no skeleton/empty state (exempt per rubric).
 export function AppShell({
@@ -71,9 +72,9 @@ export function AppShell({
   onSignOut,
   children,
   debugAction,
-  debugResult
+  debugResult,
 }: AppShellProps): React.JSX.Element {
-  const [mobileOpen, setMobileOpen] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const sidebarContent = (
     <div className="flex flex-col h-full">
@@ -86,34 +87,38 @@ export function AppShell({
         <div className="px-3 pt-3 shrink-0">
           <div className="flex rounded-md bg-bg-subtle p-0.5 gap-0.5">
             {workspaces.map((ws) => {
-              const active = ws.id === activeWorkspace
+              const active = ws.id === activeWorkspace;
               return (
                 <button
                   key={ws.id}
                   onClick={() => {
-                    onWorkspaceChange?.(ws.id)
-                    setMobileOpen(false)
+                    onWorkspaceChange?.(ws.id);
+                    setMobileOpen(false);
                   }}
-                  aria-current={active ? 'page' : undefined}
+                  aria-current={active ? "page" : undefined}
                   className={`flex-1 flex items-center justify-center gap-1.5 h-8 rounded-[5px] text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base ${
                     active
                       ? ws.color
                         ? workspaceActiveClasses[ws.color]
-                        : 'bg-bg-base text-text-primary shadow-sm'
-                      : 'text-text-secondary hover:text-text-primary'
+                        : "bg-bg-base text-text-primary shadow-sm"
+                      : "text-text-secondary hover:text-text-primary"
                   }`}
                 >
                   {ws.label}
                   {!!ws.badgeCount && (
                     <Badge
                       variant="error"
-                      className={active && ws.color ? 'bg-white/25 text-white px-1.5 py-0 text-[10px]' : 'px-1.5 py-0 text-[10px]'}
+                      className={
+                        active && ws.color
+                          ? "bg-white/25 text-white px-1.5 py-0 text-[10px]"
+                          : "px-1.5 py-0 text-[10px]"
+                      }
                     >
                       {ws.badgeCount}
                     </Badge>
                   )}
                 </button>
-              )
+              );
             })}
           </div>
         </div>
@@ -121,19 +126,19 @@ export function AppShell({
 
       <nav className="flex-1 overflow-y-auto px-3 py-4 flex flex-col gap-1">
         {navItems.map((item) => {
-          const active = item.id === activeSection
+          const active = item.id === activeSection;
           return (
             <button
               key={item.id}
               onClick={() => {
-                onSectionChange(item.id)
-                setMobileOpen(false)
+                onSectionChange(item.id);
+                setMobileOpen(false);
               }}
-              aria-current={active ? 'page' : undefined}
+              aria-current={active ? "page" : undefined}
               className={`relative flex items-center gap-3 h-10 px-3 rounded-md text-sm font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base ${
                 active
-                  ? 'bg-brand-subtle text-brand'
-                  : 'text-text-secondary hover:bg-bg-raised hover:text-text-primary'
+                  ? "bg-brand-subtle text-brand"
+                  : "text-text-secondary hover:bg-bg-raised hover:text-text-primary"
               }`}
             >
               {item.dotColor && (
@@ -150,7 +155,7 @@ export function AppShell({
                 </Badge>
               )}
             </button>
-          )
+          );
         })}
       </nav>
 
@@ -161,10 +166,14 @@ export function AppShell({
           </span>
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
             {profile?.role && (
-              <Badge variant={roleBadgeVariant[profile.role] ?? 'default'}>{profile.role}</Badge>
+              <Badge variant={roleBadgeVariant[profile.role] ?? "default"}>
+                {profile.role}
+              </Badge>
             )}
             {profile?.branch_name && (
-              <span className="text-xs text-text-muted">{profile.branch_name}</span>
+              <span className="text-xs text-text-muted">
+                {profile.branch_name}
+              </span>
             )}
           </div>
         </div>
@@ -176,32 +185,37 @@ export function AppShell({
         {pinnedNavItems.length > 0 && (
           <div className="flex items-center gap-1">
             {pinnedNavItems.map((item) => {
-              const active = item.id === activeSection
+              const active = item.id === activeSection;
               return (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => {
-                    onSectionChange(item.id)
-                    setMobileOpen(false)
+                    onSectionChange(item.id);
+                    setMobileOpen(false);
                   }}
-                  aria-current={active ? 'page' : undefined}
+                  aria-current={active ? "page" : undefined}
                   aria-label={item.label}
                   title={item.label}
                   className={`w-9 h-9 rounded-md flex items-center justify-center transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base ${
                     active
-                      ? 'bg-brand-subtle text-brand'
-                      : 'text-text-secondary hover:bg-bg-raised hover:text-text-primary'
+                      ? "bg-brand-subtle text-brand"
+                      : "text-text-secondary hover:bg-bg-raised hover:text-text-primary"
                   }`}
                 >
                   {item.icon}
                 </button>
-              )
+              );
             })}
           </div>
         )}
 
-        <Button variant="secondary" size="sm" onClick={onSignOut} className="w-full">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onSignOut}
+          className="w-full"
+        >
           Sign out
         </Button>
 
@@ -227,10 +241,17 @@ export function AppShell({
         )}
       </div>
     </div>
-  )
+  );
 
   return (
-    <div className="min-h-screen bg-bg-subtle lg:flex">
+    <div
+      className={cn(
+        "min-h-screen bg-bg-subtle lg:flex",
+        // Wholesale repaints the shared tokens blue for everything inside it — see
+        // globals.css's .workspace-wholesale block.
+        activeWorkspace === "wholesale" && "workspace-wholesale",
+      )}
+    >
       {/* Desktop sidebar */}
       <aside className="hidden lg:block w-64 shrink-0 border-r border-border bg-bg-base">
         <div className="fixed w-64 h-screen">{sidebarContent}</div>
@@ -266,8 +287,10 @@ export function AppShell({
         {/* Above the content rather than inside it, so it is the same one line whichever
             page is open — and so no page has to know about the network to explain itself. */}
         <ConnectionBanner />
-        <main className="w-full px-4 sm:px-6 py-8 flex flex-col gap-8">{children}</main>
+        <main className="w-full px-4 sm:px-6 py-8 flex flex-col gap-8">
+          {children}
+        </main>
       </div>
     </div>
-  )
+  );
 }

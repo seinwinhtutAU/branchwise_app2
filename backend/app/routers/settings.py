@@ -48,8 +48,6 @@ class EarlyWarningThresholds(BaseModel):
     dead_stock_warning_share_pct: float = Field(ge=0, le=100)
     dead_stock_critical_share_pct: float = Field(ge=0, le=100)
     traffic_decline_warning_pct: float = Field(ge=-100, le=0)
-    single_item_basket_normal_share_pct: float = Field(ge=0, le=100)
-    single_item_basket_warning_share_pct: float = Field(ge=0, le=100)
 
 
 class AppSettingsUpdate(BaseModel):

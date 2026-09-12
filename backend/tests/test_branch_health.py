@@ -141,6 +141,10 @@ def _snapshot(**overrides) -> branch_health.BranchSnapshot:
         previous_avg_items_per_basket=3.0,
         single_item_basket_share_pct=20.0,
         previous_single_item_basket_share_pct=20.0,
+        trading_days=30,
+        previous_trading_days=30,
+        products_sold=120,
+        previous_products_sold=120,
         data_issue_count=0,
         critical_data_issue_count=0,
         data_issue_sections=(),
@@ -205,7 +209,12 @@ def test_healthy_branch_scores_well_across_every_dimension():
 
 def test_no_previous_period_leaves_sales_unscored_rather_than_zero():
     scored = branch_health.score_branch(
-        _snapshot(previous_net_revenue=0.0, previous_transaction_count=0, previous_avg_basket=0.0)
+        _snapshot(
+            previous_net_revenue=0.0,
+            previous_transaction_count=0,
+            previous_avg_basket=0.0,
+            previous_products_sold=0,
+        )
     )
     sales = _dimension(scored, "sales")
     assert sales["score"] is None
@@ -279,9 +288,11 @@ def test_falling_revenue_pushes_sales_into_critical():
     assert sales["status"] == "critical"
     by_key = {s["key"]: s for s in sales["sub_metrics"]}
     assert by_key["revenue_growth_pct"]["value"] == -25.0
-    # The average sale actually rose — the sub-metric breakdown has to show that even
-    # though the dimension as a whole is red, since that is the whole diagnostic value.
-    assert by_key["avg_basket_growth_pct"]["value"] > 0
+    # The average sale actually rose — the breakdown has to show that even though Sales
+    # as a whole is red, since that is the whole diagnostic value. It lives under
+    # Customer now ("what is a visit worth"), not under Sales.
+    customer = _dimension(scored, "customer")
+    assert {s["key"]: s for s in customer["sub_metrics"]}["avg_basket_growth_pct"]["value"] > 0
 
 
 def test_dead_stock_share_drives_the_inventory_score_down():
@@ -522,6 +533,40 @@ def test_saved_weights_reach_the_overview_endpoint(authed_client: TestClient, db
 
 
 # --- explaining the measures ------------------------------------------------------------
+
+
+def test_average_daily_sales_divides_by_the_days_the_shop_actually_traded():
+    """A shorter month, a public holiday or a day whose file never arrived must not read
+    as customers walking away — which is the whole reason the Customer dimension scores
+    sales per *open* day rather than the raw count the Sales dimension already has."""
+    # 400 sales over 25 open days against 450 over 30: fewer sales in total, but a
+    # busier day than before.
+    values = branch_health.sub_metric_values(
+        _snapshot(
+            transaction_count=400,
+            previous_transaction_count=450,
+            trading_days=25,
+            previous_trading_days=30,
+        )
+    )
+    assert round(values["avg_daily_sales_growth_pct"], 1) == 6.7
+
+    # And a branch with no trading days at all in either period is unmeasured, never 0.
+    quiet = branch_health.sub_metric_values(_snapshot(trading_days=0, previous_trading_days=0))
+    assert quiet["avg_daily_sales_growth_pct"] is None
+
+
+def test_neither_customer_measure_can_sink_the_dimension_alone():
+    """The pair exists because one figure at 100% swung the whole dimension; each is
+    half, so a bad one lands as half a dimension rather than all of it."""
+    only_average_sale_is_bad = _dimension(
+        branch_health.score_branch(
+            _snapshot(net_revenue=80_000.0, transaction_count=100, previous_transaction_count=100)
+        ),
+        "customer",
+    )
+    assert only_average_sale_is_bad["score"] is not None
+    assert only_average_sale_is_bad["score"] > 35
 
 
 def test_every_measure_explains_itself():

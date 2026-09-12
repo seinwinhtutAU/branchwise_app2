@@ -34,6 +34,9 @@ app.db
 backend/.pytest_cache
 *.pyc
 
+# Editor swap files are crash-recovery artefacts, never source.
+*.swp
+
 # env files (never commit real secrets)
 .env
 backend/.env
@@ -54,3 +57,5 @@ retail_data/
 # Diagram sources and their rendered images — presentation material, kept locally
 # (the repo already dropped the earlier presentation documents for the same reason).
 diagram/
+
+wholesale_prototype

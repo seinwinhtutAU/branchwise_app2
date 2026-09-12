@@ -1,141 +1,183 @@
-import { useState } from 'react'
-import type { Session } from '@renderer/lib/auth'
-import { apiBaseUrl } from '@renderer/lib/auth'
-import { useCachedFetch } from '@renderer/lib/useCachedFetch'
-import { useToast } from '@renderer/lib/useToast'
-import { cn } from '@renderer/lib/utils'
-import { Badge } from '@renderer/components/ui/Badge'
-import { Button } from '@renderer/components/ui/Button'
-import { Card, CardHeader } from '@renderer/components/ui/Card'
-import { EmptyState } from '@renderer/components/ui/EmptyState'
-import { Select } from '@renderer/components/ui/Select'
-import { TableSkeleton } from '@renderer/components/ui/Skeleton'
-import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
-import { HeartPulseIcon } from '@renderer/components/ui/icons'
-import { StatTile } from '@renderer/components/features/dashboard/shared'
+import { useState } from "react";
+import type { Session } from "@renderer/lib/auth";
+import { apiBaseUrl } from "@renderer/lib/auth";
+import { useCachedFetch } from "@renderer/lib/useCachedFetch";
+import { useToast } from "@renderer/lib/useToast";
+import { cn } from "@renderer/lib/utils";
+import { Badge } from "@renderer/components/ui/Badge";
+import { Button } from "@renderer/components/ui/Button";
+import { Card, CardHeader } from "@renderer/components/ui/Card";
+import { EmptyState } from "@renderer/components/ui/EmptyState";
+import { Select } from "@renderer/components/ui/Select";
+import { TableSkeleton } from "@renderer/components/ui/Skeleton";
+import {
+  TableContainer,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
+} from "@renderer/components/ui/Table";
+import { HeartPulseIcon } from "@renderer/components/ui/icons";
+import { StatTile } from "@renderer/components/features/dashboard/shared";
 
 interface FreshnessRow {
-  branch_id: string
-  branch_name: string
-  sales_last_imported_at: string | null
-  inventory_last_imported_at: string | null
-  purchase_last_imported_at: string | null
+  branch_id: string;
+  branch_name: string;
+  sales_last_imported_at: string | null;
+  inventory_last_imported_at: string | null;
+  purchase_last_imported_at: string | null;
 }
 
-type BatchImportType = 'sales' | 'purchase' | 'inventory'
-type ReviewStatus = 'review' | 'possible_duplicate'
+type BatchImportType = "sales" | "purchase" | "inventory";
+type ReviewStatus = "review" | "possible_duplicate";
 
 interface BatchReviewRow {
-  batch_id: string
-  import_type: BatchImportType
-  branch_name: string
-  filename: string | null
-  confirmed_at: string
-  note: string
-  status: ReviewStatus
+  batch_id: string;
+  import_type: BatchImportType;
+  branch_name: string;
+  filename: string | null;
+  confirmed_at: string;
+  note: string;
+  status: ReviewStatus;
 }
 
 interface SlipMismatchRow {
-  batch_id: string
-  branch_name: string
-  slip_id: string
-  date: string
-  line_total: number
-  subtotal_on_slip: number
-  difference: number
+  batch_id: string;
+  branch_name: string;
+  slip_id: string;
+  date: string;
+  line_total: number;
+  subtotal_on_slip: number;
+  difference: number;
 }
 
 interface ImportHealthResponse {
-  batches_checked: number
-  batches_to_review: BatchReviewRow[]
-  slip_total_mismatches: SlipMismatchRow[]
+  batches_checked: number;
+  batches_to_review: BatchReviewRow[];
+  slip_total_mismatches: SlipMismatchRow[];
 }
 
 interface Props {
-  session: Session
-  onViewImportBatch?: (batchId: string) => void
+  session: Session;
+  onViewImportBatch?: (batchId: string) => void;
 }
 
 function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return new Date(iso).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' })
+  return new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" });
 }
 
 function formatMoney(value: number): string {
-  return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function daysSince(iso: string): number {
-  return Math.floor((Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24))
+  return Math.floor(
+    (Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24),
+  );
 }
 
 function agoLabel(iso: string): string {
-  const days = daysSince(iso)
-  if (days <= 0) return 'Today'
-  if (days === 1) return 'Yesterday'
-  return `${days} days ago`
+  const days = daysSince(iso);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return `${days} days ago`;
 }
 
 // Sales and inventory files are exported every day, so "fresh" has a narrow window:
 // today is fine, yesterday is a soft warning (maybe just not uploaded yet today),
 // anything older — or never imported — is a real gap worth someone's attention.
-function freshnessBadge(iso: string | null): { variant: 'success' | 'warning' | 'error'; label: string } {
-  if (!iso) return { variant: 'error', label: 'Never imported' }
-  const days = daysSince(iso)
-  if (days <= 0) return { variant: 'success', label: 'Today' }
-  if (days === 1) return { variant: 'warning', label: 'Yesterday' }
-  return { variant: 'error', label: `${days} days ago` }
+function freshnessBadge(iso: string | null): {
+  variant: "success" | "warning" | "error";
+  label: string;
+} {
+  if (!iso) return { variant: "error", label: "Never imported" };
+  const days = daysSince(iso);
+  if (days <= 0) return { variant: "success", label: "Today" };
+  if (days === 1) return { variant: "warning", label: "Yesterday" };
+  return { variant: "error", label: `${days} days ago` };
 }
 
 // Purchases only happen when a branch actually restocks, which isn't every day, so an
 // old purchase import means "nothing was bought", not "someone forgot to upload".
 // Show when it last happened, but never grade it as late.
-function occasionalBadge(iso: string | null): { variant: 'default'; label: string } {
-  return { variant: 'default', label: iso ? agoLabel(iso) : 'None yet' }
+function occasionalBadge(iso: string | null): {
+  variant: "default";
+  label: string;
+} {
+  return { variant: "default", label: iso ? agoLabel(iso) : "None yet" };
 }
 
 function FreshnessCell({
   iso,
-  expectedDaily = true
+  expectedDaily = true,
 }: {
-  iso: string | null
-  expectedDaily?: boolean
+  iso: string | null;
+  expectedDaily?: boolean;
 }): React.JSX.Element {
-  const { variant, label } = expectedDaily ? freshnessBadge(iso) : occasionalBadge(iso)
+  const { variant, label } = expectedDaily
+    ? freshnessBadge(iso)
+    : occasionalBadge(iso);
   return (
     <div className="flex flex-col gap-1">
       <Badge variant={variant}>{label}</Badge>
-      {iso && <span className="text-xs text-text-muted whitespace-nowrap">{formatDateTime(iso)}</span>}
+      {iso && (
+        <span className="text-xs text-text-muted whitespace-nowrap">
+          {formatDateTime(iso)}
+        </span>
+      )}
     </div>
-  )
+  );
 }
 
-const TYPE_BADGE: Record<BatchImportType, { variant: 'info' | 'brand' | 'default'; label: string }> = {
-  sales: { variant: 'info', label: 'Sales' },
-  purchase: { variant: 'brand', label: 'Purchase' },
-  inventory: { variant: 'default', label: 'Inventory' }
-}
+const TYPE_BADGE: Record<
+  BatchImportType,
+  { variant: "info" | "brand" | "default"; label: string }
+> = {
+  sales: { variant: "info", label: "Sales" },
+  purchase: { variant: "brand", label: "Purchase" },
+  inventory: { variant: "default", label: "Inventory" },
+};
 
-const STATUS_BADGE: Record<ReviewStatus, { variant: 'error' | 'warning'; label: string }> = {
-  review: { variant: 'error', label: 'Review' },
-  possible_duplicate: { variant: 'warning', label: 'Possible duplicate' }
-}
+const STATUS_BADGE: Record<
+  ReviewStatus,
+  { variant: "error" | "warning"; label: string }
+> = {
+  review: { variant: "error", label: "Review" },
+  possible_duplicate: { variant: "warning", label: "Possible duplicate" },
+};
 
-const DAYS_OPTIONS = [7, 30, 90] as const
+const DAYS_OPTIONS = [7, 30, 90] as const;
 
-type Tab = 'freshness' | 'health'
+type Tab = "freshness" | "health";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'freshness', label: 'Import freshness' },
-  { id: 'health', label: 'Import Health' }
-]
+  { id: "freshness", label: "Import freshness" },
+  { id: "health", label: "Import Health" },
+];
 
-function OverviewTabBar({ activeTab, onSelect }: { activeTab: Tab; onSelect: (tab: Tab) => void }): React.JSX.Element {
+function OverviewTabBar({
+  activeTab,
+  onSelect,
+}: {
+  activeTab: Tab;
+  onSelect: (tab: Tab) => void;
+}): React.JSX.Element {
   return (
-    <div role="tablist" className="flex flex-wrap gap-1 p-1 rounded-lg bg-bg-subtle w-fit">
+    <div
+      role="tablist"
+      className="flex flex-wrap gap-1 p-1 rounded-lg bg-bg-subtle w-fit"
+    >
       {TABS.map((tab) => (
         <button
           key={tab.id}
@@ -144,60 +186,73 @@ function OverviewTabBar({ activeTab, onSelect }: { activeTab: Tab; onSelect: (ta
           aria-selected={activeTab === tab.id}
           onClick={() => onSelect(tab.id)}
           className={cn(
-            'flex items-center gap-1.5 h-8 px-4 rounded-md text-sm font-medium transition-all duration-150',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1',
+            "flex items-center gap-1.5 h-8 px-4 rounded-md text-sm font-medium transition-all duration-150",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1",
             activeTab === tab.id
-              ? 'bg-brand-subtle text-brand shadow-sm'
-              : 'text-text-muted hover:text-text-secondary'
+              ? "bg-brand-subtle text-brand shadow-sm"
+              : "text-text-muted hover:text-text-secondary",
           )}
         >
           {tab.label}
         </button>
       ))}
     </div>
-  )
+  );
 }
 
-function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.Element {
-  const showToast = useToast()
-  const [activeTab, setActiveTab] = useState<Tab>('freshness')
+function ImportOverviewPage({
+  session,
+  onViewImportBatch,
+}: Props): React.JSX.Element {
+  const showToast = useToast();
+  const [activeTab, setActiveTab] = useState<Tab>("freshness");
 
   const {
     data: freshness,
     isRefreshing: freshnessRefreshing,
     failed: freshnessFailed,
-    reload: loadFreshness
-  } = useCachedFetch<FreshnessRow[]>(`${apiBaseUrl}/api/imports/freshness`, session, 'upload freshness')
+    reload: loadFreshness,
+  } = useCachedFetch<FreshnessRow[]>(
+    `${apiBaseUrl}/api/imports/freshness`,
+    session,
+    "upload freshness",
+  );
 
-  const [days, setDays] = useState<number>(30)
+  const [days, setDays] = useState<number>(30);
   // `days` is in the URL, so changing it is a different cache key and fetches properly.
   const {
     data: health,
     isRefreshing: healthRefreshing,
     failed: healthFailed,
-    reload: loadHealth
+    reload: loadHealth,
   } = useCachedFetch<ImportHealthResponse>(
     `${apiBaseUrl}/api/imports/health?days=${days}`,
     session,
-    'import health'
-  )
+    "import health",
+  );
 
   async function dismissBatch(batchId: string): Promise<void> {
     try {
-      const response = await fetch(`${apiBaseUrl}/api/imports/health/${batchId}/dismiss`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${session.access_token}` }
-      })
+      const response = await fetch(
+        `${apiBaseUrl}/api/imports/health/${batchId}/dismiss`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        },
+      );
       if (!response.ok) {
-        showToast('error', `Failed to dismiss: ${response.status}`)
-        return
+        showToast("error", `Failed to dismiss: ${response.status}`);
+        return;
       }
       // Refetch rather than dropping the row locally: the cached copy is shared, and a
       // hand-edited one would disagree with the server the next time it is read.
-      loadHealth()
-      showToast('success', 'Dismissed — already handled batches won\'t clutter this list')
+      loadHealth();
+      showToast(
+        "success",
+        "Dismissed — already handled batches won't clutter this list",
+      );
     } catch {
-      showToast('error', 'Failed to dismiss — is the backend running?')
+      showToast("error", "Failed to dismiss — is the backend running?");
     }
   }
 
@@ -211,8 +266,8 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
             variant="secondary"
             size="sm"
             onClick={() => {
-              loadFreshness()
-              loadHealth()
+              loadFreshness();
+              loadHealth();
             }}
             loading={freshnessRefreshing || healthRefreshing}
           >
@@ -223,9 +278,13 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
 
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <OverviewTabBar activeTab={activeTab} onSelect={setActiveTab} />
-        {activeTab === 'health' && (
+        {activeTab === "health" && (
           <div className="w-40">
-            <Select label="Period" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+            <Select
+              label="Period"
+              value={days}
+              onChange={(e) => setDays(Number(e.target.value))}
+            >
               {DAYS_OPTIONS.map((option) => (
                 <option key={option} value={option}>
                   Last {option} days
@@ -236,9 +295,11 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
         )}
       </div>
 
-      {activeTab === 'freshness' && (
+      {activeTab === "freshness" && (
         <>
-          {freshness === null && !freshnessFailed && <TableSkeleton rows={3} cols={4} />}
+          {freshness === null && !freshnessFailed && (
+            <TableSkeleton rows={3} cols={4} />
+          )}
           {freshness === null && freshnessFailed && (
             <EmptyState
               icon={<HeartPulseIcon />}
@@ -252,7 +313,11 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
             />
           )}
           {freshness !== null && freshness.length === 0 && (
-            <EmptyState icon={<HeartPulseIcon />} title="No branches yet" description="Once a branch has an account and imports data, it'll show up here." />
+            <EmptyState
+              icon={<HeartPulseIcon />}
+              title="No branches yet"
+              description="Once a branch has an account and imports data, it'll show up here."
+            />
           )}
           {freshness !== null && freshness.length > 0 && (
             <TableContainer>
@@ -280,7 +345,10 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
                       <FreshnessCell iso={row.inventory_last_imported_at} />
                     </Td>
                     <Td>
-                      <FreshnessCell iso={row.purchase_last_imported_at} expectedDaily={false} />
+                      <FreshnessCell
+                        iso={row.purchase_last_imported_at}
+                        expectedDaily={false}
+                      />
                     </Td>
                   </Tr>
                 ))}
@@ -290,9 +358,11 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
         </>
       )}
 
-      {activeTab === 'health' && (
+      {activeTab === "health" && (
         <>
-          {health === null && !healthFailed && <TableSkeleton rows={4} cols={4} />}
+          {health === null && !healthFailed && (
+            <TableSkeleton rows={4} cols={4} />
+          )}
 
           {health === null && healthFailed && (
             <EmptyState
@@ -318,7 +388,11 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
                 <StatTile
                   label="Batches flagged"
                   value={String(health.batches_to_review.length)}
-                  sub={health.batches_to_review.length > 0 ? 'worth a second look' : 'nothing flagged'}
+                  sub={
+                    health.batches_to_review.length > 0
+                      ? "worth a second look"
+                      : "nothing flagged"
+                  }
                 />
                 <StatTile
                   label="Slip-total mismatches"
@@ -354,26 +428,37 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
                     <Tbody>
                       {health.batches_to_review.map((row) => (
                         <Tr key={row.batch_id}>
-                          <Td className="whitespace-nowrap">{formatDate(row.confirmed_at)}</Td>
+                          <Td className="whitespace-nowrap">
+                            {formatDate(row.confirmed_at)}
+                          </Td>
                           <Td>
-                            <Badge variant={TYPE_BADGE[row.import_type].variant}>
+                            <Badge
+                              variant={TYPE_BADGE[row.import_type].variant}
+                            >
                               {TYPE_BADGE[row.import_type].label}
                             </Badge>
                           </Td>
                           <Td className="font-medium">{row.branch_name}</Td>
-                          <Td className="max-w-[16rem] truncate" title={row.filename ?? undefined}>
+                          <Td
+                            className="max-w-[16rem] truncate"
+                            title={row.filename ?? undefined}
+                          >
                             {row.filename}
                           </Td>
                           <Td className="max-w-[28rem]">{row.note}</Td>
                           <Td>
-                            <Badge variant={STATUS_BADGE[row.status].variant}>{STATUS_BADGE[row.status].label}</Badge>
+                            <Badge variant={STATUS_BADGE[row.status].variant}>
+                              {STATUS_BADGE[row.status].label}
+                            </Badge>
                           </Td>
                           <Td>
                             <div className="flex items-center gap-3">
                               {onViewImportBatch && (
                                 <button
                                   className="text-brand text-sm font-medium hover:underline whitespace-nowrap"
-                                  onClick={() => onViewImportBatch(row.batch_id)}
+                                  onClick={() =>
+                                    onViewImportBatch(row.batch_id)
+                                  }
                                 >
                                   View in History →
                                 </button>
@@ -423,9 +508,15 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
                         <Tr key={`${row.batch_id}-${row.slip_id}`}>
                           <Td className="font-mono text-xs">{row.slip_id}</Td>
                           <Td className="font-medium">{row.branch_name}</Td>
-                          <Td className="whitespace-nowrap">{formatDate(row.date)}</Td>
-                          <Td className="text-right tabular-nums">{formatMoney(row.line_total)}</Td>
-                          <Td className="text-right tabular-nums">{formatMoney(row.subtotal_on_slip)}</Td>
+                          <Td className="whitespace-nowrap">
+                            {formatDate(row.date)}
+                          </Td>
+                          <Td className="text-right tabular-nums">
+                            {formatMoney(row.line_total)}
+                          </Td>
+                          <Td className="text-right tabular-nums">
+                            {formatMoney(row.subtotal_on_slip)}
+                          </Td>
                           <Td className="text-right tabular-nums text-warning font-medium">
                             {formatMoney(row.difference)}
                           </Td>
@@ -450,7 +541,7 @@ function ImportOverviewPage({ session, onViewImportBatch }: Props): React.JSX.El
         </>
       )}
     </div>
-  )
+  );
 }
 
-export default ImportOverviewPage
+export default ImportOverviewPage;

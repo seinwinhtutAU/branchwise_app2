@@ -8,7 +8,7 @@ reference, and as the material the assistant's answers should agree with.
 It explains how retail data is imported, how sales and profit are calculated, how warnings work, what each setting does, and how to use the chat assistant.
 
 > **Scope:** This Help Center only covers the Retail workflow.
-> It does not cover the Wholesale workflow such as Customer Orders, Factory Vouchers, Warehouse Arrival, or Factory Receiving. Wholesale has its own separate Help Center.
+> It does not cover the Wholesale workflow, which was removed on 2026-09-11 while it is redesigned — a wholesale account currently sees an empty page.
 
 ---
 

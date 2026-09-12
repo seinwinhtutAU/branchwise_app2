@@ -14,11 +14,11 @@ Each parser (`app/services/{pos,inventory,purchase}_import.py`) classifies rows 
 
 ## Target columns
 
-| Source | Output columns |
-|---|---|
-| `sale.csv` | `Date, SlipID, SlipNumber, LineNo, LineID, StockCode, Description, Location, Selling_Price, Qty, UOM, Discount_Amount, Amount, Net_Amount, Time` |
-| `inventory.csv` | `StockCode, Description, Location, Group, On_Hand_Qty, Buying_Price, Selling_Price` |
-| `purchase.csv` | `StockCode, Description, Location, Quantity, UOM, Buying_Price` |
+| Source          | Output columns                                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sale.csv`      | `Date, SlipID, SlipNumber, LineNo, LineID, StockCode, Description, Location, Selling_Price, Qty, UOM, Discount_Amount, Amount, Net_Amount, Time` |
+| `inventory.csv` | `StockCode, Description, Location, Group, On_Hand_Qty, Buying_Price, Selling_Price`                                                              |
+| `purchase.csv`  | `StockCode, Description, Location, Quantity, UOM, Buying_Price`                                                                                  |
 
 `SlipID`/`LineID` don't exist in the source — they're synthesized (`SlipID = {date}-{slip_number}`, e.g. `20260821-002`; `LineID = {SlipID}-{line_no}`) to be stable, human-readable, and unique across multiple days' files.
 
@@ -47,7 +47,7 @@ display label changes: `stock_code` stays the key that identifies a product.
 Rows imported before this rule keep their old casing until re-imported, so
 `backend/scripts/titlecase_product_descriptions.py` applies the same function to the
 existing `products` table. It is a dry run by default and prints every change; `--apply`
-saves. Wholesale order/voucher lines are deliberately untouched — those descriptions are
+saves. Wholesale order/voucher lines were deliberately untouched — those descriptions are
 typed by hand in the app, where the person entering them chooses the casing.
 
 ## Preview vs. confirm

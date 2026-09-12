@@ -1,12 +1,19 @@
-import { useState } from 'react'
-import type { Session } from '@renderer/lib/auth'
-import { useCachedFetch } from '@renderer/lib/useCachedFetch'
-import { Button } from '@renderer/components/ui/Button'
-import { Card, CardHeader } from '@renderer/components/ui/Card'
-import { EmptyState } from '@renderer/components/ui/EmptyState'
-import { Skeleton } from '@renderer/components/ui/Skeleton'
-import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
-import { DashboardIcon, ScaleIcon } from '@renderer/components/ui/icons'
+import { useState } from "react";
+import type { Session } from "@renderer/lib/auth";
+import { useCachedFetch } from "@renderer/lib/useCachedFetch";
+import { Button } from "@renderer/components/ui/Button";
+import { Card, CardHeader } from "@renderer/components/ui/Card";
+import { EmptyState } from "@renderer/components/ui/EmptyState";
+import { Skeleton } from "@renderer/components/ui/Skeleton";
+import {
+  TableContainer,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
+} from "@renderer/components/ui/Table";
+import { DashboardIcon, ScaleIcon } from "@renderer/components/ui/icons";
 import {
   RefreshingHint,
   ChartViewToggle,
@@ -14,8 +21,8 @@ import {
   TrendChart,
   TwoLineTrendChart,
   WarningsTile,
-  type ChartView
-} from './shared'
+  type ChartView,
+} from "./shared";
 import {
   dashboardUrl,
   formatMoney,
@@ -23,39 +30,43 @@ import {
   previousPeriodLabel,
   type KpiValue,
   type PeriodKey,
-  type SaleWarningRow
-} from './helpers'
+  type SaleWarningRow,
+} from "./helpers";
 
 interface CostTrendPoint {
-  date: string
-  net_revenue: number
-  estimated_cost: number | null
-  margin_pct: number | null
+  date: string;
+  net_revenue: number;
+  estimated_cost: number | null;
+  margin_pct: number | null;
 }
 
 interface CostProduct {
-  stock_code: string
-  description: string
-  qty: number
-  net_revenue: number
+  stock_code: string;
+  description: string;
+  qty: number;
+  net_revenue: number;
   // Never null here — a product with no cost estimate at all is excluded from this
   // ranking server-side (see build_cost_dashboard), since it can't be ranked by profit.
-  estimated_cost: number
-  estimated_margin: number
-  margin_pct: number
+  estimated_cost: number;
+  estimated_margin: number;
+  margin_pct: number;
 }
 
 interface CostDashboardData {
-  branch_name: string
-  estimated_cogs: KpiValue
-  estimated_gross_margin_pct: KpiValue
-  estimated_margin_per_basket: KpiValue
-  trend: CostTrendPoint[]
-  products: CostProduct[]
-  purchase_warnings: SaleWarningRow[]
+  branch_name: string;
+  estimated_cogs: KpiValue;
+  estimated_gross_margin_pct: KpiValue;
+  estimated_margin_per_basket: KpiValue;
+  trend: CostTrendPoint[];
+  products: CostProduct[];
+  purchase_warnings: SaleWarningRow[];
 }
 
-function TopProfitProductsTable({ products }: { products: CostProduct[] }): React.JSX.Element {
+function TopProfitProductsTable({
+  products,
+}: {
+  products: CostProduct[];
+}): React.JSX.Element {
   if (products.length === 0) {
     return (
       <EmptyState
@@ -63,7 +74,7 @@ function TopProfitProductsTable({ products }: { products: CostProduct[] }): Reac
         title="No priced products in this period"
         description="Top profit products will appear once there's sales data with a purchase or stock record to estimate cost against."
       />
-    )
+    );
   }
   return (
     <TableContainer>
@@ -82,40 +93,59 @@ function TopProfitProductsTable({ products }: { products: CostProduct[] }): Reac
         {products.map((product, i) => (
           <Tr key={product.stock_code}>
             <Td className="text-text-muted">{i + 1}</Td>
-            <Td className="font-mono text-xs whitespace-nowrap">{product.stock_code}</Td>
+            <Td className="font-mono text-xs whitespace-nowrap">
+              {product.stock_code}
+            </Td>
             <Td>{product.description}</Td>
-            <Td className="text-right tabular-nums">{formatMoney(product.net_revenue)}</Td>
-            <Td className="text-right tabular-nums">{formatMoney(product.estimated_cost)}</Td>
+            <Td className="text-right tabular-nums">
+              {formatMoney(product.net_revenue)}
+            </Td>
+            <Td className="text-right tabular-nums">
+              {formatMoney(product.estimated_cost)}
+            </Td>
             <Td className="text-right tabular-nums font-medium text-text-primary">
               {formatMoney(product.estimated_margin)}
             </Td>
-            <Td className="text-right tabular-nums">{formatPercent(product.margin_pct)}</Td>
+            <Td className="text-right tabular-nums">
+              {formatPercent(product.margin_pct)}
+            </Td>
           </Tr>
         ))}
       </Tbody>
     </TableContainer>
-  )
+  );
 }
 
 interface Props {
-  session: Session
-  branchId: string
-  period: PeriodKey
-  dateFrom: string
-  dateTo: string
-  canLoad: boolean
-  onViewWarnings: () => void
+  session: Session;
+  branchId: string;
+  period: PeriodKey;
+  dateFrom: string;
+  dateTo: string;
+  canLoad: boolean;
+  onViewWarnings: () => void;
 }
 
-export function CostTab({ session, branchId, period, dateFrom, dateTo, canLoad, onViewWarnings }: Props): React.JSX.Element {
-  const [marginTrendView, setMarginTrendView] = useState<ChartView>('line')
+export function CostTab({
+  session,
+  branchId,
+  period,
+  dateFrom,
+  dateTo,
+  canLoad,
+  onViewWarnings,
+}: Props): React.JSX.Element {
+  const [marginTrendView, setMarginTrendView] = useState<ChartView>("line");
   // One cached request per (tab, branch, period) — returning to this tab with the same
   // selection shows the numbers it showed last time instead of a skeleton. See
   // lib/useCachedFetch.ts.
-  const url = canLoad ? dashboardUrl('cost', branchId, { period, dateFrom, dateTo }) : null
-  const { data, isRefreshing, failed, reload } = useCachedFetch<CostDashboardData>(url, session, 'Cost dashboard')
+  const url = canLoad
+    ? dashboardUrl("cost", branchId, { period, dateFrom, dateTo })
+    : null;
+  const { data, isRefreshing, failed, reload } =
+    useCachedFetch<CostDashboardData>(url, session, "Cost dashboard");
 
-  if (!canLoad) return <></>
+  if (!canLoad) return <></>;
 
   if (data === null) {
     if (failed) {
@@ -130,7 +160,7 @@ export function CostTab({ session, branchId, period, dateFrom, dateTo, canLoad, 
             </Button>
           }
         />
-      )
+      );
     }
     return (
       <div className="flex flex-col gap-4">
@@ -143,7 +173,7 @@ export function CostTab({ session, branchId, period, dateFrom, dateTo, canLoad, 
         <Skeleton className="h-48" />
         <Skeleton className="h-48" />
       </div>
-    )
+    );
   }
 
   return (
@@ -174,7 +204,12 @@ export function CostTab({ session, branchId, period, dateFrom, dateTo, canLoad, 
         <CardHeader
           title="Gross margin trend"
           description="Estimated gross margin % by day over the selected period."
-          action={<ChartViewToggle view={marginTrendView} onChange={setMarginTrendView} />}
+          action={
+            <ChartViewToggle
+              view={marginTrendView}
+              onChange={setMarginTrendView}
+            />
+          }
         />
         <TrendChart
           points={data.trend}
@@ -210,12 +245,19 @@ export function CostTab({ session, branchId, period, dateFrom, dateTo, canLoad, 
           <TopProfitProductsTable products={data.products} />
         </Card>
         <Card>
-          <CardHeader title="Purchase data quality" description="Bad values on purchase lines in the selected period." />
-          <WarningsTile warnings={data.purchase_warnings} label="Purchase" onViewWarnings={onViewWarnings} />
+          <CardHeader
+            title="Purchase data quality"
+            description="Bad values on purchase lines in the selected period."
+          />
+          <WarningsTile
+            warnings={data.purchase_warnings}
+            label="Purchase"
+            onViewWarnings={onViewWarnings}
+          />
         </Card>
       </div>
     </div>
-  )
+  );
 }
 
-export default CostTab
+export default CostTab;

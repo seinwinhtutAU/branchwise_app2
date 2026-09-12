@@ -1,8 +1,8 @@
 """LangGraph tool-calling agent for the retail chatbot.
 
-Deliberately retail-only for now (see routers/chat.py's role check) — wholesale runs
-on a completely separate data model (app/models/wholesale.py) that tools.py's tools
-don't touch. Every tool takes the resolved `User` and applies the same
+Deliberately retail-only (see routers/chat.py's role check) — wholesale runs on a
+completely separate data model, removed on 2026-09-11 pending its redesign, that
+tools.py's tools never touched. Every tool takes the resolved `User` and applies the same
 `if user.branch_id is not None: filter(...)` scoping every other router uses, so a
 branch-scoped account never sees another branch's data through the chatbot either.
 """

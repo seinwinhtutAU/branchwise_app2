@@ -50,8 +50,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "dead_stock_warning_share_pct": 10.0,
         "dead_stock_critical_share_pct": 25.0,
         "traffic_decline_warning_pct": -10.0,
-        "single_item_basket_normal_share_pct": 45.0,
-        "single_item_basket_warning_share_pct": 60.0,
     },
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef } from "react";
 
 /**
  * Hands each fetch its own AbortSignal, cancelling whichever request was still in
@@ -10,11 +10,11 @@ import { useEffect, useRef } from 'react'
  * `signal.aborted` — an aborted request is not a failure worth a toast.
  */
 export function useLatestRequest(): () => AbortSignal {
-  const controller = useRef<AbortController | null>(null)
-  useEffect(() => () => controller.current?.abort(), [])
+  const controller = useRef<AbortController | null>(null);
+  useEffect(() => () => controller.current?.abort(), []);
   return () => {
-    controller.current?.abort()
-    controller.current = new AbortController()
-    return controller.current.signal
-  }
+    controller.current?.abort();
+    controller.current = new AbortController();
+    return controller.current.signal;
+  };
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from "react";
 
 /**
  * A debounced string: mirrors `value` once it's sat still for `delay` ms, except an
@@ -13,14 +13,14 @@ import { useEffect, useState } from 'react'
  * own custom date range for the original case this generalizes from.
  */
 export function useSettled(value: string, delay: number): string {
-  const [settled, setSettled] = useState(value)
+  const [settled, setSettled] = useState(value);
   useEffect(() => {
     if (!value) {
-      setSettled('')
-      return
+      setSettled("");
+      return;
     }
-    const timer = setTimeout(() => setSettled(value), delay)
-    return () => clearTimeout(timer)
-  }, [value, delay])
-  return settled
+    const timer = setTimeout(() => setSettled(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return settled;
 }

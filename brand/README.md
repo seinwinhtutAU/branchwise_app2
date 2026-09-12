@@ -6,15 +6,15 @@ place), and the upward step reads as growth.
 
 ## Files
 
-| File | Use it for |
-| --- | --- |
-| `branchwise-lockup.svg` | The full logo — mark plus name. The default, on white or any light background. |
-| `branchwise-lockup-dark.svg` | The same lockup on a dark background. |
-| `branchwise-mark.svg` | The mark on its own, where the name is already nearby. |
-| `branchwise-mark-white.svg` | The mark on a dark or coloured background. |
-| `branchwise-icon.svg` | The rounded app icon — the mark in white on an indigo gradient. Used for Windows and Linux, where the artwork is expected to reach the edges. |
-| `branchwise-icon-macos.svg` | The same icon inset to Apple's icon grid (824 inside 1024) with a soft shadow, so it sits at the same visual size as other Mac apps in the Dock. |
-| `png/` | PNG exports of all of the above, with transparent backgrounds. Use these in Word, PowerPoint, or anywhere SVG is awkward. |
+| File                         | Use it for                                                                                                                                       |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `branchwise-lockup.svg`      | The full logo — mark plus name. The default, on white or any light background.                                                                   |
+| `branchwise-lockup-dark.svg` | The same lockup on a dark background.                                                                                                            |
+| `branchwise-mark.svg`        | The mark on its own, where the name is already nearby.                                                                                           |
+| `branchwise-mark-white.svg`  | The mark on a dark or coloured background.                                                                                                       |
+| `branchwise-icon.svg`        | The rounded app icon — the mark in white on an indigo gradient. Used for Windows and Linux, where the artwork is expected to reach the edges.    |
+| `branchwise-icon-macos.svg`  | The same icon inset to Apple's icon grid (824 inside 1024) with a soft shadow, so it sits at the same visual size as other Mac apps in the Dock. |
+| `png/`                       | PNG exports of all of the above, with transparent backgrounds. Use these in Word, PowerPoint, or anywhere SVG is awkward.                        |
 
 Regenerate the PNGs after editing any SVG:
 
@@ -33,14 +33,14 @@ the running app hands to the window and the Dock.
 
 ## Colours
 
-| Hex | Where it appears |
-| --- | --- |
+| Hex       | Where it appears                                                         |
+| --------- | ------------------------------------------------------------------------ |
 | `#4338ca` | The head-office dot at the bottom, and the dark end of the icon gradient |
-| `#4f46e5` | The tallest (right-hand) branch |
-| `#6366f1` | The connecting lines, the word "Wise", and the app's own brand colour |
-| `#818cf8` | The middle branch, and the light end of the icon gradient |
-| `#a5b4fc` | The shortest (left-hand) branch |
-| `#1e293b` | The word "Branch" |
+| `#4f46e5` | The tallest (right-hand) branch                                          |
+| `#6366f1` | The connecting lines, the word "Wise", and the app's own brand colour    |
+| `#818cf8` | The middle branch, and the light end of the icon gradient                |
+| `#a5b4fc` | The shortest (left-hand) branch                                          |
+| `#1e293b` | The word "Branch"                                                        |
 
 These are the same indigo tokens the app already uses (`--color-brand` in
 `frontend/renderer/src/styles/globals.css`), so the logo and the interface match.

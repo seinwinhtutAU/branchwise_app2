@@ -1,4 +1,4 @@
-import { useConnectionStatus } from '@renderer/lib/connection'
+import { useConnectionStatus } from "@renderer/lib/connection";
 
 /**
  * A single line across the top of the app when the connection is not carrying requests
@@ -13,10 +13,10 @@ import { useConnectionStatus } from '@renderer/lib/connection'
  * It renders nothing when things are fine, which is the normal case.
  */
 export function ConnectionBanner(): React.JSX.Element | null {
-  const status = useConnectionStatus()
-  if (status === 'online') return null
+  const status = useConnectionStatus();
+  if (status === "online") return null;
 
-  const offline = status === 'offline'
+  const offline = status === "offline";
 
   return (
     <div
@@ -24,19 +24,19 @@ export function ConnectionBanner(): React.JSX.Element | null {
       aria-live="polite"
       className={`flex items-center gap-2 px-4 sm:px-6 py-2 text-sm border-b ${
         offline
-          ? 'bg-error-subtle text-error border-error/20'
-          : 'bg-warning-subtle text-warning border-warning/20'
+          ? "bg-error-subtle text-error border-error/20"
+          : "bg-warning-subtle text-warning border-warning/20"
       }`}
     >
       <span
-        className={`w-2 h-2 rounded-full shrink-0 ${offline ? 'bg-error' : 'bg-warning animate-pulse motion-reduce:animate-none'}`}
+        className={`w-2 h-2 rounded-full shrink-0 ${offline ? "bg-error" : "bg-warning animate-pulse motion-reduce:animate-none"}`}
         aria-hidden="true"
       />
       <span>
         {offline
-          ? 'No connection — showing the last saved data. Reconnecting automatically; new imports will need to wait.'
-          : 'Loading is slow right now — pages may take longer than usual.'}
+          ? "No connection — showing the last saved data. Reconnecting automatically; new imports will need to wait."
+          : "Loading is slow right now — pages may take longer than usual."}
       </span>
     </div>
-  )
+  );
 }

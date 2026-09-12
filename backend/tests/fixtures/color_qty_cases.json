@@ -1,0 +1,54 @@
+{
+  "_comment": "The shared contract between the colour grammar's two copies: frontend/renderer/src/components/features/wholesale/shared.ts (colorQtyProblem/parseColorQty, instant feedback while typing) and backend/app/services/wholesale/colors.py (color_qty_problem/parse_color_qty, the authoritative check on every write). Both must agree on every case here — if one changes, update this file and check the other copy still passes.",
+  "problems": [
+    { "text": "black10s,pink2p", "problem": null },
+    { "text": "black10s+pink2p", "problem": null },
+    { "text": "black10s, pink2p", "problem": null },
+    { "text": "", "problem": null },
+    { "text": "  ", "problem": null },
+    { "text": "black10s,", "problem": "There is an empty piece — check the commas." },
+    { "text": "10", "problem": "\"10\" has no color in front of it." },
+    { "text": "10s", "problem": "\"10s\" is not a color, a count and a unit, like black10s." },
+    { "text": "black", "problem": "\"black\" has no count after it." },
+    { "text": "black0s", "problem": "\"black0s\" counts nothing." },
+    { "text": "black10", "problem": "\"black10\" needs a unit — s for sets, p for pairs, d for dozens." },
+    { "text": "black10x", "problem": "\"black10x\" ends in \"x\" — use s for sets, p for pairs, d for dozens." },
+    { "text": "black-10s", "problem": "\"black-10s\" is not a color, a count and a unit, like black10s." }
+  ],
+  "parses": [
+    {
+      "text": "black10s,pink2p",
+      "colors": [
+        { "color": "black", "qty": 10, "unit": "set" },
+        { "color": "pink", "qty": 2, "unit": "pair" }
+      ],
+      "row_unit": "set",
+      "pairs": 62
+    },
+    {
+      "text": "black1s,black2p,pink1s",
+      "colors": [
+        { "color": "black", "qty": 1, "unit": "set" },
+        { "color": "black", "qty": 2, "unit": "pair" },
+        { "color": "pink", "qty": 1, "unit": "set" }
+      ],
+      "row_unit": "set",
+      "pairs": 14
+    },
+    {
+      "text": "black40p,white20p",
+      "colors": [
+        { "color": "black", "qty": 40, "unit": "pair" },
+        { "color": "white", "qty": 20, "unit": "pair" }
+      ],
+      "row_unit": "set",
+      "pairs": 60
+    },
+    {
+      "text": "black3d",
+      "colors": [{ "color": "black", "qty": 3, "unit": "dozen" }],
+      "row_unit": "pair",
+      "pairs": 36
+    }
+  ]
+}

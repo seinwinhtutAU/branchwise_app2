@@ -1,34 +1,40 @@
-import { useEffect, useState } from 'react'
-import { Button } from '@renderer/components/ui/Button'
-import { Input } from '@renderer/components/ui/Input'
+import { useEffect, useState } from "react";
+import { Button } from "@renderer/components/ui/Button";
+import { Input } from "@renderer/components/ui/Input";
 
 interface PaginationProps {
-  page: number
-  totalPages: number
-  totalItems: number
-  pageSize: number
-  onPageChange: (page: number) => void
+  page: number;
+  totalPages: number;
+  totalItems: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
 }
 
 // Pure primitive — no skeleton/empty state (exempt per rubric).
-export function Pagination({ page, totalPages, totalItems, pageSize, onPageChange }: PaginationProps): React.JSX.Element {
-  const start = totalItems === 0 ? 0 : (page - 1) * pageSize + 1
-  const end = Math.min(page * pageSize, totalItems)
+export function Pagination({
+  page,
+  totalPages,
+  totalItems,
+  pageSize,
+  onPageChange,
+}: PaginationProps): React.JSX.Element {
+  const start = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, totalItems);
 
   // A free-typed draft of the page number, separate from `page` itself — so a
   // half-typed value (or one outside the valid range) isn't clobbered by the `page`
   // prop on every keystroke, and only commits (clamped) on blur/Enter.
-  const [draft, setDraft] = useState(String(page))
+  const [draft, setDraft] = useState(String(page));
   useEffect(() => {
-    setDraft(String(page))
-  }, [page])
+    setDraft(String(page));
+  }, [page]);
 
   function commitDraft(): void {
-    const parsed = Math.trunc(Number(draft))
-    if (Number.isFinite(parsed) && draft.trim() !== '') {
-      onPageChange(Math.min(Math.max(parsed, 1), totalPages))
+    const parsed = Math.trunc(Number(draft));
+    if (Number.isFinite(parsed) && draft.trim() !== "") {
+      onPageChange(Math.min(Math.max(parsed, 1), totalPages));
     } else {
-      setDraft(String(page))
+      setDraft(String(page));
     }
   }
 
@@ -38,7 +44,12 @@ export function Pagination({ page, totalPages, totalItems, pageSize, onPageChang
         Showing {start}–{end} of {totalItems}
       </span>
       <div className="flex items-center gap-2">
-        <Button variant="secondary" size="sm" onClick={() => onPageChange(page - 1)} disabled={page <= 1}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => onPageChange(page - 1)}
+          disabled={page <= 1}
+        >
           Previous
         </Button>
         <span className="flex items-center gap-1.5 text-sm text-text-secondary tabular-nums">
@@ -50,19 +61,24 @@ export function Pagination({ page, totalPages, totalItems, pageSize, onPageChang
             value={draft}
             aria-label="Page number"
             disabled={totalPages <= 1}
-            onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
+            onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
             onBlur={commitDraft}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') e.currentTarget.blur()
+              if (e.key === "Enter") e.currentTarget.blur();
             }}
             className="h-8 w-14 px-1.5 text-center"
           />
           of {totalPages}
         </span>
-        <Button variant="secondary" size="sm" onClick={() => onPageChange(page + 1)} disabled={page >= totalPages}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => onPageChange(page + 1)}
+          disabled={page >= totalPages}
+        >
           Next
         </Button>
       </div>
     </div>
-  )
+  );
 }

@@ -1,5 +1,12 @@
-import { forwardRef, type CSSProperties, type HTMLAttributes, type ReactNode, type TdHTMLAttributes, type ThHTMLAttributes } from 'react'
-import { cn } from '@renderer/lib/utils'
+import {
+  forwardRef,
+  type CSSProperties,
+  type HTMLAttributes,
+  type ReactNode,
+  type TdHTMLAttributes,
+  type ThHTMLAttributes,
+} from "react";
+import { cn } from "@renderer/lib/utils";
 
 // Layout wrapper — no skeleton/empty state (exempt per rubric); use TableSkeleton/EmptyState inside.
 // `overflow-x-auto` here implicitly forces `overflow-y` to `auto` too (CSS rule: an
@@ -13,38 +20,68 @@ import { cn } from '@renderer/lib/utils'
 export function TableContainer({
   children,
   className,
-  style
+  style,
 }: {
-  children: ReactNode
-  className?: string
-  style?: CSSProperties
+  children: ReactNode;
+  className?: string;
+  style?: CSSProperties;
 }): React.JSX.Element {
   return (
-    <div style={style} className={cn('w-full overflow-x-auto rounded-lg border border-border', className)}>
+    <div
+      style={style}
+      className={cn(
+        "w-full overflow-x-auto rounded-lg border border-border",
+        className,
+      )}
+    >
       <table className="w-full text-sm border-collapse">{children}</table>
     </div>
-  )
+  );
 }
 
 // Sticky at the top of the page scroll (offset below the mobile top bar, flush on desktop)
 // by default. When TableContainer is given a bounded `maxHeight` (a real scrollport),
 // pass className="top-0" here instead — see the TableContainer comment above.
-export function Thead({ children, className }: { children: ReactNode; className?: string }): React.JSX.Element {
-  return <thead className={cn('sticky top-14 lg:top-0 z-20 bg-info-subtle', className)}>{children}</thead>
-}
-
-export function Tbody({ children }: { children: ReactNode }): React.JSX.Element {
-  return <tbody>{children}</tbody>
-}
-
-export const Tr = forwardRef<HTMLTableRowElement, HTMLAttributes<HTMLTableRowElement>>(
-  ({ children, className, ...props }, ref) => (
-    <tr ref={ref} className={cn('transition-colors duration-150 hover:bg-bg-subtle', className)} {...props}>
+export function Thead({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <thead
+      className={cn("sticky top-14 lg:top-0 z-20 bg-info-subtle", className)}
+    >
       {children}
-    </tr>
-  )
-)
-Tr.displayName = 'Tr'
+    </thead>
+  );
+}
+
+export function Tbody({
+  children,
+}: {
+  children: ReactNode;
+}): React.JSX.Element {
+  return <tbody>{children}</tbody>;
+}
+
+export const Tr = forwardRef<
+  HTMLTableRowElement,
+  HTMLAttributes<HTMLTableRowElement>
+>(({ children, className, ...props }, ref) => (
+  <tr
+    ref={ref}
+    className={cn(
+      "transition-colors duration-150 hover:bg-bg-subtle",
+      className,
+    )}
+    {...props}
+  >
+    {children}
+  </tr>
+));
+Tr.displayName = "Tr";
 
 // Light gridlines between every cell (header and body) for a spreadsheet-like look.
 export function Th({
@@ -55,15 +92,15 @@ export function Th({
   return (
     <th
       className={cn(
-        'text-left font-medium text-text-muted text-xs uppercase tracking-wide px-4 py-3 whitespace-nowrap',
-        'border-b border-r border-border',
-        className
+        "text-left font-medium text-text-muted text-xs uppercase tracking-wide px-4 py-3 whitespace-nowrap",
+        "border-b border-r border-border",
+        className,
       )}
       {...props}
     >
       {children}
     </th>
-  )
+  );
 }
 
 export function Td({
@@ -73,10 +110,13 @@ export function Td({
 }: TdHTMLAttributes<HTMLTableCellElement>): React.JSX.Element {
   return (
     <td
-      className={cn('px-4 py-3 text-text-primary align-middle border-b border-r border-border', className)}
+      className={cn(
+        "px-4 py-3 text-text-primary align-middle border-b border-r border-border",
+        className,
+      )}
       {...props}
     >
       {children}
     </td>
-  )
+  );
 }

@@ -33,12 +33,12 @@ one of them alone leaves a hole:
   in one place rather than threading a retry through fifty call sites, and it is scoped
   tightly: only this app's API, only a 401, only one retry.
 
-Only a rejected *session* returns anyone to the sign-in screen.
+Only a rejected _session_ returns anyone to the sign-in screen.
 
 The backend verifies each JWT (`app/core/security.py::get_current_user`) against Neon
 Auth's JWKS. Two differences from the Supabase era worth knowing: the algorithm is
 **EdDSA (Ed25519)**, not ES256; and `iss`/`aud` are the auth host's **origin**
-(`https://<endpoint>.neonauth.<region>.aws.neon.tech`), *not* the full base URL with its
+(`https://<endpoint>.neonauth.<region>.aws.neon.tech`), _not_ the full base URL with its
 `/<db>/auth` path — verifying against the full base URL rejects every token.
 
 ## Two "users"
@@ -66,13 +66,13 @@ instead and `App.tsx`'s `DEV_PASSWORD` matches it. This is a development conveni
 service reachable from the internet — the accounts the branches actually use should be
 given real passwords before daily use.
 
-| Email | Role | Branch |
-|---|---|---|
-| admin@branchwise.app | admin | *(none)* |
-| wholesale@branchwise.app | wholesale | Wholesale |
-| aungthitsar@branchwise.app | retail | AungThitSar |
-| ashley@branchwise.app | retail | Ashley |
-| retail3@branchwise.app | retail | Retail 3 |
+| Email                      | Role      | Branch      |
+| -------------------------- | --------- | ----------- |
+| admin@branchwise.app       | admin     | _(none)_    |
+| wholesale@branchwise.app   | wholesale | Wholesale   |
+| aungthitsar@branchwise.app | retail    | AungThitSar |
+| ashley@branchwise.app      | retail    | Ashley      |
+| retail3@branchwise.app     | retail    | Retail 3    |
 
 In dev builds (`import.meta.env.DEV`), the login screen shows one-click buttons for each of these — see `App.tsx`. They're hidden in production builds since the password is hardcoded in the client bundle.
 

@@ -19,7 +19,7 @@ alerts) and `app/services/explanation.py` (why each alert happened), rendered by
 matching dashboard tab itself uses — `_revenue_totals`, `_cost_totals_and_products`,
 `_stock_summary`, `_basket_stats` in `app/services/dashboard.py`, and
 `build_warning_sections` in `app/services/data_quality.py`. Overview is a second
-*reading* of the pillars' figures, never a second *computation* of them. If a red
+_reading_ of the pillars' figures, never a second _computation_ of them. If a red
 Inventory score sent a manager to an Inventory tab that reported a different dead-stock
 count, neither number would ever be trusted again. `test_overview_reports_the_same_figures_as_the_tabs_it_links_to`
 exists specifically to keep that true.
@@ -44,45 +44,45 @@ measurable, and each dimension's `effective_weight` reports what it really contr
 
 Five dimensions, weighted:
 
-| Dimension | Weight | Question it answers |
-| --- | ---: | --- |
-| Sales | 25% | Is the branch selling more or less than the previous period of the same length? |
-| Profit | 25% | Is what it sells actually making money, and is that improving? |
-| Inventory | 25% | Is stock moving, and is it about to run out of anything that sells? |
-| Customer | 15% | Are shoppers buying more per visit, or making smaller, single-item trips? |
-| Data Quality | 10% | Can the four scores above be trusted? |
+| Dimension    | Weight | Question it answers                                                         |
+| ------------ | -----: | --------------------------------------------------------------------------- |
+| Sales        |    25% | Is the branch selling more than it was, and still selling across its range? |
+| Profit       |    25% | Is what it sells actually making money, and is that improving?              |
+| Inventory    |    25% | Is stock moving, and is it about to run out of anything that sells?         |
+| Customer     |    15% | How busy is a normal trading day, and is a visit worth more than it was?    |
+| Data Quality |    10% | Can the four scores above be trusted?                                       |
 
 Each dimension is a weighted average of its sub-metrics:
 
-| Dimension | Sub-metric | Weight | Score bands (value → score) |
-| --- | --- | ---: | --- |
-| Sales | Revenue growth % | 50% | -20→0, -10→40, 0→70, +10→100 |
-| Sales | Transaction growth % | 30% | same as above |
-| Sales | Average sale growth % | 20% | -15→0, -5→50, 0→75, +5→100 |
-| Profit | Gross margin % | 60% | 0→0, 10→40, 20→80, 30→100 |
-| Profit | Margin change (pp) | 40% | -10→0, -3→50, 0→75, +3→100 |
-| Inventory | Dead stock share % | 40% | 0→100, 5→80, 15→40, 30→0 |
-| Inventory | Stockout risk share % | 30% | 0→100, 2→85, 5→60, 10→20, 20→0 |
-| Inventory | Days of inventory on hand | 30% | 0→50, 15→90, 30→100, 45→85, 60→60, 90→30, 120→0 |
-| Customer | Items per basket growth % | 55% | -15→0, -5→50, 0→75, +5→100 |
-| Customer | Single-item basket share % | 45% | 30→100, 50→75, 70→40, 85→0 |
-| Data Quality | Issues per 100 records | 70% | 0→100, 1→80, 3→50, 10→10, 20→0 |
-| Data Quality | Stock mismatches (count) | 30% | 0→100, 1→70, 5→30, 20→0 |
+| Dimension    | Sub-metric                    | Weight | Score bands (value → score)                     |
+| ------------ | ----------------------------- | -----: | ----------------------------------------------- |
+| Sales        | Revenue growth %              |    50% | -20→0, -10→40, 0→70, +10→100                    |
+| Sales        | Transaction growth %          |    30% | same as above                                   |
+| Sales        | Products sold growth %        |    20% | -15→0, -5→50, 0→75, +5→100                      |
+| Profit       | Gross margin %                |    60% | 0→0, 10→40, 20→80, 30→100                       |
+| Profit       | Margin change (pp)            |    40% | -10→0, -3→50, 0→75, +3→100                      |
+| Inventory    | Dead stock share %            |    40% | 0→100, 5→80, 15→40, 30→0                        |
+| Inventory    | Stockout risk share %         |    30% | 0→100, 2→85, 5→60, 10→20, 20→0                  |
+| Inventory    | Days of inventory on hand     |    30% | 0→50, 15→90, 30→100, 45→85, 60→60, 90→30, 120→0 |
+| Customer     | Average sale value growth %   |    50% | -15→0, -5→50, 0→75, +5→100                      |
+| Customer     | Transactions-per-day growth % |    50% | same as above                                   |
+| Data Quality | Issues per 100 records        |    70% | 0→100, 1→80, 3→50, 10→10, 20→0                  |
+| Data Quality | Stock mismatches (count)      |    30% | 0→100, 1→70, 5→30, 20→0                         |
 
 Each sub-metric also carries a `unit` telling the frontend how to render its raw
 value. `pct_change` and `pct_points` are movements and get a green/red ▲/▼ arrow and a signed
 number — the same arrows and colours the stat tiles use, so "this went up" looks the same
 across the app — while `pct` is a plain level (`30.0%`); the rest are `days`, `count` and
-`rate`. The colour follows the direction rather than whether the movement was good: on
-single-item basket share a rise is a problem, so green means "went up", and the score
-beside it is what judges. `pct_points` is written out as "points" rather than `pp`, which
-is correct, standard, and unread by anyone outside finance.
+`rate`. The colour follows the direction rather than whether the movement was good: on a
+share where a rise is a problem, green still only means "went up", and the score beside it
+is what judges. A `pct_points` movement is written as a plain "%" rather than "percentage
+points" or `pp`, so it reads the same as every other percentage on the screen.
 
 A value between two breakpoints is linearly interpolated; a value past either end is
-clamped. Because the score is stated *per breakpoint* rather than derived from the
+clamped. Because the score is stated _per breakpoint_ rather than derived from the
 value's direction, one mechanism covers "higher is better" (revenue growth), "lower is
 better" (dead stock), and "there is a healthy middle" — days of inventory on hand peaks
-at 30 days and falls off on *both* sides, since under two weeks of cover is a stockout
+at 30 days and falls off on _both_ sides, since under two weeks of cover is a stockout
 waiting to happen and over two months is cash sitting on a shelf.
 
 Status bands, used identically by the gauge, the dimension bars and (later) the alerts:
@@ -98,7 +98,7 @@ Status bands, used identically by the gauge, the dimension bars and (later) the 
 - **Data quality is a rate, not a count.** 40 warnings across 40,000 rows is a clean
   import; 40 across 200 is a broken one. The denominator (`records_checked`) is the
   period's sale lines + purchase lines + the branch's current SKU count.
-- **Profit is gated on cost coverage.** Costs are *estimates* from
+- **Profit is gated on cost coverage.** Costs are _estimates_ from
   `app/services/pricing.py`'s point-in-time buying price, and a product with no cost
   estimate is simply not costed. Below `MIN_COST_COVERAGE_PCT` (50%) of period revenue
   having any cost estimate at all, the margin figure describes a minority of the
@@ -108,7 +108,7 @@ Status bands, used identically by the gauge, the dimension bars and (later) the 
 
 ## The Early Warning engine
 
-The score says *which part* of a branch is unhealthy. `app/services/early_warning.py`
+The score says _which part_ of a branch is unhealthy. `app/services/early_warning.py`
 answers the next question — **what specifically is wrong, and what should I do about
 it** — as a severity-ranked list of named problems on the same payload.
 
@@ -130,25 +130,24 @@ a manager reacts to still means "decisions waiting", while the list itself can s
 drift that used to produce no row at all. A `normal` alert's `recommended_action` says as
 much in its first words ("Nothing to act on yet…"), and there is a test asserting it.
 
-| Rule | Fires when | Severity |
-| --- | --- | --- |
-| `no_sales_recorded` | No sales at all this period, after a period that had them | critical |
-| `revenue_decline` | Revenue growth ≤ -5% (≤ -10% and ≤ -20% escalate) | normal / warning / critical |
-| `low_margin` | Gross margin < 15% (< 10% and < 5% escalate) | normal / warning / critical |
-| `margin_slipping` | Margin fell ≥ 1 percentage point (≥ 3 escalates) | normal / warning |
-| `stockout_risk` | Any product with ≤ 3 days of stock left | critical |
-| `low_stock` | Any product with < 7 days of stock left | warning |
-| `watch_stock` | Any product with 7–14 days of stock left | normal |
-| `dead_stock` | ≥ 5% of SKUs on the shelf with no sale in 90 days (≥ 10% and ≥ 25% escalate) | normal / warning / critical |
-| `traffic_decline` | Transactions down ≥ 10% while the average sale rose **and** revenue itself stayed quiet | warning |
-| `single_item_baskets` | ≥ 45% of transactions were one line item (≥ 60% escalates) | normal / warning |
-| `data_quality_*` | Any Warning-page check found rows this period | that check's own severity |
+| Rule                                                         | Fires when                                                                              | Severity                    |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------- | --------------------------- |
+| `no_sales_recorded`                                          | No sales at all this period, after a period that had them                               | critical                    |
+| `revenue_decline`                                            | Revenue growth ≤ -5% (≤ -10% and ≤ -20% escalate)                                       | normal / warning / critical |
+| `low_margin`                                                 | Gross margin < 15% (< 10% and < 5% escalate)                                            | normal / warning / critical |
+| `margin_slipping` (shown as "Margin lower than last period") | Margin fell ≥ 1% (≥ 3% escalates)                                                       | normal / warning            |
+| `stockout_risk`                                              | Any product with ≤ 3 days of stock left                                                 | critical                    |
+| `low_stock`                                                  | Any product with < 7 days of stock left                                                 | warning                     |
+| `watch_stock`                                                | Any product with 7–14 days of stock left                                                | normal                      |
+| `dead_stock`                                                 | ≥ 5% of SKUs on the shelf with no sale in 90 days (≥ 10% and ≥ 25% escalate)            | normal / warning / critical |
+| `traffic_decline`                                            | Transactions down ≥ 10% while the average sale rose **and** revenue itself stayed quiet | warning                     |
+| `data_quality_*`                                             | Any Warning-page check found rows this period                                           | that check's own severity   |
 
 Two rules deliberately have no `normal` tier. `no_sales_recorded` is never mild — an
 empty period is either a missing import or a shut shop. `traffic_decline` is already the
 narrow hidden case (see below), and a milder version of "the headline looks fine" is
 indistinguishable from an ordinary week. `watch_stock` is the opposite: the one rule that
-exists *only* at `normal`, reusing the Inventory tab's own third band
+exists _only_ at `normal`, reusing the Inventory tab's own third band
 (`WATCH_DAYS_OF_STOCK` = 14), so the three stock levels on that page and the three
 severities here are the same three bands rather than two sets that can drift apart.
 
@@ -177,8 +176,8 @@ Three design rules behind that table:
 
 Thresholds live in a frozen `Thresholds` dataclass that every rule takes as an
 argument, built from `app_settings` on each request (see **Tuning** below).
-`dead_stock` and `single_item_baskets` fire on *shares*, not raw counts: twelve dead
-SKUs is nothing in a 1,000-product shop and serious in a 40-product one.
+`dead_stock` fires on a _share_, not a raw count: twelve dead SKUs is nothing in a
+1,000-product shop and serious in a 40-product one.
 
 Alerts are computed, never generated — every sentence is a template filled with figures
 from the snapshot. Nothing in this engine asks a model what it thinks.
@@ -187,8 +186,8 @@ from the snapshot. Nothing in this engine asks a model what it thinks.
 
 `app/services/explanation.py`. An alert saying "revenue is down 11.3%" tells a manager
 something they could read off a chart. The next sentence is the one that changes what
-they do: *fewer people came in, and the ones who did spent more* calls for marketing,
-opening hours or staffing; *the same people bought less each* calls for pricing,
+they do: _fewer people came in, and the ones who did spent more_ calls for marketing,
+opening hours or staffing; _the same people bought less each_ calls for pricing,
 placement or stock. Two different decisions behind one identical headline.
 
 Every explanation here is **arithmetic**, never a model's opinion. Revenue decomposes
@@ -204,7 +203,7 @@ revenue = transactions × average basket
 
 The three terms sum to the actual change with **no residual** — there is a test
 asserting exactly that across four different shapes of movement — so whichever of the
-first two is larger *is* the driver. It is measured, not inferred. That is the whole
+first two is larger _is_ the driver. It is measured, not inferred. That is the whole
 reason this is a module rather than a prompt: a decomposition can be checked by hand,
 and it cannot be confidently wrong.
 
@@ -222,7 +221,7 @@ growth rates — what the branch sold for, against what it paid for what it sold
 named causes come out of that comparison: `costs_outpaced_sales` (selling more without
 keeping more of it — buying prices or mix), `sales_fell_faster_than_costs` (selling
 prices or mix, not suppliers), and `costs_rose_while_sales_fell` (both sides moved
-against the margin). A low margin *level* is a different question again, and
+against the margin). A low margin _level_ is a different question again, and
 `describe_margin_level` answers the one that changes the decision: whether it is new. A
 margin thin for months is a pricing decision to revisit; one that was healthy last
 period is an event to investigate.
@@ -237,13 +236,6 @@ months), and the business asked for it to go rather than have a sentence claim m
 the data supports. The stock alert's "why" is now how long the stock lasts, and nothing
 about why.
 
-**A high single-item basket share** gets the `low_margin` treatment, since it is also a
-level rather than a movement: the question that changes the decision is whether it is
-new. A branch that has always sold this way has a layout and bundling question; one that
-jumped from 45% to 78% has an event to find — a companion product out of stock, or a
-display that moved. Its drift threshold is 5 percentage points rather than margin's 1,
-because basket composition moves with the weather and the day of the week.
-
 In the UI (`AlertExplanation` in `dashboard/shared.tsx`) an opened alert shows its
 figures laid out and labelled, in the order a reader asks for them:
 
@@ -254,34 +246,35 @@ figures laid out and labelled, in the order a reader asks for them:
    period is on screen). Without this line a reader comparing a July period against a
    stock alert has no way to know they are not the same days.
 2. **The figures** (`Alert.facts`), as tables. This is the panel's main content, and it
-   exists because the business asked to *see the data*: a sentence saying the margin fell
+   exists because the business asked to _see the data_: a sentence saying the margin fell
    is a claim, while sales, cost of goods, what was kept and the margin — each with its
    previous value — is that claim with its working attached, checkable against the shop's
    own books. Two shapes, because the two kinds of row do not share columns:
-   **movements** get a four-column table headed *Last period · This period · Change*, and
+   **movements** get a four-column table headed _Last period · This period · Change_, and
    **plain facts** ("Products affected · 3 of 908") a two-column key-value table with no
-   header, since the left column already is the label. An alert producing both (single-item
-   baskets) shows the movements first, as that is what it is claiming. The headers stay
+   header, since the left column already is the label. An alert producing both (fewer
+   customers than before) shows the movements first, as that is what it is claiming. The headers stay
    "Last period"/"This period" whatever period is selected — the exact days are named in
    the line above, and a header that changed with the period would restate them worse.
    Both tables are width-capped: the row this panel expands inside is as wide as the
    Business Alerts table, and a four-column figure table stretched across all of it puts a
-   label at one edge and its number at the other.
+   label at one edge and its number at the other. They are built from the app's own
+   `TableContainer`/`Thead`/`Th`/`Td` — bordered, tinted header, gridlines between cells —
+   so a figure block looks like the Sale and Inventory tables the same person reads all
+   day, and like the spreadsheet the numbers came out of.
+
+   **The change cell carries an arrow for the direction and its colour from the verdict.**
+   Cost of goods rising 14% is an up arrow (that is what the number did) painted red (for
+   that figure, up is the wrong way) — so `Alert.facts` sends `direction` and `tone`
+   separately. Change strings use a real minus sign rather than a hyphen, since the same
+   column shows "−Ks 1,175,057" beside "−5.6 points" and the two characters do not match.
+
 3. **The products** (`Alert.table`), for an alert about a list rather than a number: the
    few with the least cover left, each with what is on the shelf, what sold in the last
    30 days, and how long that lasts, plus "78 more on the Inventory tab" when the list was
    capped (`AT_RISK_SHORTLIST_LIMIT`). A branch with eighty low products gets one true,
    unactionable sentence otherwise; nobody reorders eighty lines off a count.
-4. **The revenue split** (`Alert.evidence`, `kind: revenue_split`) — on the revenue alert
-   only, since that is the one whose subject is the money itself. The customer alert
-   (`traffic_decline`) had it too and the business asked for it to go: that alert is about
-   people, and a bar chart of where the Kyat came from answers a question its reader is
-   not asking. Where it does appear:
-   each part as a bar with its amount, scaled against the largest part rather than the
-   total, since one part can pull the other way and a share-of-total bar would run
-   backwards. The parts sum to the total change exactly, which is the property that lets
-   this be shown as evidence at all.
-5. **Why**, then **What to do** — the latter tinted and holding the evidence button, since
+4. **Why**, then **What to do** — the latter tinted and holding the evidence button, since
    it is the thing the whole alert exists to produce.
 
 **Values are formatted on the server, not the client.** Every fact arrives as a finished
@@ -305,11 +298,19 @@ asks them as a single question, and two stacked headings for one thought is what
 panel read like a report. The measured half still leads the paragraph, so the reading never
 borrows its authority silently.
 
-**The chip row is gone**, along with the stock alert's demand/drawdown evidence block. The
+**The chip row is gone**, along with the revenue split and the stock alert's
+demand/drawdown evidence block. The
 chips showed two or three of the same figures the fact rows now carry in full, and keeping
 both would have been the duplication this engine avoids everywhere else. The
-demand/drawdown split — "selling faster than before → order more" against "simply run down
-→ order sooner" — was removed at the business's request: at this shop's volumes it rests on
+The revenue split — the "Where the Ks 1,312,950 went" bars, `Alert.evidence` with
+`kind: revenue_split` — went the same way: the money it split up is already in the fact
+rows and named again in Why, so the bars were the panel's third telling of one movement.
+It had been dropped from the customer alert earlier, for a different reason — that alert is
+about people, and a bar chart of where the Kyat came from answers a question its reader is
+not asking. `explanation.decompose_revenue_change` still runs, because Why is built from
+it; only the drawn bars are gone. The demand/drawdown split — "selling faster than before →
+order more" against "simply run down → order sooner" — was removed at the business's
+request: at this shop's volumes it rests on
 a handful of sales, and a sentence like "selling 0.6× its earlier rate" reads far firmer
 than the evidence under it. `explanation.classify_stock_risk` still exists and is still
 tested, but no alert uses it.
@@ -351,7 +352,7 @@ compare.
 
 Both live in `app_settings` as a single nested JSON value each
 (`branch_health_weights`, `early_warning_thresholds`) rather than as fourteen flat keys.
-They are each edited as a *set* — a weight only means anything relative to the other
+They are each edited as a _set_ — a weight only means anything relative to the other
 four, and a half-saved threshold set would fire alerts nobody chose — and the value
 column is already JSON, so nesting costs nothing and needs no migration. On read,
 `settings._merged_over_default` lays the saved dict over the defaults, so a set saved
@@ -370,7 +371,7 @@ Two deliberate non-validations:
 
 The set now carries a `normal` firing point for each rule that has one
 (`revenue_decline_normal_pct`, `low_margin_normal_pct`, `margin_slip_normal_pp`,
-`dead_stock_normal_share_pct`, `single_item_basket_normal_share_pct`) alongside the
+`dead_stock_normal_share_pct`) alongside the
 `warning` and `critical` ones. A threshold set saved before those keys existed still
 returns a complete shape, since `_merged_over_default` lays the saved dict over the
 defaults — the same property that made adding them need no migration.
@@ -418,7 +419,7 @@ are all exactly the other tabs' (`resolve_period`, `_resolve_retail_branch`).
   `estimated_stock_value` silently reads 0 for any product with no `buying_price` on its
   latest snapshot (a pre-existing property of the Inventory tab, not new here).
 - **The score bands are a considered default, not a business-configured setting.** The
-  dimension weights and the alert thresholds *are* configurable (see **Tuning**); the
+  dimension weights and the alert thresholds _are_ configurable (see **Tuning**); the
   piecewise bands that turn a raw value into a 0-100 sub-metric score are not, since
   they are a curve rather than a number and there is no sane form control for one.
 
@@ -449,8 +450,8 @@ mostly dead stock rather than stockouts. Nothing is hidden and nothing is summar
 - **What it measures** — one plain sentence (`SubMetric.definition`), in the words a shop
   manager would use rather than the ones the formula uses.
 - **Where the number comes from** — the same value again as the figures behind it
-  (`SubMetric.calculation`, evaluated against the snapshot): *"312 of 629 products with
-  stock"*, *"Ks 77,000,000 of stock ÷ Ks 686,667 of goods sold per day"*.
+  (`SubMetric.calculation`, evaluated against the snapshot): _"312 of 629 products with
+  stock"_, _"Ks 77,000,000 of stock ÷ Ks 686,667 of goods sold per day"_.
 - **How it scores** — the band table itself, rendered from `SubMetric.bands`, with this
   period's value marked on it.
 
@@ -469,14 +470,14 @@ like a branch with no alerts.
 That third point is the reason the band table is generated rather than written: the page
 renders the very table the score was computed against, so the explanation on screen
 cannot drift from the arithmetic behind the number. The old answer to "how is this measured" was the
-"View Revenue" link, and it was the wrong one — that tab shows *related* data, not the
+"View Revenue" link, and it was the wrong one — that tab shows _related_ data, not the
 calculation, so a reader still had to take the number on faith.
 
 It deliberately does **not** list the branch's alerts, only a one-line count linking to
 the Business Alerts page. Earlier versions did list them, from before that page existed;
 once it did, showing them in both places made two pages that answered the same question
-badly instead of two that answer different questions well — *what is wrong and what do I
-do* there, *why is this number what it is* here.
+badly instead of two that answer different questions well — _what is wrong and what do I
+do_ there, _why is this number what it is_ here.
 
 Rows that could not be measured stay visible showing `—`, rather than disappearing: a
 dimension whose weights suddenly did not add up to 100% would look broken. A dimension
@@ -504,7 +505,7 @@ together and splitting them forced the filters and the Refresh button onto oppos
 of a prop boundary.
 
 It sits beside Dashboard rather than beside Warning even though both are lists of things
-that are wrong: this one is the *business* going wrong, Warning is the *imported data*
+that are wrong: this one is the _business_ going wrong, Warning is the _imported data_
 being wrong, and they are read by different people for different reasons. A manager
 should be able to open it directly rather than going through the Dashboard first, which
 is why it is a nav section and not a sixth Dashboard tab.
@@ -530,10 +531,8 @@ matches what clicking it produces.
 
 **An alert carries its figures as data, not only inside its sentences.** `Alert.facts`
 is the labelled rows the detail panel shows — a single value (`{label, value}`) or a
-movement (`{label, before, after, change, tone}`) — `Alert.table` is the products behind a
-list-shaped alert, and `Alert.evidence` is the revenue decomposition (`kind:
-"revenue_split"`, the before and after totals, and the three parts that sum to the
-change). All are filled by the rules from the same `explanation.py` results the sentences
+movement (`{label, before, after, change, tone}`) — and `Alert.table` is the products
+behind a list-shaped alert. Both are filled by the rules from the same `explanation.py` results the sentences
 were built from, so the UI renders one set of numbers rather than recomputing a second —
 the "nothing is measured twice" rule applied across the wire, extended to formatting: the
 values arrive as finished strings, because formatting them twice is how a row ends up
@@ -542,7 +541,7 @@ disagreeing with the sentence beside it. A figure that could not be measured lea
 
 **Every branch appears, including the healthy ones.** Above the table sits one tile per
 retail branch — its overall score, its status band, and how many alerts it has here.
-A page that lists only problems can never answer *who is fine?*, and a branch that is
+A page that lists only problems can never answer _who is fine?_, and a branch that is
 simply absent from it reads as one that failed to load rather than one with nothing to
 act on. The score and the band are Overview's own, read off the same payload rather than
 recomputed: `STATUS_META` moved from `OverviewTab.tsx` to `dashboard/helpers.ts` so both
@@ -555,7 +554,7 @@ the chips describe the filter. Clicking a tile filters the table to that branch 
 clicking it again clears it, sharing state with the Branch selector, so a healthy tile is
 a control rather than decoration.
 
-**A branch that raised nothing gets one row saying so** — a green *Normal* badge and
+**A branch that raised nothing gets one row saying so** — a green _Normal_ badge and
 "Everything normal this period" — rather than no rows at all, for the same reason it gets
 a tile: absence is unreadable. It is shown only when no category chip is active, since
 under a chip "everything normal" would be a claim about one category worded as a claim
@@ -588,7 +587,7 @@ behave identically without one owning the other's state.
 **Drill-through** is the point of the whole layout: Sales → Revenue, Profit → Cost,
 Inventory → Inventory, Customer → Customer, and Data Quality leaves the dashboard for
 the Warning page. The branch travels with it, so drilling in from a branch card shows
-*that* branch rather than whatever the shared selector was on.
+_that_ branch rather than whatever the shared selector was on.
 
 Two Settings cards sit alongside the tab (admin only, retail workspaces only): the
 weights and the thresholds described under **Tuning**.
@@ -612,12 +611,12 @@ plus attribution to visits, to baskets, and to "both" when neither dominates; th
 sign-aware wording when revenue held up despite lost footfall; the three margin causes;
 whether a low margin level is reported as new or standing; the stock-risk split between
 demand speeding up and stock running down (including the no-earlier-sales case and the
-single-product wording); whether a high single-item share is reported as new or
-standing; and that alerts with nothing to decompose leave the fields empty. It also asserts that no two alerts on one branch
+single-product wording); and that alerts with nothing to decompose leave the fields
+empty. It also asserts that no two alerts on one branch
 carry identical explanation text.
 
 `backend/tests/test_early_warning.py` covers the engine (a healthy branch raising
-nothing, criticals sorting ahead of warnings, injectable thresholds, and that *every*
+nothing, criticals sorting ahead of warnings, injectable thresholds, and that _every_
 alert from every rule carries an action and a valid evidence link — asserted once
 across the whole rule set rather than rule by rule) and each rule's own behaviour:
 escalation thresholds, the missing-import case, the mutually-exclusive margin and stock

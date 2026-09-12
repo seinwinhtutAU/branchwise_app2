@@ -1,18 +1,32 @@
-import { Fragment, useState } from 'react'
-import type { Session } from '@renderer/lib/auth'
-import { cn } from '@renderer/lib/utils'
-import { useCachedFetchMany } from '@renderer/lib/useCachedFetch'
-import type { BranchOption } from '@renderer/lib/useBranches'
-import { Badge } from '@renderer/components/ui/Badge'
-import { Button } from '@renderer/components/ui/Button'
-import { Card, CardHeader } from '@renderer/components/ui/Card'
-import { EmptyState } from '@renderer/components/ui/EmptyState'
-import { Select } from '@renderer/components/ui/Select'
-import { Skeleton } from '@renderer/components/ui/Skeleton'
-import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
-import { ChevronDownIcon, ChevronUpIcon, WarningIcon } from '@renderer/components/ui/icons'
-import { AlertExplanation, PeriodControls } from '@renderer/components/features/dashboard/shared'
-import { usePeriodRange } from '@renderer/components/features/dashboard/usePeriodRange'
+import { Fragment, useState } from "react";
+import type { Session } from "@renderer/lib/auth";
+import { cn } from "@renderer/lib/utils";
+import { useCachedFetchMany } from "@renderer/lib/useCachedFetch";
+import type { BranchOption } from "@renderer/lib/useBranches";
+import { Badge } from "@renderer/components/ui/Badge";
+import { Button } from "@renderer/components/ui/Button";
+import { Card, CardHeader } from "@renderer/components/ui/Card";
+import { EmptyState } from "@renderer/components/ui/EmptyState";
+import { Select } from "@renderer/components/ui/Select";
+import { Skeleton } from "@renderer/components/ui/Skeleton";
+import {
+  TableContainer,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
+} from "@renderer/components/ui/Table";
+import {
+  ChevronDownIcon,
+  ChevronUpIcon,
+  WarningIcon,
+} from "@renderer/components/ui/icons";
+import {
+  AlertExplanation,
+  PeriodControls,
+} from "@renderer/components/features/dashboard/shared";
+import { usePeriodRange } from "@renderer/components/features/dashboard/usePeriodRange";
 import {
   ACTIONABLE_SEVERITIES,
   SEVERITY_META,
@@ -22,9 +36,9 @@ import {
   type EvidenceTarget,
   type HealthAlert,
   type HealthStatus,
-  type OverviewData
-} from '@renderer/components/features/dashboard/helpers'
-import type { Profile } from '@renderer/components/features/types'
+  type OverviewData,
+} from "@renderer/components/features/dashboard/helpers";
+import type { Profile } from "@renderer/components/features/types";
 
 // Every business warning the Early Warning engine raised, for every retail branch, in one
 // table — the "what needs my attention today" page, as opposed to the Dashboard's
@@ -53,37 +67,41 @@ import type { Profile } from '@renderer/components/features/types'
 // It issues no requests of its own: it reads the same per-branch overview payloads the
 // Dashboard's branch cards fetch, through the shared cache (see lib/useCachedFetch.ts).
 
-const EXCLUDED_DIMENSION = 'data_quality'
-const COLUMN_COUNT = 5
+const EXCLUDED_DIMENSION = "data_quality";
+const COLUMN_COUNT = 5;
 
 const CATEGORY_LABEL: Record<string, string> = {
-  sales: 'Sales',
-  profit: 'Profit',
-  inventory: 'Inventory',
-  customer: 'Customer'
-}
+  sales: "Sales",
+  profit: "Profit",
+  inventory: "Inventory",
+  customer: "Customer",
+};
 
-const CATEGORY_ORDER = ['sales', 'profit', 'inventory', 'customer']
+const CATEGORY_ORDER = ["sales", "profit", "inventory", "customer"];
 
 // Worst first. `normal` alerts sit at the end of a branch's rows: they are the notices
 // that ask for nothing today, so they must never push a decision off the top of the list.
-const SEVERITY_RANK: Record<AlertSeverity, number> = { critical: 0, warning: 1, normal: 2 }
+const SEVERITY_RANK: Record<AlertSeverity, number> = {
+  critical: 0,
+  warning: 1,
+  normal: 2,
+};
 
 interface BranchAlert extends HealthAlert {
-  branchId: string
-  branchName: string
+  branchId: string;
+  branchName: string;
 }
 
 function FilterChip({
   label,
   count,
   active,
-  onClick
+  onClick,
 }: {
-  label: string
-  count: number
-  active: boolean
-  onClick: () => void
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
 }): React.JSX.Element {
   return (
     <button
@@ -91,16 +109,16 @@ function FilterChip({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        'h-8 px-3 rounded-full text-sm font-medium border transition-colors duration-150',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1',
+        "h-8 px-3 rounded-full text-sm font-medium border transition-colors duration-150",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1",
         active
-          ? 'bg-brand-subtle text-brand border-border-brand'
-          : 'bg-bg-base text-text-secondary border-border hover:border-border-strong'
+          ? "bg-brand-subtle text-brand border-border-brand"
+          : "bg-bg-base text-text-secondary border-border hover:border-border-strong",
       )}
     >
       {label} <span className="tabular-nums text-text-muted">{count}</span>
     </button>
-  )
+  );
 }
 
 /**
@@ -111,13 +129,13 @@ function FilterChip({
  */
 function AlertRow({
   alert,
-  onOpenEvidence
+  onOpenEvidence,
 }: {
-  alert: BranchAlert
-  onOpenEvidence: (target: EvidenceTarget, branchId: string) => void
+  alert: BranchAlert;
+  onOpenEvidence: (target: EvidenceTarget, branchId: string) => void;
 }): React.JSX.Element {
-  const [expanded, setExpanded] = useState(false)
-  const meta = SEVERITY_META[alert.severity]
+  const [expanded, setExpanded] = useState(false);
+  const meta = SEVERITY_META[alert.severity];
 
   return (
     <>
@@ -125,9 +143,11 @@ function AlertRow({
         <Td>
           <Badge variant={meta.badge}>{meta.label}</Badge>
         </Td>
-        <Td className="whitespace-nowrap text-text-muted">{CATEGORY_LABEL[alert.dimension]}</Td>
+        <Td className="whitespace-nowrap text-text-muted">
+          {CATEGORY_LABEL[alert.dimension]}
+        </Td>
         <Td className="font-medium text-text-primary">{alert.title}</Td>
-        <Td className={cn('font-medium', meta.text)}>{alert.summary}</Td>
+        <Td className={cn("font-medium", meta.text)}>{alert.summary}</Td>
         <Td>
           <button
             type="button"
@@ -135,24 +155,33 @@ function AlertRow({
             className="inline-flex items-center gap-1 text-xs text-brand hover:text-brand-hover"
           >
             Details
-            {expanded ? <ChevronUpIcon className="w-3 h-3" /> : <ChevronDownIcon className="w-3 h-3" />}
+            {expanded ? (
+              <ChevronUpIcon className="w-3 h-3" />
+            ) : (
+              <ChevronDownIcon className="w-3 h-3" />
+            )}
           </button>
         </Td>
       </Tr>
       {expanded && (
         <Tr>
-          <Td colSpan={COLUMN_COUNT} className="bg-bg-raised">
+          {/* Same white as the rows above it, so the panel reads as part of the list
+              rather than as a grey box dropped into it — the row's own borders are all
+              the separation it needs. */}
+          <Td colSpan={COLUMN_COUNT} className="bg-bg-base">
             <div className="py-1">
               <AlertExplanation
                 alert={alert}
-                onOpenEvidence={(target) => onOpenEvidence(target, alert.branchId)}
+                onOpenEvidence={(target) =>
+                  onOpenEvidence(target, alert.branchId)
+                }
               />
             </div>
           </Td>
         </Tr>
       )}
     </>
-  )
+  );
 }
 
 /**
@@ -167,38 +196,53 @@ function AllClearRow(): React.JSX.Element {
   return (
     <Tr>
       <Td>
-        <Badge variant={SEVERITY_META.normal.badge}>{SEVERITY_META.normal.label}</Badge>
+        <Badge variant={SEVERITY_META.normal.badge}>
+          {SEVERITY_META.normal.label}
+        </Badge>
       </Td>
       <Td className="text-text-muted">—</Td>
-      <Td className="font-medium text-text-primary">Everything normal this period</Td>
-      <Td className="text-text-muted">No sales, profit, inventory or customer problems found.</Td>
+      <Td className="font-medium text-text-primary">
+        Everything normal this period
+      </Td>
+      <Td className="text-text-muted">
+        No sales, profit, inventory or customer problems found.
+      </Td>
       <Td />
     </Tr>
-  )
+  );
 }
 
 /** A full-width band naming the branch the rows beneath it belong to. */
-function BranchHeaderRow({ name, count }: { name: string; count: number }): React.JSX.Element {
+function BranchHeaderRow({
+  name,
+  count,
+}: {
+  name: string;
+  count: number;
+}): React.JSX.Element {
   return (
     <tr>
-      <td colSpan={COLUMN_COUNT} className="bg-brand-subtle px-4 py-2 border-b border-border">
+      <td
+        colSpan={COLUMN_COUNT}
+        className="bg-brand-subtle px-4 py-2 border-b border-border"
+      >
         <div className="flex items-center gap-2 text-sm">
           <span className="font-medium text-text-primary">{name}</span>
           {count > 0 && <Badge>{count}</Badge>}
         </div>
       </td>
     </tr>
-  )
+  );
 }
 
 /** One branch's standing on this page, whether or not it raised anything. */
 interface BranchStatus {
-  branchId: string
-  branchName: string
-  score: number | null
-  status: HealthStatus | null
-  alertCount: number
-  hasCritical: boolean
+  branchId: string;
+  branchName: string;
+  score: number | null;
+  status: HealthStatus | null;
+  alertCount: number;
+  hasCritical: boolean;
 }
 
 /**
@@ -216,13 +260,13 @@ interface BranchStatus {
 function BranchStatusTile({
   branch,
   active,
-  onClick
+  onClick,
 }: {
-  branch: BranchStatus
-  active: boolean
-  onClick: () => void
+  branch: BranchStatus;
+  active: boolean;
+  onClick: () => void;
 }): React.JSX.Element {
-  const meta = branch.status ? STATUS_META[branch.status] : null
+  const meta = branch.status ? STATUS_META[branch.status] : null;
 
   return (
     <button
@@ -230,85 +274,104 @@ function BranchStatusTile({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        'flex flex-col gap-1 min-w-[11rem] px-3 py-2 rounded-lg border text-left transition-colors duration-150',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1',
+        "flex flex-col gap-1 min-w-[11rem] px-3 py-2 rounded-lg border text-left transition-colors duration-150",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1",
         active
-          ? 'bg-brand-subtle border-border-brand'
-          : 'bg-bg-base border-border hover:border-border-strong'
+          ? "bg-brand-subtle border-border-brand"
+          : "bg-bg-base border-border hover:border-border-strong",
       )}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium text-text-primary">{branch.branchName}</span>
-        <Badge variant={meta?.badge ?? 'default'}>{meta?.label ?? 'Not scored'}</Badge>
+        <span className="text-sm font-medium text-text-primary">
+          {branch.branchName}
+        </span>
+        <Badge variant={meta?.badge ?? "default"}>
+          {meta?.label ?? "Not scored"}
+        </Badge>
       </div>
       <div className="flex items-baseline gap-2">
-        <span className={cn('text-xl font-semibold tabular-nums', meta?.text ?? 'text-text-muted')}>
-          {branch.score === null ? '\u2013' : Math.round(branch.score)}
+        <span
+          className={cn(
+            "text-xl font-semibold tabular-nums",
+            meta?.text ?? "text-text-muted",
+          )}
+        >
+          {branch.score === null ? "\u2013" : Math.round(branch.score)}
         </span>
         <span className="text-xs text-text-muted">
           {branch.alertCount === 0
-            ? 'nothing to act on'
-            : `${branch.alertCount} alert${branch.alertCount === 1 ? '' : 's'}`}
+            ? "nothing to act on"
+            : `${branch.alertCount} alert${branch.alertCount === 1 ? "" : "s"}`}
         </span>
       </div>
     </button>
-  )
+  );
 }
 
 interface Props {
-  session: Session
-  profile: Profile | null
-  branchOptions: BranchOption[]
-  onOpenEvidence: (target: EvidenceTarget, branchId: string) => void
+  session: Session;
+  profile: Profile | null;
+  branchOptions: BranchOption[];
+  onOpenEvidence: (target: EvidenceTarget, branchId: string) => void;
 }
 
 export function BusinessAlertsPage({
   session,
   profile,
   branchOptions,
-  onOpenEvidence
+  onOpenEvidence,
 }: Props): React.JSX.Element {
   // Admin has no fixed branch — same convention as everywhere else in the app.
-  const isAdmin = profile !== null && profile.branch_id === null
-  const range = usePeriodRange('30d')
-  const [branchFilter, setBranchFilter] = useState('')
-  const [category, setCategory] = useState('')
+  const isAdmin = profile !== null && profile.branch_id === null;
+  const range = usePeriodRange("30d");
+  const [branchFilter, setBranchFilter] = useState("");
+  const [category, setCategory] = useState("");
 
   // Admin reads every retail branch; a branch account reads only its own.
   const branchIds = isAdmin
     ? branchOptions.map((branch) => branch.id)
     : profile?.branch_id
       ? [profile.branch_id]
-      : []
+      : [];
   const urls = branchIds.map((id) =>
-    dashboardUrl('overview', id, { period: range.period, dateFrom: range.applied.from, dateTo: range.applied.to })
-  )
-  const { data, isLoading, isRefreshing, failedCount, reload } = useCachedFetchMany<OverviewData>(
-    urls,
-    session,
-    'alerts'
-  )
+    dashboardUrl("overview", id, {
+      period: range.period,
+      dateFrom: range.applied.from,
+      dateTo: range.applied.to,
+    }),
+  );
+  const { data, isLoading, isRefreshing, failedCount, reload } =
+    useCachedFetchMany<OverviewData>(urls, session, "alerts");
 
-  const branches = Object.values(data)
+  const branches = Object.values(data);
   const allAlerts: BranchAlert[] = branches
     .flatMap((branch) =>
       branch.alerts
         .filter((alert) => alert.dimension !== EXCLUDED_DIMENSION)
-        .map((alert) => ({ ...alert, branchId: branch.branch_id, branchName: branch.branch_name }))
+        .map((alert) => ({
+          ...alert,
+          branchId: branch.branch_id,
+          branchName: branch.branch_name,
+        })),
     )
     // Critical first, then by category so the same kind of problem reads together, then by
     // branch — a stable order, so nothing jumps around between refreshes.
     .sort(
       (a, b) =>
         SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] ||
-        CATEGORY_ORDER.indexOf(a.dimension) - CATEGORY_ORDER.indexOf(b.dimension) ||
-        a.branchName.localeCompare(b.branchName)
-    )
+        CATEGORY_ORDER.indexOf(a.dimension) -
+          CATEGORY_ORDER.indexOf(b.dimension) ||
+        a.branchName.localeCompare(b.branchName),
+    );
 
   // Each chip counts what it would show given the branch filter, so a chip's number always
   // matches what clicking it produces.
-  const inBranch = allAlerts.filter((alert) => !branchFilter || alert.branchId === branchFilter)
-  const shown = inBranch.filter((alert) => !category || alert.dimension === category)
+  const inBranch = allAlerts.filter(
+    (alert) => !branchFilter || alert.branchId === branchFilter,
+  );
+  const shown = inBranch.filter(
+    (alert) => !category || alert.dimension === category,
+  );
 
   // Every branch, including the ones that raised nothing — ordered the same way the table
   // is, worst first, so the strip and the list below it read in the same direction and a
@@ -319,16 +382,20 @@ export function BusinessAlertsPage({
       // the Dashboard's branch cards follow. A branch whose only rows are `normal`
       // notices reads as "nothing to act on", which is exactly what it is.
       const branchAlerts = allAlerts.filter(
-        (alert) => alert.branchId === branch.branch_id && ACTIONABLE_SEVERITIES.includes(alert.severity)
-      )
+        (alert) =>
+          alert.branchId === branch.branch_id &&
+          ACTIONABLE_SEVERITIES.includes(alert.severity),
+      );
       return {
         branchId: branch.branch_id,
         branchName: branch.branch_name,
         score: branch.overall_score,
         status: branch.status,
         alertCount: branchAlerts.length,
-        hasCritical: branchAlerts.some((alert) => alert.severity === 'critical')
-      }
+        hasCritical: branchAlerts.some(
+          (alert) => alert.severity === "critical",
+        ),
+      };
     })
     .sort(
       (a, b) =>
@@ -337,15 +404,17 @@ export function BusinessAlertsPage({
         // An unscored branch sorts last rather than as a 0, for the same reason a score
         // that could not be measured is never reported as 0.
         (a.score ?? 101) - (b.score ?? 101) ||
-        a.branchName.localeCompare(b.branchName)
-    )
+        a.branchName.localeCompare(b.branchName),
+    );
 
   // Branch order follows the worst alert each one has, so the branch needing attention
   // first is at the top — same principle as the row order inside a group.
   const groups = branches
     .filter((branch) => !branchFilter || branch.branch_id === branchFilter)
     .map((branch) => {
-      const groupAlerts = shown.filter((alert) => alert.branchId === branch.branch_id)
+      const groupAlerts = shown.filter(
+        (alert) => alert.branchId === branch.branch_id,
+      );
       return {
         branchId: branch.branch_id,
         branchName: branch.branch_name,
@@ -356,15 +425,16 @@ export function BusinessAlertsPage({
         allClear:
           !category &&
           groupAlerts.length === 0 &&
-          allAlerts.every((alert) => alert.branchId !== branch.branch_id)
-      }
+          allAlerts.every((alert) => alert.branchId !== branch.branch_id),
+      };
     })
     .filter((group) => group.alerts.length > 0 || group.allClear)
     .sort(
       (a, b) =>
-        SEVERITY_RANK[a.alerts[0]?.severity ?? 'normal'] - SEVERITY_RANK[b.alerts[0]?.severity ?? 'normal'] ||
-        a.branchName.localeCompare(b.branchName)
-    )
+        SEVERITY_RANK[a.alerts[0]?.severity ?? "normal"] -
+          SEVERITY_RANK[b.alerts[0]?.severity ?? "normal"] ||
+        a.branchName.localeCompare(b.branchName),
+    );
 
   return (
     <div className="flex flex-col">
@@ -372,7 +442,12 @@ export function BusinessAlertsPage({
         title="Business Alerts"
         description="How every retail branch is doing, and the sales, profit, inventory and customer problems found in this period."
         action={
-          <Button variant="secondary" size="sm" onClick={reload} loading={isRefreshing}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={reload}
+            loading={isRefreshing}
+          >
             Refresh
           </Button>
         }
@@ -384,7 +459,11 @@ export function BusinessAlertsPage({
         <PeriodControls range={range} />
         {branches.length > 1 && (
           <div className="w-48">
-            <Select label="Branch" value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}>
+            <Select
+              label="Branch"
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+            >
               <option value="">All branches</option>
               {branches.map((branch) => (
                 <option key={branch.branch_id} value={branch.branch_id}>
@@ -397,7 +476,9 @@ export function BusinessAlertsPage({
       </div>
 
       {isAdmin && branchOptions.length === 0 ? (
-        <p className="text-sm text-text-muted">Add a retail branch before there is anything to check.</p>
+        <p className="text-sm text-text-muted">
+          Add a retail branch before there is anything to check.
+        </p>
       ) : isLoading ? (
         <div className="flex flex-col gap-4">
           <Skeleton className="h-10 w-96" />
@@ -422,34 +503,47 @@ export function BusinessAlertsPage({
                 key={branch.branchId}
                 branch={branch}
                 active={branchFilter === branch.branchId}
-                onClick={() => setBranchFilter(branchFilter === branch.branchId ? '' : branch.branchId)}
+                onClick={() =>
+                  setBranchFilter(
+                    branchFilter === branch.branchId ? "" : branch.branchId,
+                  )
+                }
               />
             ))}
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <FilterChip label="All" count={inBranch.length} active={!category} onClick={() => setCategory('')} />
+            <FilterChip
+              label="All"
+              count={inBranch.length}
+              active={!category}
+              onClick={() => setCategory("")}
+            />
             {CATEGORY_ORDER.map((key) => (
               <FilterChip
                 key={key}
                 label={CATEGORY_LABEL[key]}
-                count={inBranch.filter((alert) => alert.dimension === key).length}
+                count={
+                  inBranch.filter((alert) => alert.dimension === key).length
+                }
                 active={category === key}
-                onClick={() => setCategory(category === key ? '' : key)}
+                onClick={() => setCategory(category === key ? "" : key)}
               />
             ))}
           </div>
 
           {failedCount > 0 && (
             <p className="text-sm text-warning">
-              {failedCount} branch{failedCount === 1 ? '' : 'es'} couldn&apos;t be loaded, so this list may be
-              incomplete.
+              {failedCount} branch{failedCount === 1 ? "" : "es"} couldn&apos;t
+              be loaded, so this list may be incomplete.
             </p>
           )}
 
           {groups.length === 0 ? (
             <Card>
-              <p className="text-sm text-text-secondary">No alerts match these filters.</p>
+              <p className="text-sm text-text-secondary">
+                No alerts match these filters.
+              </p>
             </Card>
           ) : (
             <TableContainer>
@@ -468,7 +562,10 @@ export function BusinessAlertsPage({
                     a band that says it once is easier to read against. */}
                 {groups.map((group) => (
                   <Fragment key={group.branchId}>
-                    <BranchHeaderRow name={group.branchName} count={group.alerts.length} />
+                    <BranchHeaderRow
+                      name={group.branchName}
+                      count={group.alerts.length}
+                    />
                     {group.allClear ? (
                       <AllClearRow />
                     ) : (
@@ -488,7 +585,7 @@ export function BusinessAlertsPage({
         </div>
       )}
     </div>
-  )
+  );
 }
 
-export default BusinessAlertsPage
+export default BusinessAlertsPage;

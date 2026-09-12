@@ -1,12 +1,19 @@
-import { useState } from 'react'
-import type { Session } from '@renderer/lib/auth'
-import { useCachedFetch } from '@renderer/lib/useCachedFetch'
-import { Button } from '@renderer/components/ui/Button'
-import { Card, CardHeader } from '@renderer/components/ui/Card'
-import { EmptyState } from '@renderer/components/ui/EmptyState'
-import { Skeleton } from '@renderer/components/ui/Skeleton'
-import { TableContainer, Thead, Tbody, Tr, Th, Td } from '@renderer/components/ui/Table'
-import { DashboardIcon, SalesIcon } from '@renderer/components/ui/icons'
+import { useState } from "react";
+import type { Session } from "@renderer/lib/auth";
+import { useCachedFetch } from "@renderer/lib/useCachedFetch";
+import { Button } from "@renderer/components/ui/Button";
+import { Card, CardHeader } from "@renderer/components/ui/Card";
+import { EmptyState } from "@renderer/components/ui/EmptyState";
+import { Skeleton } from "@renderer/components/ui/Skeleton";
+import {
+  TableContainer,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
+} from "@renderer/components/ui/Table";
+import { DashboardIcon, SalesIcon } from "@renderer/components/ui/icons";
 import {
   RefreshingHint,
   ChartViewToggle,
@@ -14,8 +21,8 @@ import {
   TrendChart,
   WarningsTile,
   WeekdayHourHeatmap,
-  type ChartView
-} from './shared'
+  type ChartView,
+} from "./shared";
 import {
   dashboardUrl,
   formatCount,
@@ -23,40 +30,44 @@ import {
   previousPeriodLabel,
   type KpiValue,
   type PeriodKey,
-  type SaleWarningRow
-} from './helpers'
+  type SaleWarningRow,
+} from "./helpers";
 
 interface TrendPoint {
-  date: string
-  net_revenue: number
+  date: string;
+  net_revenue: number;
 }
 
 interface TopProduct {
-  stock_code: string
-  description: string
-  qty: number
-  net_revenue: number
-  avg_selling_price: number | null
+  stock_code: string;
+  description: string;
+  qty: number;
+  net_revenue: number;
+  avg_selling_price: number | null;
 }
 
 interface HeatmapCell {
-  weekday: number
-  hour_band: string
-  net_revenue: number
+  weekday: number;
+  hour_band: string;
+  net_revenue: number;
 }
 
 interface RevenueDashboardData {
-  branch_name: string
-  net_revenue: KpiValue
-  transaction_count: KpiValue
-  avg_basket: KpiValue
-  trend: TrendPoint[]
-  top_products: TopProduct[]
-  heatmap: HeatmapCell[]
-  sale_warnings: SaleWarningRow[]
+  branch_name: string;
+  net_revenue: KpiValue;
+  transaction_count: KpiValue;
+  avg_basket: KpiValue;
+  trend: TrendPoint[];
+  top_products: TopProduct[];
+  heatmap: HeatmapCell[];
+  sale_warnings: SaleWarningRow[];
 }
 
-function TopProductsTable({ products }: { products: TopProduct[] }): React.JSX.Element {
+function TopProductsTable({
+  products,
+}: {
+  products: TopProduct[];
+}): React.JSX.Element {
   if (products.length === 0) {
     return (
       <EmptyState
@@ -64,7 +75,7 @@ function TopProductsTable({ products }: { products: TopProduct[] }): React.JSX.E
         title="No sales in this period"
         description="Top products will appear once there's sales data for the selected period."
       />
-    )
+    );
   }
   return (
     <TableContainer>
@@ -82,39 +93,58 @@ function TopProductsTable({ products }: { products: TopProduct[] }): React.JSX.E
         {products.map((product, i) => (
           <Tr key={product.stock_code}>
             <Td className="text-text-muted">{i + 1}</Td>
-            <Td className="font-mono text-xs whitespace-nowrap">{product.stock_code}</Td>
-            <Td>{product.description}</Td>
-            <Td className="text-right tabular-nums">{product.qty.toLocaleString()}</Td>
-            <Td className="text-right tabular-nums">
-              {product.avg_selling_price === null ? '—' : formatMoney(product.avg_selling_price)}
+            <Td className="font-mono text-xs whitespace-nowrap">
+              {product.stock_code}
             </Td>
-            <Td className="text-right tabular-nums">{formatMoney(product.net_revenue)}</Td>
+            <Td>{product.description}</Td>
+            <Td className="text-right tabular-nums">
+              {product.qty.toLocaleString()}
+            </Td>
+            <Td className="text-right tabular-nums">
+              {product.avg_selling_price === null
+                ? "—"
+                : formatMoney(product.avg_selling_price)}
+            </Td>
+            <Td className="text-right tabular-nums">
+              {formatMoney(product.net_revenue)}
+            </Td>
           </Tr>
         ))}
       </Tbody>
     </TableContainer>
-  )
+  );
 }
 
 interface Props {
-  session: Session
-  branchId: string
-  period: PeriodKey
-  dateFrom: string
-  dateTo: string
-  canLoad: boolean
-  onViewWarnings: () => void
+  session: Session;
+  branchId: string;
+  period: PeriodKey;
+  dateFrom: string;
+  dateTo: string;
+  canLoad: boolean;
+  onViewWarnings: () => void;
 }
 
-export function RevenueTab({ session, branchId, period, dateFrom, dateTo, canLoad, onViewWarnings }: Props): React.JSX.Element {
-  const [trendView, setTrendView] = useState<ChartView>('bar')
+export function RevenueTab({
+  session,
+  branchId,
+  period,
+  dateFrom,
+  dateTo,
+  canLoad,
+  onViewWarnings,
+}: Props): React.JSX.Element {
+  const [trendView, setTrendView] = useState<ChartView>("bar");
   // One cached request per (tab, branch, period) — returning to this tab with the same
   // selection shows the numbers it showed last time instead of a skeleton. See
   // lib/useCachedFetch.ts.
-  const url = canLoad ? dashboardUrl('revenue', branchId, { period, dateFrom, dateTo }) : null
-  const { data, isRefreshing, failed, reload } = useCachedFetch<RevenueDashboardData>(url, session, 'Revenue dashboard')
+  const url = canLoad
+    ? dashboardUrl("revenue", branchId, { period, dateFrom, dateTo })
+    : null;
+  const { data, isRefreshing, failed, reload } =
+    useCachedFetch<RevenueDashboardData>(url, session, "Revenue dashboard");
 
-  if (!canLoad) return <></>
+  if (!canLoad) return <></>;
 
   if (data === null) {
     if (failed) {
@@ -129,7 +159,7 @@ export function RevenueTab({ session, branchId, period, dateFrom, dateTo, canLoa
             </Button>
           }
         />
-      )
+      );
     }
     return (
       <div className="flex flex-col gap-4">
@@ -141,7 +171,7 @@ export function RevenueTab({ session, branchId, period, dateFrom, dateTo, canLoa
         <Skeleton className="h-48" />
         <Skeleton className="h-48" />
       </div>
-    )
+    );
   }
 
   return (
@@ -188,20 +218,34 @@ export function RevenueTab({ session, branchId, period, dateFrom, dateTo, canLoa
           title="Sales by day & hour"
           description="Revenue concentration by weekday and time of day — useful for staffing decisions."
         />
-        <WeekdayHourHeatmap cells={data.heatmap} getValue={(c) => c.net_revenue} formatValue={formatMoney} />
+        <WeekdayHourHeatmap
+          cells={data.heatmap}
+          getValue={(c) => c.net_revenue}
+          formatValue={formatMoney}
+        />
       </Card>
 
       <Card>
-        <CardHeader title="Top products" description="Ranked by net revenue in the selected period." />
+        <CardHeader
+          title="Top products"
+          description="Ranked by net revenue in the selected period."
+        />
         <TopProductsTable products={data.top_products} />
       </Card>
 
       <Card>
-        <CardHeader title="Sale data quality" description="Bad values on sale lines in the selected period." />
-        <WarningsTile warnings={data.sale_warnings} label="Sale" onViewWarnings={onViewWarnings} />
+        <CardHeader
+          title="Sale data quality"
+          description="Bad values on sale lines in the selected period."
+        />
+        <WarningsTile
+          warnings={data.sale_warnings}
+          label="Sale"
+          onViewWarnings={onViewWarnings}
+        />
       </Card>
     </div>
-  )
+  );
 }
 
-export default RevenueTab
+export default RevenueTab;

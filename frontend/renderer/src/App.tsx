@@ -20,7 +20,12 @@ import {
   signUp,
   startSessionRefresh,
 } from "@renderer/lib/auth";
-import { clearLastKnown, forgetLastKnown, readLastKnown, writeLastKnown } from "@renderer/lib/lastKnown";
+import {
+  clearLastKnown,
+  forgetLastKnown,
+  readLastKnown,
+  writeLastKnown,
+} from "@renderer/lib/lastKnown";
 import { installNetworkResilience } from "@renderer/lib/network";
 import { useToast } from "@renderer/lib/useToast";
 import { AuthScreen } from "@renderer/components/features/AuthScreen";
@@ -45,6 +50,7 @@ import { formatBuyingPriceSource } from "@renderer/lib/buyingPriceSource";
 import { useAppSettings } from "@renderer/lib/appSettings";
 import { Spinner } from "@renderer/components/ui/Spinner";
 import { ErrorBoundary } from "@renderer/components/ui/ErrorBoundary";
+import { EmptyState } from "@renderer/components/ui/EmptyState";
 import {
   UploadIcon,
   HistoryIcon,
@@ -56,9 +62,10 @@ import {
   InventoryIcon,
   PurchaseIcon,
   ClipboardIcon,
-  FactoryIcon,
-  WarehouseIcon,
   ReceivingIcon,
+  TruckIcon,
+  VoucherIcon,
+  WarehouseIcon,
   WarningIcon,
   SettingsIcon,
 } from "@renderer/components/ui/icons";
@@ -86,16 +93,19 @@ const InventoryPage = lazy(
   () => import("@renderer/components/features/InventoryPage"),
 );
 const CustomerOrdersPage = lazy(
-  () => import("@renderer/components/features/CustomerOrdersPage"),
+  () => import("@renderer/components/features/wholesale/CustomerOrdersPage"),
 );
-const FactoryVouchersPage = lazy(
-  () => import("@renderer/components/features/FactoryVouchersPage"),
+const SupplierVouchersPage = lazy(
+  () => import("@renderer/components/features/wholesale/SupplierVouchersPage"),
 );
-const WarehouseArrivalPage = lazy(
-  () => import("@renderer/components/features/WarehouseArrivalPage"),
+const DeliveryPage = lazy(
+  () => import("@renderer/components/features/wholesale/DeliveryPage"),
 );
-const FactoryReceivingPage = lazy(
-  () => import("@renderer/components/features/FactoryReceivingPage"),
+const ReceivingPage = lazy(
+  () => import("@renderer/components/features/wholesale/ReceivingPage"),
+);
+const WholesaleInventoryPage = lazy(
+  () => import("@renderer/components/features/wholesale/InventoryPage"),
 );
 const WarningsPage = lazy(
   () => import("@renderer/components/features/WarningsPage"),
@@ -123,8 +133,10 @@ type Section =
   | "warnings"
   | "orders"
   | "vouchers"
-  | "warehouseArrival"
-  | "factoryReceiving"
+  | "delivery"
+  | "receiving"
+  | "stock"
+  | "wholesale"
   | "settings";
 
 // Retail and Wholesale are two functionally separate products glued together for admin's
@@ -168,19 +180,16 @@ const RETAIL_NAV_ITEMS: NavItem[] = [
   { id: "warnings", label: "Warning", icon: <WarningIcon /> },
 ];
 
+// The wholesale workflow is being rebuilt from scratch (see diagram/wholesale/erd.mmd),
+// so its old screens are gone. The workspace and this one nav item stay so a wholesale
+// account still has somewhere to land and the tab doesn't disappear from admin's view.
 const WHOLESALE_NAV_ITEMS: NavItem[] = [
   { id: "orders", label: "Customer Orders", icon: <ClipboardIcon /> },
-  { id: "vouchers", label: "Factory Vouchers", icon: <FactoryIcon /> },
-  {
-    id: "warehouseArrival",
-    label: "Warehouse Arrival",
-    icon: <WarehouseIcon />,
-  },
-  {
-    id: "factoryReceiving",
-    label: "Factory Receiving",
-    icon: <ReceivingIcon />,
-  },
+  { id: "vouchers", label: "Supplier Vouchers", icon: <VoucherIcon /> },
+  { id: "delivery", label: "Delivery", icon: <TruckIcon /> },
+  { id: "receiving", label: "Receiving", icon: <ReceivingIcon /> },
+  { id: "stock", label: "Inventory", icon: <InventoryIcon /> },
+  { id: "wholesale", label: "Wholesale", icon: <WarehouseIcon /> },
 ];
 
 const WORKSPACE_NAV_ITEMS: Record<Workspace, NavItem[]> = {
@@ -235,9 +244,11 @@ const SECTION_TITLES: Record<Section, string> = {
   purchase: "Purchase",
   warnings: "Warning",
   orders: "Customer orders",
-  vouchers: "Factory vouchers",
-  warehouseArrival: "Warehouse arrival",
-  factoryReceiving: "Factory voucher receiving",
+  vouchers: "Supplier vouchers",
+  delivery: "Delivery",
+  receiving: "Receiving",
+  stock: "Inventory",
+  wholesale: "Wholesale",
   settings: "Settings",
 };
 
@@ -328,7 +339,9 @@ function App(): React.JSX.Element {
   // with `session === null`, and the profile effect below reads that as "signed out" and
   // wipes the remembered profile — which is fine online (the fetch refills it) and breaks
   // the app offline, where nothing refills it.
-  const [session, setSession] = useState<Session | null>(() => loadStoredSession());
+  const [session, setSession] = useState<Session | null>(() =>
+    loadStoredSession(),
+  );
   // Notices imports and reverts done by other accounts on other machines, so their
   // work invalidates this browser's cached pages too (see useImportedDataWatch).
   useImportedDataWatch(session);
@@ -994,18 +1007,12 @@ function App(): React.JSX.Element {
                   onFileReady={handleFileReady}
                 />
               )}
-              {section === "orders" && (
-                <CustomerOrdersPage session={session} profile={profile} />
-              )}
-              {section === "vouchers" && (
-                <FactoryVouchersPage session={session} profile={profile} />
-              )}
-              {section === "warehouseArrival" && (
-                <WarehouseArrivalPage session={session} profile={profile} />
-              )}
-              {section === "factoryReceiving" && (
-                <FactoryReceivingPage session={session} profile={profile} />
-              )}
+              {section === "orders" && <CustomerOrdersPage session={session} />}
+              {section === "vouchers" && <SupplierVouchersPage session={session} />}
+              {section === "delivery" && <DeliveryPage session={session} />}
+              {section === "receiving" && <ReceivingPage session={session} />}
+              {section === "stock" && <WholesaleInventoryPage session={session} />}
+              {section === "wholesale" && <WholesalePlaceholder />}
               {section === "settings" && (
                 <SettingsPage
                   session={session}
@@ -1028,6 +1035,19 @@ function App(): React.JSX.Element {
         <ChatLauncher session={session} profile={profile} />
       )}
     </AppShell>
+  );
+}
+
+// Stands in for the wholesale workflow while it is being redesigned from scratch. The nav
+// item and the workspace tab stay put so a wholesale account still lands somewhere and
+// admin can still see the tab; there is simply nothing behind them yet.
+function WholesalePlaceholder(): React.JSX.Element {
+  return (
+    <EmptyState
+      icon={<WarehouseIcon />}
+      title="Wholesale is being rebuilt"
+      description="Customer Orders, Supplier Vouchers and Delivery are built. The receiving gate, stock and payments screens are still to come."
+    />
   );
 }
 

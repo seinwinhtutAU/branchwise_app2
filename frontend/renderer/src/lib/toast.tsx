@@ -1,29 +1,37 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react'
-import { Toast, type ToastData, type ToastVariant } from '@renderer/components/ui/Toast'
-import { ToastContext, type ShowToast } from './useToast'
+import { useCallback, useRef, useState, type ReactNode } from "react";
+import {
+  Toast,
+  type ToastData,
+  type ToastVariant,
+} from "@renderer/components/ui/Toast";
+import { ToastContext, type ShowToast } from "./useToast";
 
 const AUTO_DISMISS_MS: Record<ToastVariant, number> = {
   success: 4000,
   info: 4000,
-  error: 7000
-}
+  error: 7000,
+};
 
-export function ToastProvider({ children }: { children: ReactNode }): React.JSX.Element {
-  const [toasts, setToasts] = useState<ToastData[]>([])
-  const nextId = useRef(0)
+export function ToastProvider({
+  children,
+}: {
+  children: ReactNode;
+}): React.JSX.Element {
+  const [toasts, setToasts] = useState<ToastData[]>([]);
+  const nextId = useRef(0);
 
   const dismiss = useCallback((id: string) => {
-    setToasts((current) => current.filter((t) => t.id !== id))
-  }, [])
+    setToasts((current) => current.filter((t) => t.id !== id));
+  }, []);
 
   const show = useCallback<ShowToast>(
     (variant, message) => {
-      const id = String(nextId.current++)
-      setToasts((current) => [...current, { id, variant, message }])
-      setTimeout(() => dismiss(id), AUTO_DISMISS_MS[variant])
+      const id = String(nextId.current++);
+      setToasts((current) => [...current, { id, variant, message }]);
+      setTimeout(() => dismiss(id), AUTO_DISMISS_MS[variant]);
     },
-    [dismiss]
-  )
+    [dismiss],
+  );
 
   return (
     <ToastContext.Provider value={show}>
@@ -34,5 +42,5 @@ export function ToastProvider({ children }: { children: ReactNode }): React.JSX.
         ))}
       </div>
     </ToastContext.Provider>
-  )
+  );
 }

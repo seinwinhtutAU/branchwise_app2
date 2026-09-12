@@ -89,14 +89,9 @@ class Alert:
     # than staying quiet).
     driver: str | None = None
     interpretation: str | None = None
-    # A revenue movement split into the parts that produced it (`kind: revenue_split`),
-    # drawn as bars under the figures. None on every other rule — carried out as data so
-    # the client never recomputes it (see docs/branch_health.md's "nothing is measured
-    # twice").
-    evidence: dict | None = None
     # The alert detail panel, as data.
     #
-    # `chips` and `evidence` above were built for a glanceable summary; what the business
+    # `chips` above was built for a glanceable summary; what the business
     # actually asked for is the figures themselves, laid out and labelled, so the reader
     # can check the claim rather than take it. These three carry that:
     #
@@ -134,8 +129,6 @@ class Thresholds:
     dead_stock_warning_share_pct: float = 10.0
     dead_stock_critical_share_pct: float = 25.0
     traffic_decline_warning_pct: float = -10.0
-    single_item_basket_normal_share_pct: float = 45.0
-    single_item_basket_warning_share_pct: float = 60.0
 
 
 DEFAULT_THRESHOLDS = Thresholds()
@@ -194,7 +187,7 @@ def _ks_change(amount: float) -> str:
 
 def _minus(text: str) -> str:
     """A real minus sign, not a hyphen. Both appear in the same column of the same table
-    ("−Ks 1,175,057" beside "-5.6 points") and the difference is visible."""
+    ("−Ks 1,175,057" beside "-5.6%") and the difference is visible."""
     return text.replace("-", "\u2212")
 
 
@@ -380,7 +373,7 @@ def _margin_facts(snapshot: BranchSnapshot) -> tuple[dict, ...]:
             "Margin",
             _pct(snapshot.previous_gross_margin_pct) if comparable else None,
             _pct(snapshot.gross_margin_pct or 0.0),
-            _minus(f"{(snapshot.gross_margin_pct or 0.0) - snapshot.previous_gross_margin_pct:+.1f} points")
+            _minus(f"{(snapshot.gross_margin_pct or 0.0) - snapshot.previous_gross_margin_pct:+.1f}%")
             if comparable
             else None,
             (snapshot.gross_margin_pct or 0.0) - snapshot.previous_gross_margin_pct
@@ -410,25 +403,6 @@ def _stock_facts(snapshot: BranchSnapshot, count: int, days_threshold: int) -> t
             else None,
         ),
     )
-
-
-def _revenue_evidence(change: explanation.RevenueChange, snapshot: BranchSnapshot) -> dict:
-    """The revenue split as data. The three parts sum to `total_change` exactly (there is
-    a test on that property in test_explanation.py), which is the whole reason this can be
-    shown as evidence rather than as an opinion."""
-    return {
-        "kind": "revenue_split",
-        "from_total": snapshot.previous_net_revenue,
-        "to_total": snapshot.net_revenue,
-        "total_change": change.revenue_change,
-        "parts": [
-            {"label": "Fewer transactions" if change.transaction_effect < 0 else "More transactions",
-             "amount": round(change.transaction_effect, 2)},
-            {"label": "Smaller average sale" if change.basket_effect < 0 else "Bigger average sale",
-             "amount": round(change.basket_effect, 2)},
-            {"label": "Both at once", "amount": round(change.interaction_effect, 2)},
-        ],
-    }
 
 
 # --- Rules ----------------------------------------------------------------------------
@@ -514,7 +488,6 @@ def revenue_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert
             link="revenue",
             driver=driver,
             interpretation=interpretation,
-            evidence=_revenue_evidence(decomposed, snapshot) if decomposed else None,
             context=_period_context(snapshot),
             facts=_sales_facts(snapshot),
         )
@@ -605,12 +578,16 @@ def margin_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]
         Alert(
             id="margin_slipping",
             measure="margin_growth_pp",
-            summary=f"Margin down {abs(change):.1f} points",
+            summary=f"Margin down {abs(change):.1f}%",
             severity=slip_severity,
             dimension="profit",
-            title="Margin is slipping" if slip_severity == WARNING else "Margin has edged down",
+            title=(
+                "Margin lower than last period"
+                if slip_severity == WARNING
+                else "Margin a little lower than last period"
+            ),
             what_happened=(
-                f"Estimated gross margin fell {abs(change):.1f} percentage points against "
+                f"Estimated gross margin fell {abs(change):.1f}% against "
                 f"{_period_phrase(snapshot)}, from {snapshot.previous_gross_margin_pct:.1f}% to "
                 f"{margin:.1f}%."
             ),
@@ -847,7 +824,7 @@ def traffic_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert
             summary=f"Transactions down {abs(transaction_growth):.1f}%",
             severity=WARNING,
             dimension="customer",
-            title="Losing customers behind a steady revenue line",
+            title="Fewer customers than before",
             what_happened=(
                 f"Net revenue is {'up' if revenue_growth >= 0 else 'down'} "
                 f"{abs(revenue_growth):.1f}% against {_period_phrase(snapshot)}, so the headline "
@@ -882,77 +859,6 @@ def traffic_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert
                     else None,
                     _growth(snapshot.avg_items_per_basket, snapshot.previous_avg_items_per_basket),
                 ),
-            ),
-        )
-    ]
-
-
-def single_item_basket_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]:
-    if not snapshot.transaction_count:
-        return []
-    share = snapshot.single_item_basket_share_pct
-    if share < thresholds.single_item_basket_normal_share_pct:
-        return []
-    severity = (
-        WARNING if share >= thresholds.single_item_basket_warning_share_pct else NORMAL
-    )
-    # Like a low margin, this is a level rather than a movement, so the "why" that
-    # changes the decision is whether it is new: a branch that has always sold this way
-    # has a layout question, one that jumped has an event to find.
-    driver, interpretation = explanation.describe_basket_composition(
-        share,
-        snapshot.previous_single_item_basket_share_pct
-        if snapshot.previous_transaction_count
-        else None,
-    )
-    return [
-        Alert(
-            id="single_item_baskets",
-            measure="single_item_basket_share_pct",
-            summary=f"{share:.0f}% of transactions have one item",
-            severity=severity,
-            dimension="customer",
-            title=(
-                "Many transactions are a single item"
-                if severity == NORMAL
-                else "Most transactions are a single item"
-            ),
-            what_happened=f"{share:.0f}% of transactions in this period were a single line item.",
-            recommended_action=(
-                "Nothing to act on yet. The Customer tab's items-per-transaction histogram shows "
-                "whether this is how the branch has always sold."
-                if severity == NORMAL
-                else "Open the Customer tab's items-per-transaction histogram. A high single-item share is "
-                "usually a placement or bundling opportunity rather than a demand problem."
-            ),
-            link="customer",
-            driver=driver,
-            interpretation=interpretation,
-            context=_period_context(snapshot),
-            facts=_facts(
-                _movement(
-                    "Sales with one item only",
-                    _pct(snapshot.previous_single_item_basket_share_pct)
-                    if snapshot.previous_transaction_count
-                    else None,
-                    _pct(share),
-                    _minus(f"{share - snapshot.previous_single_item_basket_share_pct:+.1f} points")
-                    if snapshot.previous_transaction_count
-                    else None,
-                    share - snapshot.previous_single_item_basket_share_pct
-                    if snapshot.previous_transaction_count
-                    else None,
-                    higher_is_better=False,
-                ),
-                _movement(
-                    "Items per sale",
-                    f"{snapshot.previous_avg_items_per_basket:.2f}"
-                    if snapshot.previous_avg_items_per_basket
-                    else None,
-                    f"{snapshot.avg_items_per_basket:.2f}",
-                    None,
-                ),
-                _fact("Sales counted", f"{snapshot.transaction_count:,}"),
             ),
         )
     ]
@@ -1000,7 +906,6 @@ RULES: tuple[Rule, ...] = (
     stockout_rule,
     dead_stock_rule,
     traffic_rule,
-    single_item_basket_rule,
     data_quality_rule,
 )
 

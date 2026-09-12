@@ -262,13 +262,13 @@ def describe_margin_level(
         )
     if change < 0:
         return (
-            f"Margin fell {abs(change):.1f} percentage points, from "
+            f"Margin fell {abs(change):.1f}%, from "
             f"{previous_gross_margin_pct:.1f}% to {gross_margin_pct:.1f}%.",
             "This is a recent move, so it is worth finding what changed this period rather than "
             "treating it as the branch's normal level.",
         )
     return (
-        f"Margin has risen {change:.1f} percentage points from {previous_gross_margin_pct:.1f}%.",
+        f"Margin has risen {change:.1f}% from {previous_gross_margin_pct:.1f}%.",
         "It is improving, but still below the level this business treats as healthy.",
     )
 
@@ -372,43 +372,3 @@ def describe_stock_risk(risk: StockRisk) -> tuple[str, str]:
     )
 
     return driver, _STOCK_RISK_INTERPRETATION[risk.cause]
-
-
-# --- Basket composition ---------------------------------------------------------------
-
-# Single-item share is a noisier figure than margin — it moves with the weather and the
-# day of the week — so it takes a wider move than MARGIN_DRIFT_PP before it counts as
-# having changed rather than drifted.
-BASKET_DRIFT_PP = 5.0
-
-
-def describe_basket_composition(
-    single_item_share_pct: float, previous_single_item_share_pct: float | None
-) -> tuple[str | None, str | None]:
-    """Why a high single-item basket share matters, which turns entirely on whether it
-    is new. A branch that has always sold this way has a layout and bundling question;
-    one that jumped from 45% to 80% has an event to find — a stockout on a companion
-    product, or a display that moved."""
-    if previous_single_item_share_pct is None:
-        return None, None
-
-    change = single_item_share_pct - previous_single_item_share_pct
-    if abs(change) < BASKET_DRIFT_PP:
-        return (
-            f"It was {previous_single_item_share_pct:.0f}% in the previous period as well.",
-            "This is how the branch normally sells rather than something that changed, so it "
-            "points at layout, bundling and what gets offered at the counter — not at this "
-            "period in particular.",
-        )
-    if change > 0:
-        return (
-            f"Single-item transactions rose {change:.0f} percentage points, from "
-            f"{previous_single_item_share_pct:.0f}% to {single_item_share_pct:.0f}%.",
-            "This is a recent shift, so it is worth finding what changed — a companion product "
-            "out of stock, or a display that moved, will do this.",
-        )
-    return (
-        f"Single-item transactions have fallen {abs(change):.0f} percentage points from "
-        f"{previous_single_item_share_pct:.0f}%, but are still high.",
-        "The trend is going the right way; the level is still where a bigger sale is worth building.",
-    )

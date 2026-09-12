@@ -128,7 +128,7 @@ def test_a_low_margin_level_says_whether_it_is_new():
     assert "standing level" in standing
 
     new_driver, new = explanation.describe_margin_level(7.0, 22.0)
-    assert "fell 15.0 percentage points" in new_driver
+    assert "fell 15.0%" in new_driver
     assert "recent move" in new
 
     improving_driver, improving = explanation.describe_margin_level(9.0, 4.0)
@@ -282,49 +282,3 @@ def test_stock_alert_explains_itself_by_how_long_the_stock_lasts():
     assert "1 product has" in alert.what_happened
     assert "product(s)" not in alert.what_happened
     assert "its recent selling rate" in alert.what_happened
-
-
-# --- basket composition ---------------------------------------------------------------
-
-
-def test_a_high_single_item_share_says_whether_it_is_new():
-    """The distinction that changes the decision: a branch that has always sold this way
-    has a layout question, one that jumped has an event to find."""
-    standing_driver, standing = explanation.describe_basket_composition(72.0, 70.0)
-    assert "as well" in standing_driver
-    assert "normally sells" in standing
-
-    risen_driver, risen = explanation.describe_basket_composition(78.0, 45.0)
-    assert "rose 33 percentage points" in risen_driver
-    assert "recent shift" in risen
-
-    falling_driver, falling = explanation.describe_basket_composition(72.0, 85.0)
-    assert "fallen 13 percentage points" in falling_driver
-    assert "right way" in falling
-
-    assert explanation.describe_basket_composition(72.0, None) == (None, None)
-
-
-def test_single_item_alert_carries_that_context():
-    alert = _by_id(
-        early_warning.evaluate(
-            _snapshot(single_item_basket_share_pct=78.0, previous_single_item_basket_share_pct=45.0)
-        ),
-        "single_item_baskets",
-    )
-    assert alert.driver is not None and "rose 33 percentage points" in alert.driver
-    assert alert.interpretation is not None and "recent shift" in alert.interpretation
-
-
-def test_single_item_alert_has_no_context_without_a_previous_period():
-    alert = _by_id(
-        early_warning.evaluate(
-            _snapshot(
-                single_item_basket_share_pct=78.0,
-                previous_transaction_count=0,
-                previous_net_revenue=0.0,
-            )
-        ),
-        "single_item_baskets",
-    )
-    assert alert.driver is None
