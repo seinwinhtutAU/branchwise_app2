@@ -6,11 +6,15 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   error?: string;
   hint?: string;
   startIcon?: ReactNode;
+  endIcon?: ReactNode;
 }
 
 // Pure primitive — no skeleton/empty state (exempt per rubric).
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, hint, startIcon, className, id, ...props }, ref) => {
+  (
+    { label, error, hint, startIcon, endIcon, className, id, ...props },
+    ref,
+  ) => {
     const inputId =
       id ??
       (typeof label === "string"
@@ -45,11 +49,17 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
                 ? "border-error focus-visible:ring-error"
                 : "border-border hover:border-border-strong",
               startIcon && "pl-9",
+              endIcon && "pr-9",
               className,
             )}
             aria-invalid={!!error}
             {...props}
           />
+          {endIcon && (
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+              {endIcon}
+            </span>
+          )}
         </div>
         {error && <p className="text-xs text-error">{error}</p>}
         {hint && !error && <p className="text-xs text-text-muted">{hint}</p>}

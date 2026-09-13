@@ -75,3 +75,33 @@ def test_delivery_is_capped_by_stock_and_updates_order_progress(authed_client: T
     removed = authed_client.delete(f"/api/wholesale/inventory/deliveries/{delivery.json()['movement_id']}")
     assert removed.status_code == 204
     assert authed_client.get(f"/api/wholesale/orders/{order['order_id']}").json()["received_qty"] == 0
+
+
+def test_delivery_must_match_order_and_stock_colors(authed_client: TestClient, db_session: Session) -> None:
+    branch = _branch(db_session)
+    _user(db_session, branch.id)
+    _incoming_stock(db_session, branch)
+    order_payload = _order_payload()
+    order_payload["lines"][0]["color_qty"] = "black1s,pink1s"
+    order = authed_client.post("/api/wholesale/orders", json=order_payload).json()
+    payload = {
+        "order_id": order["order_id"],
+        "stock_code": "A1001",
+        "location": "Gate",
+        "unit": "set",
+        "delivered_on": "2026-09-13",
+        "note": "Collected",
+    }
+
+    missing_color = authed_client.post(
+        "/api/wholesale/inventory/deliveries",
+        json=payload | {"color_qty": "pink1s"},
+    )
+    assert missing_color.status_code == 422
+    assert "pink" in missing_color.json()["detail"]
+
+    available_color = authed_client.post(
+        "/api/wholesale/inventory/deliveries",
+        json=payload | {"color_qty": "black1s"},
+    )
+    assert available_color.status_code == 201

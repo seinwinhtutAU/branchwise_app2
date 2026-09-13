@@ -4,7 +4,7 @@
 
 /** The ERD's payment_account.payment_status. Worked out from what has actually been
  *  paid rather than stored, so a badge can never disagree with the figures beside it. */
-import { toPairs, type Unit } from "./units";
+import { fromPairs, toPairs, type Unit } from "./units";
 
 export type PaymentStatus = "unpaid" | "partial" | "paid";
 
@@ -100,6 +100,48 @@ export function colorQtyPairs(text: string, rowUnit: Unit): number {
     (sum, entry) => sum + toPairs(entry.qty, entry.unit ?? rowUnit),
     0,
   );
+}
+
+/** Derives the displayed quantity from the colour shorthand, rather than asking for it
+ *  again in a field of its own — the same rule colorQtyPairs already follows, in the unit
+ *  the row actually reads in. Rows that use one unit stay in that unit; mixed units are
+ *  represented as pairs so the total stays exact. */
+export function quantityFromColors(
+  text: string,
+  fallbackUnit: Unit,
+): { qty: number; unit: Unit } {
+  if (text.trim() === "") return { qty: 0, unit: fallbackUnit };
+
+  const entries = parseColorQty(text);
+  const units = entries.map((entry) => entry.unit ?? fallbackUnit);
+  const unit =
+    units.length > 0 && units.every((entry) => entry === units[0])
+      ? units[0]
+      : "pair";
+
+  return {
+    qty: fromPairs(colorQtyPairs(text, fallbackUnit), unit),
+    unit,
+  };
+}
+
+/** A receiving or a delivery only ever records a stock code and a quantity, never which
+ *  voucher/order line it satisfies — so two lines for the same stock code would leave
+ *  the server unable to say which line the goods actually belong to. Flags the second
+ *  (and every later) line carrying a code already used above it; the first occurrence is
+ *  left alone so the message points at the one to fix. Returns null when the line is fine. */
+export function duplicateStockCodeProblem(
+  lines: readonly { stock_code: string }[],
+  index: number,
+): string | null {
+  const code = lines[index]?.stock_code.trim().toLowerCase();
+  if (!code) return null;
+  const firstIndex = lines.findIndex(
+    (line) => line.stock_code.trim().toLowerCase() === code,
+  );
+  return firstIndex !== -1 && firstIndex !== index
+    ? `Already used on line ${firstIndex + 1} — add the quantity there instead.`
+    : null;
 }
 
 /** Keeps the digits out of whatever was typed into a number field. Those fields are

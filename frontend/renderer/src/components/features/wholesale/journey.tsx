@@ -11,6 +11,11 @@ import {
   shipmentPairs,
   type Shipment,
 } from "@renderer/components/features/wholesale/shipments";
+import {
+  countedPairs,
+  openedCount,
+  type Receiving,
+} from "@renderer/components/features/wholesale/receivings";
 import { formatQty } from "@renderer/components/features/wholesale/shared";
 import { formatIn } from "@renderer/components/features/wholesale/units";
 
@@ -22,15 +27,35 @@ import { formatIn } from "@renderer/components/features/wholesale/units";
 
 export function DeliveryJourney({
   shipment,
+  receivings = [],
   before = [],
   after = [],
 }: {
   shipment: Shipment;
+  /** So "Final received" can show what has actually been opened and counted, not just
+   *  how many boxes reached the gate. Omit where that detail isn't available; the card
+   *  falls back to packages arrived, as before. */
+  receivings?: Receiving[];
   /** Cards to show before the goods leave the supplier. */
   before?: React.ReactNode[];
   /** Cards to show after they reach the gate. */
   after?: React.ReactNode[];
 }): React.JSX.Element {
+  // A package the gate has logged is not the same as one anyone has opened and checked
+  // against the voucher — see final_received_packages in ./store. This is the number
+  // that actually says "we have counted what's in these boxes."
+  const ours = receivings.filter(
+    (receiving) => receiving.shipment_no === shipment.shipment_no,
+  );
+  const openedPackages = ours.reduce(
+    (sum, receiving) => sum + openedCount(receiving),
+    0,
+  );
+  const countedQty = ours.reduce(
+    (sum, receiving) => sum + countedPairs(receiving),
+    0,
+  );
+
   const cards: React.ReactNode[] = [
     ...before,
     <JourneyCard
@@ -120,6 +145,28 @@ export function DeliveryJourney({
             : undefined
         }
       />
+    </JourneyCard>,
+    <JourneyCard
+      key="counted"
+      stage="final"
+      title="Counted at the gate"
+      subtitle={shipment.final_location}
+      done={
+        shipment.final_received_packages > 0 &&
+        openedPackages === shipment.final_received_packages
+      }
+      doneLabel="Everything counted"
+    >
+      <JourneyRow
+        label="Packages opened"
+        value={`${formatQty(openedPackages)} / ${formatQty(shipment.final_received_packages)}`}
+        good={
+          shipment.final_received_packages > 0
+            ? openedPackages === shipment.final_received_packages
+            : undefined
+        }
+      />
+      <JourneyRow label="Quantity" value={formatIn(countedQty, "set")} />
     </JourneyCard>,
     ...after,
   ];

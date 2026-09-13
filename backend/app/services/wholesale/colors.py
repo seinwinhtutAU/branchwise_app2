@@ -100,6 +100,17 @@ def color_qty_pairs(text: str, row_unit: WholesaleUnit) -> int:
     return sum(to_pairs(entry.qty, entry.unit or row_unit) for entry in parse_color_qty(text))
 
 
+def color_qty_pairs_by_color(text: str, row_unit: WholesaleUnit) -> dict[str, int]:
+    """Returns the pair count for each normalized colour in a shorthand value."""
+    pairs: dict[str, int] = {}
+    for entry in parse_color_qty(text):
+        color = " ".join(entry.color.split()).casefold()
+        if not color or entry.qty <= 0:
+            continue
+        pairs[color] = pairs.get(color, 0) + to_pairs(entry.qty, entry.unit or row_unit)
+    return pairs
+
+
 def colors_as_json(text: str) -> list[dict]:
     """The parsed form written alongside the raw string, so a reader never has to
     re-parse color_qty. This is a cache of the parse, not a second source of truth —

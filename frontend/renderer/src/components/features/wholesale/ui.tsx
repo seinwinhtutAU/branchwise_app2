@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@renderer/lib/utils";
 import { Input } from "@renderer/components/ui/Input";
+import { Textarea } from "@renderer/components/ui/Textarea";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -44,7 +46,8 @@ import {
 export const PAGE_SIZE = 10;
 
 /** The tint on every box a person is meant to fill in. */
-export const EDITABLE = "bg-brand-subtle";
+export const EDITABLE =
+  "bg-warning-subtle border-warning/50 hover:border-warning focus-visible:ring-brand";
 
 /** Blue, but pale: actions in the same family as the filled primary button without
  *  competing with it. */
@@ -242,7 +245,7 @@ export function FigureCard({
 }: {
   label: string;
   value: string;
-  sub: string;
+  sub?: string;
   tone?: Tone;
 }): React.JSX.Element {
   return (
@@ -258,7 +261,7 @@ export function FigureCard({
       >
         {value}
       </span>
-      <span className="block text-xs text-text-muted">{sub}</span>
+      {sub && <span className="block text-xs text-text-muted">{sub}</span>}
     </div>
   );
 }
@@ -340,12 +343,11 @@ export function GroupTag({
   );
 }
 
-/** A product on one table line: what it is, and which range it belongs to.
+/** A product value on one table line: description first, group underneath.
  *
- *  Stacked, not side by side. A description and a tag competing for one narrow column
- *  left "Ladies' rubber slipper" broken across three or four lines with the tag pushed
- *  around between them. On its own line the description has the whole column to itself
- *  and reads as one phrase, with the group sitting quietly underneath. */
+ *  The stock code is rendered by the surrounding table because it may also need a copy
+ *  action. Keeping the remaining values as plain stacked text makes the Product column
+ *  read like one compact three-line value instead of a nested badge. */
 export function ProductCell({
   description,
   group,
@@ -354,11 +356,11 @@ export function ProductCell({
   group: ProductGroup;
 }): React.JSX.Element {
   return (
-    <div className="flex flex-col items-start gap-1 min-w-[9rem]">
-      <span className="text-text-primary leading-snug">
+    <div className="flex min-w-[9rem] flex-col items-start gap-0.5">
+      <span className="break-words text-text-primary leading-snug">
         {description || "—"}
       </span>
-      <GroupTag group={group} />
+      <span className="text-xs text-text-muted">{GROUP_LABELS[group]}</span>
     </div>
   );
 }
@@ -374,23 +376,25 @@ export function GroupSelect({
   onChange: (group: ProductGroup) => void;
 }): React.JSX.Element {
   return (
-    <select
-      aria-label={label}
-      value={value}
-      onChange={(event) => onChange(event.target.value as ProductGroup)}
-      className={cn(
-        "w-full h-9 rounded-md border border-border px-2 text-sm text-text-primary",
-        EDITABLE,
-        "transition-all duration-150",
-        "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base focus:border-transparent",
-      )}
-    >
-      {PRODUCT_GROUPS.map((group) => (
-        <option key={group} value={group}>
-          {GROUP_LABELS[group]}
-        </option>
-      ))}
-    </select>
+    <div className="relative">
+      <select
+        aria-label={label}
+        value={value}
+        onChange={(event) => onChange(event.target.value as ProductGroup)}
+        className={cn(
+          "w-full h-9 rounded-md border border-border px-2 text-sm text-text-primary",
+          EDITABLE,
+          "pr-2 transition-all duration-150",
+          "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base focus:border-transparent",
+        )}
+      >
+        {PRODUCT_GROUPS.map((group) => (
+          <option key={group} value={group}>
+            {GROUP_LABELS[group]}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 
@@ -399,19 +403,33 @@ export function ReadOnlyField({
   label,
   value,
   copyable = false,
+  wrap = false,
   className,
 }: {
   label: string;
   value: string;
   /** Shows a copy button — for the references people pass on to someone else. */
   copyable?: boolean;
+  /** Lets long values remain fully visible instead of being truncated. */
+  wrap?: boolean;
   className?: string;
 }): React.JSX.Element {
   return (
     <div className={className}>
-      <dt className="text-xs text-text-muted mb-1">{label}</dt>
-      <dd className="bg-bg-subtle border border-border rounded-md px-3 py-2 text-sm text-text-primary flex items-center justify-between gap-2">
-        <span className="truncate">{value || "—"}</span>
+      <dt className="text-sm font-medium text-text-secondary mb-1.5">
+        {label}
+      </dt>
+      <dd
+        className={cn(
+          "bg-bg-subtle border border-border rounded-md px-3 text-sm text-text-primary flex justify-between gap-2",
+          wrap
+            ? "min-h-10 h-auto items-start py-2 whitespace-normal break-words"
+            : "h-10 items-center",
+        )}
+      >
+        <span className={wrap ? "whitespace-normal break-words" : "truncate"}>
+          {value || "—"}
+        </span>
         {copyable && value && (
           <CopyButton value={value} what={label.toLowerCase()} />
         )}
@@ -517,6 +535,92 @@ export function MenuItem({
       {icon ?? <span className="w-4" />}
       {label}
     </button>
+  );
+}
+
+/**
+ * Render a floating layer outside panels and table scrollports. Dropdowns and row
+ * action menus must be able to extend past rounded cards; an absolutely positioned
+ * child cannot do that when one of its ancestors has overflow clipping.
+ */
+export function FloatingLayer({
+  anchorRef,
+  children,
+  className,
+  align = "left",
+  matchAnchorWidth = false,
+  estimatedHeight = 180,
+}: {
+  anchorRef: React.RefObject<HTMLElement | null>;
+  children: React.ReactNode;
+  className: string;
+  align?: "left" | "right";
+  matchAnchorWidth?: boolean;
+  estimatedHeight?: number;
+}): React.JSX.Element {
+  const layerRef = useRef<HTMLDivElement>(null);
+  const [style, setStyle] = useState<React.CSSProperties>({
+    position: "fixed",
+    left: 0,
+    top: 0,
+    visibility: "hidden",
+  });
+
+  useLayoutEffect(() => {
+    function positionLayer(): void {
+      const anchor = anchorRef.current;
+      if (!anchor) return;
+
+      const anchorBox = anchor.getBoundingClientRect();
+      const layer = layerRef.current;
+      const width = matchAnchorWidth
+        ? anchorBox.width
+        : Math.max(layer?.offsetWidth ?? 0, 176);
+      const height = layer?.offsetHeight || estimatedHeight;
+      const gap = 4;
+      const viewportPadding = 8;
+      const opensBelow =
+        anchorBox.bottom + gap + height <= window.innerHeight - viewportPadding;
+      const top = opensBelow
+        ? anchorBox.bottom + gap
+        : Math.max(viewportPadding, anchorBox.top - height - gap);
+      const naturalLeft =
+        align === "right" ? anchorBox.right - width : anchorBox.left;
+      const left = Math.min(
+        Math.max(viewportPadding, naturalLeft),
+        Math.max(viewportPadding, window.innerWidth - width - viewportPadding),
+      );
+
+      setStyle({
+        position: "fixed",
+        top,
+        left,
+        width: matchAnchorWidth ? width : undefined,
+        maxHeight: `calc(100vh - ${viewportPadding * 2}px)`,
+        visibility: "visible",
+        zIndex: 100,
+      });
+    }
+
+    positionLayer();
+    window.addEventListener("resize", positionLayer);
+    document.addEventListener("scroll", positionLayer, true);
+    return () => {
+      window.removeEventListener("resize", positionLayer);
+      document.removeEventListener("scroll", positionLayer, true);
+    };
+  }, [align, anchorRef, estimatedHeight, matchAnchorWidth]);
+
+  return createPortal(
+    <div
+      ref={layerRef}
+      style={style}
+      onMouseDown={(event) => event.stopPropagation()}
+      className={className}
+    >
+      {children}
+    </div>,
+    document.body,
   );
 }
 
@@ -655,6 +759,7 @@ export function QuantityField({
   value,
   unit,
   hint,
+  error,
   onChange,
   onUnitChange,
 }: {
@@ -663,6 +768,7 @@ export function QuantityField({
   value: number;
   unit: Unit;
   hint?: string;
+  error?: string;
   onChange: (value: number) => void;
   onUnitChange: (unit: Unit) => void;
 }): React.JSX.Element {
@@ -678,6 +784,7 @@ export function QuantityField({
       value={draft}
       unit={unit}
       hint={hint}
+      error={error}
       onChange={(digits) => {
         setDraft(digits);
         if (digits === "") return;
@@ -695,6 +802,7 @@ export function CellInput({
   value,
   numeric = false,
   type = "text",
+  multiline = false,
   error,
   className,
   onChange,
@@ -704,6 +812,7 @@ export function CellInput({
   value: string;
   numeric?: boolean;
   type?: "text" | "date";
+  multiline?: boolean;
   /** Said plainly under the box when what was typed cannot be read. */
   error?: string;
   className?: string;
@@ -711,28 +820,51 @@ export function CellInput({
 }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-1">
-      <input
-        type={type}
-        inputMode={numeric ? "numeric" : undefined}
-        aria-label={label}
-        placeholder={placeholder}
-        value={value}
-        onChange={(event) =>
-          onChange(
-            numeric ? onlyDigits(event.target.value) : event.target.value,
-          )
-        }
-        className={cn(
-          "w-full h-9 rounded-md border border-border px-2 text-sm text-text-primary",
-          EDITABLE,
-          "placeholder:text-text-muted",
-          "transition-all duration-150",
-          "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base focus:border-transparent",
-          error && "border-error focus-visible:ring-error",
-          className,
+      <div className="relative">
+        {multiline ? (
+          <>
+            <Textarea
+              aria-label={label}
+              placeholder={placeholder}
+              value={value}
+              onChange={(event) => onChange(event.target.value)}
+              className={cn(
+                "min-h-9 px-2",
+                EDITABLE,
+                "placeholder:text-text-muted",
+                error && "border-error focus-visible:ring-error",
+                className,
+              )}
+              aria-invalid={error ? true : undefined}
+            />
+          </>
+        ) : (
+          <>
+            <input
+              type={type}
+              inputMode={numeric ? "numeric" : undefined}
+              aria-label={label}
+              placeholder={placeholder}
+              value={value}
+              onChange={(event) =>
+                onChange(
+                  numeric ? onlyDigits(event.target.value) : event.target.value,
+                )
+              }
+              className={cn(
+                "w-full h-9 rounded-md border border-border px-2 text-sm text-text-primary",
+                EDITABLE,
+                "placeholder:text-text-muted",
+                "transition-all duration-150",
+                "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base focus:border-transparent",
+                error && "border-error focus-visible:ring-error",
+                className,
+              )}
+              aria-invalid={error ? true : undefined}
+            />
+          </>
         )}
-        aria-invalid={error ? true : undefined}
-      />
+      </div>
       {error && <span className="text-xs text-error">{error}</span>}
     </div>
   );
@@ -748,6 +880,7 @@ export function SuggestInput({
   onChange,
   /** Inside a table cell there is no room for a label above the box. */
   bare = false,
+  error,
 }: {
   label: React.ReactNode;
   placeholder: string;
@@ -755,6 +888,7 @@ export function SuggestInput({
   value: string;
   onChange: (value: string) => void;
   bare?: boolean;
+  error?: string;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -785,6 +919,7 @@ export function SuggestInput({
         role="combobox"
         aria-expanded={open}
         aria-autocomplete="list"
+        error={error}
         onChange={(event) => {
           onChange(event.target.value);
           setOpen(true);
@@ -795,27 +930,30 @@ export function SuggestInput({
         }}
       />
       {open && matches.length > 0 && (
-        <ul
-          role="listbox"
-          className="absolute z-30 left-0 right-0 top-full mt-1 max-h-44 overflow-y-auto bg-bg-base border border-border rounded-md shadow-lg py-1 animate-fade-in"
+        <FloatingLayer
+          anchorRef={ref}
+          matchAnchorWidth
+          className="bg-bg-base border border-border rounded-md shadow-lg animate-fade-in"
         >
-          {matches.map((name) => (
-            <li key={name}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={name === value}
-                onClick={() => {
-                  onChange(name);
-                  setOpen(false);
-                }}
-                className="w-full text-left px-3 py-2 text-sm text-text-secondary transition-colors duration-150 hover:bg-bg-subtle hover:text-text-primary"
-              >
-                {name}
-              </button>
-            </li>
-          ))}
-        </ul>
+          <ul role="listbox" className="max-h-44 overflow-y-auto py-1">
+            {matches.map((name) => (
+              <li key={name}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={name === value}
+                  onClick={() => {
+                    onChange(name);
+                    setOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm text-text-secondary transition-colors duration-150 hover:bg-bg-subtle hover:text-text-primary"
+                >
+                  {name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </FloatingLayer>
       )}
     </div>
   );
@@ -952,6 +1090,53 @@ export function JourneyArrow(): React.JSX.Element {
   );
 }
 
+/** Editing an existing payment's amount. Keeps its own draft text so clearing the box to
+ *  retype a number does not immediately snap back to the old amount — a plain input bound
+ *  straight to `payment.amount` rejects (and un-shows) every keystroke that briefly leaves
+ *  it empty or invalid, which made an existing payment feel impossible to edit in place. The
+ *  committed amount (and so "Paid so far") only updates once the typed value is valid. */
+function PaymentAmountCell({
+  payment,
+  balance,
+  onUpdate,
+}: {
+  payment: Payment;
+  balance: number;
+  onUpdate: (payment: Payment) => void;
+}): React.JSX.Element {
+  const [text, setText] = useState(String(payment.amount));
+  const room = balance + payment.amount;
+
+  // The committed amount can change from outside this box — another edit reverted, the
+  // voucher/order reloaded after Save — so the draft still has to follow it.
+  useEffect(() => {
+    setText(String(payment.amount));
+  }, [payment.amount]);
+
+  const typed = Number(text) || 0;
+  const tooMuch = text.trim() !== "" && typed > room;
+
+  function handleChange(next: string): void {
+    setText(next);
+    const amount = Number(next) || 0;
+    if (amount > 0 && amount <= room) {
+      onUpdate({ ...payment, amount });
+    }
+  }
+
+  return (
+    <CellInput
+      label={`Amount for payment on ${formatDate(payment.date)}`}
+      placeholder="0"
+      numeric
+      className="text-right"
+      value={text}
+      onChange={handleChange}
+      error={tooMuch ? `Only ${formatKyat(room)} is available.` : undefined}
+    />
+  );
+}
+
 /** The money taken against one order or one voucher, and the box for writing down the
  *  next payment.
  *
@@ -969,34 +1154,38 @@ export function PaymentsTable({
   /** "customer" or "supplier" — only used to say who the money is to or from. */
   who,
   onAdd,
+  onUpdate,
   onRemove,
+  readOnly = false,
 }: {
   payments: Payment[];
   balance: number;
   who: string;
   onAdd: (payment: Payment) => void;
+  onUpdate?: (payment: Payment) => void;
   onRemove: (paymentId: string) => void;
+  readOnly?: boolean;
 }): React.JSX.Element {
-  const [adding, setAdding] = useState(false);
-  const [date, setDate] = useState(todayIso());
-  const [amount, setAmount] = useState("");
-  const [note, setNote] = useState("");
+  // A new row joins the table the moment "Add payment" is pressed — the same way a new
+  // product line does — rather than living in a separate draft form the amount has to
+  // clear a "save" gate to leave. addingId just remembers which row that was, so a
+  // "Cancel" can take back an add nobody meant to make.
+  const [addingId, setAddingId] = useState<string | null>(null);
 
-  const value = Number(amount) || 0;
-  const tooMuch = value > balance;
-  const canSave = value > 0 && !tooMuch;
+  useEffect(() => {
+    if (readOnly) setAddingId(null);
+  }, [readOnly]);
 
-  function save(): void {
-    onAdd({
-      payment_id: `pay-${Date.now()}`,
-      date,
-      amount: value,
-      note: note.trim(),
-    });
-    setAdding(false);
-    setDate(todayIso());
-    setAmount("");
-    setNote("");
+  function addPayment(): void {
+    const id = `pay-${Date.now()}`;
+    setAddingId(id);
+    onAdd({ payment_id: id, date: todayIso(), amount: 0, note: "" });
+  }
+
+  function cancelAdd(): void {
+    if (!addingId) return;
+    onRemove(addingId);
+    setAddingId(null);
   }
 
   return (
@@ -1007,25 +1196,60 @@ export function PaymentsTable({
             <Th className="w-40">Date</Th>
             <Th className="text-right w-44">Amount</Th>
             <Th>Note</Th>
-            <Th className="w-10" aria-label="Remove payment" />
+            {!readOnly && <Th className="w-10" aria-label="Remove payment" />}
           </Tr>
         </Thead>
         <Tbody>
-          {payments.length === 0 && !adding && (
+          {payments.length === 0 && (
             <Tr>
-              <Td colSpan={4} className="text-text-muted text-sm">
+              <Td colSpan={readOnly ? 3 : 4} className="text-text-muted text-sm">
                 Nothing paid yet.
               </Td>
             </Tr>
           )}
           {payments.map((payment) => (
             <Tr key={payment.payment_id}>
-              <Td className="whitespace-nowrap">{formatDate(payment.date)}</Td>
-              <Td className="text-right tabular-nums font-medium">
-                {formatKyat(payment.amount)}
-              </Td>
-              <Td className="text-text-muted">{payment.note || "—"}</Td>
-              <Td className="text-center">
+              {onUpdate && !readOnly ? (
+                <Td>
+                  <CellInput
+                    label={`Payment date for ${formatKyat(payment.amount)}`}
+                    placeholder=""
+                    type="date"
+                    value={payment.date}
+                    onChange={(date) => onUpdate({ ...payment, date })}
+                  />
+                </Td>
+              ) : (
+                <Td className="whitespace-nowrap">
+                  {formatDate(payment.date)}
+                </Td>
+              )}
+              {onUpdate && !readOnly ? (
+                <Td>
+                  <PaymentAmountCell
+                    payment={payment}
+                    balance={balance}
+                    onUpdate={onUpdate}
+                  />
+                </Td>
+              ) : (
+                <Td className="text-right tabular-nums font-medium">
+                  {formatKyat(payment.amount)}
+                </Td>
+              )}
+              {onUpdate && !readOnly ? (
+                <Td>
+                  <CellInput
+                    label={`Note for payment on ${formatDate(payment.date)}`}
+                    placeholder="Deposit, transfer, cash…"
+                    value={payment.note}
+                    onChange={(note) => onUpdate({ ...payment, note })}
+                  />
+                </Td>
+              ) : (
+                <Td className="text-text-muted">{payment.note || "—"}</Td>
+              )}
+              {!readOnly && <Td className="text-center">
                 <button
                   type="button"
                   onClick={() => onRemove(payment.payment_id)}
@@ -1039,46 +1263,9 @@ export function PaymentsTable({
                 >
                   <TrashIcon className="w-4 h-4" />
                 </button>
-              </Td>
+              </Td>}
             </Tr>
           ))}
-          {adding && (
-            <Tr className="bg-brand-subtle hover:bg-brand-subtle">
-              <Td>
-                <CellInput
-                  label="Date the money came in"
-                  placeholder=""
-                  type="date"
-                  value={date}
-                  onChange={setDate}
-                />
-              </Td>
-              <Td>
-                <CellInput
-                  label="Amount paid"
-                  placeholder="0"
-                  numeric
-                  className="text-right"
-                  value={amount}
-                  onChange={setAmount}
-                  error={
-                    tooMuch
-                      ? `Only ${formatKyat(balance)} is still unpaid.`
-                      : undefined
-                  }
-                />
-              </Td>
-              <Td>
-                <CellInput
-                  label="Note on this payment"
-                  placeholder="Deposit, transfer, cash…"
-                  value={note}
-                  onChange={setNote}
-                />
-              </Td>
-              <Td />
-            </Tr>
-          )}
           <Tr className="bg-bg-subtle hover:bg-bg-subtle">
             <Td className="font-semibold">Paid so far</Td>
             <Td className="text-right tabular-nums font-semibold text-success">
@@ -1086,7 +1273,7 @@ export function PaymentsTable({
                 payments.reduce((sum, payment) => sum + payment.amount, 0),
               )}
             </Td>
-            <Td colSpan={2} className="text-text-muted">
+            <Td colSpan={readOnly ? 1 : 2} className="text-text-muted">
               {balance > 0
                 ? `${formatKyat(balance)} still unpaid`
                 : "Nothing left to pay"}
@@ -1096,35 +1283,27 @@ export function PaymentsTable({
       </TableContainer>
 
       <div className="flex flex-wrap items-center gap-2">
-        {adding ? (
+        {!readOnly ? (
           <>
-            <Button size="sm" disabled={!canSave} onClick={save}>
-              <CheckIcon className="w-4 h-4" />
-              Save payment
+            <Button size="sm" onClick={addPayment}>
+              <PlusIcon className="w-4 h-4" />
+              Add payment
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setAdding(false);
-                setAmount("");
-                setNote("");
-              }}
-            >
-              Cancel
-            </Button>
+            {addingId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={SOFT_RED}
+                onClick={cancelAdd}
+              >
+                Cancel
+              </Button>
+            )}
           </>
         ) : (
-          <Button
-            variant="ghost"
-            size="sm"
-            className={SOFT_BLUE}
-            disabled={balance <= 0}
-            onClick={() => setAdding(true)}
-          >
-            <PlusIcon className="w-4 h-4" />
-            Record payment
-          </Button>
+          <span className="text-xs text-text-muted">
+            Switch to Edit to add or remove payments.
+          </span>
         )}
         {balance <= 0 && payments.length > 0 && (
           <span className="text-xs text-text-muted">

@@ -41,7 +41,19 @@ def _line(line_in) -> SupplierVoucherLine:
     )
 
 
+def _check_no_duplicate_stock_codes(lines) -> None:
+    # A receiving item only records a stock code and a quantity, never which voucher
+    # line it satisfies — two lines for the same stock code would make received-quantity
+    # attribution ambiguous (see _out in the router). Put the extra quantity on the
+    # existing line instead.
+    seen = {line.stock_code.strip().lower() for line in lines}
+    if len(seen) != len(lines):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Each stock code can only appear on one line per voucher")
+
+
 def create_voucher(db: Session, branch_id: str | None, payload) -> SupplierVoucher:
+    _check_no_duplicate_stock_codes(payload.lines)
+
     def attempt() -> SupplierVoucher:
         voucher = SupplierVoucher(
             branch_id=branch_id, voucher_no=allocate_reference(db, SupplierVoucher.voucher_no, branch_id, "VCH", date.today()),
@@ -57,6 +69,7 @@ def create_voucher(db: Session, branch_id: str | None, payload) -> SupplierVouch
 
 
 def update_voucher(db: Session, voucher_id: str, branch_id: str | None, payload) -> SupplierVoucher:
+    _check_no_duplicate_stock_codes(payload.lines)
     voucher = _load(db, voucher_id, branch_id)
     voucher.supplier_name = payload.supplier_name.strip()
     voucher.voucher_date = payload.voucher_date
@@ -108,3 +121,38 @@ def received_pairs_by_voucher_no(db: Session, voucher_nos: list[str], branch_id:
         query = query.filter(Receiving.branch_id == branch_id)
     rows = query.group_by(Receiving.voucher_no).all()
     return {voucher_no: int(pairs) for voucher_no, pairs in rows}
+
+
+def received_pairs_by_voucher_stock(
+    db: Session,
+    voucher_nos: list[str],
+    branch_id: str | None,
+) -> dict[tuple[str, str], int]:
+    """Return opened receiving quantities grouped by voucher and stock code.
+
+    Voucher line received quantities must come from the same opened package items as
+    the Receiving screen. Keeping this aggregation here prevents the voucher detail
+    from inventing a separate received-quantity source in the frontend.
+    """
+    if not voucher_nos:
+        return {}
+    query = (
+        db.query(
+            Receiving.voucher_no,
+            ReceivingItem.stock_code,
+            func.coalesce(func.sum(ReceivingItem.qty_pairs), 0),
+        )
+        .join(ReceivingPackage, ReceivingPackage.receiving_id == Receiving.id)
+        .join(ReceivingItem, ReceivingItem.package_id == ReceivingPackage.id)
+        .filter(
+            Receiving.voucher_no.in_(voucher_nos),
+            ReceivingPackage.opened.is_(True),
+        )
+    )
+    if branch_id is not None:
+        query = query.filter(Receiving.branch_id == branch_id)
+    rows = query.group_by(Receiving.voucher_no, ReceivingItem.stock_code).all()
+    return {
+        (voucher_no, stock_code): int(pairs)
+        for voucher_no, stock_code, pairs in rows
+    }

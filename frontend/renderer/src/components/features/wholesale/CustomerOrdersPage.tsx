@@ -7,6 +7,7 @@ import {
   EDITABLE,
   GroupSelect,
   FigureCard,
+  FloatingLayer,
   MenuItem,
   PAGE_SIZE,
   Panel,
@@ -45,6 +46,7 @@ import {
   CloseIcon,
   EyeIcon,
   MoreIcon,
+  PencilIcon,
   PlusIcon,
   SearchIcon,
   TrashIcon,
@@ -67,6 +69,7 @@ import {
 import {
   colorQtyPairs,
   colorQtyProblem,
+  duplicateStockCodeProblem,
   SUPPLIER_NAMES,
   formatDate,
   formatKyat,
@@ -95,7 +98,6 @@ import {
 } from "@renderer/components/features/wholesale/api";
 import {
   GROUP_LABELS,
-  PRODUCT_GROUPS,
   STOCK_CODES,
   productOf,
   type ProductGroup,
@@ -117,6 +119,7 @@ const sets = (qty: number): string => formatIn(qty, "set");
 // after each fetch because Inventory has not moved to its own API phase yet.
 
 type View = "list" | "detail" | "new";
+type OrderDetailMode = "view" | "edit";
 type StatusFilter = OrderStatus | "all";
 type PayFilter = PaymentStatus | "all";
 
@@ -181,9 +184,21 @@ function PaymentBadge({
   );
 }
 
-export default function CustomerOrdersPage({ session }: { session: Session }): React.JSX.Element {
+export default function CustomerOrdersPage({
+  session,
+  initialOrderId,
+  onInitialOrderOpened,
+}: {
+  session: Session;
+  initialOrderId?: string | null;
+  onInitialOrderOpened?: () => void;
+}): React.JSX.Element {
   const showToast = useToast();
-  const { data: wire, isRefreshing, reload } = useCachedFetch<CustomerOrder[]>(
+  const {
+    data: wire,
+    isRefreshing,
+    reload,
+  } = useCachedFetch<CustomerOrder[]>(
     CUSTOMER_ORDERS_URL,
     session,
     "customer orders",
@@ -194,22 +209,47 @@ export default function CustomerOrdersPage({ session }: { session: Session }): R
   const { orders } = useWholesale();
   const [view, setView] = useState<View>("list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [openMode, setOpenMode] = useState<OrderDetailMode>("view");
 
   const selected =
     orders.find((order) => order.order_id === selectedId) ?? null;
 
-  function openOrder(orderId: string): void {
+  useEffect(() => {
+    if (!initialOrderId) return;
+    const target = orders.find((order) => order.order_id === initialOrderId);
+    if (!target) return;
+    setSelectedId(target.order_id);
+    setOpenMode("edit");
+    setView("detail");
+    onInitialOrderOpened?.();
+  }, [initialOrderId, onInitialOrderOpened, orders]);
+
+  function openOrder(
+    orderId: string,
+    mode: OrderDetailMode = "view",
+  ): void {
     setSelectedId(orderId);
+    setOpenMode(mode);
     setView("detail");
   }
 
   function cancelOrder(orderId: string): void {
     cancelCustomerOrder(session, orderId)
       .then(reload)
-      .catch((error) => showToast("error", error instanceof WholesaleApiError ? error.message : "Could not cancel the order."));
+      .catch((error) =>
+        showToast(
+          "error",
+          error instanceof WholesaleApiError
+            ? error.message
+            : "Could not cancel the order.",
+        ),
+      );
   }
 
-  async function persistOrder(order: CustomerOrder): Promise<void> {
+  async function persistOrder(
+    order: CustomerOrder,
+    originalOrder: CustomerOrder,
+  ): Promise<void> {
     try {
       await updateCustomerOrder(session, order.order_id, {
         customer_name: order.customer_name,
@@ -218,6 +258,61 @@ export default function CustomerOrdersPage({ session }: { session: Session }): R
         order_date: order.order_date,
         lines: order.lines,
       });
+
+      const originalPayments = originalOrder.payment.payments;
+      // A payment added but left at its default of 0 (the row exists but nobody has
+      // typed an amount into it yet) is not a real payment — drop it rather than send
+      // it to a server that rejects anything not greater than zero. Zeroing an existing
+      // payment's amount is treated the same way: as taking that payment back.
+      const currentPayments = order.payment.payments.filter(
+        (payment) => payment.amount > 0,
+      );
+      const changed = (
+        left: (typeof currentPayments)[number],
+        right: (typeof currentPayments)[number],
+      ): boolean =>
+        left.date !== right.date ||
+        left.amount !== right.amount ||
+        left.note !== right.note;
+
+      // There is no update endpoint for a payment, so an edit removes the old row and
+      // adds the new one (removing first keeps the balance check, which sums every
+      // existing payment, from double-counting the row being edited). If the add then
+      // fails, put the original payment back rather than leaving it simply gone.
+      for (const payment of originalPayments) {
+        const next = currentPayments.find(
+          (candidate) => candidate.payment_id === payment.payment_id,
+        );
+        if (!next) {
+          await removeCustomerOrderPayment(
+            session,
+            order.order_id,
+            payment.payment_id,
+          );
+        } else if (changed(payment, next)) {
+          await removeCustomerOrderPayment(
+            session,
+            order.order_id,
+            payment.payment_id,
+          );
+          try {
+            await addCustomerOrderPayment(session, order.order_id, next);
+          } catch (error) {
+            await addCustomerOrderPayment(session, order.order_id, payment);
+            throw error;
+          }
+        }
+      }
+
+      for (const payment of currentPayments) {
+        const previous = originalPayments.find(
+          (candidate) => candidate.payment_id === payment.payment_id,
+        );
+        if (!previous) {
+          await addCustomerOrderPayment(session, order.order_id, payment);
+        }
+      }
+
       await reload();
       showToast("success", "Order saved.");
     } catch (error) {
@@ -245,7 +340,14 @@ export default function CustomerOrdersPage({ session }: { session: Session }): R
         setView("detail");
         await reload();
       })
-      .catch((error) => showToast("error", error instanceof WholesaleApiError ? error.message : "Could not create the order."));
+      .catch((error) =>
+        showToast(
+          "error",
+          error instanceof WholesaleApiError
+            ? error.message
+            : "Could not create the order.",
+        ),
+      );
   }
 
   if (view === "new") {
@@ -262,9 +364,8 @@ export default function CustomerOrdersPage({ session }: { session: Session }): R
     return (
       <OrderDetail
         order={selected}
+        initialMode={openMode}
         onSave={persistOrder}
-        onAddPayment={(payment) => addCustomerOrderPayment(session, selected.order_id, payment).then(reload).catch((error) => showToast("error", error instanceof WholesaleApiError ? error.message : "Could not add the payment."))}
-        onRemovePayment={(paymentId) => removeCustomerOrderPayment(session, selected.order_id, paymentId).then(reload).catch((error) => showToast("error", error instanceof WholesaleApiError ? error.message : "Could not remove the payment."))}
         onBack={() => setView("list")}
       />
     );
@@ -274,6 +375,7 @@ export default function CustomerOrdersPage({ session }: { session: Session }): R
     <OrderList
       orders={orders}
       onOpen={openOrder}
+      onEdit={(orderId) => openOrder(orderId, "edit")}
       onCancel={cancelOrder}
       onNew={() => setView("new")}
       onRefresh={reload}
@@ -294,6 +396,7 @@ function nextOrderNo(orders: CustomerOrder[]): string {
 function OrderList({
   orders,
   onOpen,
+  onEdit,
   onCancel,
   onNew,
   onRefresh,
@@ -301,6 +404,7 @@ function OrderList({
 }: {
   orders: CustomerOrder[];
   onOpen: (orderId: string) => void;
+  onEdit: (orderId: string) => void;
   onCancel: (orderId: string) => void;
   onNew: () => void;
   onRefresh: () => void;
@@ -366,7 +470,7 @@ function OrderList({
           sub="orders in the system"
         />
         <FigureCard
-          label="Total ordered"
+          label="Total Ordered Qty"
           value={sets(totalQty)}
           sub="across all orders"
           tone="neutral"
@@ -380,7 +484,7 @@ function OrderList({
         <FigureCard
           label="Orders not finished"
           value={formatQty(unfinished)}
-          sub={`of ${formatQty(live.length)} waiting on goods`}
+          sub={`of ${formatQty(live.length)} orders still in progress`}
           tone={unfinished > 0 ? "warning" : "success"}
         />
         <FigureCard
@@ -544,6 +648,7 @@ function OrderList({
                       <Td className="text-right">
                         <RowMenu
                           onView={() => onOpen(order.order_id)}
+                          onEdit={() => onEdit(order.order_id)}
                           onCancel={
                             order.order_status === "cancelled"
                               ? undefined
@@ -576,9 +681,11 @@ function OrderList({
  *  something with no backend behind them. */
 function RowMenu({
   onView,
+  onEdit,
   onCancel,
 }: {
   onView: () => void;
+  onEdit: () => void;
   onCancel?: () => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -618,13 +725,25 @@ function RowMenu({
         <MoreIcon className="w-4 h-4" />
       </button>
       {open && (
-        <div className="absolute right-0 top-9 z-30 min-w-44 bg-bg-base border border-border rounded-lg shadow-lg py-1 animate-fade-in">
+        <FloatingLayer
+          anchorRef={ref}
+          align="right"
+          className="min-w-44 bg-bg-base border border-border rounded-lg shadow-lg py-1 animate-fade-in"
+        >
           <MenuItem
             icon={<EyeIcon className="w-4 h-4" />}
             label="View details"
             onClick={() => {
               setOpen(false);
               onView();
+            }}
+          />
+          <MenuItem
+            icon={<PencilIcon className="w-4 h-4" />}
+            label="Edit order"
+            onClick={() => {
+              setOpen(false);
+              onEdit();
             }}
           />
           {onCancel && (
@@ -638,7 +757,7 @@ function RowMenu({
               }}
             />
           )}
-        </div>
+        </FloatingLayer>
       )}
     </div>
   );
@@ -646,29 +765,172 @@ function RowMenu({
 
 // ── Detail ───────────────────────────────────────────────────────────────────
 
+function OrderProductsView({
+  order,
+}: {
+  order: CustomerOrder;
+}): React.JSX.Element {
+  return (
+    <TableContainer>
+      <Thead className="top-0">
+        <Tr>
+          <Th className="min-w-[10rem] whitespace-nowrap">
+            Supplier / Factory
+          </Th>
+          <Th className="min-w-[18rem]">Product</Th>
+          <Th className="min-w-[11rem]">Colors</Th>
+          <Th className="text-right whitespace-nowrap">Ordered qty</Th>
+          <Th className="text-right whitespace-nowrap">Received qty</Th>
+          <Th className="text-right whitespace-nowrap">Remaining qty</Th>
+          <Th className="text-right min-w-[7rem]">Selling price</Th>
+          <Th className="text-right">Amount</Th>
+        </Tr>
+      </Thead>
+      <Tbody>
+        {order.lines.map((line) => (
+          <Tr key={line.order_line_id}>
+            <Td className="font-medium">{line.supplier_name || "—"}</Td>
+            <Td>
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <div className="flex min-w-0 items-center gap-1">
+                  <span className="font-semibold text-brand break-words">
+                    {line.stock_code || "No stock code"}
+                  </span>
+                  {line.stock_code && (
+                    <CopyButton value={line.stock_code} what="stock code" />
+                  )}
+                </div>
+                <span className="break-words text-text-primary">
+                  {line.description || "—"}
+                </span>
+                <span className="text-xs text-text-muted">
+                  {GROUP_LABELS[line.group]}
+                </span>
+              </div>
+            </Td>
+            <Td className="whitespace-normal break-words text-text-secondary">
+              {line.color_qty || "—"}
+            </Td>
+            <Td className="text-right tabular-nums">
+              {sets(line.wanted_qty)}
+            </Td>
+            <Td className="text-right tabular-nums font-medium text-success">
+              {sets(line.received_qty)}
+            </Td>
+            <Td className="text-right tabular-nums font-semibold text-error">
+              {sets(lineRemaining(line))}
+            </Td>
+            <Td className="text-right tabular-nums">
+              {formatKyat(line.selling_price)}
+            </Td>
+            <Td className="text-right tabular-nums font-medium whitespace-nowrap">
+              {formatKyat(line.wanted_qty * line.selling_price)}
+            </Td>
+          </Tr>
+        ))}
+        <Tr className="bg-bg-subtle hover:bg-bg-subtle">
+          <Td className="font-semibold" colSpan={3}>
+            Total
+          </Td>
+          <Td className="text-right tabular-nums font-semibold">
+            {sets(order.total_qty)}
+          </Td>
+          <Td className="text-right tabular-nums font-semibold text-success">
+            {sets(order.received_qty)}
+          </Td>
+          <Td className="text-right tabular-nums font-semibold text-error">
+            {sets(remainingQty(order))}
+          </Td>
+          <Td />
+          <Td className="text-right tabular-nums font-semibold text-brand">
+            {formatKyat(orderAmount(order))}
+          </Td>
+        </Tr>
+      </Tbody>
+    </TableContainer>
+  );
+}
+
+function OrderInfoView({
+  order,
+}: {
+  order: CustomerOrder;
+}): React.JSX.Element {
+  const suppliers = Array.from(
+    new Set(
+      order.lines
+        .map((line) => line.supplier_name.trim())
+        .filter((supplier) => supplier !== ""),
+    ),
+  ).join(", ");
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+        <h3 className="mb-3 text-sm font-semibold text-text-primary">
+          Customer
+        </h3>
+        <dl className="grid gap-3 sm:grid-cols-2">
+          <ReadOnlyField label="Customer name" value={order.customer_name} />
+          <ReadOnlyField label="Phone" value={order.customer_phone || "—"} />
+          <ReadOnlyField
+            label="Address"
+            value={order.customer_address || "—"}
+            wrap
+            className="sm:col-span-2"
+          />
+        </dl>
+      </div>
+      <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+        <h3 className="mb-3 text-sm font-semibold text-text-primary">
+          Order
+        </h3>
+        <dl className="grid gap-3 sm:grid-cols-2">
+          <ReadOnlyField
+            label="Order no."
+            value={order.order_no}
+            copyable
+          />
+          <ReadOnlyField
+            label="Order date"
+            value={formatDate(order.order_date)}
+          />
+          <ReadOnlyField
+            label="Supplier / Factory"
+            value={suppliers || "—"}
+            wrap
+            className="sm:col-span-2"
+          />
+        </dl>
+      </div>
+    </div>
+  );
+}
+
 function OrderDetail({
   order: initialOrder,
+  initialMode,
   onSave,
-  onAddPayment,
-  onRemovePayment,
   onBack,
 }: {
   order: CustomerOrder;
-  onSave: (order: CustomerOrder) => Promise<void>;
-  onAddPayment: (payment: CustomerOrder["payment"]["payments"][number]) => void;
-  onRemovePayment: (paymentId: string) => void;
+  initialMode: OrderDetailMode;
+  onSave: (order: CustomerOrder, originalOrder: CustomerOrder) => Promise<void>;
   onBack: () => void;
 }): React.JSX.Element {
   const [order, setOrder] = useState(initialOrder);
+  const [detailMode, setDetailMode] = useState<OrderDetailMode>(initialMode);
   const [saving, setSaving] = useState(false);
+  const [addingLineId, setAddingLineId] = useState<string | null>(null);
   useEffect(() => {
     setOrder(initialOrder);
+    setAddingLineId(null);
   }, [initialOrder]);
 
   async function saveChanges(): Promise<void> {
     setSaving(true);
     try {
-      await onSave(order);
+      await onSave(order, initialOrder);
     } finally {
       setSaving(false);
     }
@@ -677,8 +939,19 @@ function OrderDetail({
   const remaining = remainingQty(order);
   const pct = receivedPct(order);
 
+  // total_qty/received_qty are the server's own running totals across order.lines (see
+  // _out in the router) — recomputed here the same way whenever a line changes, so the
+  // header figures never lag behind an edit still sitting unsaved on screen.
   function apply(patch: Partial<CustomerOrder>): void {
-    setOrder((current) => ({ ...current, ...patch }));
+    setOrder((current) => {
+      const next = { ...current, ...patch };
+      if (!patch.lines) return next;
+      return {
+        ...next,
+        total_qty: next.lines.reduce((sum, line) => sum + line.wanted_qty, 0),
+        received_qty: next.lines.reduce((sum, line) => sum + line.received_qty, 0),
+      };
+    });
   }
 
   // Editing a line is editing the order: the quantity is re-read from the colours, the
@@ -713,11 +986,14 @@ function OrderDetail({
   }
 
   function addLine(): void {
+    if (addingLineId) return;
+    const lineId = `col-${Date.now()}`;
+    setAddingLineId(lineId);
     apply({
       lines: [
         ...order.lines,
         {
-          order_line_id: `col-${Date.now()}`,
+          order_line_id: lineId,
           stock_code: "",
           description: "",
           group: "man",
@@ -733,14 +1009,65 @@ function OrderDetail({
   }
 
   function removeLine(index: number): void {
+    if (order.lines[index]?.order_line_id === addingLineId) {
+      setAddingLineId(null);
+    }
     apply({
       lines: order.lines.filter((_, position) => position !== index),
     });
   }
+
+  function cancelAddLine(): void {
+    if (!addingLineId) return;
+    apply({
+      lines: order.lines.filter(
+        (line) => line.order_line_id !== addingLineId,
+      ),
+    });
+    setAddingLineId(null);
+  }
+
+  function setPayment(
+    paymentId: string,
+    patch: Partial<CustomerOrder["payment"]["payments"][number]>,
+  ): void {
+    apply({
+      payment: {
+        ...order.payment,
+        payments: order.payment.payments.map((payment) =>
+          payment.payment_id === paymentId ? { ...payment, ...patch } : payment,
+        ),
+      },
+    });
+  }
+
+  function addPayment(
+    payment: CustomerOrder["payment"]["payments"][number],
+  ): void {
+    apply({
+      payment: {
+        ...order.payment,
+        payments: [...order.payment.payments, payment],
+      },
+    });
+  }
+
+  function removePayment(paymentId: string): void {
+    apply({
+      payment: {
+        ...order.payment,
+        payments: order.payment.payments.filter(
+          (payment) => payment.payment_id !== paymentId,
+        ),
+      },
+    });
+  }
+
   const amount = orderAmount(order);
   const balance = orderBalance(order);
   const paid = paidAmount(order);
   const paidShare = paidPct(order);
+  const hasChanges = JSON.stringify(order) !== JSON.stringify(initialOrder);
 
   return (
     <div className="flex flex-col gap-5">
@@ -752,84 +1079,189 @@ function OrderDetail({
       </div>
 
       <Panel>
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-          <div>
-            <h2 className="text-lg font-semibold text-text-primary tracking-tight">
-              Order details
-            </h2>
+        <div className="grid items-center gap-3 px-6 py-4 border-b border-border lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-semibold text-text-primary tracking-tight">
+                {order.order_no}
+              </h2>
+              <StatusBadge status={order.order_status} />
+              <PaymentBadge status={paymentStatus(order)} />
+            </div>
+            <p className="mt-0.5 truncate text-sm text-text-muted">
+              {order.customer_name} · {formatDate(order.order_date)}
+            </p>
           </div>
-          <div className="flex items-center gap-2">
-            <StatusBadge status={order.order_status} />
-            <PaymentBadge status={paymentStatus(order)} />
-            <Button
-              size="sm"
-              onClick={() => void saveChanges()}
-              loading={saving}
-            >
-              <CheckIcon className="w-4 h-4" />
-              Save changes
-            </Button>
+          <div
+            role="tablist"
+            aria-label="Order detail mode"
+            className="order-2 flex w-full rounded-md bg-bg-subtle p-0.5 lg:order-none lg:w-auto lg:justify-self-center"
+          >
+            {(["view", "edit"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                role="tab"
+                aria-selected={detailMode === mode}
+                onClick={() => setDetailMode(mode)}
+                className={cn(
+                  "flex-1 rounded-[5px] px-4 py-1.5 text-sm font-medium capitalize transition-colors duration-150 sm:flex-none",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+                  detailMode === mode
+                    ? "bg-brand text-white shadow-sm"
+                    : "text-text-muted hover:text-text-primary",
+                )}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+          <div className="order-3 flex items-center gap-2 lg:order-none lg:justify-self-end">
+            {(detailMode === "edit" || hasChanges) && (
+              <Button
+                size="sm"
+                onClick={() => void saveChanges()}
+                loading={saving}
+                disabled={!hasChanges}
+              >
+                <CheckIcon className="w-4 h-4" />
+                Save changes
+              </Button>
+            )}
           </div>
         </div>
 
         <div className="px-6 py-6 flex flex-col gap-8">
           <section>
-            <SectionLabel>Customer &amp; order information</SectionLabel>
-            {/* The order number is the one thing that cannot change — it is how this
-                order is referred to everywhere else. Everything a customer can correct
-                about themselves is typed straight in. */}
-            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-              <ReadOnlyField
-                label="Order no."
-                value={order.order_no}
-                copyable
+            <SectionLabel>Order information</SectionLabel>
+            {detailMode === "view" ? (
+              <OrderInfoView order={order} />
+            ) : (
+              <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                <h3 className="mb-3 text-sm font-semibold text-text-primary">
+                  Customer
+                </h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Input
+                    label="Customer name"
+                    className={EDITABLE}
+                    value={order.customer_name}
+                    onChange={(event) =>
+                      apply({ customer_name: event.target.value })
+                    }
+                  />
+                  <Input
+                    label="Phone"
+                    className={EDITABLE}
+                    value={order.customer_phone}
+                    onChange={(event) =>
+                      apply({ customer_phone: event.target.value })
+                    }
+                  />
+                  <div className="sm:col-span-2">
+                    <label className="mb-1.5 block text-sm font-medium text-text-secondary">
+                      Address
+                    </label>
+                    <CellInput
+                      label="Address"
+                      placeholder="Customer address"
+                      multiline
+                      value={order.customer_address}
+                      onChange={(next) => apply({ customer_address: next })}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                <h3 className="mb-3 text-sm font-semibold text-text-primary">
+                  Order
+                </h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ReadOnlyField
+                    label="Order no."
+                    value={order.order_no}
+                    copyable
+                  />
+                  <Input
+                    label="Order date"
+                    type="date"
+                    className={EDITABLE}
+                    value={order.order_date}
+                    onChange={(event) =>
+                      apply({ order_date: event.target.value })
+                    }
+                  />
+                </div>
+              </div>
+              </div>
+            )}
+          </section>
+
+          <section>
+            <div className="flex flex-wrap items-end justify-between gap-2 mb-3">
+              <div>
+                <SectionLabel>Delivery</SectionLabel>
+                <p className="-mt-2 text-xs text-text-muted">
+                  Track how much of the order has reached the customer.
+                </p>
+              </div>
+              <span className="text-sm font-semibold tabular-nums text-text-primary">
+                {pct}% received
+              </span>
+            </div>
+            <div className="grid gap-3 grid-cols-1 sm:grid-cols-3 mb-4">
+              <BigFigure label="Ordered qty" value={sets(order.total_qty)} />
+              <BigFigure
+                label="Received qty"
+                value={sets(order.received_qty)}
+                tone="success"
               />
-              <Input
-                label="Order date"
-                type="date"
-                className={EDITABLE}
-                value={order.order_date}
-                onChange={(event) =>
-                  apply({ order_date: event.target.value })
-                }
+              <BigFigure
+                label="Remaining qty"
+                value={sets(remaining)}
+                tone="error"
               />
-              <Input
-                label="Customer"
-                className={EDITABLE}
-                value={order.customer_name}
-                onChange={(event) =>
-                  apply({ customer_name: event.target.value })
-                }
-              />
-              <Input
-                label="Phone"
-                className={EDITABLE}
-                value={order.customer_phone}
-                onChange={(event) =>
-                  apply({ customer_phone: event.target.value })
-                }
-              />
-              <Input
-                label="Address"
-                className={cn(EDITABLE, "sm:col-span-2 lg:col-span-4")}
-                value={order.customer_address}
-                onChange={(event) =>
-                  apply({ customer_address: event.target.value })
-                }
+            </div>
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span className="font-medium text-text-secondary">
+                Delivery progress
+              </span>
+              <span className="tabular-nums font-semibold text-text-primary">
+                {sets(order.received_qty)} / {sets(order.total_qty)}
+              </span>
+            </div>
+            <div
+              role="progressbar"
+              aria-valuenow={pct}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Delivery progress"
+              className="h-2 rounded-full bg-bg-raised overflow-hidden"
+            >
+              <div
+                className={cn(
+                  "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
+                  pct === 100 ? "bg-success" : "bg-brand",
+                )}
+                style={{ width: String(pct) + "%" }}
               />
             </div>
           </section>
 
           <section>
             <SectionLabel>Products</SectionLabel>
-            <TableContainer>
+            {detailMode === "view" ? (
+              <OrderProductsView order={order} />
+            ) : (
+              <>
+                <TableContainer>
               <Thead className="top-0">
                 <Tr>
                   <Th className="min-w-[10rem] whitespace-nowrap">
                     Supplier / Factory
                   </Th>
-                  <Th className="min-w-[9rem]">Stock code</Th>
-                  <Th className="min-w-[12rem]">Product</Th>
+                  <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[11rem]">Colors</Th>
                   <Th className="text-right whitespace-nowrap">Ordered qty</Th>
                   <Th className="text-right whitespace-nowrap">Received qty</Th>
@@ -846,7 +1278,7 @@ function OrderDetail({
                     <Td>
                       <SuggestInput
                         bare
-                        label={`Supplier for line ${index + 1}`}
+                        label={`Supplier for product ${index + 1}`}
                         placeholder="Choose…"
                         suggestions={SUPPLIER_NAMES}
                         value={line.supplier_name}
@@ -855,31 +1287,37 @@ function OrderDetail({
                         }
                       />
                     </Td>
-                    <Td>
-                      <div className="flex items-center gap-1">
-                        <SuggestInput
-                          bare
-                          label={`Stock code for line ${index + 1}`}
-                          placeholder="A1001"
-                          suggestions={STOCK_CODES}
-                          value={line.stock_code}
-                          onChange={(next) => setStockCode(index, next)}
-                        />
-                        <CopyButton value={line.stock_code} what="stock code" />
-                      </div>
-                    </Td>
-                    <Td>
+                    <Td className="min-w-[18rem]">
                       <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center gap-1">
+                          <SuggestInput
+                            bare
+                            label={`Stock code for product ${index + 1}`}
+                            placeholder="A1001"
+                            suggestions={STOCK_CODES}
+                            value={line.stock_code}
+                            onChange={(next) => setStockCode(index, next)}
+                            error={
+                              duplicateStockCodeProblem(order.lines, index) ??
+                              undefined
+                            }
+                          />
+                          <CopyButton
+                            value={line.stock_code}
+                            what="stock code"
+                          />
+                        </div>
                         <CellInput
-                          label={`Description for line ${index + 1}`}
+                          label={`Description for product ${index + 1}`}
                           placeholder="Men's leather sandal"
+                          multiline
                           value={line.description}
                           onChange={(next) =>
                             setLine(index, { description: next })
                           }
                         />
                         <GroupSelect
-                          label={`Group for line ${index + 1}`}
+                          label={`Group for product ${index + 1}`}
                           value={line.group}
                           onChange={(group) => setLine(index, { group })}
                         />
@@ -887,8 +1325,9 @@ function OrderDetail({
                     </Td>
                     <Td>
                       <CellInput
-                        label={`Colors for line ${index + 1}`}
+                        label={`Colors for product ${index + 1}`}
                         placeholder="black10s,pink2p"
+                        multiline
                         value={line.color_qty}
                         onChange={(next) => setColors(index, next)}
                         error={
@@ -910,13 +1349,15 @@ function OrderDetail({
                     </Td>
                     <Td>
                       <CellInput
-                        label={`Selling price for line ${index + 1}`}
+                        label={`Selling price for product ${index + 1}`}
                         placeholder="0"
                         numeric
                         className="text-right"
                         value={String(line.selling_price)}
                         onChange={(next) =>
-                          setLine(index, { selling_price: Number(next) || 0 })
+                          setLine(index, {
+                            selling_price: Number(next) || 0,
+                          })
                         }
                       />
                     </Td>
@@ -926,7 +1367,7 @@ function OrderDetail({
                         type="button"
                         onClick={() => removeLine(index)}
                         title="Remove this product"
-                        aria-label={`Remove product on line ${index + 1}`}
+                        aria-label={`Remove product ${index + 1}`}
                         className={cn(
                           "ml-2 p-1 rounded-md align-middle transition-colors duration-150",
                           SOFT_RED,
@@ -939,7 +1380,7 @@ function OrderDetail({
                   </Tr>
                 ))}
                 <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-                  <Td className="font-semibold" colSpan={4}>
+                  <Td className="font-semibold" colSpan={3}>
                     Total
                   </Td>
                   <Td className="text-right tabular-nums font-semibold">
@@ -957,109 +1398,92 @@ function OrderDetail({
                   </Td>
                 </Tr>
               </Tbody>
-            </TableContainer>
-            <div className="mt-3">
-              <Button
-                variant="ghost"
-                size="sm"
-                className={SOFT_BLUE}
-                onClick={addLine}
-              >
-                <PlusIcon className="w-4 h-4" />
-                Add product
-              </Button>
-            </div>
-          </section>
-
-          <section>
-            <SectionLabel>Delivery</SectionLabel>
-            <div className="grid gap-3 grid-cols-1 sm:grid-cols-3 mb-4">
-              <BigFigure label="Ordered qty" value={sets(order.total_qty)} />
-              <BigFigure
-                label="Received qty"
-                value={sets(order.received_qty)}
-                tone="success"
-              />
-              <BigFigure
-                label="Remaining qty"
-                value={sets(remaining)}
-                tone="error"
-              />
-            </div>
-            <div className="flex items-center justify-between text-sm mb-2">
-              <span className="font-medium text-text-secondary">
-                Delivery progress
-              </span>
-              <span className="tabular-nums font-semibold text-text-primary">
-                {sets(order.received_qty)} / {sets(order.total_qty)} ({pct}%)
-              </span>
-            </div>
-            <div
-              role="progressbar"
-              aria-valuenow={pct}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label="Delivery progress"
-              className="h-2 rounded-full bg-bg-raised overflow-hidden"
-            >
-              <div
-                className={cn(
-                  "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
-                  pct === 100 ? "bg-success" : "bg-brand",
-                )}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
+                </TableContainer>
+                <div className="mt-3">
+                  <Button
+                    size="sm"
+                    onClick={addLine}
+                  >
+                    <PlusIcon className="w-4 h-4" />
+                    Add product
+                  </Button>
+                  {addingLineId && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={cancelAddLine}
+                      className={cn(SOFT_RED, "ml-2")}
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+              </>
+            )}
           </section>
 
           <section>
             <SectionLabel>Payment</SectionLabel>
-            <div className="grid gap-3 grid-cols-1 sm:grid-cols-3 mb-4">
-              <MoneyFigure label="Order total" value={formatKyat(amount)} />
-              <MoneyFigure
-                label="Paid so far"
-                value={formatKyat(paid)}
-                tone="success"
-              />
-              <MoneyFigure
-                label="Unpaid amount"
-                value={formatKyat(balance)}
-                tone={balance > 0 ? "error" : "success"}
-              />
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 text-sm mb-2">
-              <span className="font-medium text-text-secondary">
-                Paid so far
-              </span>
-              <span className="tabular-nums font-semibold text-text-primary">
-                {formatKyat(paid)} / {formatKyat(amount)} ({paidShare}%)
-              </span>
-            </div>
-            <div
-              role="progressbar"
-              aria-valuenow={paidShare}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label="Paid so far"
-              className="h-2 rounded-full bg-bg-raised overflow-hidden mb-5"
-            >
+            <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+              <div className="grid gap-3 grid-cols-1 sm:grid-cols-3 mb-4">
+                <MoneyFigure label="Order total" value={formatKyat(amount)} />
+                <MoneyFigure
+                  label="Paid so far"
+                  value={formatKyat(paid)}
+                  tone="success"
+                />
+                <MoneyFigure
+                  label="Unpaid amount"
+                  value={formatKyat(balance)}
+                  tone={balance > 0 ? "error" : "success"}
+                />
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm mb-2">
+                <span className="font-medium text-text-secondary">
+                  Payment progress
+                </span>
+                <span className="tabular-nums font-semibold text-text-primary">
+                  {formatKyat(paid)} / {formatKyat(amount)} ({paidShare}%)
+                </span>
+              </div>
               <div
-                className={cn(
-                  "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
-                  paidShare === 100 ? "bg-success" : "bg-warning",
-                )}
-                style={{ width: `${paidShare}%` }}
+                role="progressbar"
+                aria-valuenow={paidShare}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Paid so far"
+                className="h-2 rounded-full bg-bg-raised overflow-hidden"
+              >
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
+                    paidShare === 100 ? "bg-success" : "bg-warning",
+                  )}
+                  style={{ width: String(paidShare) + "%" }}
+                />
+              </div>
+            </div>
+            <div className="mt-5 border-t border-border pt-5">
+              <div className="mb-3">
+                <h3 className="text-sm font-semibold text-text-primary">
+                  Payment
+                </h3>
+                <p className="mt-0.5 text-xs text-text-muted">
+                  Every deposit and transfer recorded against this order.
+                </p>
+              </div>
+              <PaymentsTable
+                payments={order.payment.payments}
+                balance={balance}
+                who="customer"
+                onAdd={addPayment}
+                onUpdate={(payment) =>
+                  setPayment(payment.payment_id, payment)
+                }
+                onRemove={removePayment}
+                readOnly={detailMode === "view"}
               />
             </div>
-            {/* Every figure above is the sum of this table. Customers pay in parts —
-                a deposit, something on collection — so the parts are what is kept. */}
-            <PaymentsTable
-              payments={order.payment.payments}
-              balance={balance}
-              who="customer"
-              onAdd={onAddPayment}
-              onRemove={onRemovePayment}
-            />
           </section>
         </div>
       </Panel>
@@ -1250,36 +1674,39 @@ function CustomerPicker({
           onKeyDown={handleKey}
         />
         {open && (
-          <ul
-            role="listbox"
-            className="absolute z-30 left-0 right-0 top-full mt-1 max-h-52 overflow-y-auto bg-bg-base border border-border rounded-md shadow-lg py-1 animate-fade-in"
+          <FloatingLayer
+            anchorRef={ref}
+            matchAnchorWidth
+            className="bg-bg-base border border-border rounded-md shadow-lg animate-fade-in"
           >
-            {matches.map((customer, index) => (
-              <li key={customer.name}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={index === highlight}
-                  onMouseEnter={() => setHighlight(index)}
-                  onClick={() => choose(customer.name)}
-                  className={cn(
-                    "w-full text-left px-3 py-2 text-sm transition-colors duration-150",
-                    index === highlight
-                      ? "bg-brand-subtle text-brand"
-                      : "text-text-secondary hover:bg-bg-subtle hover:text-text-primary",
-                  )}
-                >
-                  {customer.name}
-                </button>
-              </li>
-            ))}
-            {matches.length === 0 && (
-              <li className="px-3 py-2 text-sm text-text-muted">
-                No customer by that name yet — carry on and a new one is
-                created.
-              </li>
-            )}
-          </ul>
+            <ul role="listbox" className="max-h-52 overflow-y-auto py-1">
+              {matches.map((customer, index) => (
+                <li key={customer.name}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={index === highlight}
+                    onMouseEnter={() => setHighlight(index)}
+                    onClick={() => choose(customer.name)}
+                    className={cn(
+                      "w-full text-left px-3 py-2 text-sm transition-colors duration-150",
+                      index === highlight
+                        ? "bg-brand-subtle text-brand"
+                        : "text-text-secondary hover:bg-bg-subtle hover:text-text-primary",
+                    )}
+                  >
+                    {customer.name}
+                  </button>
+                </li>
+              ))}
+              {matches.length === 0 && (
+                <li className="px-3 py-2 text-sm text-text-muted">
+                  No customer by that name yet — carry on and a new one is
+                  created.
+                </li>
+              )}
+            </ul>
+          </FloatingLayer>
         )}
       </div>
       <p className="text-xs text-text-muted">
@@ -1321,11 +1748,15 @@ function NewOrderForm({
   // colours counts nothing, and a line worth nothing on an order is a line nobody can
   // deliver against.
   const emptyColors = filledLines.some((line) => line.color_qty.trim() === "");
+  const hasDuplicateStockCode = lines.some(
+    (_, index) => duplicateStockCodeProblem(lines, index) !== null,
+  );
   const canLeaveProducts =
     filledLines.length > 0 &&
     totalQty > 0 &&
     !emptyColors &&
-    colorProblem === undefined;
+    colorProblem === undefined &&
+    !hasDuplicateStockCode;
 
   // Picking a customer already known fills in their phone and address rather than making
   // staff retype them; a name nobody has used before simply creates a new customer.
@@ -1467,134 +1898,143 @@ function NewOrderForm({
               </p>
             </div>
 
-            <div className="border border-border rounded-lg divide-y divide-border">
-              {lines.map((line, index) => {
-                const lineQty = draftPairs(line);
-                const lineAmount = lineQty * (Number(line.selling_price) || 0);
-                return (
-                  <div
-                    key={index}
-                    className="grid gap-3 grid-cols-1 md:grid-cols-12 items-start p-3"
-                  >
-                    <div className="md:col-span-3">
-                      <SuggestInput
-                        label={<Required>Stock code</Required>}
-                        placeholder="A1001"
-                        suggestions={STOCK_CODES}
-                        value={line.stock_code}
-                        onChange={(next) => setStockCode(index, next)}
-                      />
-                    </div>
-                    <div className="md:col-span-5">
-                      <Input
-                        label="Description"
-                        className={EDITABLE}
-                        placeholder="Men's leather sandal"
-                        value={line.description}
-                        onChange={(event) =>
-                          updateLine(index, { description: event.target.value })
-                        }
-                      />
-                    </div>
-                    <div className="md:col-span-4">
-                      <Select
-                        label="Group"
-                        className={EDITABLE}
-                        value={line.group}
-                        onChange={(event) =>
-                          updateLine(index, {
-                            group: event.target.value as ProductGroup,
-                          })
-                        }
-                      >
-                        {PRODUCT_GROUPS.map((group) => (
-                          <option key={group} value={group}>
-                            {GROUP_LABELS[group]}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                    <div className="md:col-span-3">
-                      <Select
-                        label="Supplier / Factory"
-                        className={EDITABLE}
-                        value={line.supplier_name}
-                        onChange={(event) =>
-                          updateLine(index, {
-                            supplier_name: event.target.value,
-                          })
-                        }
-                      >
-                        <option value="">Choose…</option>
-                        {SUPPLIER_NAMES.map((name) => (
-                          <option key={name} value={name}>
-                            {name}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                    <div className="md:col-span-4">
-                      <Input
-                        label={<Required>Colors</Required>}
-                        className={EDITABLE}
-                        placeholder="black10s,pink2p"
-                        value={line.color_qty}
-                        onChange={(event) =>
-                          updateLine(index, { color_qty: event.target.value })
-                        }
-                        error={colorQtyProblem(line.color_qty) ?? undefined}
-                        hint={
-                          lineQty > 0
+            <TableContainer>
+              <Thead className="top-0">
+                <Tr>
+                  <Th className="min-w-[10rem] whitespace-nowrap">
+                    Supplier / Factory
+                  </Th>
+                  <Th className="min-w-[18rem]">Product</Th>
+                  <Th className="min-w-[13rem]">Colors</Th>
+                  <Th className="text-right whitespace-nowrap">Ordered qty</Th>
+                  <Th className="text-right min-w-[8rem]">Selling price</Th>
+                  <Th className="text-right min-w-[8rem]">Amount</Th>
+                </Tr>
+              </Thead>
+              <Tbody>
+                {lines.map((line, index) => {
+                  const lineQty = draftPairs(line);
+                  const lineAmount = lineQty * (Number(line.selling_price) || 0);
+                  return (
+                    <Tr key={index}>
+                      <Td>
+                        <Select
+                          aria-label={`Supplier for product ${index + 1}`}
+                          className={EDITABLE}
+                          value={line.supplier_name}
+                          onChange={(event) =>
+                            updateLine(index, {
+                              supplier_name: event.target.value,
+                            })
+                          }
+                        >
+                          <option value="">Choose…</option>
+                          {SUPPLIER_NAMES.map((name) => (
+                            <option key={name} value={name}>
+                              {name}
+                            </option>
+                          ))}
+                        </Select>
+                      </Td>
+                      <Td className="min-w-[18rem]">
+                        <div className="flex min-w-0 flex-col gap-1.5">
+                          <div className="flex min-w-0 items-start gap-1">
+                            <SuggestInput
+                              bare
+                              label={`Stock code for product ${index + 1}`}
+                              placeholder="A1001"
+                              suggestions={STOCK_CODES}
+                              value={line.stock_code}
+                              onChange={(next) => setStockCode(index, next)}
+                              error={
+                                duplicateStockCodeProblem(lines, index) ??
+                                undefined
+                              }
+                            />
+                            <CopyButton
+                              value={line.stock_code}
+                              what="stock code"
+                            />
+                          </div>
+                          <CellInput
+                            label={`Description for product ${index + 1}`}
+                            placeholder="Men's leather sandal"
+                            multiline
+                            value={line.description}
+                            onChange={(next) =>
+                              updateLine(index, { description: next })
+                            }
+                          />
+                          <GroupSelect
+                            label={`Group for product ${index + 1}`}
+                            value={line.group}
+                            onChange={(group) => updateLine(index, { group })}
+                          />
+                        </div>
+                      </Td>
+                      <Td>
+                        <CellInput
+                          label={`Colors for product ${index + 1}`}
+                          placeholder="black10s,pink2p"
+                          multiline
+                          value={line.color_qty}
+                          onChange={(next) =>
+                            updateLine(index, { color_qty: next })
+                          }
+                          error={colorQtyProblem(line.color_qty) ?? undefined}
+                        />
+                        <span className="mt-1 block text-xs text-text-muted">
+                          {lineQty > 0
                             ? sets(lineQty)
-                            : "Every color needs a unit — s sets, p pairs, d dozens"
-                        }
-                      />
-                    </div>
-                    <div className="md:col-span-3">
-                      <Input
-                        label="Selling price"
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="0"
-                        className={cn(EDITABLE, "text-right")}
-                        value={line.selling_price}
-                        onChange={(event) =>
-                          updateLine(index, {
-                            selling_price: onlyDigits(event.target.value),
-                          })
-                        }
-                        hint={lineAmount > 0 ? formatKyat(lineAmount) : " "}
-                      />
-                    </div>
-                    <div className="md:col-span-2 flex md:justify-end md:pt-7">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={SOFT_RED}
-                        aria-label={`Remove row ${index + 1}`}
-                        onClick={() => removeLine(index)}
-                      >
-                        <TrashIcon className="w-4 h-4" />
-                        Remove
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-
-              <div className="grid gap-3 grid-cols-1 md:grid-cols-12 items-center p-3 bg-bg-subtle">
-                <span className="md:col-span-5 text-sm font-semibold text-text-primary">
-                  Total
-                </span>
-                <span className="md:col-span-3 text-sm font-semibold tabular-nums text-text-primary">
-                  {sets(totalQty)}
-                </span>
-                <span className="md:col-span-2 text-sm font-semibold tabular-nums text-brand md:text-right">
-                  {formatKyat(totalAmount)}
-                </span>
-                <span className="hidden md:block md:col-span-2" />
-              </div>
-            </div>
+                            : "Every color needs a unit — s sets, p pairs, d dozens"}
+                        </span>
+                      </Td>
+                      <Td className="text-right tabular-nums font-medium whitespace-nowrap">
+                        {sets(lineQty)}
+                      </Td>
+                      <Td>
+                        <CellInput
+                          label={`Selling price for product ${index + 1}`}
+                          placeholder="0"
+                          numeric
+                          className="text-right"
+                          value={line.selling_price}
+                          onChange={(next) =>
+                            updateLine(index, {
+                              selling_price: onlyDigits(next),
+                            })
+                          }
+                        />
+                      </Td>
+                      <Td className="text-right tabular-nums font-medium whitespace-nowrap">
+                        {formatKyat(lineAmount)}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={cn("ml-2 align-middle", SOFT_RED)}
+                          aria-label={`Remove row ${index + 1}`}
+                          onClick={() => removeLine(index)}
+                        >
+                          <TrashIcon className="w-4 h-4" />
+                        </Button>
+                      </Td>
+                    </Tr>
+                  );
+                })}
+                <Tr className="bg-bg-subtle hover:bg-bg-subtle">
+                  <Td className="font-semibold" colSpan={3}>
+                    Total
+                  </Td>
+                  <Td className="text-right tabular-nums font-semibold">
+                    {sets(totalQty)}
+                  </Td>
+                  <Td />
+                  <Td className="text-right tabular-nums font-semibold text-brand">
+                    {formatKyat(totalAmount)}
+                  </Td>
+                </Tr>
+              </Tbody>
+            </TableContainer>
 
             <div>
               <Button
@@ -1644,12 +2084,11 @@ function NewOrderForm({
               <Thead className="top-0">
                 <Tr>
                   <Th className="whitespace-nowrap">Supplier / Factory</Th>
-                  <Th>Stock code</Th>
-                  <Th className="w-48">Product</Th>
-                  <Th>Colors</Th>
+                  <Th className="min-w-[18rem]">Product</Th>
+                  <Th className="min-w-[13rem]">Colors</Th>
                   <Th className="text-right whitespace-nowrap">Ordered qty</Th>
-                  <Th className="text-right">Selling price</Th>
-                  <Th className="text-right">Amount</Th>
+                  <Th className="text-right min-w-[8rem]">Selling price</Th>
+                  <Th className="text-right min-w-[8rem]">Amount</Th>
                 </Tr>
               </Thead>
               <Tbody>
@@ -1660,16 +2099,26 @@ function NewOrderForm({
                       <Td className="text-text-secondary">
                         {line.supplier_name || "—"}
                       </Td>
-                      <Td className="font-semibold text-brand">
-                        {line.stock_code}
+                      <Td className="min-w-[18rem]">
+                        <div className="flex min-w-0 flex-col gap-1.5">
+                          <div className="flex items-center gap-1">
+                            <span className="font-semibold text-brand break-words">
+                              {line.stock_code}
+                            </span>
+                            {line.stock_code && (
+                              <CopyButton
+                                value={line.stock_code}
+                                what="stock code"
+                              />
+                            )}
+                          </div>
+                          <ProductCell
+                            description={line.description}
+                            group={line.group}
+                          />
+                        </div>
                       </Td>
-                      <Td>
-                        <ProductCell
-                          description={line.description}
-                          group={line.group}
-                        />
-                      </Td>
-                      <Td className="font-mono text-xs text-text-secondary">
+                      <Td className="font-mono text-xs text-text-secondary break-words">
                         {line.color_qty || "—"}
                       </Td>
                       <Td className="text-right tabular-nums">{sets(qty)}</Td>
@@ -1683,7 +2132,7 @@ function NewOrderForm({
                   );
                 })}
                 <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-                  <Td className="font-semibold" colSpan={4}>
+                  <Td className="font-semibold" colSpan={3}>
                     Total
                   </Td>
                   <Td className="text-right tabular-nums font-semibold">

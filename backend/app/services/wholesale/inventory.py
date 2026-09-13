@@ -3,15 +3,23 @@
 from collections import defaultdict
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.wholesale import (
     CustomerOrder,
     Receiving,
+    ReceivingItem,
     ReceivingPackage,
+    WholesaleUnit,
     WholesaleStockMovement,
 )
-from app.services.wholesale.colors import color_qty_pairs, color_qty_problem, colors_as_json
+from app.services.wholesale.colors import (
+    color_qty_pairs,
+    color_qty_pairs_by_color,
+    color_qty_problem,
+    colors_as_json,
+)
 
 
 def _orders_query(db: Session, branch_id: str | None):
@@ -82,11 +90,44 @@ def delivered_pairs_by_order(db: Session, order_ids: list[str], branch_id: str |
     return {order_id: dict(by_stock) for order_id, by_stock in result.items()}
 
 
-def _available_pairs(db: Session, branch_id: str | None, stock_code: str, location: str, excluding_id: str | None = None) -> int:
-    incoming = sum(
-        row["pairs"] for row in incoming_movements(db, branch_id)
-        if row["stock_code"] == stock_code and row["location"] == location
+def delivered_color_pairs_by_order(
+    db: Session,
+    order_id: str,
+    stock_code: str,
+    branch_id: str | None,
+    excluding_id: str | None = None,
+) -> dict[str, int]:
+    query = db.query(WholesaleStockMovement).filter(
+        WholesaleStockMovement.order_id == order_id,
+        WholesaleStockMovement.stock_code == stock_code,
     )
+    if branch_id is not None:
+        query = query.filter(WholesaleStockMovement.branch_id == branch_id)
+    if excluding_id is not None:
+        query = query.filter(WholesaleStockMovement.id != excluding_id)
+
+    result: dict[str, int] = defaultdict(int)
+    for movement in query.all():
+        for color, pairs in color_qty_pairs_by_color(movement.color_qty, WholesaleUnit.SET).items():
+            result[color] += pairs
+    return dict(result)
+
+
+def _available_pairs(db: Session, branch_id: str | None, stock_code: str, location: str, excluding_id: str | None = None) -> int:
+    incoming_query = (
+        db.query(func.coalesce(func.sum(ReceivingItem.qty_pairs), 0))
+        .join(ReceivingPackage, ReceivingItem.package_id == ReceivingPackage.id)
+        .join(Receiving, ReceivingPackage.receiving_id == Receiving.id)
+        .filter(
+            ReceivingPackage.opened.is_(True),
+            ReceivingItem.stock_code == stock_code,
+            ReceivingItem.qty_pairs > 0,
+            Receiving.gate == location,
+        )
+    )
+    if branch_id is not None:
+        incoming_query = incoming_query.filter(Receiving.branch_id == branch_id)
+    incoming = incoming_query.scalar() or 0
     query = db.query(WholesaleStockMovement).filter(
         WholesaleStockMovement.stock_code == stock_code,
         WholesaleStockMovement.location == location,
@@ -96,6 +137,40 @@ def _available_pairs(db: Session, branch_id: str | None, stock_code: str, locati
     if excluding_id is not None:
         query = query.filter(WholesaleStockMovement.id != excluding_id)
     return incoming - sum(entry.qty_pairs for entry in query.all())
+
+
+def _available_color_pairs(
+    db: Session,
+    branch_id: str | None,
+    stock_code: str,
+    location: str,
+    excluding_id: str | None = None,
+) -> dict[str, int]:
+    available: dict[str, int] = defaultdict(int)
+    for receiving in _receivings(db, branch_id):
+        if receiving.gate != location:
+            continue
+        for package in receiving.packages:
+            if not package.opened:
+                continue
+            for item in package.items:
+                if item.stock_code != stock_code:
+                    continue
+                for color, pairs in color_qty_pairs_by_color(item.color_qty, item.unit).items():
+                    available[color] += pairs
+
+    query = db.query(WholesaleStockMovement).filter(
+        WholesaleStockMovement.stock_code == stock_code,
+        WholesaleStockMovement.location == location,
+    )
+    if branch_id is not None:
+        query = query.filter(WholesaleStockMovement.branch_id == branch_id)
+    if excluding_id is not None:
+        query = query.filter(WholesaleStockMovement.id != excluding_id)
+    for movement in query.all():
+        for color, pairs in color_qty_pairs_by_color(movement.color_qty, WholesaleUnit.SET).items():
+            available[color] -= pairs
+    return dict(available)
 
 
 def _load_delivery(db: Session, movement_id: str, branch_id: str | None) -> WholesaleStockMovement:
@@ -114,31 +189,74 @@ def _load_order(db: Session, order_id: str, branch_id: str | None) -> CustomerOr
     return order
 
 
-def _validate_delivery(db: Session, order: CustomerOrder, payload, branch_id: str | None, excluding_id: str | None = None) -> tuple[int, object]:
+def _validate_delivery(
+    db: Session,
+    order: CustomerOrder,
+    payload,
+    branch_id: str | None,
+    stock_code: str,
+    excluding_id: str | None = None,
+) -> tuple[int, object]:
     problem = color_qty_problem(payload.color_qty.strip())
     if problem:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, problem)
     pairs = color_qty_pairs(payload.color_qty.strip(), payload.unit)
-    ordered = sum(line.wanted_pairs for line in order.lines if line.stock_code == payload.stock_code.strip())
+    code = stock_code.strip()
+    ordered_lines = [line for line in order.lines if line.stock_code == code]
+    ordered = sum(line.wanted_pairs for line in ordered_lines)
     if ordered == 0:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "This product is not on the customer order")
-    delivered = delivered_pairs_by_order(db, [order.id], branch_id).get(order.id, {}).get(payload.stock_code.strip(), 0)
+    ordered_colors: dict[str, int] = defaultdict(int)
+    for line in ordered_lines:
+        for color, color_pairs in color_qty_pairs_by_color(line.color_qty, line.unit).items():
+            ordered_colors[color] += color_pairs
+    delivered_colors = delivered_color_pairs_by_order(
+        db, order.id, code, branch_id, excluding_id=excluding_id,
+    )
+    still_owed_colors = {
+        color: max(0, color_pairs - delivered_colors.get(color, 0))
+        for color, color_pairs in ordered_colors.items()
+    }
+    requested_colors = color_qty_pairs_by_color(payload.color_qty.strip(), payload.unit)
+    for color, requested in requested_colors.items():
+        if ordered_colors.get(color, 0) <= 0:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f'Color "{color}" is not on the customer order',
+            )
+        if requested > still_owed_colors.get(color, 0):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f'Color "{color}" exceeds what the customer is still owed',
+            )
+
+    available_colors = _available_color_pairs(
+        db, branch_id, code, payload.location.strip(), excluding_id=excluding_id,
+    )
+    for color, requested in requested_colors.items():
+        if requested > max(0, available_colors.get(color, 0)):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f'Color "{color}" is not available in this stock location',
+            )
+
+    delivered = delivered_pairs_by_order(db, [order.id], branch_id).get(order.id, {}).get(code, 0)
     if excluding_id is not None:
         current = _load_delivery(db, excluding_id, branch_id)
         delivered -= current.qty_pairs
     still_owed = max(0, ordered - delivered)
-    available = _available_pairs(db, branch_id, payload.stock_code.strip(), payload.location.strip(), excluding_id)
+    available = _available_pairs(db, branch_id, code, payload.location.strip(), excluding_id)
     if pairs > still_owed:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Delivery cannot exceed what the customer is still owed")
     if pairs > available:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Delivery cannot exceed what is in stock at this place")
-    source = next(line for line in order.lines if line.stock_code == payload.stock_code.strip())
+    source = next(line for line in ordered_lines)
     return pairs, source
 
 
 def create_delivery(db: Session, branch_id: str | None, user_id: str, payload) -> WholesaleStockMovement:
     order = _load_order(db, payload.order_id, branch_id)
-    pairs, source = _validate_delivery(db, order, payload, branch_id)
+    pairs, source = _validate_delivery(db, order, payload, branch_id, payload.stock_code)
     movement = WholesaleStockMovement(
         branch_id=order.branch_id, order_id=order.id, stock_code=payload.stock_code.strip(),
         description=source.description, product_group=source.product_group,
@@ -153,7 +271,9 @@ def create_delivery(db: Session, branch_id: str | None, user_id: str, payload) -
 
 def update_delivery(db: Session, movement_id: str, branch_id: str | None, payload) -> WholesaleStockMovement:
     movement = _load_delivery(db, movement_id, branch_id)
-    pairs, _ = _validate_delivery(db, movement.order, payload, branch_id, excluding_id=movement.id)
+    pairs, _ = _validate_delivery(
+        db, movement.order, payload, branch_id, movement.stock_code, excluding_id=movement.id,
+    )
     movement.location = payload.location.strip()
     movement.color_qty = payload.color_qty.strip()
     movement.colors = colors_as_json(movement.color_qty)

@@ -49,7 +49,19 @@ def _line(line_in) -> CustomerOrderLine:
     )
 
 
+def _check_no_duplicate_stock_codes(lines) -> None:
+    # A delivery only records a stock code and a quantity, never which order line it
+    # satisfies — two lines for the same stock code would make delivered-quantity
+    # attribution ambiguous (see _out in the router). Put the extra quantity on the
+    # existing line instead.
+    seen = {line.stock_code.strip().lower() for line in lines}
+    if len(seen) != len(lines):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Each stock code can only appear on one line per order")
+
+
 def create_order(db: Session, branch_id: str | None, payload) -> CustomerOrder:
+    _check_no_duplicate_stock_codes(payload.lines)
+
     def attempt() -> CustomerOrder:
         order = CustomerOrder(
             branch_id=branch_id,
@@ -66,6 +78,7 @@ def create_order(db: Session, branch_id: str | None, payload) -> CustomerOrder:
 
 
 def update_order(db: Session, order_id: str, branch_id: str | None, payload) -> CustomerOrder:
+    _check_no_duplicate_stock_codes(payload.lines)
     order = _load(db, order_id, branch_id)
     order.customer_name = payload.customer_name.strip()
     order.customer_phone = payload.customer_phone.strip()

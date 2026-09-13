@@ -35,8 +35,9 @@ import {
 } from "./customerOrders";
 import { SEED_VOUCHERS, type SupplierVoucher } from "./supplierVouchers";
 import { SEED_SHIPMENTS, type Shipment } from "./shipments";
-import { SEED_RECEIVINGS, countedPairs, type Receiving } from "./receivings";
+import { SEED_RECEIVINGS, type Receiving } from "./receivings";
 import { SEED_OUTGOING, type StockMovement } from "./stock";
+import { toPairs } from "./units";
 
 export interface WholesaleState {
   orders: CustomerOrder[];
@@ -305,12 +306,46 @@ function settleVoucher(
   receivings: Receiving[],
 ): SupplierVoucher {
   const total = voucher.lines.reduce((sum, line) => sum + line.voucher_qty, 0);
-  const received = receivings
-    .filter((receiving) => receiving.voucher_no === voucher.voucher_no)
-    .reduce((sum, receiving) => sum + countedPairs(receiving), 0);
-  return voucher.total_qty === total && voucher.received_qty === received
+  const receivedByStock = new Map<string, number>();
+  for (const receiving of receivings) {
+    if (receiving.voucher_no !== voucher.voucher_no) continue;
+    for (const entry of receiving.packages) {
+      if (!entry.opened) continue;
+      for (const item of entry.items) {
+        receivedByStock.set(
+          item.stock_code,
+          (receivedByStock.get(item.stock_code) ?? 0) +
+            toPairs(item.qty, item.unit),
+        );
+      }
+    }
+  }
+
+  const remainingByStock = new Map(receivedByStock);
+  const lines = voucher.lines.map((line) => {
+    const received = Math.min(
+      remainingByStock.get(line.stock_code) ?? 0,
+      line.voucher_qty,
+    );
+    remainingByStock.set(
+      line.stock_code,
+      Math.max(0, (remainingByStock.get(line.stock_code) ?? 0) - received),
+    );
+    return line.received_qty === received
+      ? line
+      : { ...line, received_qty: received };
+  });
+  const received = lines.reduce(
+    (sum, line) => sum + (line.received_qty ?? 0),
+    0,
+  );
+  const same =
+    voucher.total_qty === total &&
+    voucher.received_qty === received &&
+    lines.every((line, index) => line === voucher.lines[index]);
+  return same
     ? voucher
-    : { ...voucher, total_qty: total, received_qty: received };
+    : { ...voucher, lines, total_qty: total, received_qty: received };
 }
 
 /** A shipment has finally received however many packages the gate wrote down. Before any
@@ -321,10 +356,7 @@ function settleShipment(shipment: Shipment, receivings: Receiving[]): Shipment {
     (receiving) => receiving.shipment_no === shipment.shipment_no,
   );
   if (mine.length === 0) return shipment;
-  const packages = mine.reduce(
-    (sum, receiving) => sum + receiving.packages.length,
-    0,
-  );
+  const packages = mine.reduce((sum, receiving) => sum + receiving.packages.length, 0);
   return packages === shipment.final_received_packages
     ? shipment
     : { ...shipment, final_received_packages: packages };

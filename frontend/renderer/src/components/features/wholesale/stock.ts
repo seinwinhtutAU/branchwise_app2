@@ -15,12 +15,18 @@
 // recorded lives until the window reloads.
 
 import { parseColorQty } from "./shared";
-import { lineRemaining, type CustomerOrder } from "./customerOrders";
+import {
+  lineRemaining,
+  type CustomerOrder,
+  type CustomerOrderLine,
+} from "./customerOrders";
 import { type Receiving } from "./receivings";
-import { PAIRS_PER, toPairs } from "./units";
+import { PAIRS_PER, toPairs, type Unit } from "./units";
 import { type ProductGroup } from "./products";
 
 export type MovementKind = "in" | "out";
+
+export type ColorPairs = Record<string, number>;
 
 export interface StockMovement {
   movement_id: string;
@@ -58,6 +64,57 @@ export interface StockLine {
    *  "black7,white2". Summed across every movement rather than listing each one, so a
    *  line that took black in three times reads as one figure. */
   colors: string;
+  color_pairs: ColorPairs;
+}
+
+function colorKey(color: string): string {
+  return color.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export function colorPairsForText(text: string, rowUnit: Unit): ColorPairs {
+  const pairs: ColorPairs = {};
+  for (const entry of parseColorQty(text)) {
+    const color = colorKey(entry.color);
+    if (!color || entry.qty <= 0) continue;
+    pairs[color] = (pairs[color] ?? 0) + toPairs(entry.qty, entry.unit ?? rowUnit);
+  }
+  return pairs;
+}
+
+export function colorPairsForOrder(
+  order: CustomerOrder,
+  stockCode: string,
+): ColorPairs {
+  return order.lines
+    .filter((line) => line.stock_code === stockCode)
+    .reduce(
+      (pairs, line) => mergeColorPairs(pairs, colorPairsForLine(line)),
+      {},
+    );
+}
+
+function colorPairsForLine(line: CustomerOrderLine): ColorPairs {
+  return colorPairsForText(line.color_qty, line.unit);
+}
+
+export function colorPairsForMovements(
+  movements: StockMovement[],
+  predicate: (movement: StockMovement) => boolean,
+): ColorPairs {
+  return movements
+    .filter(predicate)
+    .reduce(
+      (pairs, movement) =>
+        mergeColorPairs(pairs, colorPairsForText(movement.color_qty, "set")),
+      {},
+    );
+}
+
+function mergeColorPairs(target: ColorPairs, source: ColorPairs): ColorPairs {
+  for (const [color, pairs] of Object.entries(source)) {
+    target[color] = (target[color] ?? 0) + pairs;
+  }
+  return target;
 }
 
 /** Every set counted at a gate, as a movement into that gate's stock. Read straight off
@@ -107,6 +164,7 @@ export function stockLines(movements: StockMovement[]): StockLine[] {
       in_stock: 0,
       last_moved: movement.date,
       colors: "",
+      color_pairs: {},
     };
     if (movement.kind === "in") line.pairs_in += movement.pairs;
     else line.pairs_out += movement.pairs;
@@ -120,10 +178,12 @@ export function stockLines(movements: StockMovement[]): StockLine[] {
     const byColour = colours.get(key) ?? new Map<string, number>();
     for (const entry of parseColorQty(movement.color_qty)) {
       const sign = movement.kind === "in" ? 1 : -1;
+      const color = colorKey(entry.color);
+      if (!color) continue;
       const pairs = toPairs(entry.qty, entry.unit ?? "set");
       byColour.set(
-        entry.color,
-        (byColour.get(entry.color) ?? 0) + sign * pairs,
+        color,
+        (byColour.get(color) ?? 0) + sign * pairs,
       );
     }
     colours.set(key, byColour);
@@ -144,6 +204,11 @@ export function stockLines(movements: StockMovement[]): StockLine[] {
           )
           .join(",")
       : "";
+    line.color_pairs = byColour
+      ? Object.fromEntries(
+          [...byColour.entries()].filter(([, pairs]) => pairs > 0),
+        )
+      : {};
   }
 
   return [...lines.values()].sort((a, b) =>
@@ -169,9 +234,11 @@ export function movementsFor(
 // Wholesale stock is not a shop shelf, so "running low" is not the question anyone asks
 // of it. Goods sit here for one of two reasons: a customer has already ordered them and
 // they are waiting to go out, or nobody has claimed them and they are there to be sold to
-// whoever wants them. That is what a line's status says.
+// whoever wants them. An empty shelf is neither — it used to read as "for sale" just
+// because nothing was allocated, which said the wrong thing next to a stock count of
+// zero. That is what a line's status says.
 
-export type StockPurpose = "waiting" | "for_sale";
+export type StockPurpose = "waiting" | "for_sale" | "out_of_stock";
 
 /** The open orders waiting on a product, newest first. Brought to the stock screen so a
  *  delivery can be made where the goods are, without first going to Customer Orders to
@@ -219,14 +286,15 @@ export function allocatedPairs(
   );
 }
 
-/** Whether this line is spoken for or free to sell. Allocated means every pair here is
- *  already promised to a customer; a line holding more than is owed still has stock
- *  anyone can buy, so it reads as available. */
+/** Whether this line is spoken for, free to sell, or simply not there. Allocated means
+ *  every pair here is already promised to a customer; a line holding more than is owed
+ *  still has stock anyone can buy, so it reads as available. Nothing on the shelf is its
+ *  own state — it is not "available" just because nothing has claimed it. */
 export function stockPurpose(
   line: StockLine,
   orders: CustomerOrder[],
 ): StockPurpose {
-  if (line.in_stock <= 0) return "for_sale";
+  if (line.in_stock <= 0) return "out_of_stock";
   return allocatedPairs(line, orders) >= line.in_stock ? "waiting" : "for_sale";
 }
 

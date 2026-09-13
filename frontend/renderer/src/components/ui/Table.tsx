@@ -51,7 +51,7 @@ export function Thead({
 }): React.JSX.Element {
   return (
     <thead
-      className={cn("sticky top-14 lg:top-0 z-20 bg-info-subtle", className)}
+      className={cn("sticky top-14 lg:top-0 z-20 bg-brand-subtle", className)}
     >
       {children}
     </thead>

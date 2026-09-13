@@ -4,10 +4,10 @@ import { useCachedFetch } from "@renderer/lib/useCachedFetch";
 import { useToast } from "@renderer/lib/useToast";
 import {
   CellInput,
-  GroupSelect,
   CountField,
   EDITABLE,
   FigureCard,
+  FloatingLayer,
   MenuItem,
   PAGE_SIZE,
   Panel,
@@ -40,10 +40,10 @@ import {
 import {
   CheckIcon,
   ChevronLeftIcon,
-  CloseIcon,
   ChevronRightIcon,
   EyeIcon,
   MoreVerticalIcon,
+  PencilIcon,
   ReceivingIcon,
   PlusIcon,
   SearchIcon,
@@ -71,18 +71,16 @@ import {
 } from "@renderer/components/features/wholesale/receivings";
 import { RECEIVING_GATES } from "@renderer/components/features/wholesale/shipments";
 import {
-  colorQtyPairs,
   colorQtyProblem,
   formatDate,
   formatKyat,
   formatQty,
   nextReference,
   onlyDigits,
-  parseColorQty,
+  quantityFromColors,
   todayIso,
 } from "@renderer/components/features/wholesale/shared";
 import {
-  fromPairs,
   formatIn,
   toPairs,
   type Unit,
@@ -128,6 +126,7 @@ import {
 // Backed by /api/wholesale/receivings. Detail edits are staged locally until saved.
 
 type View = "list" | "detail" | "new";
+type ReceivingDetailMode = "view" | "edit";
 type StatusFilter = ReceivingStatus | "all";
 
 const STATUS_LABELS: Record<ReceivingStatus, string> = {
@@ -144,25 +143,8 @@ const STATUS_STYLES: Record<ReceivingStatus, string> = {
   issue: "bg-error text-white",
 };
 
-/** Derives the displayed quantity from the colour shorthand. Rows that use one unit
- * stay in that unit; mixed units are represented as pairs so the total stays exact. */
-function quantityFromColors(
-  text: string,
-  fallbackUnit: Unit,
-): { qty: number; unit: Unit } {
-  if (text.trim() === "") return { qty: 0, unit: fallbackUnit };
-
-  const entries = parseColorQty(text);
-  const units = entries.map((entry) => entry.unit ?? fallbackUnit);
-  const unit =
-    units.length > 0 && units.every((entry) => entry === units[0])
-      ? units[0]
-      : "pair";
-
-  return {
-    qty: fromPairs(colorQtyPairs(text, fallbackUnit), unit),
-    unit,
-  };
+function formatStoredQuantity(qty: number, unit: Unit): string {
+  return formatIn(toPairs(qty, unit), unit);
 }
 
 function StatusBadge({
@@ -184,8 +166,12 @@ function StatusBadge({
 
 export default function ReceivingGatePage({
   session,
+  initialReceivingNo,
+  onInitialReceivingOpened,
 }: {
   session: Session;
+  initialReceivingNo?: string | null;
+  onInitialReceivingOpened?: () => void;
 }): React.JSX.Element {
   const showToast = useToast();
   const {
@@ -218,10 +204,23 @@ export default function ReceivingGatePage({
   const { receivings } = useWholesale();
   const [view, setView] = useState<View>("list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [openMode, setOpenMode] = useState<ReceivingDetailMode>("view");
 
   const selected =
     receivings.find((receiving) => receiving.receiving_id === selectedId) ??
     null;
+
+  useEffect(() => {
+    if (!initialReceivingNo) return;
+    const target = receivings.find(
+      (receiving) => receiving.receiving_no === initialReceivingNo,
+    );
+    if (!target) return;
+    setSelectedId(target.receiving_id);
+    setOpenMode("view");
+    setView("detail");
+    onInitialReceivingOpened?.();
+  }, [initialReceivingNo, onInitialReceivingOpened, receivings]);
 
   function reportSaveFailure(error: unknown, fallback: string): void {
     showToast(
@@ -282,6 +281,7 @@ export default function ReceivingGatePage({
       .then(async (created) => {
         saveReceivings((current) => [created, ...current]);
         setSelectedId(created.receiving_id);
+        setOpenMode("edit");
         setView("detail");
         await reload();
       })
@@ -304,6 +304,7 @@ export default function ReceivingGatePage({
     return (
       <ReceivingDetail
         receiving={selected}
+        initialMode={openMode}
         onBack={() => setView("list")}
         onSave={persistReceiving}
         onDelete={() => deleteReceiving(selected.receiving_id)}
@@ -331,6 +332,12 @@ export default function ReceivingGatePage({
       receivings={receivings}
       onOpen={(receivingId) => {
         setSelectedId(receivingId);
+        setOpenMode("view");
+        setView("detail");
+      }}
+      onEdit={(receivingId) => {
+        setSelectedId(receivingId);
+        setOpenMode("edit");
         setView("detail");
       }}
       onDelete={deleteReceiving}
@@ -353,6 +360,7 @@ function nextReceivingNo(receivings: Receiving[]): string {
 function ReceivingList({
   receivings,
   onOpen,
+  onEdit,
   onDelete,
   onNew,
   onRefresh,
@@ -360,6 +368,7 @@ function ReceivingList({
 }: {
   receivings: Receiving[];
   onOpen: (receivingId: string) => void;
+  onEdit: (receivingId: string) => void;
   onDelete: (receivingId: string) => void;
   onNew: () => void;
   onRefresh: () => void;
@@ -596,6 +605,7 @@ function ReceivingList({
                       <Td className="text-center">
                         <RowMenu
                           onOpen={() => onOpen(receiving.receiving_id)}
+                          onEdit={() => onEdit(receiving.receiving_id)}
                           onDelete={() => onDelete(receiving.receiving_id)}
                         />
                       </Td>
@@ -630,9 +640,11 @@ function formatDifference(difference: number, unit: Unit): string {
 
 function RowMenu({
   onOpen,
+  onEdit,
   onDelete,
 }: {
   onOpen: () => void;
+  onEdit: () => void;
   onDelete: () => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -681,7 +693,11 @@ function RowMenu({
         <MoreVerticalIcon className="w-4 h-4" />
       </button>
       {open && (
-        <div className="absolute right-0 top-9 z-30 min-w-48 bg-bg-base border border-border rounded-lg shadow-lg py-1 animate-fade-in">
+        <FloatingLayer
+          anchorRef={ref}
+          align="right"
+          className="min-w-48 bg-bg-base border border-border rounded-lg shadow-lg py-1 animate-fade-in"
+        >
           {confirming ? (
             <>
               <p className="px-3.5 py-2 text-xs text-text-muted">
@@ -703,10 +719,18 @@ function RowMenu({
             <>
               <MenuItem
                 icon={<EyeIcon className="w-4 h-4" />}
-                label="View & receive"
+                label="View details"
                 onClick={() => {
                   setOpen(false);
                   onOpen();
+                }}
+              />
+              <MenuItem
+                icon={<PencilIcon className="w-4 h-4" />}
+                label="Edit receiving"
+                onClick={() => {
+                  setOpen(false);
+                  onEdit();
                 }}
               />
               <MenuItem
@@ -717,7 +741,7 @@ function RowMenu({
               />
             </>
           )}
-        </div>
+        </FloatingLayer>
       )}
     </div>
   );
@@ -725,23 +749,217 @@ function RowMenu({
 
 // ── Detail ───────────────────────────────────────────────────────────────────
 
+function ReceivingInfoView({
+  receiving,
+}: {
+  receiving: Receiving;
+}): React.JSX.Element {
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+        <h3 className="mb-3 text-sm font-semibold text-text-primary">Receiving</h3>
+        <dl className="grid gap-3 sm:grid-cols-2">
+          <ReadOnlyField label="Receiving no." value={receiving.receiving_no} copyable />
+          <ReadOnlyField label="Shipment no." value={receiving.shipment_no} copyable />
+          <ReadOnlyField label="Voucher no." value={receiving.voucher_no} copyable />
+          <ReadOnlyField label="Supplier / Factory" value={receiving.supplier_name} />
+        </dl>
+      </div>
+      <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+        <h3 className="mb-3 text-sm font-semibold text-text-primary">Gate details</h3>
+        <dl className="grid gap-3 sm:grid-cols-2">
+          <ReadOnlyField label="Gate" value={receiving.gate} />
+          <ReadOnlyField label="Received date" value={formatDate(receiving.received_date)} />
+          <ReadOnlyField label="Packages" value={formatQty(receiving.total_packages)} />
+          <ReadOnlyField
+            label="Quantity"
+            value={formatStoredQuantity(receiving.total_qty, receiving.total_unit)}
+          />
+        </dl>
+      </div>
+    </div>
+  );
+}
+
+function ReceivingCostsView({
+  receiving,
+}: {
+  receiving: Receiving;
+}): React.JSX.Element {
+  return (
+    <TableContainer>
+      <Thead>
+        <Tr>
+          <Th>Location</Th>
+          <Th>Carrier</Th>
+          <Th>Cost type</Th>
+          <Th className="text-right">Amount</Th>
+          <Th>Note</Th>
+        </Tr>
+      </Thead>
+      <Tbody>
+        {receiving.costs.length === 0 ? (
+          <Tr>
+            <Td colSpan={5} className="text-sm text-text-muted">
+              Nothing charged for this delivery yet.
+            </Td>
+          </Tr>
+        ) : (
+          receiving.costs.map((cost) => (
+            <Tr key={cost.cost_id}>
+              <Td>{cost.stage || "—"}</Td>
+              <Td>{cost.carrier || "—"}</Td>
+              <Td>{cost.kind || "—"}</Td>
+              <Td className="text-right tabular-nums">
+                {formatKyat(cost.amount)}
+              </Td>
+              <Td className="whitespace-normal break-words text-text-muted">
+                {cost.note || "—"}
+              </Td>
+            </Tr>
+          ))
+        )}
+        <Tr className="bg-bg-subtle hover:bg-bg-subtle">
+          <Td colSpan={3} className="font-semibold">Total</Td>
+          <Td className="text-right tabular-nums font-semibold text-brand">
+            {formatKyat(totalCost(receiving))}
+          </Td>
+          <Td />
+        </Tr>
+      </Tbody>
+    </TableContainer>
+  );
+}
+
+/** One package's contents, read-only — the counterpart to the input table in edit mode.
+ *  Each product gets one row of its own height across every column (Product, Colors,
+ *  Qty), the same rule the edit-mode table uses, so a two-product package lines up
+ *  instead of stacking mismatched line-counts into one cramped cell. */
+function ReceivingPackagesView({
+  receiving,
+}: {
+  receiving: Receiving;
+}): React.JSX.Element {
+  return receiving.packages.length === 0 ? (
+    <p className="text-sm text-text-muted">No packages recorded yet.</p>
+  ) : (
+    <TableContainer>
+      <Thead>
+        <Tr>
+          <Th className="w-36">Package</Th>
+          <Th className="w-32">Received date</Th>
+          <Th className="min-w-[12rem]">Stock code</Th>
+          <Th className="min-w-[10rem]">Colors</Th>
+          <Th className="text-right w-28">Received qty</Th>
+          <Th className="min-w-[12rem]">Note</Th>
+        </Tr>
+      </Thead>
+      <Tbody>
+        {receiving.packages.map((entry) => {
+          return (
+            <Tr key={entry.package_id}>
+              <Td className="align-top">
+                <div className="flex flex-col items-start gap-2">
+                  <span className="font-semibold text-brand">
+                    #{entry.package_no}
+                  </span>
+                  <OpenedToggle
+                    opened={entry.opened}
+                    onToggle={() => undefined}
+                    disabled
+                  />
+                </div>
+              </Td>
+              <Td className="align-top whitespace-nowrap">
+                {entry.received_date ? formatDate(entry.received_date) : "—"}
+              </Td>
+              {entry.items.length === 0 ? (
+                <>
+                  <Td className="align-top text-text-muted">
+                    Nothing recorded yet
+                  </Td>
+                  <Td className="align-top text-text-muted">—</Td>
+                  <Td className="align-top text-right text-text-muted">—</Td>
+                  <Td className="align-top text-text-secondary">
+                    {entry.note || "—"}
+                  </Td>
+                </>
+              ) : (
+                <>
+                  <Td className="align-top">
+                    <div className="flex flex-col divide-y divide-border">
+                      {entry.items.map((item) => (
+                        <div
+                          key={item.item_id}
+                          className="min-h-9 py-1.5 flex items-center gap-2 first:pt-0 last:pb-0"
+                        >
+                          <span className="text-sm font-semibold text-brand whitespace-nowrap">
+                            {item.stock_code || "No stock code"}
+                          </span>
+                </div>
+                      ))}
+                    </div>
+                  </Td>
+                  <Td className="align-top">
+                    <div className="flex flex-col divide-y divide-border">
+                      {entry.items.map((item) => (
+                        <div
+                          key={item.item_id}
+                          className="min-h-9 py-1.5 flex items-center font-mono text-xs text-text-secondary first:pt-0 last:pb-0"
+                        >
+                          {item.color_qty || "—"}
+                        </div>
+                      ))}
+                    </div>
+                  </Td>
+                  <Td className="align-top text-right">
+                    <div className="flex flex-col divide-y divide-border">
+                      {entry.items.map((item) => (
+                        <div
+                          key={item.item_id}
+                          className="min-h-9 py-1.5 flex items-center justify-end tabular-nums font-semibold text-success first:pt-0 last:pb-0"
+                        >
+                          {formatStoredQuantity(item.qty, item.unit)}
+                        </div>
+                      ))}
+                    </div>
+                  </Td>
+                  <Td className="align-top whitespace-normal break-words text-text-secondary">
+                    {entry.note || "—"}
+                  </Td>
+                </>
+              )}
+            </Tr>
+          );
+        })}
+      </Tbody>
+    </TableContainer>
+  );
+}
+
 function ReceivingDetail({
   receiving: initialReceiving,
+  initialMode,
   onBack,
   onSave,
   onDelete,
 }: {
   receiving: Receiving;
+  initialMode: ReceivingDetailMode;
   onBack: () => void;
   onSave: (receiving: Receiving) => Promise<void>;
   onDelete: () => void;
 }): React.JSX.Element {
   const [receiving, setReceiving] = useState(initialReceiving);
+  const [detailMode, setDetailMode] = useState<ReceivingDetailMode>(initialMode);
   const [saving, setSaving] = useState(false);
+  const [addingCostId, setAddingCostId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   useEffect(() => {
     setReceiving(initialReceiving);
+    setAddingCostId(null);
   }, [initialReceiving]);
+  const hasChanges = JSON.stringify(receiving) !== JSON.stringify(initialReceiving);
 
   function apply(patch: Partial<Receiving>): void {
     setReceiving((current) => ({ ...current, ...patch }));
@@ -808,18 +1026,29 @@ function ReceivingDetail({
   }
 
   function addCost(): void {
+    if (addingCostId) return;
+    const cost = emptyCost(receiving.receiving_id, receiving.gate);
+    setAddingCostId(cost.cost_id);
     apply({
-      costs: [
-        ...receiving.costs,
-        emptyCost(receiving.receiving_id, receiving.gate),
-      ],
+      costs: [...receiving.costs, cost],
     });
   }
 
   function removeCost(index: number): void {
+    if (receiving.costs[index]?.cost_id === addingCostId) {
+      setAddingCostId(null);
+    }
     apply({
       costs: receiving.costs.filter((_, position) => position !== index),
     });
+  }
+
+  function cancelAddCost(): void {
+    if (!addingCostId) return;
+    apply({
+      costs: receiving.costs.filter((cost) => cost.cost_id !== addingCostId),
+    });
+    setAddingCostId(null);
   }
 
   function setItem(
@@ -908,20 +1137,54 @@ function ReceivingDetail({
       </div>
 
       <Panel>
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-          <h2 className="text-lg font-semibold text-text-primary tracking-tight">
-            Receiving details
-          </h2>
-          <div className="flex items-center gap-2">
-            <StatusBadge status={receivingStatus(receiving)} />
-            <Button
-              size="sm"
-              onClick={() => void saveChanges()}
-              loading={saving}
-            >
-              <CheckIcon className="w-4 h-4" />
-              Save changes
-            </Button>
+        <div className="grid items-center gap-3 px-6 py-4 border-b border-border lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-semibold text-text-primary tracking-tight">
+                {receiving.receiving_no}
+              </h2>
+              <StatusBadge status={receivingStatus(receiving)} />
+            </div>
+            <p className="mt-0.5 truncate text-sm text-text-muted">
+              {receiving.supplier_name} · {formatDate(receiving.received_date)}
+            </p>
+          </div>
+          <div
+            role="tablist"
+            aria-label="Receiving detail mode"
+            className="order-2 flex w-full rounded-md bg-bg-subtle p-0.5 lg:order-none lg:w-auto lg:justify-self-center"
+          >
+            {(["view", "edit"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                role="tab"
+                aria-selected={detailMode === mode}
+                onClick={() => setDetailMode(mode)}
+                className={cn(
+                  "flex-1 rounded-[5px] px-4 py-1.5 text-sm font-medium capitalize transition-colors duration-150 sm:flex-none",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+                  detailMode === mode
+                    ? "bg-brand text-white shadow-sm"
+                    : "text-text-muted hover:text-text-primary",
+                )}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+          <div className="order-3 flex items-center gap-2 lg:order-none lg:justify-self-end">
+            {(detailMode === "edit" || hasChanges) && (
+              <Button
+                size="sm"
+                onClick={() => void saveChanges()}
+                loading={saving}
+                disabled={!hasChanges}
+              >
+                <CheckIcon className="w-4 h-4" />
+                Save changes
+              </Button>
+            )}
             {confirmDelete ? (
               <>
                 <Button variant="destructive" size="sm" onClick={onDelete}>
@@ -938,9 +1201,8 @@ function ReceivingDetail({
               </>
             ) : (
               <Button
-                variant="ghost"
+                variant="destructive"
                 size="sm"
-                className={SOFT_RED}
                 onClick={() => setConfirmDelete(true)}
               >
                 <TrashIcon className="w-4 h-4" />
@@ -953,6 +1215,10 @@ function ReceivingDetail({
         <div className="px-6 py-6 flex flex-col gap-8">
           <section>
             <SectionLabel>Step 1 — what we should receive</SectionLabel>
+            {detailMode === "view" ? (
+              <ReceivingInfoView receiving={receiving} />
+            ) : (
+              <>
             <dl className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
               <ReadOnlyField
                 label="Receiving no."
@@ -1006,11 +1272,17 @@ function ReceivingDetail({
                 onUnitChange={(total_unit) => apply({ total_unit })}
               />
             </div>
+              </>
+            )}
           </section>
 
           <section>
             <SectionLabel>Costs</SectionLabel>
-            <TableContainer>
+            {detailMode === "view" ? (
+              <ReceivingCostsView receiving={receiving} />
+            ) : (
+              <>
+              <TableContainer>
               <Thead className="top-0">
                 <Tr>
                   <Th>Location</Th>
@@ -1087,7 +1359,7 @@ function ReceivingDetail({
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
                         )}
                       >
-                        <CloseIcon className="w-4 h-4" />
+                        <TrashIcon className="w-4 h-4" />
                       </button>
                     </Td>
                   </Tr>
@@ -1111,19 +1383,31 @@ function ReceivingDetail({
               </Tbody>
             </TableContainer>
             <div className="mt-3">
-              <Button
-                variant="secondary"
-                className={SOFT_BLUE}
-                onClick={addCost}
-              >
+              <Button size="sm" onClick={addCost}>
                 <PlusIcon className="w-4 h-4" />
                 Add a cost
               </Button>
+              {addingCostId && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={cancelAddCost}
+                  className={cn(SOFT_RED, "ml-2")}
+                >
+                  Cancel
+                </Button>
+              )}
             </div>
+              </>
+            )}
           </section>
 
           <section>
             <SectionLabel>Step 2 — what we received</SectionLabel>
+            {detailMode === "view" ? (
+              <ReceivingPackagesView receiving={receiving} />
+            ) : (
+              <>
             <CountCheck
               counted={counted}
               expected={expectedPairs(receiving)}
@@ -1137,195 +1421,184 @@ function ReceivingDetail({
                 row appears for each one.
               </p>
             ) : (
-              <div className="flex flex-col gap-3">
-                {receiving.packages.map((entry, index) => (
-                  <article
-                    key={entry.package_id}
-                    className="overflow-hidden rounded-xl border border-border bg-bg-base"
-                  >
-                    <div className="flex flex-col gap-3 bg-bg-subtle/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex items-center gap-3">
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-subtle text-sm font-bold text-brand">
-                          {entry.package_no}
-                        </span>
-                        <div>
-                          <h3 className="text-sm font-semibold text-text-primary">
-                            Package {entry.package_no}
-                          </h3>
-                          <p className="text-xs text-text-muted">
-                            {entry.opened
-                              ? `${formatQty(entry.items.length)} ${entry.items.length === 1 ? "product" : "products"} recorded`
-                              : "Open package to record its contents"}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-3 sm:justify-end">
-                        <OpenedToggle
-                          opened={entry.opened}
-                          onToggle={() => toggleOpened(index)}
-                        />
-                        <div className="min-w-[5rem] text-right">
-                          <span className="block text-[0.65rem] font-semibold uppercase tracking-wide text-text-muted">
-                            Counted
-                          </span>
-                          <span className="block text-sm font-bold tabular-nums text-text-primary">
-                            {formatIn(packagePairs(entry), "set")}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-3 border-t border-border px-4 py-4 sm:grid-cols-2">
-                      <Input
-                        label={`Date package ${entry.package_no} was received`}
-                        type="date"
-                        className={EDITABLE}
-                        value={entry.received_date}
-                        onChange={(event) =>
-                          setPackage(index, {
-                            received_date: event.target.value,
-                          })
-                        }
-                      />
-                      <Input
-                        label={`Note on package ${entry.package_no}`}
-                        placeholder="Optional note"
-                        className={EDITABLE}
-                        value={entry.note}
-                        onChange={(event) =>
-                          setPackage(index, { note: event.target.value })
-                        }
-                      />
-                    </div>
-
-                    {entry.opened && (
-                      <div className="border-t border-border px-4 py-4">
-                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <h4 className="text-sm font-semibold text-text-primary">
-                              Products in package
-                            </h4>
-                            <p className="text-xs text-text-muted">
-                              Enter one stock code per product. The larger
-                              fields make counting easier at the gate.
-                            </p>
+              <>
+                <TableContainer>
+                  <Thead>
+                    <Tr>
+                      <Th>Package</Th>
+                      <Th>Received date</Th>
+                      <Th>Stock code</Th>
+                      <Th>Colors</Th>
+                      <Th className="text-right">Received qty</Th>
+                      <Th>Note</Th>
+                    </Tr>
+                  </Thead>
+                  <Tbody>
+                    {receiving.packages.flatMap((entry, index) => {
+                      const rowCount = Math.max(entry.items.length, 1);
+                      const packageCell = (
+                        <Td
+                          rowSpan={rowCount}
+                          className="align-top"
+                        >
+                          <div className="flex min-w-[9rem] flex-col items-start gap-2">
+                            <span className="font-semibold text-brand">
+                              #{entry.package_no}
+                            </span>
+                            <OpenedToggle
+                              opened={entry.opened}
+                              onToggle={() => toggleOpened(index)}
+                            />
                           </div>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            className={SOFT_BLUE}
-                            onClick={() => addItem(index)}
-                          >
-                            <PlusIcon className="h-4 w-4" />
-                            Add product
-                          </Button>
-                        </div>
+                        </Td>
+                      );
+                      const receivedDateCell = (
+                        <Td rowSpan={rowCount} className="align-top">
+                          <CellInput
+                            label={`Received date for package ${entry.package_no}`}
+                            placeholder="YYYY-MM-DD"
+                            type="date"
+                            value={entry.received_date}
+                            onChange={(received_date) =>
+                              setPackage(index, { received_date })
+                            }
+                          />
+                        </Td>
+                      );
+                      const noteCell = (
+                        <Td rowSpan={rowCount} className="align-top">
+                          <CellInput
+                            label={`Note on package ${entry.package_no}`}
+                            placeholder="Optional note"
+                            value={entry.note}
+                            onChange={(note) => setPackage(index, { note })}
+                          />
+                        </Td>
+                      );
+                      const packageTotalRow = (
+                        <Tr
+                          key={`${entry.package_id}-total`}
+                          className="bg-bg-subtle hover:bg-bg-subtle"
+                        >
+                          <Td colSpan={2} className="font-semibold">
+                            Total
+                          </Td>
+                          <Td className="font-semibold tabular-nums">
+                            <span className="mr-2 text-xs font-medium text-text-muted">
+                              Products
+                            </span>
+                            {formatQty(entry.items.length)}
+                          </Td>
+                          <Td />
+                          <Td className="text-right font-semibold tabular-nums text-success">
+                            {formatIn(packagePairs(entry), "set")}
+                          </Td>
+                          <Td className="text-right">
+                            {entry.opened ? (
+                              <Button size="sm" onClick={() => addItem(index)}>
+                                <PlusIcon className="h-4 w-4" />
+                                Add product
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-text-muted">
+                                Open package first
+                              </span>
+                            )}
+                          </Td>
+                        </Tr>
+                      );
 
-                        <div className="grid gap-3 xl:grid-cols-2">
-                          {entry.items.map((item, itemIndex) => (
-                            <div
-                              key={item.item_id}
-                              className="rounded-lg border border-border bg-bg-subtle/50 p-3"
-                            >
-                              <div className="mb-3 flex items-center justify-between gap-2">
-                                <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-                                  Product {itemIndex + 1}
-                                </span>
+                      if (!entry.opened || entry.items.length === 0) {
+                        return [
+                          <Tr key={entry.package_id}>
+                            {packageCell}
+                            {receivedDateCell}
+                            <Td colSpan={3} className="text-sm text-text-muted">
+                              {entry.opened
+                                ? "Add a product to record what was received"
+                                : "Open package to record products"}
+                            </Td>
+                            {noteCell}
+                          </Tr>,
+                          packageTotalRow,
+                        ];
+                      }
+
+                      return [
+                        ...entry.items.map((item, itemIndex) => (
+                          <Tr key={item.item_id}>
+                            {itemIndex === 0 && packageCell}
+                            {itemIndex === 0 && receivedDateCell}
+                            <Td className="align-top">
+                              <div className="min-w-[12rem] flex items-start gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <SuggestInput
+                                    label={`Stock code for product ${itemIndex + 1} in package ${entry.package_no}`}
+                                    placeholder="A1001"
+                                    suggestions={STOCK_CODES}
+                                    bare
+                                    value={item.stock_code}
+                                    onChange={(next) =>
+                                      setStockCode(index, itemIndex, next)
+                                    }
+                                  />
+                                </div>
                                 <button
                                   type="button"
                                   onClick={() => removeItem(index, itemIndex)}
                                   title="Remove this product"
                                   aria-label={`Remove product ${itemIndex + 1} from package ${entry.package_no}`}
                                   className={cn(
-                                    "rounded-md p-1 text-text-muted",
+                                    "mt-1 rounded-md p-1 text-text-muted",
                                     "transition-colors duration-150",
                                     "hover:bg-error-subtle hover:text-error",
                                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
                                   )}
                                 >
-                                  <CloseIcon className="h-4 w-4" />
+                                  <TrashIcon className="h-4 w-4" />
                                 </button>
                               </div>
-
-                              <div className="grid gap-3 sm:grid-cols-2">
-                                <SuggestInput
-                                  label={`Stock code for product ${itemIndex + 1} in package ${entry.package_no}`}
-                                  placeholder="A1001"
-                                  suggestions={STOCK_CODES}
-                                  value={item.stock_code}
-                                  onChange={(next) =>
-                                    setStockCode(index, itemIndex, next)
-                                  }
-                                />
-                                <Input
-                                  label="Product description"
-                                  placeholder="Men's leather sandal"
-                                  className={EDITABLE}
-                                  value={item.description}
-                                  onChange={(event) =>
-                                    setItem(index, itemIndex, {
-                                      description: event.target.value,
-                                    })
-                                  }
-                                />
-                                <div className="flex flex-col gap-1.5">
-                                  <label className="text-sm font-medium text-text-secondary">
-                                    Group
-                                  </label>
-                                  <GroupSelect
-                                    label={`Group for ${item.stock_code || "this product"} in package ${entry.package_no}`}
-                                    value={item.group}
-                                    onChange={(group) =>
-                                      setItem(index, itemIndex, { group })
-                                    }
-                                  />
-                                </div>
-                                <Input
-                                  label="Colors and quantities"
-                                  placeholder="black10s,pink2p"
-                                  className={EDITABLE}
-                                  error={
-                                    colorQtyProblem(item.color_qty) ?? undefined
-                                  }
-                                  value={item.color_qty}
-                                  onChange={(event) =>
-                                    setColorQty(
-                                      index,
-                                      itemIndex,
-                                      event.target.value,
-                                    )
-                                  }
-                                />
-                                <QuantityInput
-                                  label="Quantity"
-                                  unitLabel={`Unit for ${item.stock_code || "this product"} in package ${entry.package_no}`}
-                                  hint="Calculated from colors"
-                                  readOnly
-                                  value={String(item.qty)}
-                                  unit={item.unit}
-                                  onChange={() => undefined}
-                                  onUnitChange={() => undefined}
-                                />
+                            </Td>
+                            <Td className="align-top">
+                              <CellInput
+                                label={`Colors for product ${itemIndex + 1} in package ${entry.package_no}`}
+                                placeholder="black10s, pink2p"
+                                multiline
+                                error={
+                                  colorQtyProblem(item.color_qty) ?? undefined
+                                }
+                                value={item.color_qty}
+                                onChange={(color_qty) =>
+                                  setColorQty(index, itemIndex, color_qty)
+                                }
+                              />
+                            </Td>
+                            <Td className="align-top text-right">
+                              <div className="min-h-9 px-2 flex items-center justify-end rounded-md bg-bg-subtle text-sm font-semibold tabular-nums text-text-primary">
+                                {formatStoredQuantity(item.qty, item.unit)}
                               </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </article>
-                ))}
-
-                <div className="flex flex-col gap-2 rounded-lg border border-border bg-bg-subtle px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <span className="font-semibold text-text-primary">
-                    Packages opened {formatQty(opened)} /{" "}
-                    {formatQty(receiving.packages.length)}
-                  </span>
-                  <span className="text-sm font-semibold tabular-nums text-success">
-                    {formatIn(counted, "set")} /{" "}
-                    {formatIn(expectedPairs(receiving), "set")} received
-                  </span>
-                </div>
-              </div>
+                            </Td>
+                            {itemIndex === 0 && noteCell}
+                          </Tr>
+                        )),
+                        packageTotalRow,
+                      ];
+                    })}
+                    <Tr className="bg-bg-subtle hover:bg-bg-subtle">
+                      <Td colSpan={4} className="font-semibold">
+                        Packages opened {formatQty(opened)} /{" "}
+                        {formatQty(receiving.packages.length)}
+                      </Td>
+                      <Td colSpan={2} className="text-right font-semibold text-success">
+                        {formatIn(counted, "set")} /{" "}
+                        {formatIn(expectedPairs(receiving), "set")} received
+                      </Td>
+                    </Tr>
+                  </Tbody>
+                </TableContainer>
+              </>
+            )}
+              </>
             )}
           </section>
         </div>
@@ -1387,22 +1660,25 @@ function CountCheck({
 function OpenedToggle({
   opened,
   onToggle,
+  disabled = false,
 }: {
   opened: boolean;
   onToggle: () => void;
+  disabled?: boolean;
 }): React.JSX.Element {
   return (
     <button
       type="button"
       onClick={onToggle}
+      disabled={disabled}
       aria-pressed={opened}
       className={cn(
-        "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap",
+        "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold whitespace-nowrap shadow-sm",
         "transition-colors duration-150",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
         opened
-          ? "bg-success-subtle text-success hover:bg-success-subtle"
-          : "bg-bg-raised text-text-muted hover:bg-bg-subtle",
+          ? "border-brand bg-brand-subtle text-brand hover:bg-brand-subtle"
+          : "border-border bg-bg-base text-text-secondary hover:border-brand hover:bg-brand-subtle hover:text-brand",
       )}
     >
       {opened && <CheckIcon className="w-3.5 h-3.5" />}

@@ -6,6 +6,7 @@ import {
   CountField,
   EDITABLE,
   FigureCard,
+  FloatingLayer,
   MenuItem,
   PAGE_SIZE,
   Panel,
@@ -567,7 +568,11 @@ function RowMenu({
         <MoreVerticalIcon className="w-4 h-4" />
       </button>
       {open && (
-        <div className="absolute right-0 top-9 z-30 min-w-48 bg-bg-base border border-border rounded-lg shadow-lg py-1 animate-fade-in">
+        <FloatingLayer
+          anchorRef={ref}
+          align="right"
+          className="min-w-48 bg-bg-base border border-border rounded-lg shadow-lg py-1 animate-fade-in"
+        >
           {confirming ? (
             <>
               <p className="px-3.5 py-2 text-xs text-text-muted">
@@ -603,7 +608,7 @@ function RowMenu({
               />
             </>
           )}
-        </div>
+        </FloatingLayer>
       )}
     </div>
   );
@@ -629,6 +634,15 @@ function ShipmentDetail({
     setDraft(serverShipment);
   }, [serverShipment]);
   const shipment = draft;
+  const { receivings, vouchers } = useWholesale();
+  const voucher = vouchers.find((entry) => entry.voucher_no === shipment.voucher_no);
+  // Same rule as when the shipment is first created: flag it plainly, but let it stand
+  // — a real short-shipment happens, and this should not block saving it.
+  const quantityMismatch =
+    voucher && shipmentPairs(shipment) !== voucher.total_qty
+      ? `The voucher says ${formatIn(voucher.total_qty, "set")}.`
+      : undefined;
+  const hasChanges = JSON.stringify(shipment) !== JSON.stringify(serverShipment);
 
   const pct = arrivedPct(shipment);
   const heading = intoFinal(shipment);
@@ -700,15 +714,23 @@ function ShipmentDetail({
 
       <Panel>
         <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-          <h2 className="text-lg font-semibold text-text-primary tracking-tight">
-            Shipment details
-          </h2>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-semibold text-text-primary tracking-tight">
+                {shipment.shipment_no}
+              </h2>
+              <StatusBadge status={shipmentStatus(shipment)} />
+            </div>
+            <p className="mt-0.5 truncate text-sm text-text-muted">
+              {shipment.supplier_name} · {formatDate(shipment.sent_date)}
+            </p>
+          </div>
           <div className="flex items-center gap-2">
-            <StatusBadge status={shipmentStatus(shipment)} />
             <Button
               size="sm"
               onClick={() => void saveChanges()}
               loading={saving}
+              disabled={!hasChanges}
             >
               <CheckIcon className="w-4 h-4" />
               Save changes
@@ -730,9 +752,8 @@ function ShipmentDetail({
               </>
             ) : (
               <Button
-                variant="ghost"
+                variant="destructive"
                 size="sm"
-                className={SOFT_RED}
                 onClick={() => setConfirmDelete(true)}
               >
                 <TrashIcon className="w-4 h-4" />
@@ -745,66 +766,73 @@ function ShipmentDetail({
         <div className="px-6 py-6 flex flex-col gap-8">
           <section>
             <SectionLabel>Shipment information</SectionLabel>
-            {/* The three facts that came from the voucher stay as they are; everything a
-                shipment can genuinely change about itself is typed straight in. */}
-            <dl className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-              <ReadOnlyField
-                label="Shipment no."
-                value={shipment.shipment_no}
-                copyable
-              />
-              <ReadOnlyField
-                label="Voucher no."
-                value={shipment.voucher_no}
-                copyable
-              />
-              <ReadOnlyField
-                label="Supplier / Factory"
-                value={shipment.supplier_name}
-              />
-            </dl>
-            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 mt-4">
-              <SuggestInput
-                label="Cargo"
-                placeholder="Shwe Moe Cargo"
-                suggestions={CARGO_NAMES}
-                value={shipment.cargo_name}
-                onChange={(next) => apply({ cargo_name: next })}
-              />
-              <SuggestInput
-                label="Receiving gate"
-                placeholder="Bogyoke Rd, Mawlamyine"
-                suggestions={RECEIVING_GATES}
-                value={shipment.final_location}
-                onChange={(next) => apply({ final_location: next })}
-              />
-              <Input
-                label="Sent on"
-                type="date"
-                className={EDITABLE}
-                value={shipment.sent_date}
-                onChange={(event) => apply({ sent_date: event.target.value })}
-              />
-              {/* Packages is a plain count; Quantity carries its unit picker too, so it
-                  takes the larger share of the pair. */}
-              <div className="grid grid-cols-5 gap-3">
-                <div className="col-span-2">
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                <h3 className="mb-3 text-sm font-semibold text-text-primary">
+                  Shipment
+                </h3>
+                <dl className="grid gap-3 sm:grid-cols-2">
+                  <ReadOnlyField
+                    label="Shipment no."
+                    value={shipment.shipment_no}
+                    copyable
+                  />
+                  <ReadOnlyField
+                    label="Voucher no."
+                    value={shipment.voucher_no}
+                    copyable
+                  />
+                  <ReadOnlyField
+                    label="Supplier / Factory"
+                    value={shipment.supplier_name}
+                  />
+                </dl>
+              </div>
+              <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                <h3 className="mb-3 text-sm font-semibold text-text-primary">
+                  Delivery
+                </h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <SuggestInput
+                    label="Cargo"
+                    placeholder="Shwe Moe Cargo"
+                    suggestions={CARGO_NAMES}
+                    value={shipment.cargo_name}
+                    onChange={(next) => apply({ cargo_name: next })}
+                  />
+                  <SuggestInput
+                    label="Receiving gate"
+                    placeholder="Bogyoke Rd, Mawlamyine"
+                    suggestions={RECEIVING_GATES}
+                    value={shipment.final_location}
+                    onChange={(next) => apply({ final_location: next })}
+                  />
+                  <Input
+                    label="Sent on"
+                    type="date"
+                    className={EDITABLE}
+                    value={shipment.sent_date}
+                    onChange={(event) =>
+                      apply({ sent_date: event.target.value })
+                    }
+                  />
                   <CountField
                     label="Packages"
                     value={shipment.total_packages}
                     onChange={(next) => apply({ total_packages: next })}
                   />
-                </div>
-                <div className="col-span-3">
-                  <QuantityField
-                    label="Quantity"
-                    unitLabel="Unit the goods are counted in"
-                    value={shipment.total_qty}
-                    unit={shipment.total_unit}
-                    hint={formatIn(shipmentPairs(shipment), "pair")}
-                    onChange={(next) => apply({ total_qty: next })}
-                    onUnitChange={(total_unit) => apply({ total_unit })}
-                  />
+                  <div className="sm:col-span-1">
+                    <QuantityField
+                      label="Quantity"
+                      unitLabel="Unit the products are counted in"
+                      value={shipment.total_qty}
+                      unit={shipment.total_unit}
+                      hint={formatIn(shipmentPairs(shipment), "pair")}
+                      error={quantityMismatch}
+                      onChange={(next) => apply({ total_qty: next })}
+                      onUnitChange={(total_unit) => apply({ total_unit })}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -812,7 +840,7 @@ function ShipmentDetail({
 
           <section>
             <SectionLabel>Delivery journey</SectionLabel>
-            <DeliveryJourney shipment={shipment} />
+            <DeliveryJourney shipment={shipment} receivings={receivings} />
           </section>
 
           <section>
@@ -1023,8 +1051,7 @@ function ShipmentDetail({
             ) : insertAt === null ? (
               <div className="mt-3">
                 <Button
-                  variant="secondary"
-                  className={SOFT_BLUE}
+                  size="sm"
                   onClick={() => {
                     setInsertAt(shipment.legs.length);
                     setEditingLeg(null);
@@ -1316,6 +1343,16 @@ function NewShipmentForm({
     cargoName.trim() !== "" &&
     finalLocation.trim() !== "";
 
+  // The voucher already says what is coming — flag it plainly if what's being shipped
+  // reads differently, rather than leave a quiet hint as the only sign of a mismatch.
+  // Still lets the shipment go: a real short-shipment happens, but a typo should not
+  // read as one.
+  const quantityMismatch =
+    voucher && totalSets.trim() !== "" &&
+    toPairs(Number(totalSets) || 0, totalUnit) !== voucher.total_qty
+      ? `The voucher says ${formatIn(voucher.total_qty, "set")}.`
+      : undefined;
+
   function updateStop(index: number, patch: Partial<DraftStop>): void {
     setStops((current) =>
       current.map((stop, position) =>
@@ -1456,11 +1493,12 @@ function NewShipmentForm({
               />
               <QuantityInput
                 label="Quantity"
-                unitLabel="Unit the goods are counted in"
+                unitLabel="Unit the products are counted in"
                 value={totalSets}
                 unit={totalUnit}
                 onChange={setTotalSets}
                 onUnitChange={setTotalUnit}
+                error={quantityMismatch}
                 hint={
                   voucher
                     ? `${formatIn(voucher.total_qty, "set")} on the voucher.`

@@ -354,6 +354,11 @@ function App(): React.JSX.Element {
   // there — read once on mount by InventoryPage, same pattern as dashboardTarget above.
   const [inventoryTarget, setInventoryTarget] =
     useState<InventorySubTab | null>(null);
+  // Receiving number to open when Inventory sends someone directly to the receiving
+  // that counted a stock movement. ReceivingPage consumes and clears it after loading.
+  const [receivingTarget, setReceivingTarget] = useState<string | null>(null);
+  // Order to open when supplier planning finds a customer line without a factory.
+  const [orderTarget, setOrderTarget] = useState<string | null>(null);
   // Which branch the Dashboard's Overview tab has open (null = the all-branches page).
   // Held here rather than inside the tab because switching to Revenue unmounts that tab,
   // and coming back should return to the branch you were reading, not to the branch list.
@@ -605,6 +610,7 @@ function App(): React.JSX.Element {
     setPendingImportQueueTotal(0);
     setViewingBatchId(null);
     setHighlightBatchId(null);
+    setReceivingTarget(null);
     setWorkspace(next);
     window.localStorage.setItem(WORKSPACE_STORAGE_KEY, next);
     setSection(WORKSPACE_NAV_ITEMS[next][0].id as Section);
@@ -719,6 +725,7 @@ function App(): React.JSX.Element {
     setPendingImportQueueTotal(0);
     setViewingBatchId(null);
     setHighlightBatchId(null);
+    if (id !== "receiving") setReceivingTarget(null);
     setSection(id as Section);
   }
 
@@ -1007,11 +1014,39 @@ function App(): React.JSX.Element {
                   onFileReady={handleFileReady}
                 />
               )}
-              {section === "orders" && <CustomerOrdersPage session={session} />}
-              {section === "vouchers" && <SupplierVouchersPage session={session} />}
+              {section === "orders" && (
+                <CustomerOrdersPage
+                  session={session}
+                  initialOrderId={orderTarget}
+                  onInitialOrderOpened={() => setOrderTarget(null)}
+                />
+              )}
+              {section === "vouchers" && (
+                <SupplierVouchersPage
+                  session={session}
+                  onOpenOrder={(orderId) => {
+                    setOrderTarget(orderId);
+                    setSection("orders");
+                  }}
+                />
+              )}
               {section === "delivery" && <DeliveryPage session={session} />}
-              {section === "receiving" && <ReceivingPage session={session} />}
-              {section === "stock" && <WholesaleInventoryPage session={session} />}
+              {section === "receiving" && (
+                <ReceivingPage
+                  session={session}
+                  initialReceivingNo={receivingTarget}
+                  onInitialReceivingOpened={() => setReceivingTarget(null)}
+                />
+              )}
+              {section === "stock" && (
+                <WholesaleInventoryPage
+                  session={session}
+                  onOpenReceiving={(receivingNo) => {
+                    setReceivingTarget(receivingNo);
+                    setSection("receiving");
+                  }}
+                />
+              )}
               {section === "wholesale" && <WholesalePlaceholder />}
               {section === "settings" && (
                 <SettingsPage

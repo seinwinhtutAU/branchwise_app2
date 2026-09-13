@@ -8,7 +8,7 @@ from app.db.session import get_db
 from app.models.user import User, UserRole
 from app.schemas.wholesale_supplier_vouchers import SupplierVoucherIn, VoucherPaymentIn
 from app.services.branches import resolve_branch_id
-from app.services.wholesale_supplier_vouchers import add_payment, create_voucher, delete_payment, delete_voucher, get_voucher, list_vouchers, received_pairs_by_voucher_no, update_voucher
+from app.services.wholesale_supplier_vouchers import add_payment, create_voucher, delete_payment, delete_voucher, get_voucher, list_vouchers, received_pairs_by_voucher_no, received_pairs_by_voucher_stock, update_voucher
 
 router = APIRouter(prefix="/api/wholesale/supplier-vouchers", tags=["wholesale"])
 
@@ -18,23 +18,46 @@ def _require_wholesale(user: User) -> None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This account cannot use the wholesale workspace")
 
 
-def _out(voucher, received_pairs: int) -> dict:
-    lines = [{"voucher_line_id": line.id, "stock_code": line.stock_code, "description": line.description,
-              "group": line.product_group.value, "color_qty": line.color_qty, "unit": line.unit.value,
-              "voucher_qty": line.wanted_pairs, "buying_price": float(line.buying_price)} for line in voucher.lines]
+def _out(voucher, received_pairs: int, received_by_stock: dict[str, int] | None = None) -> dict:
+    remaining_by_stock = dict(received_by_stock or {})
+    lines = []
+    for line in voucher.lines:
+        received = min(remaining_by_stock.get(line.stock_code, 0), line.wanted_pairs)
+        remaining_by_stock[line.stock_code] = max(
+            0, remaining_by_stock.get(line.stock_code, 0) - received
+        )
+        lines.append({"voucher_line_id": line.id, "stock_code": line.stock_code, "description": line.description,
+                      "group": line.product_group.value, "color_qty": line.color_qty, "unit": line.unit.value,
+                      "voucher_qty": line.wanted_pairs, "received_qty": received,
+                      "buying_price": float(line.buying_price)})
     payments = [{"payment_id": payment.id, "date": payment.paid_on, "amount": float(payment.amount), "note": payment.note} for payment in voucher.payments]
     total = sum(line["voucher_qty"] * line["buying_price"] for line in lines)
     paid = sum(payment["amount"] for payment in payments)
     return {"voucher_id": voucher.id, "branch_id": voucher.branch_id, "voucher_no": voucher.voucher_no,
             "supplier_name": voucher.supplier_name, "voucher_date": voucher.voucher_date,
             "cargo_name": voucher.cargo_name, "total_packages": voucher.total_packages,
-            "total_qty": sum(line["voucher_qty"] for line in lines), "received_qty": received_pairs,
+            "total_qty": sum(line["voucher_qty"] for line in lines),
+            "received_qty": sum(line["received_qty"] for line in lines),
             "lines": lines, "payment": {"account_id": voucher.id, "payments": payments},
             "total_amount": total, "paid_amount": paid, "balance": max(0, total - paid)}
 
 
 def _one(db: Session, voucher) -> dict:
-    return _out(voucher, received_pairs_by_voucher_no(db, [voucher.voucher_no], voucher.branch_id).get(voucher.voucher_no, 0))
+    received_pairs = received_pairs_by_voucher_no(
+        db, [voucher.voucher_no], voucher.branch_id
+    ).get(voucher.voucher_no, 0)
+    received_by_stock = received_pairs_by_voucher_stock(
+        db, [voucher.voucher_no], voucher.branch_id
+    )
+    return _out(
+        voucher,
+        received_pairs,
+        {
+            stock_code: pairs
+            for (voucher_no, stock_code), pairs in received_by_stock.items()
+            if voucher_no == voucher.voucher_no
+        },
+    )
 
 
 @router.get("")
@@ -50,7 +73,21 @@ def list_supplier_vouchers(
     _require_wholesale(user)
     vouchers = list_vouchers(db, user.branch_id)
     received = received_pairs_by_voucher_no(db, [voucher.voucher_no for voucher in vouchers], user.branch_id)
-    rows = [_out(voucher, received.get(voucher.voucher_no, 0)) for voucher in vouchers]
+    received_by_stock = received_pairs_by_voucher_stock(
+        db, [voucher.voucher_no for voucher in vouchers], user.branch_id
+    )
+    rows = [
+        _out(
+            voucher,
+            received.get(voucher.voucher_no, 0),
+            {
+                stock_code: pairs
+                for (voucher_no, stock_code), pairs in received_by_stock.items()
+                if voucher_no == voucher.voucher_no
+            },
+        )
+        for voucher in vouchers
+    ]
     query = search.strip().lower()
     if query:
         rows = [

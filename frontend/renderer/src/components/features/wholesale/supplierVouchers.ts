@@ -33,6 +33,8 @@ export interface SupplierVoucherLine {
   unit: Unit;
   /** Total pairs across those colors — derived from color_qty and the unit. */
   voucher_qty: number;
+  /** Total pairs received for this stock code from opened receiving packages. */
+  received_qty?: number;
   buying_price: number;
 }
 
