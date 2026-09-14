@@ -115,6 +115,9 @@ const WholesaleMonitoringPage = lazy(
 const FinancePage = lazy(
   () => import("@renderer/components/features/wholesale/FinancePage"),
 );
+const WholesaleReportsPage = lazy(
+  () => import("@renderer/components/features/wholesale/ReportsPage"),
+);
 const WarningsPage = lazy(
   () => import("@renderer/components/features/WarningsPage"),
 );
@@ -146,6 +149,7 @@ type Section =
   | "stock"
   | "monitoring"
   | "finance"
+  | "reports"
   | "wholesale"
   | "settings";
 
@@ -195,6 +199,7 @@ const RETAIL_NAV_ITEMS: NavItem[] = [
 // account still has somewhere to land and the tab doesn't disappear from admin's view.
 const WHOLESALE_NAV_ITEMS: NavItem[] = [
   { id: "monitoring", label: "Dashboard", icon: <DashboardIcon /> },
+  { id: "reports", label: "Reports", icon: <OverviewIcon /> },
   { id: "orders", label: "Customer Orders", icon: <ClipboardIcon /> },
   { id: "vouchers", label: "Supplier Vouchers", icon: <VoucherIcon /> },
   { id: "delivery", label: "Shipment", icon: <TruckIcon /> },
@@ -262,6 +267,7 @@ const SECTION_TITLES: Record<Section, string> = {
   stock: "Inventory",
   monitoring: "Dashboard",
   finance: "Finance",
+  reports: "Reports",
   wholesale: "Wholesale",
   settings: "Settings",
 };
@@ -1111,6 +1117,7 @@ function App(): React.JSX.Element {
                   }}
                 />
               )}
+              {section === "reports" && <WholesaleReportsPage session={session} />}
               {section === "wholesale" && <WholesalePlaceholder />}
               {section === "settings" && (
                 <SettingsPage
