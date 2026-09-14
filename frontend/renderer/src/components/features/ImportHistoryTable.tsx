@@ -1,10 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  flexRender,
+  getCoreRowModel,
+  getPaginationRowModel,
+  useReactTable,
+  type ColumnDef,
+  type PaginationState,
+} from "@tanstack/react-table";
 import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
-import {
-  invalidateCachedPages,
-  useCachedFetch,
-} from "@renderer/lib/useCachedFetch";
+import { invalidateEverything, useUrlQuery } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
 import { cn } from "@renderer/lib/utils";
 import { useImportFilePicker } from "@renderer/lib/useImportFilePicker";
@@ -27,7 +32,7 @@ import { Pagination } from "@renderer/components/ui/Pagination";
 import { HistoryIcon } from "@renderer/components/ui/icons";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 import { distinctValues, inDateRange } from "@renderer/lib/filters";
-import { usePagination } from "@renderer/lib/usePagination";
+import "@renderer/lib/reactTable";
 import type {
   PendingImport,
   Profile,
@@ -93,6 +98,7 @@ function statusLabel(status: string): string {
 }
 
 const DEFAULT_STATUS_FILTER = "completed";
+const EMPTY_ROWS: never[] = [];
 
 const STATUS_BADGE_VARIANT: Record<string, "success" | "info" | "default"> = {
   completed: "success",
@@ -117,15 +123,16 @@ function ImportHistoryTable({
 }: Props): React.JSX.Element {
   const showToast = useToast();
   const {
-    data: rows,
+    data: fetchedRows,
     isRefreshing,
     failed,
     reload,
-  } = useCachedFetch<ImportBatchRow[]>(
+  } = useUrlQuery<ImportBatchRow[]>(
     `${apiBaseUrl}/api/imports/history`,
     session,
     "import history",
   );
+  const rows = fetchedRows ?? null;
   const [revertingId, setRevertingId] = useState<string | null>(null);
   const { aboveRef, containerStyle } = useStickyAbove();
   const highlightRowRef = useRef<HTMLTableRowElement | null>(null);
@@ -135,14 +142,14 @@ function ImportHistoryTable({
     picking,
   } = useImportFilePicker(session, onFileReady);
 
-  function handleReimport(row: ImportBatchRow): void {
+  const handleReimport = useCallback((row: ImportBatchRow): void => {
     triggerFilePicker({
       endpoint: `/api/imports/${row.import_type}`,
       importLabel: importTypeLabel(row.import_type),
       revertBatchId: row.id,
       replacingFilename: row.filename,
     });
-  }
+  }, [triggerFilePicker]);
 
   const [typeFilter, setTypeFilter] = useState("");
   // Defaults to hiding Removed/Reimported rows — they're kept as an audit trail, not
@@ -183,21 +190,7 @@ function ImportHistoryTable({
     setDateTo("");
   }
 
-  const filteredRows = useMemo(() => {
-    if (!rows) return null;
-    return rows.filter(
-      (row) =>
-        (!typeFilter || row.import_type === typeFilter) &&
-        (!statusFilter || row.status === statusFilter) &&
-        (!branchFilter || row.branch_name === branchFilter) &&
-        inDateRange(row.created_at, { from: dateFrom, to: dateTo }),
-    );
-  }, [rows, typeFilter, statusFilter, branchFilter, dateFrom, dateTo]);
-
-  const { page, setPage, totalPages, pageItems, pageSize } =
-    usePagination(filteredRows);
-
-  async function handleRevert(batchId: string): Promise<void> {
+  const handleRevert = useCallback(async (batchId: string): Promise<void> => {
     if (
       !window.confirm("Remove this import? This deletes the data it created.")
     )
@@ -219,14 +212,148 @@ function ImportHistoryTable({
       }
       // The batch's sale/inventory/purchase rows are gone, so every cached page is now
       // wrong — including this one, which refetches itself as a result. See
-      // invalidateCachedPages.
-      invalidateCachedPages();
+      // invalidateEverything.
+      invalidateEverything();
     } catch {
       showToast("error", "Revert failed — is the backend running?");
     } finally {
       setRevertingId(null);
     }
-  }
+  }, [session, showToast]);
+
+  const filteredRows = useMemo(() => {
+    if (!rows) return null;
+    return rows.filter(
+      (row) =>
+        (!typeFilter || row.import_type === typeFilter) &&
+        (!statusFilter || row.status === statusFilter) &&
+        (!branchFilter || row.branch_name === branchFilter) &&
+        inDateRange(row.created_at, { from: dateFrom, to: dateTo }),
+    );
+  }, [rows, typeFilter, statusFilter, branchFilter, dateFrom, dateTo]);
+
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 50,
+  });
+
+  const tableColumns = useMemo<ColumnDef<ImportBatchRow, unknown>[]>(
+    () => [
+      {
+        id: "type",
+        accessorFn: (row) => row.import_type,
+        header: "Type",
+        cell: (info) => String(info.getValue()),
+      },
+      {
+        id: "filename",
+        accessorFn: (row) => row.filename,
+        header: "Filename",
+        cell: (info) => String(info.getValue() ?? "—"),
+      },
+      {
+        id: "branch",
+        accessorFn: (row) => row.branch_name,
+        header: "Branch",
+        cell: (info) => String(info.getValue() ?? "—"),
+      },
+      {
+        id: "uploaded_by",
+        accessorFn: (row) => row.uploaded_by_name,
+        header: "Uploaded by",
+        cell: (info) => String(info.getValue() ?? "—"),
+      },
+      {
+        id: "status",
+        accessorFn: (row) => row.status,
+        header: "Status",
+        cell: (info) => {
+          const status = String(info.getValue());
+          return (
+            <Badge variant={statusBadgeVariant(status)}>
+              {statusLabel(status)}
+            </Badge>
+          );
+        },
+      },
+      {
+        id: "created",
+        accessorFn: (row) => row.created_at,
+        header: "Created",
+        cell: (info) => formatDate(String(info.getValue())),
+      },
+      {
+        id: "actions",
+        accessorFn: () => null,
+        header: "",
+        cell: (info) => {
+          const row = info.row.original;
+          if (row.status !== "completed") return null;
+          if (isRetailRevertLocked(row, profile)) {
+            return (
+              <span
+                className="text-xs text-text-muted"
+                title="Retail accounts can only reimport or remove an import within 1 day of importing it"
+              >
+                Locked
+              </span>
+            );
+          }
+          return (
+            <div className="flex items-center gap-1.5 justify-end">
+              <Button
+                variant="secondary"
+                size="sm"
+                title="Pick a corrected file to replace this import"
+                disabled={picking}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleReimport(row);
+                }}
+              >
+                Reimport
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleRevert(row.id);
+                }}
+                loading={revertingId === row.id}
+              >
+                Remove
+              </Button>
+            </div>
+          );
+        },
+      },
+    ],
+    [
+      handleReimport,
+      handleRevert,
+      picking,
+      profile,
+      revertingId,
+    ],
+  );
+
+  const table = useReactTable({
+    data: filteredRows ?? EMPTY_ROWS,
+    columns: tableColumns,
+    state: { pagination },
+    onPaginationChange: setPagination,
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+  });
+
+  useEffect(() => {
+    table.setPageIndex(0);
+  }, [filteredRows, table]);
+
+  const totalPages = Math.max(1, table.getPageCount());
+  const currentPage = pagination.pageIndex + 1;
+  const pageSize = pagination.pageSize;
 
   return (
     <div className="flex flex-col" style={containerStyle}>
@@ -375,7 +502,7 @@ function ImportHistoryTable({
           />
         )}
 
-      {filteredRows !== null && filteredRows.length > 0 && pageItems && (
+      {filteredRows !== null && filteredRows.length > 0 && (
         <>
           <TableContainer
             className="overflow-y-auto border-0 rounded-none"
@@ -384,92 +511,74 @@ function ImportHistoryTable({
             }}
           >
             <Thead className="top-0">
-              <Tr>
-                <Th>Type</Th>
-                <Th>Filename</Th>
-                <Th>Branch</Th>
-                <Th>Uploaded by</Th>
-                <Th>Status</Th>
-                <Th>Created</Th>
-                <Th />
-              </Tr>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <Tr key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <Th
+                      key={header.id}
+                      className={
+                        header.column.columnDef.meta?.align === "right"
+                          ? "text-right"
+                          : undefined
+                      }
+                    >
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(
+                            header.column.columnDef.header,
+                            header.getContext(),
+                          )}
+                    </Th>
+                  ))}
+                </Tr>
+              ))}
             </Thead>
             <Tbody>
-              {pageItems.map((row) => (
+              {table.getRowModel().rows.map((row) => (
                 <Tr
-                  key={row.id}
+                  key={row.original.id}
                   ref={
-                    row.id === highlightBatchId ? highlightRowRef : undefined
+                    row.original.id === highlightBatchId
+                      ? highlightRowRef
+                      : undefined
                   }
-                  onClick={() => onViewBatch(row.id)}
+                  onClick={() => onViewBatch(row.original.id)}
                   className={cn(
                     "cursor-pointer",
-                    row.id === highlightBatchId &&
+                    row.original.id === highlightBatchId &&
                       "ring-2 ring-inset ring-brand bg-brand-subtle",
                   )}
                 >
-                  <Td className="capitalize">{row.import_type}</Td>
-                  <Td className="max-w-[12rem] truncate">
-                    {row.filename ?? "—"}
-                  </Td>
-                  <Td>{row.branch_name ?? "—"}</Td>
-                  <Td>{row.uploaded_by_name ?? "—"}</Td>
-                  <Td>
-                    <Badge variant={statusBadgeVariant(row.status)}>
-                      {statusLabel(row.status)}
-                    </Badge>
-                  </Td>
-                  <Td className="text-text-muted whitespace-nowrap">
-                    {formatDate(row.created_at)}
-                  </Td>
-                  <Td>
-                    {row.status === "completed" &&
-                      (isRetailRevertLocked(row, profile) ? (
-                        <span
-                          className="text-xs text-text-muted"
-                          title="Retail accounts can only reimport or remove an import within 1 day of importing it"
-                        >
-                          Locked
-                        </span>
-                      ) : (
-                        <div className="flex items-center gap-1.5 justify-end">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            title="Pick a corrected file to replace this import"
-                            disabled={picking}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleReimport(row);
-                            }}
-                          >
-                            Reimport
-                          </Button>
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRevert(row.id);
-                            }}
-                            loading={revertingId === row.id}
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                      ))}
-                  </Td>
+                  {row.getVisibleCells().map((cell) => (
+                    <Td
+                      key={cell.id}
+                      className={cn(
+                        cell.column.id === "type" && "capitalize",
+                        cell.column.id === "filename" &&
+                          "max-w-[12rem] truncate",
+                        cell.column.id === "created" &&
+                          "text-text-muted whitespace-nowrap",
+                        cell.column.columnDef.meta?.align === "right" &&
+                          "text-right tabular-nums",
+                      )}
+                    >
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext(),
+                      )}
+                    </Td>
+                  ))}
                 </Tr>
               ))}
             </Tbody>
           </TableContainer>
 
           <Pagination
-            page={page}
+            page={currentPage}
             totalPages={totalPages}
             totalItems={filteredRows.length}
             pageSize={pageSize}
-            onPageChange={setPage}
+            onPageChange={(nextPage) => table.setPageIndex(nextPage - 1)}
           />
         </>
       )}

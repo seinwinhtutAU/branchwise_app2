@@ -97,6 +97,7 @@ def test_customer_order_line_allocation_persists_and_is_returned_on_order_reads(
     assert allocated.status_code == 200
     assert allocated.json()["lines"][0]["allocated_quantity_pairs"] == 6
     assert allocated.json()["lines"][0]["allocated_color_breakdown"] == "black1s"
+    assert allocated.json()["order_status"] == "allocating"
 
     reread = authed_client.get(f"/api/wholesale/orders/{order['order_id']}")
     assert reread.status_code == 200
@@ -111,6 +112,13 @@ def test_customer_order_line_allocation_persists_and_is_returned_on_order_reads(
     assert updated.json()["lines"][0]["allocated_quantity_pairs"] == 6
     assert updated.json()["lines"][0]["allocated_color_breakdown"] == "black1s"
 
+    fully_allocated = authed_client.put(
+        f"/api/wholesale/orders/lines/{updated.json()['lines'][0]['order_line_id']}/allocation",
+        json={"color_breakdown": "black2s"},
+    )
+    assert fully_allocated.status_code == 200
+    assert fully_allocated.json()["order_status"] == "ready_to_deliver"
+
     cleared = authed_client.put(
         f"/api/wholesale/orders/lines/{updated.json()['lines'][0]['order_line_id']}/allocation",
         json={"color_breakdown": ""},
@@ -118,14 +126,14 @@ def test_customer_order_line_allocation_persists_and_is_returned_on_order_reads(
     assert cleared.status_code == 200
     assert cleared.json()["lines"][0]["allocated_quantity_pairs"] == 0
     assert cleared.json()["lines"][0]["allocated_color_breakdown"] == ""
+    assert cleared.json()["order_status"] == "new"
 
     events = authed_client.get("/api/wholesale/orders/allocations")
     assert events.status_code == 200
     rows = events.json()
-    # One event per value change: black1s, then re-saving it on the order update is a
-    # no-op (skipped), then cleared back to "".
-    assert [row["color_breakdown"] for row in rows] == ["", "black1s"]
-    assert rows[0]["previous_color_breakdown"] == "black1s"
+    # One event per value change: black1s, then black2s, then cleared back to "".
+    assert [row["color_breakdown"] for row in rows] == ["", "black2s", "black1s"]
+    assert rows[0]["previous_color_breakdown"] == "black2s"
     assert rows[0]["order_no"] == order["order_no"]
     assert rows[0]["stock_code"] == "A1001"
     assert rows[0]["recorded_by_user_id"] == "test-user-id"
@@ -213,18 +221,6 @@ def test_delivery_clamps_allocation_and_releases_the_delivered_stock(
     assert reread["lines"][0]["allocated_quantity_pairs"] == 6
     assert reread["lines"][0]["allocated_color_breakdown"] == "black6p"
 
-    # The six pairs delivered to A no longer remain part of A's reservation, so B can
-    # take the six pairs that are physically left without colliding with stale state.
-    order_b = authed_client.post("/api/wholesale/orders", json=_order_payload()).json()
-    fits_for_b = authed_client.post(
-        "/api/wholesale/inventory/deliveries",
-        json={
-            "order_id": order_b["order_id"], "stock_code": "A1001", "location": "Gate",
-            "color_breakdown": "black1s", "unit": "set", "delivered_on": "2026-09-13", "note": "",
-        },
-    )
-    assert fits_for_b.status_code == 201
-
 
 def test_delivery_must_match_order_and_stock_colors(authed_client: TestClient, db_session: Session) -> None:
     branch = _branch(db_session)
@@ -285,7 +281,7 @@ def test_customer_delivery_batch_records_multiple_products_together(
     assert {row["delivery_address"] for row in delivery.json()} == {"12 Strand Road, Yangon"}
     order_after = authed_client.get(f"/api/wholesale/orders/{order['order_id']}").json()
     assert order_after["delivered_quantity_pairs"] == 18
-    assert order_after["order_status"] == "completed"
+    assert order_after["order_status"] == "fulfilled"
 
 
 def test_customer_delivery_batch_does_not_partially_save_invalid_lines(

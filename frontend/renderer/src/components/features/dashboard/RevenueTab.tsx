@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Session } from "@renderer/lib/auth";
-import { useCachedFetch } from "@renderer/lib/useCachedFetch";
+import { useUrlQuery } from "@renderer/lib/queryClient";
 import { Button } from "@renderer/components/ui/Button";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
@@ -137,12 +137,13 @@ export function RevenueTab({
   const [trendView, setTrendView] = useState<ChartView>("bar");
   // One cached request per (tab, branch, period) — returning to this tab with the same
   // selection shows the numbers it showed last time instead of a skeleton. See
-  // lib/useCachedFetch.ts.
+  // lib/queryClient.ts.
   const url = canLoad
     ? dashboardUrl("revenue", branchId, { period, dateFrom, dateTo })
     : null;
-  const { data, isRefreshing, failed, reload } =
-    useCachedFetch<RevenueDashboardData>(url, session, "Revenue dashboard");
+  const { data: fetched, isRefreshing, failed, reload } =
+    useUrlQuery<RevenueDashboardData>(url, session, "Revenue dashboard");
+  const data = fetched ?? null;
 
   if (!canLoad) return <></>;
 

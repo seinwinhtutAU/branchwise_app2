@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
@@ -76,7 +76,6 @@ import {
   ordersFromWire,
   type CustomerDeliveryBatchInput,
   type InventoryMovementWire,
-  updateCustomerOrderLineAllocation,
   updateCustomerDelivery,
 } from "@renderer/components/features/wholesale/api";
 import {
@@ -110,7 +109,7 @@ const ORDERS_QUERY_KEY = ["wholesale", "orders"] as const;
 
 type View = "list" | "detail";
 type InventoryTab = "stock" | "deliveries";
-type InventorySection = "overview" | "locations" | "movement" | "allocations";
+type InventorySection = "overview" | "locations" | "movement";
 type StockStatus =
   | "At Supplier"
   | "In Transit"
@@ -206,7 +205,7 @@ export default function InventoryPage({
     queryKey: ORDERS_QUERY_KEY,
     queryFn: () => fetchJson<CustomerOrder[]>(CUSTOMER_ORDERS_URL, session),
   });
-  useLoadErrorToast(ordersFailed, "customer orders for inventory allocations");
+  useLoadErrorToast(ordersFailed, "customer orders for stock records");
   useEffect(() => {
     if (orderWire) hydrateOrders(ordersFromWire(orderWire));
   }, [orderWire]);
@@ -222,8 +221,7 @@ export default function InventoryPage({
   }
   // Nothing here is this page's own: stock is what the gate has counted less what has
   // gone out to customers, and both belong to the whole workspace. Customer orders are
-  // fetched here as well so Allocations still has authoritative rows when Inventory is
-  // the first wholesale screen opened after a fresh app launch.
+  // fetched here so Stock Record can show the current orders waiting on each product.
   const { orders, receivings, outgoing, shipments, vouchers } = useWholesale();
   const [view, setView] = useState<View>("list");
   const [tab, setTab] = useState<InventoryTab>(initialTab);
@@ -231,34 +229,6 @@ export default function InventoryPage({
     stock_code: string;
     location: string;
   } | null>(null);
-  const [allocationByLine, setAllocationByLine] = useState<Record<string, number>>({});
-  const [allocationColorByLine, setAllocationColorByLine] = useState<Record<string, string>>({});
-  const persistedAllocationByLine = useMemo(
-    () =>
-      Object.fromEntries(
-        serverOrders.flatMap((order) =>
-          order.lines.map((line) => [line.order_line_id, line.allocated_quantity_pairs ?? 0]),
-        ),
-      ) as Record<string, number>,
-    [serverOrders],
-  );
-  const persistedAllocationColorByLine = useMemo(
-    () =>
-      Object.fromEntries(
-        serverOrders.flatMap((order) =>
-          order.lines.map((line) => [line.order_line_id, line.allocated_color_breakdown ?? ""]),
-        ),
-      ) as Record<string, string>,
-    [serverOrders],
-  );
-  const effectiveAllocationByLine = useMemo(
-    () => ({ ...persistedAllocationByLine, ...allocationByLine }),
-    [allocationByLine, persistedAllocationByLine],
-  );
-  const effectiveAllocationColorByLine = useMemo(
-    () => ({ ...persistedAllocationColorByLine, ...allocationColorByLine }),
-    [allocationColorByLine, persistedAllocationColorByLine],
-  );
 
   const movements = useMemo(
     () =>
@@ -268,18 +238,7 @@ export default function InventoryPage({
     [wire, receivings, outgoing],
   );
   const lines = useMemo(() => stockLines(movements), [movements]);
-  const ordersWithAllocations = useMemo(
-    () =>
-      orders.map((order) => ({
-        ...order,
-        lines: order.lines.map((line) => ({
-          ...line,
-          allocated_quantity_pairs: effectiveAllocationByLine[line.order_line_id] ?? 0,
-          allocated_color_breakdown: effectiveAllocationColorByLine[line.order_line_id] ?? "",
-        })),
-      })),
-    [effectiveAllocationByLine, effectiveAllocationColorByLine, orders],
-  );
+  const ordersWithAllocations = orderWire ? serverOrders : orders;
 
   const line =
     selected === null
@@ -348,27 +307,9 @@ export default function InventoryPage({
     <StockList
       lines={lines}
       orders={ordersWithAllocations}
-      allocationOrders={serverOrders}
       movements={movements}
       shipments={shipments}
       vouchers={vouchers}
-      allocationByLine={effectiveAllocationByLine}
-      allocationColorByLine={effectiveAllocationColorByLine}
-      onAllocate={async (lineId, quantity, colorValue) => {
-        try {
-          await updateCustomerOrderLineAllocation(session, lineId, colorValue);
-          setAllocationByLine((current) => ({ ...current, [lineId]: quantity }));
-          setAllocationColorByLine((current) => ({ ...current, [lineId]: colorValue }));
-          showToast("success", "Customer allocation saved.");
-        } catch (error) {
-          showToast(
-            "error",
-            error instanceof WholesaleApiError
-              ? error.message
-              : "Could not save this customer allocation.",
-          );
-        }
-      }}
       tab={tab}
       onTabChange={setTab}
       showTabs={showTabs}
@@ -450,7 +391,6 @@ function InventorySectionTabs({
           ["overview", "Overview"],
           ["locations", "Stock Record"],
           ["movement", "Movement"],
-          ["allocations", "Allocations"],
         ] as const
       ).map(([value, label]) => (
         <button
@@ -922,7 +862,7 @@ function CustomerDeliveries({
           sub="in this delivery"
         />
         <FigureCard
-          label="Delivery quantity"
+          label="Delivery qty"
           value={formatIn(selectedPairs, "set")}
           sub="ready to hand over"
           tone={selectedPairs > 0 ? "success" : "neutral"}
@@ -1038,7 +978,7 @@ function CustomerDeliveries({
                       <Th className="min-w-[12rem]">Stock needed</Th>
                       <Th className="min-w-[13rem]">Available stock</Th>
                       <Th className="min-w-[15rem]">Stock to deliver</Th>
-                      <Th className="text-right whitespace-nowrap">Quantity</Th>
+                      <Th className="text-right whitespace-nowrap">Qty</Th>
                       <Th className="min-w-[10rem]">Status</Th>
                     </Tr>
                   </Thead>
@@ -1231,7 +1171,7 @@ function CustomerDeliveries({
                 <Th className="whitespace-nowrap">Order no.</Th>
                 <Th>Customer</Th>
                 <Th>Products</Th>
-                <Th className="text-right whitespace-nowrap">Quantity</Th>
+                <Th className="text-right whitespace-nowrap">Qty</Th>
                 <Th>Destination</Th>
                 <Th>Note</Th>
                 <Th className="w-28" aria-label="Actions" />
@@ -1476,7 +1416,7 @@ function DeliveryDetail({
                 <Tr>
                   <Th className="min-w-[16rem]">Product</Th>
                   <Th>Colors</Th>
-                  <Th className="text-right whitespace-nowrap">Quantity</Th>
+                  <Th className="text-right whitespace-nowrap">Qty</Th>
                   {detailMode === "edit" && (
                     <>
                       <Th>From</Th>
@@ -1668,13 +1608,9 @@ function StockRowMenu({ onView }: { onView: () => void }): React.JSX.Element {
 function StockList({
   lines,
   orders,
-  allocationOrders,
   movements,
   shipments,
   vouchers,
-  allocationByLine,
-  allocationColorByLine,
-  onAllocate,
   tab,
   onTabChange,
   onOpen,
@@ -1682,15 +1618,11 @@ function StockList({
   refreshing,
   showTabs,
 }: {
-  lines: StockLine[];
-  orders: CustomerOrder[];
-  allocationOrders: CustomerOrder[];
-  movements: StockMovement[];
-  shipments: Shipment[];
-  vouchers: SupplierVoucher[];
-  allocationByLine: Record<string, number>;
-  allocationColorByLine: Record<string, string>;
-  onAllocate: (lineId: string, quantityPairs: number, colorValue: string) => void;
+      lines: StockLine[];
+      orders: CustomerOrder[];
+      movements: StockMovement[];
+      shipments: Shipment[];
+      vouchers: SupplierVoucher[];
   tab: InventoryTab;
   onTabChange: (tab: InventoryTab) => void;
   onOpen: (stockCode: string, location: string) => void;
@@ -2032,17 +1964,6 @@ function StockList({
           refreshing={refreshing}
         />
       )}
-      {section === "allocations" && (
-        <StockAllocationBoard
-          lines={lines}
-          orders={allocationOrders}
-          allocations={allocationByLine}
-          allocationColors={allocationColorByLine}
-          onAllocate={onAllocate}
-          onRefresh={onRefresh}
-          refreshing={refreshing}
-        />
-      )}
     </div>
   );
 }
@@ -2166,7 +2087,7 @@ function InventoryMovementTable({
                 <Th>Product</Th>
                 <Th>Color</Th>
                 <Th>Movement</Th>
-                <Th className="text-right">Quantity</Th>
+                <Th className="text-right">Qty</Th>
                 <Th>Location</Th>
                 <Th>Reference</Th>
                 <Th>Supplier / Customer</Th>
@@ -2229,310 +2150,6 @@ function InventoryMovementTable({
             />
           </div>
         </>
-      )}
-    </Panel>
-  );
-}
-
-function AllocationTabs({
-  active,
-  onChange,
-}: {
-  active: "new" | "allocated";
-  onChange: (tab: "new" | "allocated") => void;
-}): React.JSX.Element {
-  return (
-    <div className="flex items-center gap-1 px-6 pt-3 border-b border-border">
-      {(
-        [
-          ["new", "To Allocate"],
-          ["allocated", "Allocated"],
-        ] as const
-      ).map(([value, label]) => (
-        <button
-          key={value}
-          type="button"
-          role="tab"
-          aria-selected={active === value}
-          onClick={() => onChange(value)}
-          className={cn(
-            "border-b-2 px-3 pb-3 text-sm font-semibold transition-colors duration-150",
-            active === value
-              ? "border-brand text-brand"
-              : "border-transparent text-text-muted hover:text-text-primary",
-          )}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function StockAllocationBoard({
-  lines,
-  orders,
-  allocations,
-  allocationColors,
-  onAllocate,
-  onRefresh,
-  refreshing,
-}: {
-  lines: StockLine[];
-  orders: CustomerOrder[];
-  allocations: Record<string, number>;
-  allocationColors: Record<string, string>;
-  onAllocate: (lineId: string, quantityPairs: number, colorValue: string) => void;
-  onRefresh: () => void;
-  refreshing: boolean;
-}): React.JSX.Element {
-  const [activeTab, setActiveTab] = useState<"new" | "allocated">("new");
-  const [search, setSearch] = useState("");
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const rows = useMemo(
-    () =>
-      orders
-        .filter((order) => order.order_status !== "cancelled")
-        .flatMap((order) =>
-          order.lines
-            .filter(
-              (line) =>
-                lineRemaining(line) > 0 || (allocations[line.order_line_id] ?? 0) > 0,
-            )
-            .map((line) => {
-              const stockLinesForCode = lines.filter((stock) => stock.stock_code === line.stock_code);
-              const onHand = stockLinesForCode.reduce(
-                (sum, stock) => sum + Math.max(0, stock.quantity_available_pairs),
-                0,
-              );
-              const alreadyAllocated = orders.reduce(
-                (sum, currentOrder) =>
-                  sum +
-                  currentOrder.lines
-                    .filter((orderLine) => orderLine.stock_code === line.stock_code)
-                    .reduce((lineSum, orderLine) => lineSum + (allocations[orderLine.order_line_id] ?? 0), 0),
-                0,
-              );
-              const saved = allocations[line.order_line_id] ?? 0;
-              const remaining = lineRemaining(line);
-              const availableColorPairs = stockLinesForCode.reduce<ColorPairs>((colors, stock) => {
-                for (const [color, pairs] of Object.entries(colorPairsForText(stock.colors, "pair"))) {
-                  colors[color] = (colors[color] ?? 0) + pairs;
-                }
-                return colors;
-              }, {});
-              const reservedColorPairs = orders.reduce<ColorPairs>((colors, currentOrder) => {
-                for (const orderLine of currentOrder.lines) {
-                  if (orderLine.stock_code !== line.stock_code) continue;
-                  const allocation = allocationColors[orderLine.order_line_id] ?? orderLine.allocated_color_breakdown ?? "";
-                  for (const [color, pairs] of Object.entries(colorPairsForText(allocation, orderLine.unit))) {
-                    colors[color] = (colors[color] ?? 0) + pairs;
-                  }
-                }
-                return colors;
-              }, {});
-              for (const [color, pairs] of Object.entries(reservedColorPairs)) {
-                availableColorPairs[color] = Math.max(0, (availableColorPairs[color] ?? 0) - pairs);
-              }
-              const ownAllocation = colorPairsForText(
-                allocationColors[line.order_line_id] ?? line.allocated_color_breakdown ?? "",
-                line.unit,
-              );
-              for (const [color, pairs] of Object.entries(ownAllocation)) {
-                availableColorPairs[color] = (availableColorPairs[color] ?? 0) + pairs;
-              }
-              return {
-                order,
-                line,
-                remaining,
-                saved,
-                toAllocate: Math.max(0, remaining - saved),
-                available: Math.max(0, onHand - alreadyAllocated),
-                editableAvailable: Math.max(0, onHand - alreadyAllocated + saved),
-                availableColorPairs,
-              };
-            }),
-        )
-        .filter(({ order, line, toAllocate, editableAvailable, saved }) => {
-          const query = search.trim().toLowerCase();
-          const matchesSearch =
-            query === "" ||
-            order.order_no.toLowerCase().includes(query) ||
-            order.customer_name.toLowerCase().includes(query) ||
-            line.stock_code.toLowerCase().includes(query) ||
-            line.description.toLowerCase().includes(query);
-          const matchesTab =
-            activeTab === "new"
-              ? toAllocate > 0 && editableAvailable > 0
-              : saved > 0;
-          return matchesSearch && matchesTab;
-        }),
-    [activeTab, allocationColors, allocations, lines, orders, search],
-  );
-  const groups = useMemo(() => {
-    const grouped = new Map<string, { order: CustomerOrder; rows: typeof rows }>();
-    for (const row of rows) {
-      const current = grouped.get(row.order.order_id);
-      if (current) current.rows.push(row);
-      else grouped.set(row.order.order_id, { order: row.order, rows: [row] });
-    }
-    return [...grouped.values()];
-  }, [rows]);
-
-  return (
-    <Panel>
-      <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-        <div>
-          <h2 className="text-base font-semibold text-text-primary tracking-tight">Customer Allocations</h2>
-          <p className="text-sm text-text-muted mt-0.5">
-            {activeTab === "new"
-              ? "Reserve available stock against open customer orders."
-              : "Review and correct saved customer allocations."}
-          </p>
-        </div>
-        <InventoryRefreshButton onRefresh={onRefresh} refreshing={refreshing} />
-      </div>
-
-      <AllocationTabs active={activeTab} onChange={setActiveTab} />
-
-      <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-bg-subtle">
-        <div className="w-full sm:w-[28rem]">
-          <Input
-            aria-label="Search customer allocations"
-            placeholder="Search order, customer or product"
-            startIcon={<SearchIcon className="w-4 h-4" />}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-        </div>
-      </div>
-      {rows.length === 0 ? (
-        <EmptyState
-          icon={<InventoryIcon />}
-          title={activeTab === "new" ? "No orders ready to allocate" : "No saved allocations"}
-          description={
-            activeTab === "new"
-              ? "Open order lines with available stock will appear here."
-              : "Saved allocations will appear here so you can correct them."
-          }
-        />
-      ) : (
-        <TableContainer className="border-0 rounded-none">
-            <Thead>
-              <Tr>
-                <Th>Product</Th>
-                <Th className="text-right">
-                  {activeTab === "new" ? "To allocate" : "Remaining qty"}
-                </Th>
-                <Th className="text-right">Available stock</Th>
-                <Th className="w-64">
-                  {activeTab === "new" ? "Allocate quantity" : "Saved allocation"}
-                </Th>
-                <Th className="w-28" />
-              </Tr>
-            </Thead>
-            <Tbody>
-              {groups.map(({ order, rows: orderRows }) => (
-                <Fragment key={order.order_id}>
-                  <Tr className="bg-bg-subtle">
-                    <Td colSpan={5}>
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                        <span className="font-bold text-text-primary">{order.order_no}</span>
-                        <span className="text-sm text-text-secondary">{order.customer_name}</span>
-                        <span className="text-xs text-text-muted">{formatDate(order.order_date)}</span>
-                      </div>
-                    </Td>
-                  </Tr>
-                  {orderRows.map(({ order: rowOrder, line, remaining, toAllocate, saved, available, availableColorPairs }) => {
-                    const draft = drafts[line.order_line_id] ?? allocationColors[line.order_line_id] ?? "";
-                    const requestedColors = colorPairsForText(draft, line.unit);
-                    const quantity = Object.values(requestedColors).reduce((sum, pairs) => sum + pairs, 0);
-                    const draftAvailable = Math.max(0, available + saved - quantity);
-                    const draftAvailableColorPairs = { ...availableColorPairs };
-                    for (const [color, pairs] of Object.entries(requestedColors)) {
-                      draftAvailableColorPairs[color] = Math.max(
-                        0,
-                        (draftAvailableColorPairs[color] ?? 0) - pairs,
-                      );
-                    }
-                    const draftAvailableColors = formatColorPairs(draftAvailableColorPairs);
-                    const max = Math.min(remaining, available + saved);
-                    const remainingColors = colorPairsForText(line.color_breakdown, line.unit);
-                    const colorsFit = Object.entries(requestedColors).every(
-                      ([color, pairs]) =>
-                        pairs <= (remainingColors[color] ?? 0) &&
-                        pairs <= (availableColorPairs[color] ?? 0),
-                    );
-                    const valid = draft.trim() !== "" && quantity > 0 && quantity <= max && colorsFit;
-                    return (
-                      <Tr key={line.order_line_id}>
-                        <Td className="pl-8">
-                          <div className="font-bold text-brand">{line.stock_code}</div>
-                          <div className="max-w-[15rem] truncate text-sm text-text-primary" title={line.description}>{line.description}</div>
-                        </Td>
-                        <Td className="text-right font-semibold tabular-nums whitespace-nowrap">
-                          <div>{formatQty(activeTab === "new" ? toAllocate : remaining)} pairs</div>
-                          <div className="mt-0.5 text-xs font-normal text-text-muted">{formatColorPairs(remainingColors) || "—"}</div>
-                        </Td>
-                        <Td
-                          className={cn(
-                            "text-right font-semibold tabular-nums whitespace-nowrap",
-                            draftAvailable > 0 ? "bg-success-subtle" : "bg-bg-subtle",
-                          )}
-                        >
-                          <div className={draftAvailable > 0 ? "text-success" : "text-text-muted"}>
-                            {formatQty(draftAvailable)} pairs
-                          </div>
-                          <div className="mt-0.5 text-xs font-normal text-text-muted">
-                            {draftAvailableColors || "—"}
-                          </div>
-                        </Td>
-                        <Td>
-                          <input
-                            aria-label={`Allocation for ${rowOrder.order_no} ${line.stock_code}`}
-                            type="text"
-                            value={draft}
-                            placeholder="Enter color quantities"
-                            aria-invalid={draft.trim() !== "" && !valid}
-                            onChange={(event) => setDrafts((current) => ({ ...current, [line.order_line_id]: event.target.value }))}
-                            className={cn(
-                              "w-full rounded-md border bg-bg-base px-3 py-2 text-sm tabular-nums",
-                              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
-                              "border-border",
-                            )}
-                          />
-                        </Td>
-                        <Td>
-                          <Button
-                            size="sm"
-                            disabled={!valid || quantity <= 0}
-                            onClick={() => onAllocate(line.order_line_id, quantity, draft)}
-                          >
-                            {saved > 0 ? "Update" : "Allocate"}
-                          </Button>
-                          {activeTab === "allocated" && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                setDrafts((current) => ({
-                                  ...current,
-                                  [line.order_line_id]: "",
-                                }));
-                                onAllocate(line.order_line_id, 0, "");
-                              }}
-                            >
-                              Clear
-                            </Button>
-                          )}
-                        </Td>
-                      </Tr>
-                    );
-                  })}
-                </Fragment>
-              ))}
-            </Tbody>
-        </TableContainer>
       )}
     </Panel>
   );
@@ -3003,10 +2620,11 @@ const RELATED_ORDER_STATUS_LABELS: Record<
   CustomerOrder["order_status"],
   string
 > = {
-  created: "Created",
-  processing: "Processing",
-  partly_delivered: "Partly delivered",
-  completed: "Completed",
+  new: "New",
+  allocating: "Allocating",
+  ready_to_deliver: "Ready to deliver",
+  partly_delivered: "Partially delivered",
+  fulfilled: "Fulfilled",
   cancelled: "Cancelled",
 };
 
@@ -3014,10 +2632,11 @@ const RELATED_ORDER_STATUS_STYLES: Record<
   CustomerOrder["order_status"],
   string
 > = {
-  created: "bg-text-secondary text-white",
-  processing: "bg-brand text-white",
+  new: "bg-text-secondary text-white",
+  allocating: "bg-warning text-white",
+  ready_to_deliver: "bg-brand text-white",
   partly_delivered: "bg-warning text-white",
-  completed: "bg-success text-white",
+  fulfilled: "bg-success text-white",
   cancelled: "bg-error text-white",
 };
 
@@ -3270,8 +2889,8 @@ function StockDetail({
                   <Th>Product</Th>
                   <Th>Ordered colors</Th>
                   <Th>Stock colors</Th>
-                  <Th className="text-right whitespace-nowrap">Ordered quantity</Th>
-                  <Th className="text-right whitespace-nowrap">Received quantity</Th>
+                  <Th className="text-right whitespace-nowrap">Ordered qty</Th>
+                  <Th className="text-right whitespace-nowrap">Received qty</Th>
                   <Th className="text-right whitespace-nowrap">
                     Remaining qty
                   </Th>
@@ -3395,7 +3014,7 @@ function StockDetail({
                   <Th>Product</Th>
                   <Th>Color</Th>
                   <Th>Movement</Th>
-                  <Th className="text-right">Quantity</Th>
+                <Th className="text-right">Qty</Th>
                   <Th>Location</Th>
                   <Th>Reference</Th>
                   <Th>Supplier / Customer</Th>

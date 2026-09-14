@@ -47,7 +47,7 @@ def test_customer_order_persists_updates_and_caps_payments(authed_client: TestCl
     assert order["order_no"].startswith("ORD-")
     assert order["total_quantity_pairs"] == 12
     assert order["total_amount"] == 216000
-    assert order["order_status"] == "created"
+    assert order["order_status"] == "new"
 
     changed = _payload() | {"customer_address": "Mandalay"}
     updated = authed_client.put(f"/api/wholesale/orders/{order['order_id']}", json=changed)
@@ -108,11 +108,11 @@ def test_customer_order_list_filters_and_pages_on_the_server(authed_client: Test
     assert len(paged.json()) == 1
 
 
-def test_customer_order_shows_processing_once_a_voucher_is_placed_for_it(authed_client: TestClient, db_session: Session) -> None:
+def test_customer_order_stays_new_until_stock_is_allocated(authed_client: TestClient, db_session: Session) -> None:
     branch = _branch(db_session)
     _user(db_session, UserRole.WHOLESALE, branch.id)
     order = authed_client.post("/api/wholesale/orders", json=_payload()).json()
-    assert order["order_status"] == "created"
+    assert order["order_status"] == "new"
 
     voucher_payload = {
         "supplier_name": "Goody Factory", "voucher_date": "2026-09-13", "carrier_name": "Cargo", "total_packages": 1,
@@ -123,4 +123,4 @@ def test_customer_order_shows_processing_once_a_voucher_is_placed_for_it(authed_
 
     reread = authed_client.get(f"/api/wholesale/orders/{order['order_id']}")
     assert reread.status_code == 200
-    assert reread.json()["order_status"] == "processing"
+    assert reread.json()["order_status"] == "new"

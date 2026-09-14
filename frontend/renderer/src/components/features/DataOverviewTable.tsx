@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  flexRender,
+  getCoreRowModel,
+  useReactTable,
+  type ColumnDef,
+  type PaginationState,
+} from "@tanstack/react-table";
 import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
-import { useCachedFetch } from "@renderer/lib/useCachedFetch";
+import { useUrlQuery } from "@renderer/lib/queryClient";
 import { cn } from "@renderer/lib/utils";
 import { useToast } from "@renderer/lib/useToast";
 import { formatBuyingPriceSource } from "@renderer/lib/buyingPriceSource";
@@ -25,6 +32,7 @@ import { Pagination } from "@renderer/components/ui/Pagination";
 import { DownloadIcon, OverviewIcon } from "@renderer/components/ui/icons";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 import { useSettled } from "@renderer/lib/useSettled";
+import "@renderer/lib/reactTable";
 
 interface OverviewRow {
   Branch: string | null;
@@ -67,14 +75,14 @@ interface Props {
 // A column can light up more than one band (e.g. StockCode appears in all three).
 type Band = "sale" | "inventory" | "purchase";
 
-interface ColumnDef {
+interface OverviewColumn {
   key: keyof OverviewRow;
   label: string;
   bands: Band[];
   align?: "right";
 }
 
-const COLUMNS: ColumnDef[] = [
+const COLUMNS: OverviewColumn[] = [
   { key: "Branch", label: "Branch", bands: ["sale"] },
   { key: "Date", label: "Date", bands: ["sale"] },
   { key: "SlipID", label: "Slip ID", bands: [] },
@@ -139,6 +147,7 @@ const BAND_LABEL: Record<Band, string> = {
 // a change per keystroke, and this table's search box shouldn't refetch per letter typed.
 const FILTER_SETTLE_MS = 400;
 const PAGE_SIZE = 50;
+const EMPTY_ROWS: never[] = [];
 
 function SourceLegend(): React.JSX.Element {
   return (
@@ -176,7 +185,7 @@ function formatNumber(value: number | null): string {
   });
 }
 
-function formatCell(col: ColumnDef, value: unknown): string {
+function formatCell(col: OverviewColumn, value: unknown): string {
   if (col.key === "Buying_Price_Source")
     return formatBuyingPriceSource(value as string | null);
   if (value === null || value === undefined || value === "") return "—";
@@ -282,18 +291,52 @@ function DataOverviewTable({
   ]);
 
   const { data, isRefreshing, failed, reload } =
-    useCachedFetch<OverviewResponse>(url, session, "data overview");
+    useUrlQuery<OverviewResponse>(url, session, "data overview");
 
   const rows = data?.rows ?? null;
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  const tableColumns = useMemo<ColumnDef<OverviewRow, unknown>[]>(
+    () =>
+      visibleColumns.map((col) => ({
+        id: String(col.key),
+        accessorFn: (row: OverviewRow) => row[col.key],
+        header: () => (
+          <>
+            <SourceStrip bands={col.bands} />
+            {col.label}
+          </>
+        ),
+        cell: (info) => formatCell(col, info.getValue()),
+        meta: { align: col.align },
+      })),
+    [visibleColumns],
+  );
+  const pagination: PaginationState = {
+    pageIndex: page - 1,
+    pageSize: PAGE_SIZE,
+  };
+  const table = useReactTable({
+    data: rows ?? EMPTY_ROWS,
+    columns: tableColumns,
+    state: { pagination },
+    onPaginationChange: (updater) => {
+      const next =
+        typeof updater === "function" ? updater(pagination) : updater;
+      setPage(next.pageIndex + 1);
+    },
+    getCoreRowModel: getCoreRowModel(),
+    manualPagination: true,
+    pageCount: totalPages,
+  });
+
   // Strands nobody: if a background refresh (someone else's import) shrinks the result
   // set out from under a page the user is sitting on, snap back to the last real page
   // instead of showing an empty one.
   useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [totalPages, page]);
+    if (rows !== null && page > totalPages) setPage(totalPages);
+  }, [rows, totalPages, page]);
 
   function overviewCsvRows(source: OverviewRow[]): string[][] {
     return source.map((row) =>
@@ -521,30 +564,44 @@ function DataOverviewTable({
             }}
           >
             <Thead className="top-0">
-              <Tr>
-                {visibleColumns.map((col) => (
-                  <Th
-                    key={col.key}
-                    className={col.align === "right" ? "text-right" : undefined}
-                  >
-                    <SourceStrip bands={col.bands} />
-                    {col.label}
-                  </Th>
-                ))}
-              </Tr>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <Tr key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <Th
+                      key={header.id}
+                      className={
+                        header.column.columnDef.meta?.align === "right"
+                          ? "text-right"
+                          : undefined
+                      }
+                    >
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(
+                            header.column.columnDef.header,
+                            header.getContext(),
+                          )}
+                    </Th>
+                  ))}
+                </Tr>
+              ))}
             </Thead>
             <Tbody>
-              {rows.map((row) => (
-                <Tr key={row.LineID}>
-                  {visibleColumns.map((col) => (
+              {table.getRowModel().rows.map((row) => (
+                <Tr key={row.id}>
+                  {row.getVisibleCells().map((cell) => (
                     <Td
-                      key={col.key}
+                      key={cell.id}
                       className={cn(
                         "whitespace-nowrap",
-                        col.align === "right" && "text-right tabular-nums",
+                        cell.column.columnDef.meta?.align === "right" &&
+                          "text-right tabular-nums",
                       )}
                     >
-                      {formatCell(col, row[col.key])}
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext(),
+                      )}
                     </Td>
                   ))}
                 </Tr>
@@ -557,7 +614,7 @@ function DataOverviewTable({
             totalPages={totalPages}
             totalItems={total}
             pageSize={PAGE_SIZE}
-            onPageChange={setPage}
+            onPageChange={(nextPage) => table.setPageIndex(nextPage - 1)}
           />
         </>
       )}

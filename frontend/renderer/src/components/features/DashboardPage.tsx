@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
+import { useIsFetching } from "@tanstack/react-query";
 import type { Session } from "@renderer/lib/auth";
 import { cn } from "@renderer/lib/utils";
 import type { BranchOption } from "@renderer/lib/useBranches";
-import {
-  refreshCachedPages,
-  useFetchInFlight,
-} from "@renderer/lib/useCachedFetch";
+import { refreshEverything } from "@renderer/lib/queryClient";
 import { Button } from "@renderer/components/ui/Button";
 import { CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
@@ -130,12 +128,13 @@ export function DashboardPage({
   const waitingOnBranch = isAdmin && branchOptions.length === 0;
   const canLoad = !isAdmin || !!branchId;
 
-  // Refresh asks every mounted page to refetch rather than reaching into this one tab:
-  // each tab owns its own request (Overview owns two — the branch cards and whichever
-  // branch it has open), so a button wired to one of them would leave the rest showing
-  // the numbers the reader just asked to update. The figures stay on screen while it
-  // happens; see refreshCachedPages.
-  const isFetching = useFetchInFlight();
+  // Refresh asks every query to refetch rather than reaching into this one tab: each tab
+  // owns its own request (Overview owns two — the branch cards and whichever branch it
+  // has open), so a button wired to one of them would leave the rest showing the numbers
+  // the reader just asked to update. The figures stay on screen while it happens; see
+  // refreshEverything. useIsFetching() is React Query's own count of in-flight queries
+  // anywhere in the app, the direct replacement for the old cache's useFetchInFlight.
+  const isFetching = useIsFetching() > 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -146,7 +145,7 @@ export function DashboardPage({
           <Button
             variant="secondary"
             size="sm"
-            onClick={refreshCachedPages}
+            onClick={refreshEverything}
             loading={isFetching}
           >
             Refresh

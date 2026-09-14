@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
 import { applyTheme, cacheTheme, type ThemeMode } from "@renderer/lib/theme";
-import { invalidateCachedPages } from "@renderer/lib/useCachedFetch";
+import { invalidateEverything } from "@renderer/lib/queryClient";
 
 // The Branch Health Score's dimension weights and the Early Warning rules' firing
 // points (see docs/branch_health.md). Both are stored and updated as a whole set, not
@@ -123,7 +123,7 @@ export function useAppSettings(session: Session | null): {
     // back to a dashboard still showing yesterday's scores, for up to a day. The theme is
     // excluded because it changes only how the page is painted.
     if (Object.keys(patch).some((key) => key !== "theme"))
-      invalidateCachedPages();
+      invalidateEverything();
     return body;
   }
 

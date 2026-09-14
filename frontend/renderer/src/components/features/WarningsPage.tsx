@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
-import { useCachedFetch } from "@renderer/lib/useCachedFetch";
+import { useUrlQuery } from "@renderer/lib/queryClient";
 import { cn } from "@renderer/lib/utils";
 import { useImportFilePicker } from "@renderer/lib/useImportFilePicker";
 import { Button } from "@renderer/components/ui/Button";
@@ -763,8 +763,8 @@ function WarningsPage({
   // Cached like the dashboard tabs — coming back to the Warning page from somewhere
   // else shows the rows it showed last time rather than a skeleton, and refetches only
   // when the window settings change, an import is confirmed or reverted, or the entry
-  // ages out. See lib/useCachedFetch.ts.
-  const { data, isRefreshing, failed, reload } = useCachedFetch<{
+  // ages out. See lib/queryClient.ts.
+  const { data, isRefreshing, failed, reload } = useUrlQuery<{
     sections: WarningSection[];
   }>(
     `${apiBaseUrl}/api/warnings?sale_days=${saleWindowDays}&purchase_days=${purchaseWindowDays}`,

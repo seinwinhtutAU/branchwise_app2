@@ -277,8 +277,7 @@ export function owedPairs(stockCode: string, orders: CustomerOrder[]): number {
 }
 
 /** How much of what is on this shelf has been explicitly reserved by a user. Demand is
- *  not allocation: open orders remain unallocated until Inventory > Allocations records
- *  a quantity against their lines. */
+ *  not allocation: open orders remain unallocated until an order line records a quantity. */
 export function allocatedPairs(
   line: StockLine,
   orders: CustomerOrder[],

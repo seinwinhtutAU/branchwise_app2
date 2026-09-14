@@ -94,12 +94,14 @@ import {
   WholesaleApiError,
   addCustomerOrderPayment,
   cancelCustomerOrder,
+  createCustomerDeliveryBatch,
   createCustomerOrder,
   ordersFromWire,
   removeCustomerOrderPayment,
   updateCustomerOrder,
   updateCustomerOrderLineAllocation,
   inventoryMovementsFromWire,
+  type CustomerDeliveryBatchInput,
   type InventoryMovementWire,
   type NewCustomerOrderInput,
 } from "@renderer/components/features/wholesale/api";
@@ -113,8 +115,8 @@ import { GROUP_LABELS, type ProductGroup } from "@renderer/components/features/w
 import {
   KNOWN_CUSTOMERS,
   STOCK_CODES,
-  productOf,
   SUPPLIER_NAMES,
+  productOf,
   useHydrateMasterData,
 } from "@renderer/components/features/wholesale/masterData";
 
@@ -138,22 +140,23 @@ const sets = (qty: number): string => formatIn(qty, "set");
 
 const ORDERS_QUERY_KEY = ["wholesale", "orders"] as const;
 
-type View = "list" | "detail" | "new";
-type OrderDetailMode = "view" | "edit" | "allocate";
+type View = "list" | "detail" | "allocate" | "new";
+type OrderDetailMode = "view" | "edit";
 type StatusFilter = OrderStatus | "all";
 type PayFilter = PaymentStatus | "all";
 
 const STATUS_LABELS: Record<OrderStatus, string> = {
-  created: "Created",
-  processing: "Processing",
-  partly_delivered: "Partly delivered",
-  completed: "Completed",
+  new: "New",
+  allocating: "Allocating",
+  ready_to_deliver: "Ready to deliver",
+  partly_delivered: "Partially delivered",
+  fulfilled: "Fulfilled",
   cancelled: "Cancelled",
 };
 
 // Filled, not tinted: the shared Badge's subtle variants read as a highlighted background
 // rather than a state, so each status is solid colour with the inverse text over it. Every
-// value is a token, so all four follow the workspace's blue and the theme.
+// value is a token, so the lifecycle remains legible in the workspace theme.
 const PAYMENT_LABELS: Record<PaymentStatus, string> = {
   unpaid: "Unpaid",
   partial: "Part paid",
@@ -169,10 +172,11 @@ const PAYMENT_STYLES: Record<PaymentStatus, string> = {
 const PAYMENT_STATUSES: PaymentStatus[] = ["unpaid", "partial", "paid"];
 
 const STATUS_STYLES: Record<OrderStatus, string> = {
-  created: "bg-text-secondary text-bg-base",
-  processing: "bg-brand text-white",
+  new: "bg-text-secondary text-bg-base",
+  allocating: "bg-warning text-white",
+  ready_to_deliver: "bg-brand text-white",
   partly_delivered: "bg-warning text-white",
-  completed: "bg-success text-white",
+  fulfilled: "bg-success text-white",
   cancelled: "bg-error text-white",
 };
 
@@ -216,8 +220,8 @@ export default function CustomerOrdersPage({
   onInitialOrderOpened?: () => void;
 }): React.JSX.Element {
   const showToast = useToast();
-  const queryClient = useQueryClient();
   useHydrateMasterData(session);
+  const queryClient = useQueryClient();
   const {
     data: wire,
     isFetching: isRefreshing,
@@ -267,6 +271,25 @@ export default function CustomerOrdersPage({
       throw error;
     }
   }
+
+  async function saveDelivery(input: CustomerDeliveryBatchInput): Promise<void> {
+    try {
+      await createCustomerDeliveryBatch(session, input);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: ["wholesale", "inventory"] }),
+      ]);
+      showToast("success", "Customer delivery recorded.");
+    } catch (error) {
+      showToast(
+        "error",
+        error instanceof WholesaleApiError
+          ? error.message
+          : "Could not record this customer delivery.",
+      );
+      throw error;
+    }
+  }
   const [view, setView] = useState<View>("list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openMode, setOpenMode] = useState<OrderDetailMode>("view");
@@ -288,6 +311,11 @@ export default function CustomerOrdersPage({
     setSelectedId(orderId);
     setOpenMode(mode);
     setView("detail");
+  }
+
+  function openAllocation(orderId: string): void {
+    setSelectedId(orderId);
+    setView("allocate");
   }
 
   function cancelOrder(orderId: string): void {
@@ -423,10 +451,20 @@ export default function CustomerOrdersPage({
         order={selected}
         initialMode={openMode}
         onSave={persistOrder}
+        onBack={() => setView("list")}
+      />
+    );
+  }
+
+  if (view === "allocate" && selected) {
+    return (
+      <AllocateAndDeliveryView
+        order={selected}
         orders={orders}
         inventoryLines={inventoryLines}
         inventoryLoading={isInventoryFetching}
         onSaveAllocation={saveAllocation}
+        onSaveDelivery={saveDelivery}
         onBack={() => setView("list")}
       />
     );
@@ -437,7 +475,7 @@ export default function CustomerOrdersPage({
       orders={orders}
       onOpen={openOrder}
       onEdit={(orderId) => openOrder(orderId, "edit")}
-      onAllocate={(orderId) => openOrder(orderId, "allocate")}
+      onAllocate={openAllocation}
       onCancel={cancelOrder}
       onNew={() => setView("new")}
       onRefresh={reload}
@@ -670,12 +708,12 @@ function OrderList({
                   <Th className="whitespace-nowrap">Order no.</Th>
                   <Th>Customer</Th>
                   <Th>Date</Th>
-                  <Th className="text-right whitespace-nowrap">Ordered quantity</Th>
+                  <Th className="text-right whitespace-nowrap">Ordered qty</Th>
                   <Th className="text-right whitespace-nowrap">
-                    Remaining quantity
+                    Remaining qty
                   </Th>
                   <Th className="min-w-[11rem] whitespace-nowrap">
-                    Delivery progress
+                    Fulfillment progress
                   </Th>
                   <Th className="whitespace-nowrap">Order status</Th>
                   <Th className="whitespace-nowrap">Payment status</Th>
@@ -709,7 +747,7 @@ function OrderList({
                       <Td>
                         <RowProgress
                           pct={receivedPct(order)}
-                          label={`Delivery progress for ${order.order_no}`}
+                          label={`Fulfillment progress for ${order.order_no}`}
                         />
                       </Td>
                       <Td>
@@ -722,7 +760,11 @@ function OrderList({
                         <RowMenu
                           onView={() => onOpen(order.order_id)}
                           onEdit={() => onEdit(order.order_id)}
-                          onAllocate={() => onAllocate(order.order_id)}
+                          onAllocate={
+                            order.order_status === "cancelled"
+                              ? undefined
+                              : () => onAllocate(order.order_id)
+                          }
                           onCancel={
                             order.order_status === "cancelled"
                               ? undefined
@@ -761,7 +803,7 @@ function RowMenu({
 }: {
   onView: () => void;
   onEdit: () => void;
-  onAllocate: () => void;
+  onAllocate?: () => void;
   onCancel?: () => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -822,14 +864,16 @@ function RowMenu({
               onEdit();
             }}
           />
-          <MenuItem
-            icon={<WarehouseIcon className="w-4 h-4" />}
-            label="Allocate stock"
-            onClick={() => {
-              setOpen(false);
-              onAllocate();
-            }}
-          />
+          {onAllocate && (
+            <MenuItem
+              icon={<WarehouseIcon className="w-4 h-4" />}
+              label="Fulfill order"
+              onClick={() => {
+                setOpen(false);
+                onAllocate();
+              }}
+            />
+          )}
           {onCancel && (
             <MenuItem
               icon={<CloseIcon className="w-4 h-4" />}
@@ -849,23 +893,17 @@ function RowMenu({
 
 // ── Detail ───────────────────────────────────────────────────────────────────
 
-function OrderProductsView({
-  order,
-}: {
-  order: CustomerOrder;
-}): React.JSX.Element {
+function OrderProductsView({ order }: { order: CustomerOrder }): React.JSX.Element {
   return (
     <TableContainer>
       <Thead className="top-0">
         <Tr>
-          <Th className="min-w-[10rem] whitespace-nowrap">
-            Supplier / Factory
-          </Th>
+          <Th className="min-w-[10rem] whitespace-nowrap">Supplier / Factory</Th>
           <Th className="min-w-[18rem]">Product</Th>
           <Th className="min-w-[11rem]">Colors</Th>
-          <Th className="text-right whitespace-nowrap">Ordered quantity</Th>
-          <Th className="text-right whitespace-nowrap">Received quantity</Th>
-          <Th className="text-right whitespace-nowrap">Remaining quantity</Th>
+          <Th className="text-right whitespace-nowrap">Ordered qty</Th>
+          <Th className="text-right whitespace-nowrap">Received qty</Th>
+          <Th className="text-right whitespace-nowrap">Remaining qty</Th>
           <Th className="text-right min-w-[7rem]">Selling price</Th>
           <Th className="text-right">Amount</Th>
         </Tr>
@@ -877,59 +915,656 @@ function OrderProductsView({
             <Td>
               <div className="flex min-w-0 flex-col gap-0.5">
                 <div className="flex min-w-0 items-center gap-1">
-                  <span className="font-semibold text-brand break-words">
-                    {line.stock_code || "No stock code"}
-                  </span>
-                  {line.stock_code && (
-                    <CopyButton value={line.stock_code} what="stock code" />
-                  )}
+                  <span className="font-semibold text-brand break-words">{line.stock_code || "No stock code"}</span>
+                  {line.stock_code && <CopyButton value={line.stock_code} what="stock code" />}
                 </div>
-                <span className="break-words text-text-primary">
-                  {line.description || "—"}
-                </span>
-                <span className="text-xs text-text-muted">
-                  {GROUP_LABELS[line.product_group]}
-                </span>
+                <span className="break-words text-text-primary">{line.description || "—"}</span>
+                <span className="text-xs text-text-muted">{GROUP_LABELS[line.product_group]}</span>
               </div>
             </Td>
-            <Td className="whitespace-normal break-words text-text-secondary">
-              {line.color_breakdown || "—"}
-            </Td>
+            <Td className="whitespace-normal break-words text-text-secondary">{line.color_breakdown || "—"}</Td>
             <Td className="text-right tabular-nums">{sets(line.quantity_pairs)}</Td>
-            <Td className="text-right tabular-nums font-medium text-success">
-              {sets(line.delivered_quantity_pairs)}
-            </Td>
-            <Td className="text-right tabular-nums font-semibold text-error">
-              {sets(lineRemaining(line))}
-            </Td>
-            <Td className="text-right tabular-nums">
-              {formatKyat(line.selling_price)}
-            </Td>
-            <Td className="text-right tabular-nums font-medium whitespace-nowrap">
-              {formatKyat(line.quantity_pairs * line.selling_price)}
-            </Td>
+            <Td className="text-right tabular-nums font-medium text-success">{sets(line.delivered_quantity_pairs)}</Td>
+            <Td className="text-right tabular-nums font-semibold text-error">{sets(lineRemaining(line))}</Td>
+            <Td className="text-right tabular-nums">{formatKyat(line.selling_price)}</Td>
+            <Td className="text-right tabular-nums font-medium whitespace-nowrap">{formatKyat(line.quantity_pairs * line.selling_price)}</Td>
           </Tr>
         ))}
         <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-          <Td className="font-semibold" colSpan={3}>
-            Total
-          </Td>
-          <Td className="text-right tabular-nums font-semibold">
-            {sets(order.total_quantity_pairs)}
-          </Td>
-          <Td className="text-right tabular-nums font-semibold text-success">
-            {sets(order.delivered_quantity_pairs)}
-          </Td>
-          <Td className="text-right tabular-nums font-semibold text-error">
-            {sets(remainingQty(order))}
-          </Td>
+          <Td className="font-semibold" colSpan={3}>Total</Td>
+          <Td className="text-right tabular-nums font-semibold">{sets(order.total_quantity_pairs)}</Td>
+          <Td className="text-right tabular-nums font-semibold text-success">{sets(order.delivered_quantity_pairs)}</Td>
+          <Td className="text-right tabular-nums font-semibold text-error">{sets(remainingQty(order))}</Td>
           <Td />
-          <Td className="text-right tabular-nums font-semibold text-brand">
-            {formatKyat(orderAmount(order))}
-          </Td>
+          <Td className="text-right tabular-nums font-semibold text-brand">{formatKyat(orderAmount(order))}</Td>
         </Tr>
       </Tbody>
     </TableContainer>
+  );
+}
+
+function mergeColorPairs(target: ColorPairs, source: ColorPairs): ColorPairs {
+  for (const [color, pairs] of Object.entries(source)) {
+    target[color] = (target[color] ?? 0) + pairs;
+  }
+  return target;
+}
+
+function subtractColorPairs(colors: ColorPairs, reserved: ColorPairs): ColorPairs {
+  return Object.fromEntries(
+    Object.entries(colors).map(([color, pairs]) => [
+      color,
+      Math.max(0, pairs - (reserved[color] ?? 0)),
+    ]),
+  );
+}
+
+function availableStockColors(stockCode: string, inventoryLines: StockLine[]): ColorPairs {
+  return inventoryLines
+    .filter((line) => line.stock_code === stockCode)
+    .reduce(
+      (colors, line) => mergeColorPairs(colors, line.color_quantities_pairs),
+      {},
+    );
+}
+
+function allocationsFromOtherOrders(
+  orders: CustomerOrder[],
+  stockCode: string,
+  orderId: string,
+): ColorPairs {
+  return orders
+    .filter((order) => order.order_id !== orderId && order.order_status !== "cancelled")
+    .reduce(
+      (colors, order) =>
+        order.lines
+          .filter((line) => line.stock_code === stockCode)
+          .reduce(
+            (result, line) =>
+              mergeColorPairs(
+                result,
+                colorPairsForText(line.allocated_color_breakdown ?? "", line.unit),
+              ),
+            colors,
+          ),
+      {},
+    );
+}
+
+function formatColorPairs(colorPairs: ColorPairs): string {
+  return Object.entries(colorPairs)
+    .filter(([, pairs]) => pairs > 0)
+    .map(([color, pairs]) => (pairs % 6 === 0 ? `${color}${pairs / 6}s` : `${color}${pairs}p`))
+    .join(", ");
+}
+
+function AllocationLineRow({
+  line,
+  order,
+  orders,
+  inventoryLines,
+  inventoryLoading,
+  onSaveAllocation,
+}: {
+  line: CustomerOrderLine;
+  order: CustomerOrder;
+  orders: CustomerOrder[];
+  inventoryLines: StockLine[];
+  inventoryLoading: boolean;
+  onSaveAllocation: (lineId: string, colorBreakdown: string) => Promise<void>;
+}): React.JSX.Element {
+  const [draft, setDraft] = useState(line.allocated_color_breakdown ?? "");
+  const [saving, setSaving] = useState(false);
+  const stockColors = availableStockColors(line.stock_code, inventoryLines);
+  const reservedByOthers = allocationsFromOtherOrders(orders, line.stock_code, order.order_id);
+  const ownColors = colorPairsForText(line.allocated_color_breakdown ?? "", line.unit);
+  // Keep the current allocation available for edit validation, but subtract it from
+  // the stock amount shown as still available for a new allocation.
+  const availableForEdit = subtractColorPairs(stockColors, reservedByOthers);
+  const availableToAllocate = subtractColorPairs(availableForEdit, ownColors);
+  const availablePairs = Object.values(availableToAllocate).reduce((sum, pairs) => sum + pairs, 0);
+  const hasAvailableStock = availablePairs > 0;
+  const hasCurrentAllocation = (line.allocated_quantity_pairs ?? 0) > 0;
+  const requestedColors = colorPairsForText(draft, line.unit);
+  const requestedPairs = Object.values(requestedColors).reduce((sum, pairs) => sum + pairs, 0);
+  const orderColors = colorPairsForText(line.color_breakdown, line.unit);
+  const colorError = colorQtyProblem(draft);
+  const invalidColor = Object.entries(requestedColors).find(
+    ([color, pairs]) => pairs > (orderColors[color] ?? 0) || pairs > (availableForEdit[color] ?? 0),
+  );
+  const validationMessage = colorError
+    ?? (invalidColor
+      ? (invalidColor[1] > (orderColors[invalidColor[0]] ?? 0)
+        ? `Only ${formatIn(orderColors[invalidColor[0]] ?? 0, "pair")} of ${invalidColor[0]} is on this order.`
+        : `Only ${formatIn(availableForEdit[invalidColor[0]] ?? 0, "pair")} of ${invalidColor[0]} is available.`)
+      : requestedPairs > lineRemaining(line)
+        ? `Allocation cannot exceed ${sets(lineRemaining(line))}.`
+        : null);
+  const isChanged = draft.trim() !== (line.allocated_color_breakdown ?? "").trim();
+  const canSave = isChanged && !saving && !inventoryLoading && !validationMessage
+    && (requestedPairs > 0 || (line.allocated_quantity_pairs ?? 0) > 0);
+
+  useEffect(() => {
+    setDraft(line.allocated_color_breakdown ?? "");
+  }, [line.allocated_color_breakdown]);
+
+  async function save(): Promise<void> {
+    if (!canSave) return;
+    setSaving(true);
+    try {
+      await onSaveAllocation(line.order_line_id, draft.trim());
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Tr>
+      <Td>
+        <div className="flex min-w-[15rem] flex-col gap-0.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-bold text-brand">{line.stock_code || "No stock code"}</span>
+            <span className="text-xs text-text-muted">{GROUP_LABELS[line.product_group]}</span>
+          </div>
+          <span className="font-semibold text-text-primary">{line.description || "Unnamed product"}</span>
+          <span className="text-xs text-text-secondary">
+            <span className="font-semibold text-text-primary">Colors:</span>{" "}
+            <span className="font-bold text-brand">{line.color_breakdown || "—"}</span>
+          </span>
+        </div>
+      </Td>
+      <Td className="whitespace-nowrap text-right tabular-nums">{sets(line.quantity_pairs)}</Td>
+      <Td className="whitespace-nowrap text-right tabular-nums text-success">{sets(line.delivered_quantity_pairs)}</Td>
+      <Td className="whitespace-nowrap text-right tabular-nums font-semibold text-error">{sets(lineRemaining(line))}</Td>
+      <Td>
+        <span className="font-bold text-brand">
+          {line.allocated_color_breakdown || "Not allocated"}
+        </span>
+      </Td>
+      <Td>
+        <div className="min-w-[12rem]">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-sm font-semibold text-brand tabular-nums">
+              {inventoryLoading ? "—" : `${formatQty(availablePairs)} pairs`}
+            </span>
+            {!inventoryLoading && (
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-0.5 text-xs font-semibold",
+                  hasAvailableStock
+                    ? "bg-success-subtle text-success"
+                    : hasCurrentAllocation
+                      ? "bg-brand-subtle text-brand"
+                      : "bg-error-subtle text-error",
+                )}
+              >
+                {hasAvailableStock ? "Available" : hasCurrentAllocation ? "Fully allocated" : "Not available"}
+              </span>
+            )}
+          </div>
+          <div className="mt-0.5 text-xs text-text-secondary">
+            {inventoryLoading
+              ? "Checking stock…"
+              : hasAvailableStock
+                ? <span className="font-bold text-brand">{formatColorPairs(availableToAllocate)}</span>
+                : hasCurrentAllocation
+                  ? "No stock remains for another allocation."
+                  : "No stock is available for this item."}
+          </div>
+        </div>
+      </Td>
+      <Td className="min-w-[17rem]">
+        <Input
+          aria-label={`Allocation for ${order.order_no} ${line.stock_code}`}
+          placeholder="Enter allocation"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          error={validationMessage ?? undefined}
+        />
+        <div className="mt-1 text-xs text-text-muted">
+          {draft.trim() !== "" && !validationMessage
+            ? `${formatQty(requestedPairs)} pairs selected`
+            : "Use s, p, or d."}
+        </div>
+      </Td>
+      <Td className="whitespace-nowrap">
+        <Button size="sm" onClick={() => void save()} loading={saving} disabled={!canSave}>
+          {line.allocated_quantity_pairs ? "Update" : "Allocate"}
+        </Button>
+      </Td>
+    </Tr>
+  );
+}
+
+function AllocationTable({
+  order,
+  orders,
+  inventoryLines,
+  inventoryLoading,
+  onSaveAllocation,
+}: {
+  order: CustomerOrder;
+  orders: CustomerOrder[];
+  inventoryLines: StockLine[];
+  inventoryLoading: boolean;
+  onSaveAllocation: (lineId: string, colorBreakdown: string) => Promise<void>;
+}): React.JSX.Element {
+  return (
+    <TableContainer>
+      <Thead className="top-0">
+        <Tr>
+          <Th className="min-w-[15rem]">Product</Th>
+          <Th className="text-right whitespace-nowrap">Ordered qty</Th>
+          <Th className="text-right whitespace-nowrap">Delivered qty</Th>
+          <Th className="text-right whitespace-nowrap">Remaining qty</Th>
+          <Th className="min-w-[13rem]">Allocated colors</Th>
+          <Th className="min-w-[12rem]">Available to allocate</Th>
+          <Th className="min-w-[17rem]">Allocate colors</Th>
+          <Th>Action</Th>
+        </Tr>
+      </Thead>
+      <Tbody>
+        {order.lines.map((line) => (
+          <AllocationLineRow
+            key={line.order_line_id}
+            line={line}
+            order={order}
+            orders={orders}
+            inventoryLines={inventoryLines}
+            inventoryLoading={inventoryLoading}
+            onSaveAllocation={onSaveAllocation}
+          />
+        ))}
+      </Tbody>
+    </TableContainer>
+  );
+}
+
+function deliveryLocationsForLine(
+  line: CustomerOrderLine,
+  inventoryLines: StockLine[],
+): string[] {
+  return [
+    ...new Set(
+      inventoryLines
+        .filter((stockLine) => stockLine.stock_code === line.stock_code)
+        .map((stockLine) => stockLine.location)
+        .filter((location) => location !== ""),
+    ),
+  ];
+}
+
+function availableDeliveryColors(
+  line: CustomerOrderLine,
+  order: CustomerOrder,
+  orders: CustomerOrder[],
+  inventoryLines: StockLine[],
+  location: string,
+): ColorPairs {
+  const stockColors = inventoryLines
+    .filter(
+      (stockLine) =>
+        stockLine.stock_code === line.stock_code &&
+        stockLine.location === location,
+    )
+    .reduce(
+      (colors, stockLine) => mergeColorPairs(colors, stockLine.color_quantities_pairs),
+      {},
+    );
+  return subtractColorPairs(
+    stockColors,
+    allocationsFromOtherOrders(orders, line.stock_code, order.order_id),
+  );
+}
+
+function deliveryValidationMessage(
+  line: CustomerOrderLine,
+  draft: string,
+  allocatedColors: ColorPairs,
+  availableColors: ColorPairs,
+  inventoryLoading: boolean,
+): string | null {
+  if (draft.trim() === "" || inventoryLoading) return null;
+  const parseError = colorQtyProblem(draft);
+  if (parseError) return parseError;
+  const requestedColors = colorPairsForText(draft, line.unit);
+  const requestedPairs = Object.values(requestedColors).reduce(
+    (sum, pairs) => sum + pairs,
+    0,
+  );
+  if (requestedPairs > lineRemaining(line)) {
+    return `Delivery cannot exceed ${sets(lineRemaining(line))}.`;
+  }
+  for (const [color, pairs] of Object.entries(requestedColors)) {
+    if (pairs > (allocatedColors[color] ?? 0)) {
+      return `Only ${formatIn(allocatedColors[color] ?? 0, "pair")} of ${color} is allocated for delivery.`;
+    }
+    if (pairs > (availableColors[color] ?? 0)) {
+      return `Only ${formatIn(availableColors[color] ?? 0, "pair")} of ${color} is available at this location.`;
+    }
+  }
+  return null;
+}
+
+function DeliveryView({
+  order,
+  orders,
+  inventoryLines,
+  inventoryLoading,
+  onSaveDelivery,
+  onBack,
+}: {
+  order: CustomerOrder;
+  orders: CustomerOrder[];
+  inventoryLines: StockLine[];
+  inventoryLoading: boolean;
+  onSaveDelivery: (input: CustomerDeliveryBatchInput) => Promise<void>;
+  onBack: () => void;
+}): React.JSX.Element {
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [fromLocation, setFromLocation] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState(todayIso());
+  const [deliveryAddress, setDeliveryAddress] = useState(order.customer_address);
+  const [deliveryNote, setDeliveryNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDeliveryAddress(order.customer_address);
+  }, [order.customer_address]);
+
+  const locationOptions = [
+    ...new Set(order.lines.flatMap((line) => deliveryLocationsForLine(line, inventoryLines))),
+  ];
+  const selectedLocation = fromLocation || locationOptions[0] || "";
+
+  const rows = order.lines.map((line) => {
+    const allocatedColors = colorPairsForText(
+      line.allocated_color_breakdown ?? "",
+      line.unit,
+    );
+    const availableColors = availableDeliveryColors(
+      line,
+      order,
+      orders,
+      inventoryLines,
+      selectedLocation,
+    );
+    const draft = drafts[line.order_line_id] ?? "";
+    return {
+      line,
+      location,
+      draft,
+      problem: deliveryValidationMessage(
+        line,
+        draft,
+        allocatedColors,
+        availableColors,
+        inventoryLoading,
+      ),
+      availableColors,
+      allocatedColors,
+      pairs: Object.values(colorPairsForText(draft, line.unit)).reduce(
+        (sum, pairs) => sum + pairs,
+        0,
+      ),
+    };
+  });
+  const selectedRows = rows.filter((row) => row.pairs > 0);
+  const canSave =
+    !inventoryLoading &&
+    deliveryDate.trim() !== "" &&
+    selectedLocation !== "" &&
+    selectedRows.length > 0 &&
+    selectedRows.every((row) => row.problem === null);
+
+  async function saveDelivery(): Promise<void> {
+    if (!canSave || saving) return;
+    setSaving(true);
+    try {
+      await onSaveDelivery({
+        order_id: order.order_id,
+        delivered_on: deliveryDate,
+        delivery_address: deliveryAddress.trim(),
+        note: deliveryNote.trim(),
+        lines: selectedRows.map((row) => ({
+          stock_code: row.line.stock_code,
+          location: selectedLocation,
+          color_breakdown: row.draft.trim(),
+        })),
+      });
+      setDrafts({});
+      setDeliveryNote("");
+      setDeliveryDate(todayIso());
+      setFromLocation("");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="border-b border-border-strong pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-base font-semibold text-text-primary">Delivery details</h3>
+            <p className="mt-1 text-sm text-text-secondary">Enter where and when this delivery is going.</p>
+          </div>
+          <span className="text-sm font-semibold tabular-nums text-brand">{formatQty(selectedRows.reduce((sum, row) => sum + row.pairs, 0))} pairs selected</span>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-4">
+          <Select
+            label="From location"
+            value={selectedLocation}
+            onChange={(event) => setFromLocation(event.target.value)}
+            disabled={inventoryLoading || locationOptions.length === 0}
+          >
+            {locationOptions.length === 0 ? (
+              <option value="">No stock location</option>
+            ) : (
+              locationOptions.map((entry) => <option key={entry} value={entry}>{entry}</option>)
+            )}
+          </Select>
+          <Input
+            label="Delivery date"
+            type="date"
+            value={deliveryDate}
+            onChange={(event) => setDeliveryDate(event.target.value)}
+          />
+          <Input
+            label="Delivery address"
+            value={deliveryAddress}
+            onChange={(event) => setDeliveryAddress(event.target.value)}
+            placeholder="Customer address"
+          />
+          <Input
+            label="Delivery note"
+            value={deliveryNote}
+            onChange={(event) => setDeliveryNote(event.target.value)}
+            placeholder="Optional note"
+          />
+        </div>
+      </div>
+
+      <TableContainer>
+        <Thead className="top-0">
+          <Tr>
+            <Th className="min-w-[15rem]">Product</Th>
+            <Th className="text-right whitespace-nowrap">Ordered qty</Th>
+            <Th className="text-right whitespace-nowrap">Delivered qty</Th>
+            <Th className="text-right whitespace-nowrap">Remaining qty</Th>
+            <Th className="min-w-[13rem]">Allocated colors</Th>
+            <Th className="min-w-[13rem]">Available to deliver</Th>
+            <Th className="min-w-[17rem]">Deliver colors</Th>
+          </Tr>
+        </Thead>
+        <Tbody>
+          {rows.map((row) => {
+            const deliverableColors = Object.entries(row.allocatedColors).reduce<ColorPairs>(
+              (colors, [color, pairs]) => {
+                const deliverablePairs = Math.min(pairs, row.availableColors[color] ?? 0);
+                if (deliverablePairs > 0) colors[color] = deliverablePairs;
+                return colors;
+              },
+              {},
+            );
+            const availablePairs = Object.values(deliverableColors).reduce((sum, pairs) => sum + pairs, 0);
+            const canDeliver = (row.line.allocated_quantity_pairs ?? 0) > 0;
+            return (
+              <Tr key={row.line.order_line_id}>
+                <Td>
+                  <div className="flex min-w-[15rem] flex-col gap-0.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-bold text-brand">{row.line.stock_code || "No stock code"}</span>
+                      <span className="text-xs text-text-muted">{GROUP_LABELS[row.line.product_group]}</span>
+                    </div>
+                    <span className="font-semibold text-text-primary">{row.line.description || "Unnamed product"}</span>
+                  </div>
+                </Td>
+                <Td className="whitespace-nowrap text-right tabular-nums">{sets(row.line.quantity_pairs)}</Td>
+                <Td className="whitespace-nowrap text-right tabular-nums text-success">{sets(row.line.delivered_quantity_pairs)}</Td>
+                <Td className="whitespace-nowrap text-right tabular-nums font-semibold text-error">{sets(lineRemaining(row.line))}</Td>
+                <Td>
+                  <span className="font-bold text-brand">{formatColorPairs(row.allocatedColors) || "No allocation"}</span>
+                </Td>
+                <Td>
+                  <div className="min-w-[13rem]">
+                    <div className="font-semibold tabular-nums text-brand">
+                      {inventoryLoading ? "—" : `${formatQty(availablePairs)} pairs`}
+                    </div>
+                    <div className="mt-0.5 text-xs text-text-secondary">
+                      {inventoryLoading
+                        ? "Checking stock…"
+                        : availablePairs > 0
+                          ? <span className="font-bold text-brand">{formatColorPairs(deliverableColors)}</span>
+                          : "No allocated colors available."}
+                    </div>
+                  </div>
+                </Td>
+                <Td>
+                  <Input
+                    aria-label={`Delivery by color for ${order.order_no} ${row.line.stock_code}`}
+                    placeholder="Enter delivery"
+                    value={row.draft}
+                    onChange={(event) =>
+                      setDrafts((current) => ({ ...current, [row.line.order_line_id]: event.target.value }))
+                    }
+                    error={row.problem ?? undefined}
+                    disabled={!canDeliver || inventoryLoading || selectedLocation === ""}
+                  />
+                </Td>
+              </Tr>
+            );
+          })}
+        </Tbody>
+      </TableContainer>
+
+      <div className="flex flex-wrap justify-between gap-2">
+        <Button variant="ghost" onClick={onBack}>
+          Back to allocation
+        </Button>
+        <Button onClick={() => void saveDelivery()} loading={saving} disabled={!canSave}>
+          Record delivery
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AllocateAndDeliveryView({
+  order,
+  orders,
+  inventoryLines,
+  inventoryLoading,
+  onSaveAllocation,
+  onSaveDelivery,
+  onBack,
+}: {
+  order: CustomerOrder;
+  orders: CustomerOrder[];
+  inventoryLines: StockLine[];
+  inventoryLoading: boolean;
+  onSaveAllocation: (lineId: string, colorBreakdown: string) => Promise<void>;
+  onSaveDelivery: (input: CustomerDeliveryBatchInput) => Promise<void>;
+  onBack: () => void;
+}): React.JSX.Element {
+  const [step, setStep] = useState(0);
+  const allocatedPairs = order.lines.reduce((sum, line) => sum + (line.allocated_quantity_pairs ?? 0), 0);
+  const remainingPairs = remainingQty(order);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <Button variant="ghost" size="sm" onClick={onBack} className="self-start">
+        <ChevronLeftIcon className="w-4 h-4" />
+        Back to orders
+      </Button>
+      <Panel className="border-border-strong">
+        <div className="border-b border-border-strong px-5 py-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-xl font-semibold tracking-tight text-text-primary">Fulfill order</h2>
+                <StatusBadge status={order.order_status} />
+              </div>
+              <p className="mt-1 text-sm text-text-muted">{order.order_no} · {order.customer_name} · {formatDate(order.order_date)}</p>
+            </div>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-4">
+            <FigureCard label="Ordered" value={sets(order.total_quantity_pairs)} tone="neutral" className="border-border-strong" />
+            <FigureCard label="Allocated" value={sets(allocatedPairs)} tone="brand" className="border-border-strong" />
+            <FigureCard label="Delivered" value={sets(order.delivered_quantity_pairs)} tone="success" className="border-border-strong" />
+            <FigureCard
+              label="Remaining"
+              value={sets(remainingPairs)}
+              tone={remainingPairs > 0 ? "error" : "success"}
+              className="border-border-strong"
+            />
+          </div>
+          <div className="mt-3 mb-5">
+            <div className="mb-1 flex items-center justify-between text-xs">
+              <span className="font-medium text-text-secondary">Fulfillment progress</span>
+              <span className="font-semibold tabular-nums text-text-primary">{sets(order.delivered_quantity_pairs)} / {sets(order.total_quantity_pairs)}</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-bg-raised">
+              <div
+                className="h-full rounded-full bg-brand transition-[width] duration-300 motion-reduce:transition-none"
+                style={{ width: `${order.total_quantity_pairs > 0 ? Math.min(100, Math.round((order.delivered_quantity_pairs / order.total_quantity_pairs) * 100)) : 0}%` }}
+              />
+            </div>
+          </div>
+          <div className="mt-4">
+            <StepBar steps={["Allocate", "Delivery"]} step={step} />
+          </div>
+        </div>
+        <div className="px-5 py-4">
+          {step === 0 ? (
+            <>
+              <AllocationTable
+                order={order}
+                orders={orders}
+                inventoryLines={inventoryLines}
+                inventoryLoading={inventoryLoading}
+                onSaveAllocation={onSaveAllocation}
+              />
+              <div className="mt-4 flex justify-end">
+                <Button onClick={() => setStep(1)}>
+                  Continue to delivery
+                  <ChevronRightIcon className="h-4 w-4" />
+                </Button>
+              </div>
+            </>
+          ) : (
+            <DeliveryView
+              order={order}
+              orders={orders}
+              inventoryLines={inventoryLines}
+              inventoryLoading={inventoryLoading}
+              onSaveDelivery={onSaveDelivery}
+              onBack={() => setStep(0)}
+            />
+          )}
+        </div>
+      </Panel>
+    </div>
   );
 }
 
@@ -1005,10 +1640,11 @@ const customerOrderDetailSchema = z.object({
     total_quantity_pairs: z.number().finite().min(0),
     delivered_quantity_pairs: z.number().finite().min(0),
     order_status: z.enum([
-      "created",
-      "processing",
+      "new",
+      "allocating",
+      "ready_to_deliver",
       "partly_delivered",
-      "completed",
+      "fulfilled",
       "cancelled",
     ]),
     payment: z.object({
@@ -1298,7 +1934,7 @@ function OrderDetail({
         <div className="px-6 py-6 flex flex-col gap-10">
           <section>
             <SectionLabel>Order information</SectionLabel>
-            {detailMode === "view" ? (
+            {detailMode !== "edit" ? (
               <OrderInfoView order={order} />
             ) : (
               <div className="grid gap-4 lg:grid-cols-2">
@@ -1403,7 +2039,7 @@ function OrderDetail({
                   aria-valuenow={pct}
                   aria-valuemin={0}
                   aria-valuemax={100}
-                  aria-label="Delivery progress"
+                  aria-label="Fulfillment progress"
                   className="h-2 rounded-full bg-bg-raised overflow-hidden"
                 >
                   <div
@@ -1429,13 +2065,13 @@ function OrderDetail({
                       <Th className="min-w-[18rem]">Product</Th>
                       <Th className="min-w-[11rem]">Colors</Th>
                       <Th className="text-right whitespace-nowrap">
-                        Ordered quantity
+                        Ordered qty
                       </Th>
                       <Th className="text-right whitespace-nowrap">
-                        Received quantity
+                        Received qty
                       </Th>
                       <Th className="text-right whitespace-nowrap">
-                        Remaining quantity
+                        Remaining qty
                       </Th>
                       <Th className="text-right min-w-[7rem]">Selling price</Th>
                       <Th className="text-right">Amount</Th>
@@ -1527,7 +2163,7 @@ function OrderDetail({
                               render={({ field: colorField }) => (
                                 <CellInput
                                   label={`Colors for product ${index + 1}`}
-                                  placeholder="black10s,pink2p"
+                                  placeholder="Enter color qty"
                                   multiline
                                   value={colorField.value}
                                   onChange={(next) => {
@@ -1674,7 +2310,7 @@ function OrderDetail({
               onAdd={addPayment}
               onUpdate={(payment) => setPayment(payment.payment_id, payment)}
               onRemove={removePayment}
-              readOnly={detailMode === "view"}
+              readOnly={detailMode !== "edit"}
             />
           </section>
         </div>
@@ -2042,7 +2678,7 @@ function NewOrderForm({
     if (!hasProductQuantity) {
       setError("lines", {
         type: "validate",
-        message: "Add a product with at least one color quantity.",
+        message: "Add a product with at least one color qty.",
       });
     }
     if (
@@ -2081,7 +2717,7 @@ function NewOrderForm({
       order_date: values.order_date,
       total_quantity_pairs: orderLines.reduce((sum, line) => sum + line.quantity_pairs, 0),
       delivered_quantity_pairs: 0,
-      order_status: "created",
+      order_status: "new",
       // Nothing has been paid at the moment an order is written down, so the account
       // starts unpaid.
       payment: { account_id: `pa-${now}`, payments: [] },
@@ -2177,7 +2813,7 @@ function NewOrderForm({
                   </Th>
                   <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[13rem]">Colors</Th>
-                  <Th className="text-right whitespace-nowrap">Ordered quantity</Th>
+                  <Th className="text-right whitespace-nowrap">Ordered qty</Th>
                   <Th className="text-right min-w-[8rem]">Selling price</Th>
                   <Th className="text-right min-w-[8rem]">Amount</Th>
                 </Tr>
@@ -2274,7 +2910,7 @@ function NewOrderForm({
                           render={({ field: colorField }) => (
                             <CellInput
                               label={`Colors for product ${index + 1}`}
-                              placeholder="black10s,pink2p"
+                              placeholder="Enter color qty"
                               multiline
                               value={colorField.value}
                               onChange={colorField.onChange}
@@ -2396,7 +3032,7 @@ function NewOrderForm({
                   <Th className="whitespace-nowrap">Supplier / Factory</Th>
                   <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[13rem]">Colors</Th>
-                  <Th className="text-right whitespace-nowrap">Ordered quantity</Th>
+                  <Th className="text-right whitespace-nowrap">Ordered qty</Th>
                   <Th className="text-right min-w-[8rem]">Selling price</Th>
                   <Th className="text-right min-w-[8rem]">Amount</Th>
                 </Tr>

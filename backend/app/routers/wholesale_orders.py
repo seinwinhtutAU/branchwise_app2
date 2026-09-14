@@ -29,7 +29,6 @@ from app.services.wholesale.inventory import (
     effective_allocated_color_pairs,
 )
 from app.services.wholesale.references import allocate_reference
-from app.services.wholesale_supplier_vouchers import stock_codes_with_open_vouchers
 
 router = APIRouter(prefix="/api/wholesale/orders", tags=["wholesale"])
 
@@ -42,11 +41,9 @@ def _require_wholesale(user: User) -> None:
 def _out(
     order,
     delivered_by_stock: dict[str, int] | None = None,
-    procuring_stock_codes: set[str] | None = None,
     delivered_colors_by_stock: dict[str, dict[str, int]] | None = None,
 ) -> dict:
     delivered_by_stock = delivered_by_stock or {}
-    procuring_stock_codes = procuring_stock_codes or set()
     delivered_colors_by_stock = delivered_colors_by_stock or {}
     remaining_deliveries = dict(delivered_by_stock)
     lines = []
@@ -88,18 +85,19 @@ def _out(
     paid = sum(payment["amount"] for payment in payments)
     received = sum(line["delivered_quantity_pairs"] for line in lines)
     total_wanted = sum(line["quantity_pairs"] for line in lines)
-    # "Processing" says buying has started — a supplier voucher exists for something
-    # this order still needs — before any of it has actually reached the customer.
-    # Once something has, the status is about delivery instead: see
-    # app/services/wholesale_supplier_vouchers.py::stock_codes_with_open_vouchers.
+    allocated = sum(line["allocated_quantity_pairs"] for line in lines)
     if order.cancelled:
         order_status = "cancelled"
+    elif total_wanted > 0 and received >= total_wanted:
+        order_status = "fulfilled"
     elif received > 0:
-        order_status = "partly_delivered" if received < total_wanted else "completed"
-    elif any(line["stock_code"] in procuring_stock_codes for line in lines):
-        order_status = "processing"
+        order_status = "partly_delivered"
+    elif allocated >= total_wanted and total_wanted > 0:
+        order_status = "ready_to_deliver"
+    elif allocated > 0:
+        order_status = "allocating"
     else:
-        order_status = "created"
+        order_status = "new"
     return {
         "order_id": order.id,
         "branch_id": order.branch_id,
@@ -117,11 +115,6 @@ def _out(
         "paid_amount": paid,
         "balance_due": max(0, total - paid),
     }
-
-
-def _procuring(db: Session, branch_id: str | None, orders: list[CustomerOrder]) -> set[str]:
-    stock_codes = {line.stock_code for order in orders for line in order.lines}
-    return stock_codes_with_open_vouchers(db, branch_id, stock_codes)
 
 
 def _delivered_colors(db: Session, order: CustomerOrder, branch_id: str | None) -> dict[str, dict[str, int]]:
@@ -149,12 +142,10 @@ def list_customer_orders(
     resolved_branch_id = resolve_branch_id(user, branch_id, db)
     orders = list_orders(db, resolved_branch_id)
     delivered = delivered_pairs_by_order(db, [order.id for order in orders], resolved_branch_id)
-    procuring = _procuring(db, resolved_branch_id, orders)
     rows = [
         _out(
             order,
             delivered.get(order.id),
-            procuring,
             _delivered_colors(db, order, resolved_branch_id),
         )
         for order in orders
@@ -234,7 +225,6 @@ def read_customer_order(order_id: str, user: User = Depends(get_current_app_user
     return _out(
         order,
         delivered_pairs_by_order(db, [order.id], user.branch_id).get(order.id),
-        _procuring(db, user.branch_id, [order]),
         _delivered_colors(db, order, user.branch_id),
     )
 
@@ -244,7 +234,7 @@ def create_customer_order(payload: OrderIn, user: User = Depends(get_current_app
     _require_wholesale(user)
     branch_id = resolve_branch_id(user, payload.branch_id, db)
     order = create_order(db, branch_id, payload)
-    return _out(order, None, _procuring(db, branch_id, [order]), _delivered_colors(db, order, branch_id))
+    return _out(order, None, _delivered_colors(db, order, branch_id))
 
 
 @router.put("/{order_id}")
@@ -254,7 +244,6 @@ def update_customer_order(order_id: str, payload: OrderIn, user: User = Depends(
     return _out(
         order,
         delivered_pairs_by_order(db, [order.id], user.branch_id).get(order.id),
-        _procuring(db, user.branch_id, [order]),
         _delivered_colors(db, order, user.branch_id),
     )
 
@@ -296,7 +285,6 @@ def update_customer_order_line_allocation(
     return _out(
         order,
         delivered_pairs_by_order(db, [order.id], user.branch_id).get(order.id),
-        _procuring(db, user.branch_id, [order]),
         _delivered_colors(db, order, user.branch_id),
     )
 

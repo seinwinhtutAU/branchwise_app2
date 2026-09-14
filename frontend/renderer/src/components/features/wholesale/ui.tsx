@@ -254,15 +254,17 @@ export function FigureCard({
   sub,
   tone = "brand",
   compact = false,
+  className,
 }: {
   label: string;
   value: string;
   sub?: string;
   tone?: Tone;
   compact?: boolean;
+  className?: string;
 }): React.JSX.Element {
   return (
-    <div className={cn("bg-bg-base border border-border rounded-xl", compact ? "p-3" : "p-5")}>
+    <div className={cn("bg-bg-base border border-border rounded-xl", compact ? "p-3" : "p-5", className)}>
       <span className={cn("block text-xs font-semibold uppercase tracking-wide text-text-muted", compact ? "mb-1" : "mb-2")}>
         {label}
       </span>

@@ -3,7 +3,7 @@ import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
 import { useConnectionStatus } from "@renderer/lib/connection";
 import { RequestTimeoutError } from "@renderer/lib/network";
-import { invalidateCachedPages } from "@renderer/lib/useCachedFetch";
+import { invalidateEverything } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
 import { Button } from "@renderer/components/ui/Button";
 import { Input } from "@renderer/components/ui/Input";
@@ -192,7 +192,7 @@ function ImportReviewPage({
       // Sales/inventory/purchase data just changed, so every cached dashboard and
       // Warning page is out of date. This is the honest invalidation signal in this app
       // — a confirmed or reverted import is the only thing that moves that data.
-      invalidateCachedPages();
+      invalidateEverything();
       onConfirmed(body);
     } catch (error) {
       // A request that timed out may have been saved anyway — the answer just never came

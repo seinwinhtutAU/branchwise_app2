@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { cn } from "@renderer/lib/utils";
-import { useCachedFetch } from "@renderer/lib/useCachedFetch";
+import { useUrlQuery } from "@renderer/lib/queryClient";
 import type { BranchOption } from "@renderer/lib/useBranches";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
@@ -53,7 +53,7 @@ import {
 // request per branch. That is deliberate rather than a single all-branches endpoint:
 // the cards fire their requests in parallel, so page 1 costs about what one branch
 // costs, and opening a branch afterwards is instant because page 2 reads the very same
-// cache entry the card already filled (see lib/useCachedFetch.ts).
+// cache entry the card already filled (see lib/queryClient.ts).
 //
 // The guiding rule for the layout is that a screen showing every branch, or every
 // dimension, or every alert, can only afford one line each. Anything more and it stops
@@ -142,11 +142,12 @@ function BranchSummaryCard({
 }): React.JSX.Element {
   // Each card owns its own request, so the branches load in parallel and page 2 later
   // reads the same cache entry instead of fetching again.
-  const { data, isRefreshing, failed, reload } = useCachedFetch<OverviewData>(
+  const { data: fetched, isRefreshing, failed, reload } = useUrlQuery<OverviewData>(
     dashboardUrl("overview", branch.id, { period, dateFrom, dateTo }),
     session,
     `${branch.name} health`,
   );
+  const data = fetched ?? null;
 
   if (data === null) {
     return failed ? (
@@ -559,11 +560,12 @@ function BranchDetail({
   onOpenEvidence: (target: EvidenceTarget) => void;
   onViewBusinessAlerts: () => void;
 }): React.JSX.Element {
-  const { data, isRefreshing, failed, reload } = useCachedFetch<OverviewData>(
+  const { data: fetched, isRefreshing, failed, reload } = useUrlQuery<OverviewData>(
     dashboardUrl("overview", branchId, { period, dateFrom, dateTo }),
     session,
     "Overview dashboard",
   );
+  const data = fetched ?? null;
 
   if (data === null) {
     if (failed) {

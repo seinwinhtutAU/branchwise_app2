@@ -1,7 +1,7 @@
 import { Fragment, useState } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { cn } from "@renderer/lib/utils";
-import { useCachedFetchMany } from "@renderer/lib/useCachedFetch";
+import { useUrlQueries } from "@renderer/lib/queryClient";
 import type { BranchOption } from "@renderer/lib/useBranches";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
@@ -65,7 +65,7 @@ import type { Profile } from "@renderer/components/features/types";
 // two screens.
 //
 // It issues no requests of its own: it reads the same per-branch overview payloads the
-// Dashboard's branch cards fetch, through the shared cache (see lib/useCachedFetch.ts).
+// Dashboard's branch cards fetch, through the shared cache (see lib/queryClient.ts).
 
 const EXCLUDED_DIMENSION = "data_quality";
 const COLUMN_COUNT = 5;
@@ -341,7 +341,7 @@ export function BusinessAlertsPage({
     }),
   );
   const { data, isLoading, isRefreshing, failedCount, reload } =
-    useCachedFetchMany<OverviewData>(urls, session, "alerts");
+    useUrlQueries<OverviewData>(urls, session, "alerts");
 
   const branches = Object.values(data);
   const allAlerts: BranchAlert[] = branches

@@ -1,5 +1,5 @@
 import type { Session } from "@renderer/lib/auth";
-import { useCachedFetch } from "@renderer/lib/useCachedFetch";
+import { useUrlQuery } from "@renderer/lib/queryClient";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
@@ -272,10 +272,11 @@ export function InventoryTab({
 }: Props): React.JSX.Element {
   // One cached request per (tab, branch, period) — returning to this tab with the same
   // selection shows the numbers it showed last time instead of a skeleton. See
-  // lib/useCachedFetch.ts.
+  // lib/queryClient.ts.
   const url = canLoad ? dashboardUrl("inventory", branchId) : null;
-  const { data, isRefreshing, failed, reload } =
-    useCachedFetch<InventoryDashboardData>(url, session, "Inventory dashboard");
+  const { data: fetched, isRefreshing, failed, reload } =
+    useUrlQuery<InventoryDashboardData>(url, session, "Inventory dashboard");
+  const data = fetched ?? null;
 
   if (!canLoad) return <></>;
 

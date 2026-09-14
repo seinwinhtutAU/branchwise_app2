@@ -8,20 +8,22 @@ import { paymentStatusOf, sharePct, type PaymentStatus } from "./shared";
 import { type Unit } from "./units";
 import { type ProductGroup } from "./products";
 
-/** created → processing (a supplier voucher has been placed) → partly_delivered (some
- *  of it has reached the customer) → completed, or cancelled at any point. */
+/** new → allocating → ready_to_deliver → partly_delivered → fulfilled, or cancelled at
+ *  any point. Status follows the stock reserved and delivered for the order. */
 export type OrderStatus =
-  | "created"
-  | "processing"
+  | "new"
+  | "allocating"
+  | "ready_to_deliver"
   | "partly_delivered"
-  | "completed"
+  | "fulfilled"
   | "cancelled";
 
 export const ORDER_STATUSES: OrderStatus[] = [
-  "created",
-  "processing",
+  "new",
+  "allocating",
+  "ready_to_deliver",
   "partly_delivered",
-  "completed",
+  "fulfilled",
   "cancelled",
 ];
 
@@ -45,8 +47,9 @@ export interface CustomerOrderLine {
    *  is the sum of these: a customer asks for two stock codes and is rarely given both at
    *  once, so "how much is still owed" is a question about a product, not an order. */
   delivered_quantity_pairs: number;
-  /** Explicit stock reserved for this order line. It is set from Inventory > Allocations,
-   *  never inferred from demand, so an order only consumes stock when someone allocates it. */
+  /** Explicit stock reserved for this order line. It is set from the order detail's
+   *  allocation panel, never inferred from demand. The API clamps it to what remains
+   *  owed after delivery. */
   allocated_quantity_pairs?: number;
   /** The colour shorthand entered when the stock reservation was made. */
   allocated_color_breakdown?: string;
@@ -171,7 +174,7 @@ export const SEED_ORDERS: CustomerOrder[] = [
     order_date: "2026-09-02",
     total_quantity_pairs: 120,
     delivered_quantity_pairs: 24,
-    order_status: "processing",
+    order_status: "allocating",
     payment: {
       account_id: "pa-1",
       payments: [
@@ -225,7 +228,7 @@ export const SEED_ORDERS: CustomerOrder[] = [
     order_date: "2026-09-05",
     total_quantity_pairs: 78,
     delivered_quantity_pairs: 78,
-    order_status: "completed",
+    order_status: "fulfilled",
     payment: {
       account_id: "pa-2",
       payments: [
@@ -267,7 +270,7 @@ export const SEED_ORDERS: CustomerOrder[] = [
     order_date: "2026-09-08",
     total_quantity_pairs: 204,
     delivered_quantity_pairs: 0,
-    order_status: "created",
+    order_status: "new",
     payment: {
       account_id: "pa-3",
       payments: [],
@@ -308,7 +311,7 @@ export const SEED_ORDERS: CustomerOrder[] = [
     order_date: "2026-09-09",
     total_quantity_pairs: 60,
     delivered_quantity_pairs: 0,
-    order_status: "created",
+    order_status: "new",
     payment: {
       account_id: "pa-4",
       payments: [
@@ -344,7 +347,7 @@ export const SEED_ORDERS: CustomerOrder[] = [
     order_date: "2026-09-10",
     total_quantity_pairs: 150,
     delivered_quantity_pairs: 36,
-    order_status: "processing",
+    order_status: "allocating",
     payment: {
       account_id: "pa-5",
       payments: [],

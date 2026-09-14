@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
-import { useCachedFetch } from "@renderer/lib/useCachedFetch";
+import { useUrlQuery } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
 import { cn } from "@renderer/lib/utils";
 import { Badge } from "@renderer/components/ui/Badge";
@@ -208,28 +208,30 @@ function ImportOverviewPage({
   const [activeTab, setActiveTab] = useState<Tab>("freshness");
 
   const {
-    data: freshness,
+    data: fetchedFreshness,
     isRefreshing: freshnessRefreshing,
     failed: freshnessFailed,
     reload: loadFreshness,
-  } = useCachedFetch<FreshnessRow[]>(
+  } = useUrlQuery<FreshnessRow[]>(
     `${apiBaseUrl}/api/imports/freshness`,
     session,
     "upload freshness",
   );
+  const freshness = fetchedFreshness ?? null;
 
   const [days, setDays] = useState<number>(30);
   // `days` is in the URL, so changing it is a different cache key and fetches properly.
   const {
-    data: health,
+    data: fetchedHealth,
     isRefreshing: healthRefreshing,
     failed: healthFailed,
     reload: loadHealth,
-  } = useCachedFetch<ImportHealthResponse>(
+  } = useUrlQuery<ImportHealthResponse>(
     `${apiBaseUrl}/api/imports/health?days=${days}`,
     session,
     "import health",
   );
+  const health = fetchedHealth ?? null;
 
   async function dismissBatch(batchId: string): Promise<void> {
     try {

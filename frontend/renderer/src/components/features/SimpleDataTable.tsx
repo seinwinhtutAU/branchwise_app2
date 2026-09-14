@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  flexRender,
+  getCoreRowModel,
+  getPaginationRowModel,
+  useReactTable,
+  type ColumnDef,
+  type PaginationState,
+} from "@tanstack/react-table";
+import "@renderer/lib/reactTable";
 import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
-import { useCachedFetch } from "@renderer/lib/useCachedFetch";
+import { useUrlQuery } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
 import { useSettled } from "@renderer/lib/useSettled";
 import { cn } from "@renderer/lib/utils";
@@ -29,7 +38,6 @@ import {
 import { Pagination } from "@renderer/components/ui/Pagination";
 import { DownloadIcon } from "@renderer/components/ui/icons";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
-import { usePagination } from "@renderer/lib/usePagination";
 
 export interface DataTableColumn<T> {
   key: keyof T;
@@ -120,6 +128,9 @@ interface Props<T extends object> {
 
 const PAGE_SIZE = 50;
 const FILTER_SETTLE_MS = 400;
+// A stable reference for "no data yet" so the table's `data` prop doesn't get a fresh
+// array identity — and therefore a needless row-model recompute — on every render.
+const EMPTY_ROWS: never[] = [];
 
 function defaultFormat(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
@@ -233,9 +244,10 @@ export function SimpleDataTable<T extends object>({
     const query = params.toString();
     if (query) url += `?${query}`;
   }
-  const { data, isRefreshing, failed, reload } = useCachedFetch<
+  const { data: fetched, isRefreshing, failed, reload } = useUrlQuery<
     T[] | ServerPage<T>
   >(url, session, title.toLowerCase());
+  const data = fetched ?? null;
   const rows =
     data === null
       ? null
@@ -295,15 +307,61 @@ export function SimpleDataTable<T extends object>({
     );
   }, [rows, filters, search, selectValues, dateFrom, dateTo, serverPaged]);
 
-  const clientPagination = usePagination(serverPaged ? null : filteredRows);
+  // Column defs, built once from the caller's plain DataTableColumn list — `meta.align`
+  // is what the header/cell renderers below read instead of re-deriving it from `col`.
+  const tableColumns = useMemo<ColumnDef<T, unknown>[]>(
+    () =>
+      columns.map((col) => ({
+        id: String(col.key),
+        accessorFn: (row: T) => row[col.key],
+        header: col.label,
+        cell: (info) => (col.format ?? defaultFormat)(info.getValue() as T[keyof T]),
+        meta: { align: col.align },
+      })),
+    [columns],
+  );
+
+  // Client-paginated mode's own page state — the server-paged case reuses `page`/setPage
+  // above instead, since there the server (not this table) already did the paging.
+  const [clientPageIndex, setClientPageIndex] = useState(0);
+  const pagination: PaginationState = serverPaged
+    ? { pageIndex: page - 1, pageSize: PAGE_SIZE }
+    : { pageIndex: clientPageIndex, pageSize: PAGE_SIZE };
+
+  const table = useReactTable({
+    data: (serverPaged ? rows : filteredRows) ?? EMPTY_ROWS,
+    columns: tableColumns,
+    state: { pagination },
+    onPaginationChange: (updater) => {
+      const next =
+        typeof updater === "function" ? updater(pagination) : updater;
+      if (serverPaged) setPage(next.pageIndex + 1);
+      else setClientPageIndex(next.pageIndex);
+    },
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: serverPaged ? undefined : getPaginationRowModel(),
+    manualPagination: serverPaged,
+    pageCount: serverPaged
+      ? Math.max(1, Math.ceil((total ?? 0) / PAGE_SIZE))
+      : undefined,
+  });
+
   const totalPages = serverPaged
     ? Math.max(1, Math.ceil((total ?? 0) / PAGE_SIZE))
-    : clientPagination.totalPages;
-  const pageItems = serverPaged ? rows : clientPagination.pageItems;
-  const pageSize = serverPaged ? PAGE_SIZE : clientPagination.pageSize;
-  const currentPage = serverPaged ? page : clientPagination.page;
+    : table.getPageCount();
+  const renderedRows = table.getRowModel().rows;
+  const currentPage = serverPaged ? page : clientPageIndex + 1;
   const totalItems = serverPaged ? (total ?? 0) : (filteredRows?.length ?? 0);
-  const setCurrentPage = serverPaged ? setPage : clientPagination.setPage;
+  const setCurrentPage = serverPaged
+    ? setPage
+    : (p: number) => setClientPageIndex(p - 1);
+
+  // Jumps back to page 1 whenever the filtered set changes underneath us — otherwise a
+  // filter change can strand the user on a now-empty page.
+  useEffect(() => {
+    if (!serverPaged) setClientPageIndex(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredRows]);
 
   // Snaps back to the last real page if a background refresh shrinks the result set out
   // from under the page the user is sitting on.
@@ -548,7 +606,7 @@ export function SimpleDataTable<T extends object>({
         />
       )}
 
-      {pageItems !== null && pageItems.length > 0 && (
+      {rows !== null && totalItems > 0 && (
         <>
           <TableContainer
             className="overflow-y-auto border-0 rounded-none"
@@ -557,29 +615,39 @@ export function SimpleDataTable<T extends object>({
             }}
           >
             <Thead className="top-0">
-              <Tr>
-                {columns.map((col) => (
-                  <Th
-                    key={String(col.key)}
-                    className={col.align === "right" ? "text-right" : undefined}
-                  >
-                    {col.label}
-                  </Th>
-                ))}
-              </Tr>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <Tr key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <Th
+                      key={header.id}
+                      className={
+                        header.column.columnDef.meta?.align === "right"
+                          ? "text-right"
+                          : undefined
+                      }
+                    >
+                      {flexRender(
+                        header.column.columnDef.header,
+                        header.getContext(),
+                      )}
+                    </Th>
+                  ))}
+                </Tr>
+              ))}
             </Thead>
             <Tbody>
-              {pageItems.map((row, i) => (
-                <Tr key={rowKey(row, i)}>
-                  {columns.map((col) => (
+              {renderedRows.map((row) => (
+                <Tr key={rowKey(row.original, row.index)}>
+                  {row.getVisibleCells().map((cell) => (
                     <Td
-                      key={String(col.key)}
+                      key={cell.id}
                       className={cn(
                         "whitespace-nowrap",
-                        col.align === "right" && "text-right tabular-nums",
+                        cell.column.columnDef.meta?.align === "right" &&
+                          "text-right tabular-nums",
                       )}
                     >
-                      {(col.format ?? defaultFormat)(row[col.key])}
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </Td>
                   ))}
                 </Tr>
@@ -591,7 +659,7 @@ export function SimpleDataTable<T extends object>({
             page={currentPage}
             totalPages={totalPages}
             totalItems={totalItems}
-            pageSize={pageSize}
+            pageSize={PAGE_SIZE}
             onPageChange={setCurrentPage}
           />
         </>
