@@ -86,6 +86,7 @@ export interface Payment {
   payment_id: string;
   paid_on: string;
   amount: number;
+  paid_quantity_pairs?: number | null;
   note: string;
 }
 

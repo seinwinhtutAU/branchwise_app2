@@ -21,6 +21,31 @@ def resolve_branch_id(user: User, branch_id: str | None, db: Session) -> str | N
     return branch_id
 
 
+def resolve_wholesale_branch_id(user: User, branch_id: str | None, db: Session) -> str | None:
+    """Wholesale's own version of resolve_branch_id. A wholesale-role account's own
+    branch still always wins, but an admin isn't forced to name a branch explicitly the
+    way retail's resolve_branch_id demands: today there is normally exactly one wholesale
+    branch, and requiring admin to pass branch_id for that single-branch case (which the
+    front end's wholesale screens don't even collect) turned "admin can do everything"
+    into "admin gets a 400 trying to create a shipment/voucher/order". Only once a second
+    wholesale branch actually exists does this ask for one, the same way the retail
+    import screen already does for retail."""
+    if user.branch_id is not None:
+        return user.branch_id
+    if branch_id:
+        return resolve_branch_id(user, branch_id, db)
+
+    wholesale_branches = list_wholesale_branches(db).all()
+    if len(wholesale_branches) == 1:
+        return wholesale_branches[0].id
+    if not wholesale_branches:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No wholesale branch is set up yet")
+    raise HTTPException(
+        status.HTTP_400_BAD_REQUEST,
+        "More than one wholesale branch exists — pass branch_id to say which one this is for",
+    )
+
+
 def branch_name(db: Session, branch_id: str | None) -> str | None:
     """Display name for a nullable branch_id — None in, None out, and None for an
     id with no Branch row (deleted/unknown) rather than an error, since callers

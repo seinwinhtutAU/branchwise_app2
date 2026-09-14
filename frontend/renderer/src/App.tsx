@@ -68,6 +68,7 @@ import {
   WarehouseIcon,
   WarningIcon,
   SettingsIcon,
+  DollarIcon,
 } from "@renderer/components/ui/icons";
 
 // Lazy-loaded so a given account's bundle only pays for the sections it can actually
@@ -107,6 +108,13 @@ const ReceivingPage = lazy(
 const WholesaleInventoryPage = lazy(
   () => import("@renderer/components/features/wholesale/InventoryPage"),
 );
+const WholesaleMonitoringPage = lazy(
+  () =>
+    import("@renderer/components/features/wholesale/MonitoringDashboardPage"),
+);
+const FinancePage = lazy(
+  () => import("@renderer/components/features/wholesale/FinancePage"),
+);
 const WarningsPage = lazy(
   () => import("@renderer/components/features/WarningsPage"),
 );
@@ -136,6 +144,8 @@ type Section =
   | "delivery"
   | "receiving"
   | "stock"
+  | "monitoring"
+  | "finance"
   | "wholesale"
   | "settings";
 
@@ -184,11 +194,13 @@ const RETAIL_NAV_ITEMS: NavItem[] = [
 // so its old screens are gone. The workspace and this one nav item stay so a wholesale
 // account still has somewhere to land and the tab doesn't disappear from admin's view.
 const WHOLESALE_NAV_ITEMS: NavItem[] = [
+  { id: "monitoring", label: "Dashboard", icon: <DashboardIcon /> },
   { id: "orders", label: "Customer Orders", icon: <ClipboardIcon /> },
   { id: "vouchers", label: "Supplier Vouchers", icon: <VoucherIcon /> },
   { id: "delivery", label: "Shipment", icon: <TruckIcon /> },
   { id: "receiving", label: "Receiving", icon: <ReceivingIcon /> },
   { id: "stock", label: "Inventory", icon: <InventoryIcon /> },
+  { id: "finance", label: "Finance", icon: <DollarIcon /> },
   { id: "wholesale", label: "Wholesale", icon: <WarehouseIcon /> },
 ];
 
@@ -248,6 +260,8 @@ const SECTION_TITLES: Record<Section, string> = {
   delivery: "Shipment",
   receiving: "Receiving",
   stock: "Inventory",
+  monitoring: "Dashboard",
+  finance: "Finance",
   wholesale: "Wholesale",
   settings: "Settings",
 };
@@ -359,6 +373,9 @@ function App(): React.JSX.Element {
   const [receivingTarget, setReceivingTarget] = useState<string | null>(null);
   // Order to open when supplier planning finds a customer line without a factory.
   const [orderTarget, setOrderTarget] = useState<string | null>(null);
+  const [shipmentTarget, setShipmentTarget] = useState<string | null>(null);
+  const [voucherTarget, setVoucherTarget] = useState<string | null>(null);
+  const [stockTarget, setStockTarget] = useState<string | null>(null);
   // Which branch the Dashboard's Overview tab has open (null = the all-branches page).
   // Held here rather than inside the tab because switching to Revenue unmounts that tab,
   // and coming back should return to the branch you were reading, not to the branch list.
@@ -611,6 +628,9 @@ function App(): React.JSX.Element {
     setViewingBatchId(null);
     setHighlightBatchId(null);
     setReceivingTarget(null);
+    setShipmentTarget(null);
+    setVoucherTarget(null);
+    setStockTarget(null);
     setWorkspace(next);
     window.localStorage.setItem(WORKSPACE_STORAGE_KEY, next);
     setSection(WORKSPACE_NAV_ITEMS[next][0].id as Section);
@@ -1022,9 +1042,19 @@ function App(): React.JSX.Element {
                 />
               )}
               {section === "vouchers" && (
-                <SupplierVouchersPage session={session} />
+                <SupplierVouchersPage
+                  session={session}
+                  initialVoucherId={voucherTarget}
+                  onInitialVoucherOpened={() => setVoucherTarget(null)}
+                />
               )}
-              {section === "delivery" && <DeliveryPage session={session} />}
+              {section === "delivery" && (
+                <DeliveryPage
+                  session={session}
+                  initialShipmentId={shipmentTarget}
+                  onInitialShipmentOpened={() => setShipmentTarget(null)}
+                />
+              )}
               {section === "receiving" && (
                 <ReceivingPage
                   session={session}
@@ -1035,9 +1065,49 @@ function App(): React.JSX.Element {
               {section === "stock" && (
                 <WholesaleInventoryPage
                   session={session}
+                  initialStockCode={stockTarget}
+                  onInitialStockOpened={() => setStockTarget(null)}
                   onOpenReceiving={(receivingNo) => {
                     setReceivingTarget(receivingNo);
                     setSection("receiving");
+                  }}
+                />
+              )}
+              {section === "monitoring" && (
+                <WholesaleMonitoringPage
+                  session={session}
+                  onOpenShipment={(shipmentId) => {
+                    setShipmentTarget(shipmentId);
+                    handleSectionChange("delivery");
+                  }}
+                  onOpenOrder={(orderId) => {
+                    setOrderTarget(orderId);
+                    handleSectionChange("orders");
+                  }}
+                  onOpenVoucher={(voucherId) => {
+                    setVoucherTarget(voucherId);
+                    handleSectionChange("vouchers");
+                  }}
+                  onOpenReceiving={(receivingNo) => {
+                    setReceivingTarget(receivingNo);
+                    handleSectionChange("receiving");
+                  }}
+                  onOpenStock={(stockCode) => {
+                    setStockTarget(stockCode);
+                    handleSectionChange("stock");
+                  }}
+                />
+              )}
+              {section === "finance" && (
+                <FinancePage
+                  session={session}
+                  onOpenOrder={(orderId) => {
+                    setOrderTarget(orderId);
+                    handleSectionChange("orders");
+                  }}
+                  onOpenVoucher={(voucherId) => {
+                    setVoucherTarget(voucherId);
+                    handleSectionChange("vouchers");
                   }}
                 />
               )}

@@ -138,7 +138,6 @@ const sets = (qty: number): string => formatIn(qty, "set");
 function lineReceivedQty(line: SupplierVoucherLine): number {
   return line.received_quantity_pairs ?? 0;
 }
-
 function lineRemainingQty(line: SupplierVoucherLine): number {
   return Math.max(0, line.quantity_pairs - lineReceivedQty(line));
 }
@@ -235,8 +234,12 @@ function PaymentBadge({
 
 export default function SupplierVouchersPage({
   session,
+  initialVoucherId,
+  onInitialVoucherOpened,
 }: {
   session: Session;
+  initialVoucherId?: string | null;
+  onInitialVoucherOpened?: () => void;
 }): React.JSX.Element {
   const showToast = useToast();
   useHydrateMasterData(session);
@@ -280,6 +283,18 @@ export default function SupplierVouchersPage({
   const [newOrderLines, setNewOrderLines] = useState<
     OpenOrderLine[] | undefined
   >();
+
+  useEffect(() => {
+    if (!initialVoucherId) return;
+    const target = vouchers.find(
+      (voucher) => voucher.voucher_id === initialVoucherId,
+    );
+    if (!target) return;
+    setSelectedId(target.voucher_id);
+    setOpenMode("view");
+    setView("detail");
+    onInitialVoucherOpened?.();
+  }, [initialVoucherId, onInitialVoucherOpened, vouchers]);
 
   const selected =
     vouchers.find((voucher) => voucher.voucher_id === selectedId) ?? null;

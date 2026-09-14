@@ -7,8 +7,9 @@ from app.core.security import get_current_app_user
 from app.db.session import get_db
 from app.models.user import User, UserRole
 from app.schemas.wholesale_supplier_vouchers import SupplierVoucherIn, VoucherPaymentIn
-from app.services.branches import resolve_branch_id
+from app.services.branches import resolve_wholesale_branch_id
 from app.services.wholesale_supplier_vouchers import add_payment, create_voucher, delete_payment, delete_voucher, get_voucher, list_vouchers, received_pairs_by_voucher_no, received_pairs_by_voucher_stock, update_voucher
+from app.services.wholesale.money import voucher_totals
 
 router = APIRouter(prefix="/api/wholesale/supplier-vouchers", tags=["wholesale"])
 
@@ -31,15 +32,14 @@ def _out(voucher, received_pairs: int, received_by_stock: dict[str, int] | None 
                       "quantity_pairs": line.quantity_pairs, "received_quantity_pairs": received,
                       "buying_price": float(line.buying_price)})
     payments = [{"payment_id": payment.id, "paid_on": payment.paid_on, "amount": float(payment.amount), "note": payment.note} for payment in voucher.payments]
-    total = sum(line["quantity_pairs"] * line["buying_price"] for line in lines)
-    paid = sum(payment["amount"] for payment in payments)
+    totals = voucher_totals(voucher)
     return {"voucher_id": voucher.id, "branch_id": voucher.branch_id, "voucher_no": voucher.voucher_no,
             "supplier_name": voucher.supplier_name, "voucher_date": voucher.voucher_date,
             "carrier_name": voucher.carrier_name, "total_packages": voucher.total_packages,
             "total_quantity_pairs": sum(line["quantity_pairs"] for line in lines),
             "received_quantity_pairs": sum(line["received_quantity_pairs"] for line in lines),
             "lines": lines, "payment": {"account_id": voucher.id, "payments": payments},
-            "total_amount": total, "paid_amount": paid, "balance_due": max(0, total - paid)}
+            "total_amount": totals["total"], "paid_amount": totals["paid"], "balance_due": totals["balance_due"]}
 
 
 def _one(db: Session, voucher) -> dict:
@@ -109,7 +109,7 @@ def list_supplier_vouchers(
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_supplier_voucher(payload: SupplierVoucherIn, user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> dict:
     _require_wholesale(user)
-    return _one(db, create_voucher(db, resolve_branch_id(user, payload.branch_id, db), payload))
+    return _one(db, create_voucher(db, resolve_wholesale_branch_id(user, payload.branch_id, db), payload))
 
 
 @router.put("/{voucher_id}")

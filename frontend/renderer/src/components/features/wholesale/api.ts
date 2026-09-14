@@ -12,7 +12,11 @@ import { apiBaseUrl, type Session } from "@renderer/lib/auth";
 import { RequestTimeoutError } from "@renderer/lib/network";
 import { invalidateEverything } from "@renderer/lib/queryClient";
 import { type Shipment, type ShipmentLeg } from "./shipments";
-import { type Receiving, type ReceivingCost, type ReceivingPackage } from "./receivings";
+import {
+  type Receiving,
+  type ReceivingCost,
+  type ReceivingPackage,
+} from "./receivings";
 import { type SupplierVoucher } from "./supplierVouchers";
 import { type AllocationEvent, type CustomerOrder } from "./customerOrders";
 import { type StockMovement } from "./stock";
@@ -58,13 +62,14 @@ async function request<T>(
 
   const body = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new WholesaleApiError(body?.detail ?? `Request failed: ${response.status}`);
+    throw new WholesaleApiError(
+      body?.detail ?? `Request failed: ${response.status}`,
+    );
   }
 
   invalidateEverything();
   return body as T;
 }
-
 // ── Shipments ──────────────────────────────────────────────────────────────
 
 interface ShipmentLegWire {
@@ -93,6 +98,77 @@ export interface ShipmentWire {
 
 export const SHIPMENTS_URL = `${apiBaseUrl}/api/wholesale/shipments`;
 
+export interface MonitoringCount<T> {
+  count: number;
+  rows: T[];
+}
+
+export interface MonitoringShipmentRow {
+  shipment_id: string;
+  shipment_no: string;
+  supplier_name: string;
+  sent_on: string;
+  days_in_transit: number;
+  shipment_status: string;
+}
+
+export interface MonitoringOrderRow {
+  order_id: string;
+  order_no: string;
+  customer_name: string;
+  order_status?: string;
+  order_date: string;
+  days_open?: number;
+  balance_due?: number;
+}
+
+export interface MonitoringVoucherRow {
+  voucher_id: string;
+  voucher_no: string;
+  supplier_name: string;
+  balance_due: number;
+  voucher_date: string;
+}
+
+export interface MonitoringProductRow {
+  product_id: string;
+  stock_code: string;
+  description: string;
+  product_group: string;
+}
+
+export interface MonitoringActivityRow {
+  activity_id: string;
+  type: "receiving" | "delivery" | "payment";
+  created_at: string;
+  receiving_id?: string;
+  receiving_no?: string;
+  supplier_name?: string;
+  shipment_no?: string;
+  delivery_id?: string;
+  order_id?: string;
+  order_no?: string;
+  customer_name?: string;
+  stock_code?: string;
+  quantity_pairs?: number;
+  payment_id?: string;
+  amount?: number;
+  paid_on?: string;
+  voucher_id?: string;
+  voucher_no?: string | null;
+}
+
+export interface MonitoringSnapshot {
+  shipments_in_transit: MonitoringCount<MonitoringShipmentRow>;
+  orders_pending: MonitoringCount<MonitoringOrderRow>;
+  unpaid_vouchers: MonitoringCount<MonitoringVoucherRow>;
+  unpaid_orders: MonitoringCount<MonitoringOrderRow>;
+  zero_stock_products: MonitoringCount<MonitoringProductRow>;
+  recent_activity: MonitoringActivityRow[];
+}
+
+export const WHOLESALE_MONITORING_URL = `${apiBaseUrl}/api/wholesale/monitoring`;
+
 /** The wire shape uses total_quantity_pairs (what the server actually stores); the screens still
  *  say total_quantity_pairs (what it was written in), converted here at the one seam rather than
  *  renamed through every call site. */
@@ -108,7 +184,10 @@ export function shipmentFromWire(wire: ShipmentWire): Shipment {
     total_packages: wire.total_packages,
     // Shipment responses carry the normalized pair total; the screen model stores the
     // value in the shipment's displayed unit and converts it back at the one seam.
-    total_quantity_pairs: fromPairs(wire.total_quantity_pairs, wire.total_unit as Shipment["total_unit"]),
+    total_quantity_pairs: fromPairs(
+      wire.total_quantity_pairs,
+      wire.total_unit as Shipment["total_unit"],
+    ),
     total_unit: wire.total_unit as Shipment["total_unit"],
     packages_sent_by_cargo: wire.packages_sent_by_cargo,
     final_received_packages: wire.final_received_packages,
@@ -154,22 +233,26 @@ export async function createShipment(
   session: Session,
   input: NewShipmentInput,
 ): Promise<Shipment> {
-  const wire = await request<ShipmentWire>(session, "/api/wholesale/shipments", {
-    method: "POST",
-    body: {
-      voucher_no: input.voucher_no,
-      supplier_name: input.supplier_name,
-      carrier_name: input.carrier_name,
-      final_destination: input.final_destination,
-      sent_on: input.sent_on,
-      total_packages: input.total_packages,
-      total_quantity_pairs: input.total_quantity_pairs,
-      total_unit: input.total_unit,
-      packages_sent_by_cargo: input.packages_sent_by_cargo,
-      final_received_packages: input.final_received_packages,
-      legs: input.legs.map(legToWire),
+  const wire = await request<ShipmentWire>(
+    session,
+    "/api/wholesale/shipments",
+    {
+      method: "POST",
+      body: {
+        voucher_no: input.voucher_no,
+        supplier_name: input.supplier_name,
+        carrier_name: input.carrier_name,
+        final_destination: input.final_destination,
+        sent_on: input.sent_on,
+        total_packages: input.total_packages,
+        total_quantity_pairs: input.total_quantity_pairs,
+        total_unit: input.total_unit,
+        packages_sent_by_cargo: input.packages_sent_by_cargo,
+        final_received_packages: input.final_received_packages,
+        legs: input.legs.map(legToWire),
+      },
     },
-  });
+  );
   return shipmentFromWire(wire);
 }
 
@@ -180,12 +263,16 @@ export async function updateShipment(
 ): Promise<Shipment> {
   const body: Record<string, unknown> = {};
   if (patch.voucher_no !== undefined) body.voucher_no = patch.voucher_no;
-  if (patch.supplier_name !== undefined) body.supplier_name = patch.supplier_name;
+  if (patch.supplier_name !== undefined)
+    body.supplier_name = patch.supplier_name;
   if (patch.carrier_name !== undefined) body.carrier_name = patch.carrier_name;
-  if (patch.final_destination !== undefined) body.final_destination = patch.final_destination;
+  if (patch.final_destination !== undefined)
+    body.final_destination = patch.final_destination;
   if (patch.sent_on !== undefined) body.sent_on = patch.sent_on;
-  if (patch.total_packages !== undefined) body.total_packages = patch.total_packages;
-  if (patch.total_quantity_pairs !== undefined) body.total_quantity_pairs = patch.total_quantity_pairs;
+  if (patch.total_packages !== undefined)
+    body.total_packages = patch.total_packages;
+  if (patch.total_quantity_pairs !== undefined)
+    body.total_quantity_pairs = patch.total_quantity_pairs;
   if (patch.total_unit !== undefined) body.total_unit = patch.total_unit;
   if (patch.packages_sent_by_cargo !== undefined)
     body.packages_sent_by_cargo = patch.packages_sent_by_cargo;
@@ -201,7 +288,10 @@ export async function updateShipment(
   return shipmentFromWire(wire);
 }
 
-export async function deleteShipment(session: Session, shipmentId: string): Promise<void> {
+export async function deleteShipment(
+  session: Session,
+  shipmentId: string,
+): Promise<void> {
   await request<void>(session, `/api/wholesale/shipments/${shipmentId}`, {
     method: "DELETE",
   });
@@ -242,14 +332,26 @@ export const DESTINATIONS_URL = `${apiBaseUrl}/api/wholesale/destinations`;
 export const RECEIVING_GATES_URL = `${apiBaseUrl}/api/wholesale/receiving-gates`;
 
 export function productsFromWire(wires: WholesaleProductWire[]): Product[] {
-  return wires.filter((wire) => wire.active).map(({ stock_code, description, product_group }) => ({ stock_code, description, product_group }));
+  return wires
+    .filter((wire) => wire.active)
+    .map(({ stock_code, description, product_group }) => ({
+      stock_code,
+      description,
+      product_group,
+    }));
 }
 
-export function customersFromWire(wires: WholesaleCustomerWire[]): Array<{ name: string; phone: string; address: string }> {
-  return wires.filter((wire) => wire.active).map(({ name, phone, address }) => ({ name, phone, address }));
+export function customersFromWire(
+  wires: WholesaleCustomerWire[],
+): Array<{ name: string; phone: string; address: string }> {
+  return wires
+    .filter((wire) => wire.active)
+    .map(({ name, phone, address }) => ({ name, phone, address }));
 }
 
-export function namedEntitiesFromWire(wires: WholesaleNamedEntityWire[]): string[] {
+export function namedEntitiesFromWire(
+  wires: WholesaleNamedEntityWire[],
+): string[] {
   return wires.filter((wire) => wire.active).map((wire) => wire.name);
 }
 
@@ -259,32 +361,140 @@ export interface NewWholesaleProductInput {
   product_group: Product["product_group"];
 }
 
-export async function createWholesaleProduct(session: Session, input: NewWholesaleProductInput): Promise<WholesaleProductWire> {
-  return request<WholesaleProductWire>(session, "/api/wholesale/products", { method: "POST", body: input });
+export async function createWholesaleProduct(
+  session: Session,
+  input: NewWholesaleProductInput,
+): Promise<WholesaleProductWire> {
+  return request<WholesaleProductWire>(session, "/api/wholesale/products", {
+    method: "POST",
+    body: input,
+  });
 }
 
-export async function updateWholesaleProduct(session: Session, id: string, patch: Partial<NewWholesaleProductInput> & { active?: boolean }): Promise<WholesaleProductWire> {
-  return request<WholesaleProductWire>(session, `/api/wholesale/products/${id}`, { method: "PATCH", body: patch });
+export async function updateWholesaleProduct(
+  session: Session,
+  id: string,
+  patch: Partial<NewWholesaleProductInput> & { active?: boolean },
+): Promise<WholesaleProductWire> {
+  return request<WholesaleProductWire>(
+    session,
+    `/api/wholesale/products/${id}`,
+    { method: "PATCH", body: patch },
+  );
 }
 
-export async function deleteWholesaleProduct(session: Session, id: string): Promise<void> {
-  await request<void>(session, `/api/wholesale/products/${id}`, { method: "DELETE" });
+export async function deleteWholesaleProduct(
+  session: Session,
+  id: string,
+): Promise<void> {
+  await request<void>(session, `/api/wholesale/products/${id}`, {
+    method: "DELETE",
+  });
 }
 
-export interface NewWholesaleSupplierInput { name: string; phone: string; address: string; }
-export interface NewWholesaleCustomerInput { name: string; phone: string; address: string; }
-export interface NewWholesaleNamedEntityInput { name: string; }
+export interface NewWholesaleSupplierInput {
+  name: string;
+  phone: string;
+  address: string;
+}
+export interface NewWholesaleCustomerInput {
+  name: string;
+  phone: string;
+  address: string;
+}
+export interface NewWholesaleNamedEntityInput {
+  name: string;
+}
 
-export async function createWholesaleSupplier(session: Session, input: NewWholesaleSupplierInput): Promise<WholesaleNamedEntityWire> { return request<WholesaleNamedEntityWire>(session, "/api/wholesale/suppliers", { method: "POST", body: input }); }
-export async function updateWholesaleSupplier(session: Session, id: string, patch: Partial<NewWholesaleSupplierInput> & { active?: boolean }): Promise<WholesaleNamedEntityWire> { return request<WholesaleNamedEntityWire>(session, `/api/wholesale/suppliers/${id}`, { method: "PATCH", body: patch }); }
-export async function deleteWholesaleSupplier(session: Session, id: string): Promise<void> { await request<void>(session, `/api/wholesale/suppliers/${id}`, { method: "DELETE" }); }
-export async function createWholesaleCustomer(session: Session, input: NewWholesaleCustomerInput): Promise<WholesaleCustomerWire> { return request<WholesaleCustomerWire>(session, "/api/wholesale/customers", { method: "POST", body: input }); }
-export async function updateWholesaleCustomer(session: Session, id: string, patch: Partial<NewWholesaleCustomerInput> & { active?: boolean }): Promise<WholesaleCustomerWire> { return request<WholesaleCustomerWire>(session, `/api/wholesale/customers/${id}`, { method: "PATCH", body: patch }); }
-export async function deleteWholesaleCustomer(session: Session, id: string): Promise<void> { await request<void>(session, `/api/wholesale/customers/${id}`, { method: "DELETE" }); }
+export async function createWholesaleSupplier(
+  session: Session,
+  input: NewWholesaleSupplierInput,
+): Promise<WholesaleNamedEntityWire> {
+  return request<WholesaleNamedEntityWire>(
+    session,
+    "/api/wholesale/suppliers",
+    { method: "POST", body: input },
+  );
+}
+export async function updateWholesaleSupplier(
+  session: Session,
+  id: string,
+  patch: Partial<NewWholesaleSupplierInput> & { active?: boolean },
+): Promise<WholesaleNamedEntityWire> {
+  return request<WholesaleNamedEntityWire>(
+    session,
+    `/api/wholesale/suppliers/${id}`,
+    { method: "PATCH", body: patch },
+  );
+}
+export async function deleteWholesaleSupplier(
+  session: Session,
+  id: string,
+): Promise<void> {
+  await request<void>(session, `/api/wholesale/suppliers/${id}`, {
+    method: "DELETE",
+  });
+}
+export async function createWholesaleCustomer(
+  session: Session,
+  input: NewWholesaleCustomerInput,
+): Promise<WholesaleCustomerWire> {
+  return request<WholesaleCustomerWire>(session, "/api/wholesale/customers", {
+    method: "POST",
+    body: input,
+  });
+}
+export async function updateWholesaleCustomer(
+  session: Session,
+  id: string,
+  patch: Partial<NewWholesaleCustomerInput> & { active?: boolean },
+): Promise<WholesaleCustomerWire> {
+  return request<WholesaleCustomerWire>(
+    session,
+    `/api/wholesale/customers/${id}`,
+    { method: "PATCH", body: patch },
+  );
+}
+export async function deleteWholesaleCustomer(
+  session: Session,
+  id: string,
+): Promise<void> {
+  await request<void>(session, `/api/wholesale/customers/${id}`, {
+    method: "DELETE",
+  });
+}
 
-export async function createWholesaleNamedEntity(session: Session, path: string, input: NewWholesaleNamedEntityInput): Promise<WholesaleNamedEntityWire> { return request<WholesaleNamedEntityWire>(session, `/api/wholesale/${path}`, { method: "POST", body: input }); }
-export async function updateWholesaleNamedEntity(session: Session, path: string, id: string, patch: Partial<NewWholesaleNamedEntityInput> & { active?: boolean }): Promise<WholesaleNamedEntityWire> { return request<WholesaleNamedEntityWire>(session, `/api/wholesale/${path}/${id}`, { method: "PATCH", body: patch }); }
-export async function deleteWholesaleNamedEntity(session: Session, path: string, id: string): Promise<void> { await request<void>(session, `/api/wholesale/${path}/${id}`, { method: "DELETE" }); }
+export async function createWholesaleNamedEntity(
+  session: Session,
+  path: string,
+  input: NewWholesaleNamedEntityInput,
+): Promise<WholesaleNamedEntityWire> {
+  return request<WholesaleNamedEntityWire>(session, `/api/wholesale/${path}`, {
+    method: "POST",
+    body: input,
+  });
+}
+export async function updateWholesaleNamedEntity(
+  session: Session,
+  path: string,
+  id: string,
+  patch: Partial<NewWholesaleNamedEntityInput> & { active?: boolean },
+): Promise<WholesaleNamedEntityWire> {
+  return request<WholesaleNamedEntityWire>(
+    session,
+    `/api/wholesale/${path}/${id}`,
+    { method: "PATCH", body: patch },
+  );
+}
+export async function deleteWholesaleNamedEntity(
+  session: Session,
+  path: string,
+  id: string,
+): Promise<void> {
+  await request<void>(session, `/api/wholesale/${path}/${id}`, {
+    method: "DELETE",
+  });
+}
 
 // ── Receivings ─────────────────────────────────────────────────────────────
 
@@ -430,34 +640,55 @@ function costsToWire(costs: ReceivingCost[]): {
   }));
 }
 
-export async function createReceiving(session: Session, input: NewReceivingInput): Promise<Receiving> {
-  const wire = await request<ReceivingWire>(session, "/api/wholesale/receivings", {
-    method: "POST",
-    body: {
-      shipment_id: input.shipment_id,
-      gate: input.gate,
-      received_on: input.received_on,
-      total_packages: input.total_packages,
-      total_quantity_pairs: input.total_quantity_pairs * PAIRS_PER[input.total_unit],
-      total_unit: input.total_unit,
+export async function createReceiving(
+  session: Session,
+  input: NewReceivingInput,
+): Promise<Receiving> {
+  const wire = await request<ReceivingWire>(
+    session,
+    "/api/wholesale/receivings",
+    {
+      method: "POST",
+      body: {
+        shipment_id: input.shipment_id,
+        gate: input.gate,
+        received_on: input.received_on,
+        total_packages: input.total_packages,
+        total_quantity_pairs:
+          input.total_quantity_pairs * PAIRS_PER[input.total_unit],
+        total_unit: input.total_unit,
+      },
     },
-  });
-  if (input.costs.length > 0) await replaceReceivingCosts(session, wire.receiving_id, input.costs);
+  );
+  if (input.costs.length > 0)
+    await replaceReceivingCosts(session, wire.receiving_id, input.costs);
   return receivingFromWire(wire);
 }
 
 export async function updateReceiving(
   session: Session,
   receivingId: string,
-  patch: Pick<Receiving, "gate" | "received_on" | "total_packages" | "total_quantity_pairs" | "total_unit">,
+  patch: Pick<
+    Receiving,
+    | "gate"
+    | "received_on"
+    | "total_packages"
+    | "total_quantity_pairs"
+    | "total_unit"
+  >,
 ): Promise<Receiving> {
-  const wire = await request<ReceivingWire>(session, `/api/wholesale/receivings/${receivingId}`, {
-    method: "PATCH",
-    body: {
-      ...patch,
-      total_quantity_pairs: patch.total_quantity_pairs * PAIRS_PER[patch.total_unit],
+  const wire = await request<ReceivingWire>(
+    session,
+    `/api/wholesale/receivings/${receivingId}`,
+    {
+      method: "PATCH",
+      body: {
+        ...patch,
+        total_quantity_pairs:
+          patch.total_quantity_pairs * PAIRS_PER[patch.total_unit],
+      },
     },
-  });
+  );
   return receivingFromWire(wire);
 }
 
@@ -487,8 +718,13 @@ export async function replaceReceivingCosts(
   return receivingFromWire(wire);
 }
 
-export async function deleteReceiving(session: Session, receivingId: string): Promise<void> {
-  await request<void>(session, `/api/wholesale/receivings/${receivingId}`, { method: "DELETE" });
+export async function deleteReceiving(
+  session: Session,
+  receivingId: string,
+): Promise<void> {
+  await request<void>(session, `/api/wholesale/receivings/${receivingId}`, {
+    method: "DELETE",
+  });
 }
 
 // ── Supplier vouchers ──────────────────────────────────────────────────────
@@ -496,7 +732,9 @@ export async function deleteReceiving(session: Session, receivingId: string): Pr
 export interface SupplierVoucherWire extends SupplierVoucher {}
 export const SUPPLIER_VOUCHERS_URL = `${apiBaseUrl}/api/wholesale/supplier-vouchers`;
 
-export function vouchersFromWire(wires: SupplierVoucherWire[]): SupplierVoucher[] {
+export function vouchersFromWire(
+  wires: SupplierVoucherWire[],
+): SupplierVoucher[] {
   return wires;
 }
 
@@ -538,43 +776,122 @@ function voucherBody(input: NewSupplierVoucherInput): {
   };
 }
 
-export async function createSupplierVoucher(session: Session, input: NewSupplierVoucherInput): Promise<SupplierVoucher> {
-  return request<SupplierVoucher>(session, "/api/wholesale/supplier-vouchers", { method: "POST", body: voucherBody(input) });
+export async function createSupplierVoucher(
+  session: Session,
+  input: NewSupplierVoucherInput,
+): Promise<SupplierVoucher> {
+  return request<SupplierVoucher>(session, "/api/wholesale/supplier-vouchers", {
+    method: "POST",
+    body: voucherBody(input),
+  });
 }
 
-export async function updateSupplierVoucher(session: Session, voucherId: string, input: NewSupplierVoucherInput): Promise<SupplierVoucher> {
-  return request<SupplierVoucher>(session, `/api/wholesale/supplier-vouchers/${voucherId}`, { method: "PUT", body: voucherBody(input) });
+export async function updateSupplierVoucher(
+  session: Session,
+  voucherId: string,
+  input: NewSupplierVoucherInput,
+): Promise<SupplierVoucher> {
+  return request<SupplierVoucher>(
+    session,
+    `/api/wholesale/supplier-vouchers/${voucherId}`,
+    { method: "PUT", body: voucherBody(input) },
+  );
 }
 
-export async function deleteSupplierVoucher(session: Session, voucherId: string): Promise<void> {
-  await request<void>(session, `/api/wholesale/supplier-vouchers/${voucherId}`, { method: "DELETE" });
+export async function deleteSupplierVoucher(
+  session: Session,
+  voucherId: string,
+): Promise<void> {
+  await request<void>(
+    session,
+    `/api/wholesale/supplier-vouchers/${voucherId}`,
+    { method: "DELETE" },
+  );
 }
 
-export async function addSupplierVoucherPayment(session: Session, voucherId: string, payment: SupplierVoucher["payment"]["payments"][number]): Promise<void> {
-  await request(session, `/api/wholesale/supplier-vouchers/${voucherId}/payments`, { method: "POST", body: { paid_on: payment.paid_on, amount: payment.amount, note: payment.note } });
+export async function addSupplierVoucherPayment(
+  session: Session,
+  voucherId: string,
+  payment: SupplierVoucher["payment"]["payments"][number],
+): Promise<void> {
+  await request(
+    session,
+    `/api/wholesale/supplier-vouchers/${voucherId}/payments`,
+    {
+      method: "POST",
+      body: {
+        paid_on: payment.paid_on,
+        amount: payment.amount,
+        note: payment.note,
+      },
+    },
+  );
 }
 
-export async function removeSupplierVoucherPayment(session: Session, voucherId: string, paymentId: string): Promise<void> {
-  await request<void>(session, `/api/wholesale/supplier-vouchers/${voucherId}/payments/${paymentId}`, { method: "DELETE" });
+export async function removeSupplierVoucherPayment(
+  session: Session,
+  voucherId: string,
+  paymentId: string,
+): Promise<void> {
+  await request<void>(
+    session,
+    `/api/wholesale/supplier-vouchers/${voucherId}/payments/${paymentId}`,
+    { method: "DELETE" },
+  );
 }
 
 // ── Customer orders ────────────────────────────────────────────────────────
 
 export const CUSTOMER_ORDERS_URL = `${apiBaseUrl}/api/wholesale/orders`;
+export const WHOLESALE_FINANCE_CUSTOMERS_URL = `${apiBaseUrl}/api/wholesale/finance/customers`;
 export const ALLOCATION_EVENTS_URL = `${apiBaseUrl}/api/wholesale/orders/allocations`;
-export function allocationEventsFromWire(wires: AllocationEvent[]): AllocationEvent[] { return wires; }
+export function allocationEventsFromWire(
+  wires: AllocationEvent[],
+): AllocationEvent[] {
+  return wires;
+}
 export interface NewCustomerOrderInput {
-  customer_name: string; customer_phone: string; customer_address: string; order_date: string; lines: CustomerOrder["lines"];
+  customer_name: string;
+  customer_phone: string;
+  customer_address: string;
+  order_date: string;
+  lines: CustomerOrder["lines"];
 }
-export function ordersFromWire(wires: CustomerOrder[]): CustomerOrder[] { return wires; }
+export function ordersFromWire(wires: CustomerOrder[]): CustomerOrder[] {
+  return wires;
+}
 function orderBody(input: NewCustomerOrderInput): object {
-  return { ...input, lines: input.lines.map((line) => ({ stock_code: line.stock_code, description: line.description, product_group: line.product_group, supplier_name: line.supplier_name, color_breakdown: line.color_breakdown, unit: line.unit, selling_price: line.selling_price })) };
+  return {
+    ...input,
+    lines: input.lines.map((line) => ({
+      stock_code: line.stock_code,
+      description: line.description,
+      product_group: line.product_group,
+      supplier_name: line.supplier_name,
+      color_breakdown: line.color_breakdown,
+      unit: line.unit,
+      selling_price: line.selling_price,
+    })),
+  };
 }
-export async function createCustomerOrder(session: Session, input: NewCustomerOrderInput): Promise<CustomerOrder> {
-  return request<CustomerOrder>(session, "/api/wholesale/orders", { method: "POST", body: orderBody(input) });
+export async function createCustomerOrder(
+  session: Session,
+  input: NewCustomerOrderInput,
+): Promise<CustomerOrder> {
+  return request<CustomerOrder>(session, "/api/wholesale/orders", {
+    method: "POST",
+    body: orderBody(input),
+  });
 }
-export async function cancelCustomerOrder(session: Session, orderId: string): Promise<CustomerOrder> {
-  return request<CustomerOrder>(session, `/api/wholesale/orders/${orderId}/cancel`, { method: "POST" });
+export async function cancelCustomerOrder(
+  session: Session,
+  orderId: string,
+): Promise<CustomerOrder> {
+  return request<CustomerOrder>(
+    session,
+    `/api/wholesale/orders/${orderId}/cancel`,
+    { method: "POST" },
+  );
 }
 
 export async function updateCustomerOrderLineAllocation(
@@ -582,10 +899,14 @@ export async function updateCustomerOrderLineAllocation(
   orderLineId: string,
   colorBreakdown: string,
 ): Promise<CustomerOrder> {
-  return request<CustomerOrder>(session, `/api/wholesale/orders/lines/${orderLineId}/allocation`, {
-    method: "PUT",
-    body: { color_breakdown: colorBreakdown },
-  });
+  return request<CustomerOrder>(
+    session,
+    `/api/wholesale/orders/lines/${orderLineId}/allocation`,
+    {
+      method: "PUT",
+      body: { color_breakdown: colorBreakdown },
+    },
+  );
 }
 
 export async function updateCustomerOrder(
@@ -599,8 +920,13 @@ export async function updateCustomerOrder(
   });
 }
 
-export async function deleteCustomerOrder(session: Session, orderId: string): Promise<void> {
-  await request<void>(session, `/api/wholesale/orders/${orderId}`, { method: "DELETE" });
+export async function deleteCustomerOrder(
+  session: Session,
+  orderId: string,
+): Promise<void> {
+  await request<void>(session, `/api/wholesale/orders/${orderId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function addCustomerOrderPayment(
@@ -608,9 +934,25 @@ export async function addCustomerOrderPayment(
   orderId: string,
   payment: CustomerOrder["payment"]["payments"][number],
 ): Promise<void> {
+  const body: {
+    paid_on: string;
+    amount: number;
+    note: string;
+    paid_quantity_pairs?: number;
+  } = {
+    paid_on: payment.paid_on,
+    amount: payment.amount,
+    note: payment.note,
+  };
+  if (
+    payment.paid_quantity_pairs !== undefined &&
+    payment.paid_quantity_pairs !== null
+  ) {
+    body.paid_quantity_pairs = payment.paid_quantity_pairs;
+  }
   await request<void>(session, `/api/wholesale/orders/${orderId}/payments`, {
     method: "POST",
-    body: { paid_on: payment.paid_on, amount: payment.amount, note: payment.note },
+    body,
   });
 }
 
@@ -619,9 +961,13 @@ export async function removeCustomerOrderPayment(
   orderId: string,
   paymentId: string,
 ): Promise<void> {
-  await request<void>(session, `/api/wholesale/orders/${orderId}/payments/${paymentId}`, {
-    method: "DELETE",
-  });
+  await request<void>(
+    session,
+    `/api/wholesale/orders/${orderId}/payments/${paymentId}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 // ── Inventory movements ────────────────────────────────────────────────────

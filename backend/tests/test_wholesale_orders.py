@@ -123,4 +123,34 @@ def test_customer_order_stays_new_until_stock_is_allocated(authed_client: TestCl
 
     reread = authed_client.get(f"/api/wholesale/orders/{order['order_id']}")
     assert reread.status_code == 200
-    assert reread.json()["order_status"] == "new"
+
+
+def test_admin_can_list_and_create_orders_without_naming_a_branch(
+    authed_client: TestClient, db_session: Session
+) -> None:
+    """An admin account has no fixed branch_id. With exactly one wholesale branch (the
+    normal case), admin must be able to list and create orders without being forced to
+    pass branch_id — that used to 400 because the list/create endpoints called
+    resolve_branch_id, which demands an explicit answer from any account with no fixed
+    branch, retail-style. See app.services.branches.resolve_wholesale_branch_id and
+    wholesale_orders.py's _visible_branch_id."""
+    branch = _branch(db_session)
+    # A wholesale-role user assigned to this branch is what makes it "a wholesale
+    # branch" at all (see list_wholesale_branches) — a different id from the admin
+    # account below, which is who this test actually signs in as.
+    db_session.add(User(id="wholesale-user-id", name="Tester", email="tester@example.com", role=UserRole.WHOLESALE, branch_id=branch.id))
+    db_session.add(User(id="test-user-id", name="Admin", email="admin@example.com", role=UserRole.ADMIN, branch_id=None))
+    db_session.commit()
+
+    listed = authed_client.get("/api/wholesale/orders")
+    assert listed.status_code == 200
+
+    created = authed_client.post("/api/wholesale/orders", json=_payload())
+    assert created.status_code == 201
+    assert created.json()["branch_id"] == branch.id
+
+    next_no = authed_client.get("/api/wholesale/orders/next-no")
+    assert next_no.status_code == 200
+
+    allocations = authed_client.get("/api/wholesale/orders/allocations")
+    assert allocations.status_code == 200

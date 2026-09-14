@@ -158,11 +158,14 @@ function StatusBadge({
     </span>
   );
 }
-
 export default function DeliveryPage({
   session,
+  initialShipmentId,
+  onInitialShipmentOpened,
 }: {
   session: Session;
+  initialShipmentId?: string | null;
+  onInitialShipmentOpened?: () => void;
 }): React.JSX.Element {
   const showToast = useToast();
   useHydrateMasterData(session);
@@ -195,6 +198,17 @@ export default function DeliveryPage({
 
   const [view, setView] = useState<View>("list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!initialShipmentId) return;
+    const target = shipments.find(
+      (shipment) => shipment.shipment_id === initialShipmentId,
+    );
+    if (!target) return;
+    setSelectedId(target.shipment_id);
+    setView("detail");
+    onInitialShipmentOpened?.();
+  }, [initialShipmentId, onInitialShipmentOpened, shipments]);
 
   function reportSaveFailure(error: unknown, fallback: string): void {
     showToast(

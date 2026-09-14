@@ -9,7 +9,7 @@ from app.db.session import get_db
 from app.models.user import User, UserRole
 from app.models.wholesale import CustomerOrder
 from app.schemas.wholesale_orders import OrderIn, OrderLineAllocationIn, OrderPaymentIn
-from app.services.branches import resolve_branch_id
+from app.services.branches import resolve_wholesale_branch_id
 from app.services.wholesale.orders import (
     add_payment,
     allocate_order_line,
@@ -21,7 +21,9 @@ from app.services.wholesale.orders import (
     list_allocation_events,
     list_orders,
     update_order,
+    order_status,
 )
+from app.services.wholesale.money import order_totals
 from app.services.wholesale.inventory import (
     color_pairs_breakdown,
     delivered_color_pairs_by_order,
@@ -36,6 +38,15 @@ router = APIRouter(prefix="/api/wholesale/orders", tags=["wholesale"])
 def _require_wholesale(user: User) -> None:
     if user.role not in (UserRole.WHOLESALE, UserRole.ADMIN):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This account cannot use the wholesale workspace")
+
+
+def _visible_branch_id(user: User, branch_id: str | None) -> str | None:
+    """For a read: a branch-scoped account's own branch always wins; an admin with no
+    branch_id filter sees every branch (None = unrestricted), same as every other
+    wholesale list endpoint. Unlike resolve_wholesale_branch_id, this never raises —
+    "show me everything" is a perfectly good answer for admin on a read, just not on a
+    write, which needs to say which branch owns the new row."""
+    return user.branch_id if user.branch_id is not None else branch_id
 
 
 def _out(
@@ -78,26 +89,20 @@ def _out(
             0, remaining_deliveries.get(line["stock_code"], 0) - line["delivered_quantity_pairs"]
         )
     payments = [
-        {"payment_id": payment.id, "paid_on": payment.paid_on, "amount": float(payment.amount), "note": payment.note}
+        {
+            "payment_id": payment.id,
+            "paid_on": payment.paid_on,
+            "amount": float(payment.amount),
+            "paid_quantity_pairs": payment.paid_quantity_pairs,
+            "note": payment.note,
+        }
         for payment in order.payments
     ]
-    total = sum(line["quantity_pairs"] * line["selling_price"] for line in lines)
-    paid = sum(payment["amount"] for payment in payments)
+    totals = order_totals(order)
     received = sum(line["delivered_quantity_pairs"] for line in lines)
     total_wanted = sum(line["quantity_pairs"] for line in lines)
     allocated = sum(line["allocated_quantity_pairs"] for line in lines)
-    if order.cancelled:
-        order_status = "cancelled"
-    elif total_wanted > 0 and received >= total_wanted:
-        order_status = "fulfilled"
-    elif received > 0:
-        order_status = "partly_delivered"
-    elif allocated >= total_wanted and total_wanted > 0:
-        order_status = "ready_to_deliver"
-    elif allocated > 0:
-        order_status = "allocating"
-    else:
-        order_status = "new"
+    status_value = order_status(total_wanted, received, allocated, order.cancelled)
     return {
         "order_id": order.id,
         "branch_id": order.branch_id,
@@ -108,12 +113,12 @@ def _out(
         "order_date": order.order_date,
         "total_quantity_pairs": total_wanted,
         "delivered_quantity_pairs": received,
-        "order_status": order_status,
+        "order_status": status_value,
         "lines": lines,
         "payment": {"account_id": order.id, "payments": payments},
-        "total_amount": total,
-        "paid_amount": paid,
-        "balance_due": max(0, total - paid),
+        "total_amount": totals["total"],
+        "paid_amount": totals["paid"],
+        "balance_due": totals["balance_due"],
     }
 
 
@@ -139,7 +144,7 @@ def list_customer_orders(
     response: Response = None,
 ) -> list[dict]:
     _require_wholesale(user)
-    resolved_branch_id = resolve_branch_id(user, branch_id, db)
+    resolved_branch_id = _visible_branch_id(user, branch_id)
     orders = list_orders(db, resolved_branch_id)
     delivered = delivered_pairs_by_order(db, [order.id for order in orders], resolved_branch_id)
     rows = [
@@ -181,7 +186,7 @@ def list_customer_order_allocations(
     response: Response = None,
 ) -> list[dict]:
     _require_wholesale(user)
-    resolved_branch_id = resolve_branch_id(user, branch_id, db)
+    resolved_branch_id = _visible_branch_id(user, branch_id)
     events = list_allocation_events(db, resolved_branch_id, search)
     response.headers["X-Total-Count"] = str(len(events))
     start = (page - 1) * page_size
@@ -214,7 +219,7 @@ def next_order_no(
     db: Session = Depends(get_db),
 ) -> dict:
     _require_wholesale(user)
-    resolved_branch_id = resolve_branch_id(user, branch_id, db)
+    resolved_branch_id = _visible_branch_id(user, branch_id)
     return {"order_no": allocate_reference(db, CustomerOrder.order_no, resolved_branch_id, "ORD", date.today())}
 
 
@@ -232,7 +237,7 @@ def read_customer_order(order_id: str, user: User = Depends(get_current_app_user
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_customer_order(payload: OrderIn, user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> dict:
     _require_wholesale(user)
-    branch_id = resolve_branch_id(user, payload.branch_id, db)
+    branch_id = resolve_wholesale_branch_id(user, payload.branch_id, db)
     order = create_order(db, branch_id, payload)
     return _out(order, None, _delivered_colors(db, order, branch_id))
 
@@ -269,7 +274,13 @@ def remove_customer_order(order_id: str, user: User = Depends(get_current_app_us
 def create_customer_payment(order_id: str, payload: OrderPaymentIn, user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> dict:
     _require_wholesale(user)
     payment = add_payment(db, order_id, user.branch_id, user.id, payload)
-    return {"payment_id": payment.id, "paid_on": payment.paid_on, "amount": float(payment.amount), "note": payment.note}
+    return {
+        "payment_id": payment.id,
+        "paid_on": payment.paid_on,
+        "amount": float(payment.amount),
+        "paid_quantity_pairs": payment.paid_quantity_pairs,
+        "note": payment.note,
+    }
 
 
 @router.put("/lines/{order_line_id}/allocation")

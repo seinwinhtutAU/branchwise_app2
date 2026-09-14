@@ -17,7 +17,7 @@ from app.schemas.wholesale_receivings import (
     ReceivingCreate,
     ReceivingUpdate,
 )
-from app.services.branches import resolve_branch_id
+from app.services.branches import resolve_wholesale_branch_id
 from app.services.wholesale.receivings import (
     ItemLike,
     PackageLike,
@@ -166,7 +166,7 @@ def create_receiving_endpoint(
     db: Session = Depends(get_db),
 ) -> dict:
     _require_wholesale(user)
-    branch_id = resolve_branch_id(user, payload.branch_id, db)
+    branch_id = resolve_wholesale_branch_id(user, payload.branch_id, db)
     return _receiving_out(create_receiving(db, branch_id, payload))
 
 

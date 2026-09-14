@@ -13,7 +13,7 @@ from app.db.session import get_db
 from app.models.user import User, UserRole
 from app.models.wholesale import Shipment
 from app.schemas.wholesale_shipments import ShipmentCreate, ShipmentUpdate
-from app.services.branches import resolve_branch_id
+from app.services.branches import resolve_wholesale_branch_id
 from app.services.wholesale.shipments import shipment_derived
 from app.services.wholesale_receivings import final_received_by_shipment
 from app.services.wholesale_shipments import (
@@ -121,7 +121,7 @@ def create_shipment_endpoint(
     db: Session = Depends(get_db),
 ) -> dict:
     _require_wholesale(user)
-    branch_id = resolve_branch_id(user, payload.branch_id, db)
+    branch_id = resolve_wholesale_branch_id(user, payload.branch_id, db)
     shipment = create_shipment(db, branch_id, payload)
     return _shipment_out(shipment)
 

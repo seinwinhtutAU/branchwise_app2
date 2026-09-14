@@ -377,6 +377,9 @@ class WholesalePayment(Base):
     order_id: Mapped[str | None] = mapped_column(ForeignKey("wholesale_customer_orders.id", ondelete="CASCADE"))
     paid_on: Mapped[date] = mapped_column(Date, nullable=False)
     amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    # Customer payments may be assigned to delivered pairs. Supplier voucher
+    # payments leave this empty because package payment logic does not apply there.
+    paid_quantity_pairs: Mapped[int | None] = mapped_column(Integer, nullable=True)
     note: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
     recorded_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

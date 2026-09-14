@@ -28,6 +28,20 @@ from app.services.wholesale.references import allocate_reference, retry_on_refer
 _LOAD_OPTIONS = (selectinload(CustomerOrder.lines), selectinload(CustomerOrder.payments))
 
 
+def order_status(total_wanted: int, received: int, allocated: int, cancelled: bool) -> str:
+    if cancelled:
+        return "cancelled"
+    if total_wanted > 0 and received >= total_wanted:
+        return "fulfilled"
+    if received > 0:
+        return "partly_delivered"
+    if allocated >= total_wanted and total_wanted > 0:
+        return "ready_to_deliver"
+    if allocated > 0:
+        return "allocating"
+    return "new"
+
+
 def _load(db: Session, order_id: str, branch_id: str | None) -> CustomerOrder:
     order = db.query(CustomerOrder).options(*_LOAD_OPTIONS).filter(CustomerOrder.id == order_id).first()
     if order is None or (branch_id is not None and order.branch_id != branch_id):
@@ -138,9 +152,19 @@ def add_payment(db: Session, order_id: str, branch_id: str | None, user_id: str,
     paid = sum(float(payment.amount) for payment in order.payments)
     if paid + payload.amount > total:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Payment cannot exceed the order balance")
+    if payload.paid_quantity_pairs is not None:
+        already_paid_pairs = sum(payment.paid_quantity_pairs or 0 for payment in order.payments)
+        delivered = delivered_pairs_by_order(db, [order.id], branch_id).get(order.id, {})
+        delivered_pairs = sum(delivered.values())
+        if already_paid_pairs + payload.paid_quantity_pairs > delivered_pairs:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "Paid pairs cannot exceed delivered pairs.",
+            )
     payment = WholesalePayment(
         branch_id=order.branch_id, order_id=order.id, paid_on=payload.paid_on,
-        amount=payload.amount, note=payload.note.strip(), recorded_by_user_id=user_id,
+        amount=payload.amount, paid_quantity_pairs=payload.paid_quantity_pairs,
+        note=payload.note.strip(), recorded_by_user_id=user_id,
     )
     db.add(payment)
     db.commit()

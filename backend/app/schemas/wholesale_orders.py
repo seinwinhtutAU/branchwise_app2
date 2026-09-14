@@ -23,6 +23,7 @@ class OrderIn(BaseModel):
 class OrderPaymentIn(BaseModel):
     paid_on: date
     amount: float = Field(gt=0)
+    paid_quantity_pairs: int | None = Field(default=None, ge=0)
     note: str = Field(default="", max_length=1000)
 
 

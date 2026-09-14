@@ -114,9 +114,13 @@ const STOCK_STATUSES: StockStatus[] = [
 export default function InventoryPage({
   session,
   onOpenReceiving,
+  initialStockCode,
+  onInitialStockOpened,
 }: {
   session: Session;
   onOpenReceiving: (receivingNo: string) => void;
+  initialStockCode?: string | null;
+  onInitialStockOpened?: () => void;
 }): React.JSX.Element {
   const queryClient = useQueryClient();
   const {
@@ -175,6 +179,17 @@ export default function InventoryPage({
             entry.location === selected.location,
         ) ?? null);
 
+  useEffect(() => {
+    if (!initialStockCode || selected || (!wire && !isError)) return;
+    const target = lines.find((entry) => entry.stock_code === initialStockCode);
+    if (!target) {
+      onInitialStockOpened?.();
+      return;
+    }
+    setSelected({ stock_code: target.stock_code, location: target.location });
+    onInitialStockOpened?.();
+  }, [initialStockCode, isError, lines, onInitialStockOpened, selected, wire]);
+
   if (view === "detail" && line) {
     return (
       <StockDetail
@@ -206,7 +221,6 @@ export default function InventoryPage({
     />
   );
 }
-
 function InventorySectionTabs({
   section,
   onChange,
