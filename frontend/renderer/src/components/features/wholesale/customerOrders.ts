@@ -1,20 +1,26 @@
 // The customer-order half of the wholesale data model drawn in diagram/wholesale/erd.mmd.
-// Front-end only for now: there is no backend behind any of this, so the rows below are
-// in-memory seed data and anything the user adds lives until the window reloads. Types
-// are named after the ERD's columns rather than the old removed API's, so wiring a real
-// backend later is a matter of swapping the source, not renaming every field. The
+// The API wire shape is kept aligned with these screen types. Seed rows remain a useful
+// offline fallback for the wholesale workspace, while customer orders and their stock
+// allocations are hydrated from the backend whenever the relevant screen is opened. The
 // formatting and colour-shorthand helpers live in ./shared, shared with factory vouchers.
 
 import { paymentStatusOf, sharePct, type PaymentStatus } from "./shared";
 import { type Unit } from "./units";
 import { type ProductGroup } from "./products";
 
-/** created → processing → completed, or cancelled at any point. */
-export type OrderStatus = "created" | "processing" | "completed" | "cancelled";
+/** created → processing (a supplier voucher has been placed) → partly_delivered (some
+ *  of it has reached the customer) → completed, or cancelled at any point. */
+export type OrderStatus =
+  | "created"
+  | "processing"
+  | "partly_delivered"
+  | "completed"
+  | "cancelled";
 
 export const ORDER_STATUSES: OrderStatus[] = [
   "created",
   "processing",
+  "partly_delivered",
   "completed",
   "cancelled",
 ];
@@ -25,21 +31,49 @@ export interface CustomerOrderLine {
   /** What the product actually is, so a line reads as a shoe and not as a code. */
   description: string;
   /** Man, lady or child — the range the business thinks in. */
-  group: ProductGroup;
+  product_group: ProductGroup;
   supplier_name: string;
   /** Colors and their counts the way staff already write them, e.g. "black10,pink10". */
-  color_qty: string;
+  color_breakdown: string;
   /** The unit the colors were written in — "black10" can mean ten pairs, ten sets or ten
-   *  dozen, and the quantity below is that reading turned into pairs. */
+   *  dozen, and the quantity_pairs below is that reading turned into pairs. */
   unit: Unit;
-  /** Total pairs across those colors — derived from color_qty and the unit, never typed
+  /** Total pairs across those colors — derived from color_breakdown and the unit, never typed
    *  directly. */
-  wanted_qty: number;
+  quantity_pairs: number;
   /** Pairs of this product the customer has actually been given. The order's own figure
    *  is the sum of these: a customer asks for two stock codes and is rarely given both at
    *  once, so "how much is still owed" is a question about a product, not an order. */
-  received_qty: number;
+  delivered_quantity_pairs: number;
+  /** Explicit stock reserved for this order line. It is set from Inventory > Allocations,
+   *  never inferred from demand, so an order only consumes stock when someone allocates it. */
+  allocated_quantity_pairs?: number;
+  /** The colour shorthand entered when the stock reservation was made. */
+  allocated_color_breakdown?: string;
   selling_price: number;
+}
+
+/** One change made to a customer-order line's allocation, logged by the server whenever
+ *  the reserved colour/quantity actually changes. `allocated_quantity_pairs`/
+ *  `allocated_color_breakdown` on the order line only ever hold the current reservation
+ *  (they get overwritten in place); this is the append-only log behind them, the data
+ *  the Allocation Record screen reads. */
+export interface AllocationEvent {
+  event_id: string;
+  order_id: string;
+  order_line_id: string;
+  order_no: string;
+  customer_name: string;
+  stock_code: string;
+  description: string;
+  product_group: ProductGroup;
+  unit: Unit;
+  previous_color_breakdown: string;
+  previous_quantity_pairs: number;
+  color_breakdown: string;
+  quantity_pairs: number;
+  recorded_by_user_id: string;
+  created_at: string;
 }
 
 /** One payment taken against an order — a customer pays in instalments, and "how much
@@ -47,14 +81,14 @@ export interface CustomerOrderLine {
  *  one says when it came in, so a question about last week's money has an answer. */
 export interface Payment {
   payment_id: string;
-  date: string;
+  paid_on: string;
   amount: number;
   note: string;
 }
 
 /** The ERD's payment_account for this order — what the customer owes on it. `balance`
  *  and `payment_status` are worked out from the payments taken, so nothing here can
- *  disagree with the money itself. No due date: customers here pay when they pay. */
+ *  disagree with the money itself. No due paid_on: customers here pay when they pay. */
 export interface PaymentAccount {
   account_id: string;
   payments: Payment[];
@@ -75,8 +109,8 @@ export interface CustomerOrder {
   customer_phone: string;
   customer_address: string;
   order_date: string;
-  total_qty: number;
-  received_qty: number;
+  total_quantity_pairs: number;
+  delivered_quantity_pairs: number;
   order_status: OrderStatus;
   payment: PaymentAccount;
   lines: CustomerOrderLine[];
@@ -85,14 +119,14 @@ export interface CustomerOrder {
 /** Every line's qty x price. The ERD stores line_amount per line; this is their sum. */
 export function orderAmount(order: CustomerOrder): number {
   return order.lines.reduce(
-    (sum, line) => sum + line.wanted_qty * line.selling_price,
+    (sum, line) => sum + line.quantity_pairs * line.selling_price,
     0,
   );
 }
 
 /** What is still owed of one stock code on this order. */
 export function lineRemaining(line: CustomerOrderLine): number {
-  return Math.max(0, line.wanted_qty - line.received_qty);
+  return Math.max(0, line.quantity_pairs - line.delivered_quantity_pairs);
 }
 
 /** What is still owed of one stock code across a whole order. */
@@ -103,12 +137,12 @@ export function remainingOf(order: CustomerOrder, stockCode: string): number {
 }
 
 export function remainingQty(order: CustomerOrder): number {
-  return Math.max(0, order.total_qty - order.received_qty);
+  return Math.max(0, order.total_quantity_pairs - order.delivered_quantity_pairs);
 }
 
 export function receivedPct(order: CustomerOrder): number {
-  if (order.total_qty <= 0) return 0;
-  return Math.round((order.received_qty / order.total_qty) * 100);
+  if (order.total_quantity_pairs <= 0) return 0;
+  return Math.round((order.delivered_quantity_pairs / order.total_quantity_pairs) * 100);
 }
 
 /** What is still owed on this order. A cancelled order owes nothing. */
@@ -164,21 +198,21 @@ export const SEED_ORDERS: CustomerOrder[] = [
     customer_phone: "09-4500-12345",
     customer_address: "No. 24, Bogyoke Rd, Mawlamyine",
     order_date: "2026-09-02",
-    total_qty: 120,
-    received_qty: 24,
+    total_quantity_pairs: 120,
+    delivered_quantity_pairs: 24,
     order_status: "processing",
     payment: {
       account_id: "pa-1",
       payments: [
         {
           payment_id: "pay-1",
-          date: "2026-09-02",
+          paid_on: "2026-09-02",
           amount: 1200000,
           note: "Deposit",
         },
         {
           payment_id: "pay-2",
-          date: "2026-09-10",
+          paid_on: "2026-09-10",
           amount: 1200000,
           note: "On collection",
         },
@@ -189,24 +223,24 @@ export const SEED_ORDERS: CustomerOrder[] = [
         order_line_id: "col-1",
         stock_code: "A1001",
         description: "Men's leather sandal",
-        group: "man",
+        product_group: "man",
         supplier_name: "Goody Factory",
-        color_qty: "black40p,white20p",
+        color_breakdown: "black40p,white20p",
         unit: "pair",
-        wanted_qty: 60,
-        received_qty: 12,
+        quantity_pairs: 60,
+        delivered_quantity_pairs: 12,
         selling_price: 28000,
       },
       {
         order_line_id: "col-2",
         stock_code: "A1002",
         description: "Men's slipper",
-        group: "man",
+        product_group: "man",
         supplier_name: "Goody Factory",
-        color_qty: "white30p,pink30p",
+        color_breakdown: "white30p,pink30p",
         unit: "pair",
-        wanted_qty: 60,
-        received_qty: 12,
+        quantity_pairs: 60,
+        delivered_quantity_pairs: 12,
         selling_price: 32000,
       },
     ],
@@ -218,21 +252,21 @@ export const SEED_ORDERS: CustomerOrder[] = [
     customer_phone: "09-9600-23456",
     customer_address: "112 Anawrahta Rd, Yangon",
     order_date: "2026-09-05",
-    total_qty: 78,
-    received_qty: 78,
+    total_quantity_pairs: 78,
+    delivered_quantity_pairs: 78,
     order_status: "completed",
     payment: {
       account_id: "pa-2",
       payments: [
         {
           payment_id: "pay-3",
-          date: "2026-09-05",
+          paid_on: "2026-09-05",
           amount: 1480000,
           note: "Deposit",
         },
         {
           payment_id: "pay-4",
-          date: "2026-09-06",
+          paid_on: "2026-09-06",
           amount: 1000000,
           note: "Balance by transfer",
         },
@@ -243,12 +277,12 @@ export const SEED_ORDERS: CustomerOrder[] = [
         order_line_id: "col-3",
         stock_code: "B2001",
         description: "Ladies' flat sandal",
-        group: "lady",
+        product_group: "lady",
         supplier_name: "Lek",
-        color_qty: "brown48p,black30p",
+        color_breakdown: "brown48p,black30p",
         unit: "pair",
-        wanted_qty: 78,
-        received_qty: 78,
+        quantity_pairs: 78,
+        delivered_quantity_pairs: 78,
         selling_price: 31000,
       },
     ],
@@ -260,8 +294,8 @@ export const SEED_ORDERS: CustomerOrder[] = [
     customer_phone: "09-7800-34567",
     customer_address: "Zay Gyi Market, Magway",
     order_date: "2026-09-08",
-    total_qty: 204,
-    received_qty: 0,
+    total_quantity_pairs: 204,
+    delivered_quantity_pairs: 0,
     order_status: "created",
     payment: {
       account_id: "pa-3",
@@ -272,24 +306,24 @@ export const SEED_ORDERS: CustomerOrder[] = [
         order_line_id: "col-4",
         stock_code: "C3001",
         description: "Kids' school shoe",
-        group: "child",
+        product_group: "child",
         supplier_name: "Panda Shoes",
-        color_qty: "navy60p,black42p",
+        color_breakdown: "navy60p,black42p",
         unit: "pair",
-        wanted_qty: 102,
-        received_qty: 0,
+        quantity_pairs: 102,
+        delivered_quantity_pairs: 0,
         selling_price: 29000,
       },
       {
         order_line_id: "col-5",
         stock_code: "C3002",
         description: "Kids' sandal",
-        group: "child",
+        product_group: "child",
         supplier_name: "Panda Shoes",
-        color_qty: "red50p,white52p",
+        color_breakdown: "red50p,white52p",
         unit: "pair",
-        wanted_qty: 102,
-        received_qty: 0,
+        quantity_pairs: 102,
+        delivered_quantity_pairs: 0,
         selling_price: 29000,
       },
     ],
@@ -301,15 +335,15 @@ export const SEED_ORDERS: CustomerOrder[] = [
     customer_phone: "09-4500-45678",
     customer_address: "Shwe Taung St, Mawlamyine",
     order_date: "2026-09-09",
-    total_qty: 60,
-    received_qty: 0,
+    total_quantity_pairs: 60,
+    delivered_quantity_pairs: 0,
     order_status: "created",
     payment: {
       account_id: "pa-4",
       payments: [
         {
           payment_id: "pay-5",
-          date: "2026-09-09",
+          paid_on: "2026-09-09",
           amount: 1160000,
           note: "Deposit",
         },
@@ -320,12 +354,12 @@ export const SEED_ORDERS: CustomerOrder[] = [
         order_line_id: "col-6",
         stock_code: "D4001",
         description: "Ladies' rubber slipper",
-        group: "lady",
+        product_group: "lady",
         supplier_name: "Maldini",
-        color_qty: "beige60p",
+        color_breakdown: "beige60p",
         unit: "pair",
-        wanted_qty: 60,
-        received_qty: 0,
+        quantity_pairs: 60,
+        delivered_quantity_pairs: 0,
         selling_price: 29000,
       },
     ],
@@ -337,8 +371,8 @@ export const SEED_ORDERS: CustomerOrder[] = [
     customer_phone: "09-9600-56789",
     customer_address: "5 Ward, Insein, Yangon",
     order_date: "2026-09-10",
-    total_qty: 150,
-    received_qty: 36,
+    total_quantity_pairs: 150,
+    delivered_quantity_pairs: 36,
     order_status: "processing",
     payment: {
       account_id: "pa-5",
@@ -349,24 +383,24 @@ export const SEED_ORDERS: CustomerOrder[] = [
         order_line_id: "col-7",
         stock_code: "A1001",
         description: "Men's leather sandal",
-        group: "man",
+        product_group: "man",
         supplier_name: "Goody Factory",
-        color_qty: "black42p,pink30p",
+        color_breakdown: "black42p,pink30p",
         unit: "pair",
-        wanted_qty: 72,
-        received_qty: 36,
+        quantity_pairs: 72,
+        delivered_quantity_pairs: 36,
         selling_price: 30000,
       },
       {
         order_line_id: "col-8",
         stock_code: "A1003",
         description: "Men's sport sandal",
-        group: "man",
+        product_group: "man",
         supplier_name: "Nilin",
-        color_qty: "white78p",
+        color_breakdown: "white78p",
         unit: "pair",
-        wanted_qty: 78,
-        received_qty: 0,
+        quantity_pairs: 78,
+        delivered_quantity_pairs: 0,
         selling_price: 30000,
       },
     ],
@@ -378,8 +412,8 @@ export const SEED_ORDERS: CustomerOrder[] = [
     customer_phone: "09-7800-67890",
     customer_address: "78th St, Mandalay",
     order_date: "2026-09-10",
-    total_qty: 90,
-    received_qty: 0,
+    total_quantity_pairs: 90,
+    delivered_quantity_pairs: 0,
     order_status: "cancelled",
     payment: {
       account_id: "pa-6",
@@ -390,12 +424,12 @@ export const SEED_ORDERS: CustomerOrder[] = [
         order_line_id: "col-9",
         stock_code: "B2002",
         description: "Ladies' heel sandal",
-        group: "lady",
+        product_group: "lady",
         supplier_name: "Lek",
-        color_qty: "black90p",
+        color_breakdown: "black90p",
         unit: "pair",
-        wanted_qty: 90,
-        received_qty: 0,
+        quantity_pairs: 90,
+        delivered_quantity_pairs: 0,
         selling_price: 27000,
       },
     ],

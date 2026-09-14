@@ -104,15 +104,15 @@ class Shipment(Base):
     # Supplier Vouchers exists (phase 3).
     voucher_no: Mapped[str] = mapped_column(String(30), nullable=False)
     supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    cargo_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    carrier_name: Mapped[str] = mapped_column("cargo_name", String(255), nullable=False)
     # The receiving gate this shipment lands at, as its short address — gate and
     # warehouse are the same building, so this one string is the whole of a place's
     # identity (see wholesale/shipments.ts's RECEIVING_GATES comment).
-    final_location: Mapped[str] = mapped_column(String(255), nullable=False)
-    sent_date: Mapped[date] = mapped_column(Date, nullable=False)
+    final_destination: Mapped[str] = mapped_column("final_location", String(255), nullable=False)
+    sent_on: Mapped[date] = mapped_column("sent_date", Date, nullable=False)
     total_packages: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # What is inside those packages — the supplier's own count of the goods, in pairs.
-    total_pairs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_quantity_pairs: Mapped[int] = mapped_column("total_pairs", Integer, nullable=False, default=0)
     total_unit: Mapped[WholesaleUnit] = mapped_column(
         Enum(WholesaleUnit, name="wholesale_unit", values_callable=lambda enum_cls: [m.value for m in enum_cls]),
         nullable=False,
@@ -161,10 +161,10 @@ class Receiving(Base):
     packages — the ERD's ARRIVAL, renamed to match the screen (RCV-YYMMDD-NNNN, not
     the ERD's plain arrival_id). shipment_id/voucher_no/supplier_name are copied onto the
     row at creation time from the shipment picked, the same denormalisation
-    CustomerOrderLine and SupplierVoucherLine already use for description/group: a
+    CustomerOrderLine and SupplierVoucherLine already use for description/product_group: a
     receiving still reads correctly if the shipment it came off is edited afterwards.
 
-    total_pairs is what the voucher says is coming; what was actually found is
+    total_quantity_pairs is what the voucher says is coming; what was actually found is
     counted_pairs, computed from the packages that have been opened (see
     app/services/wholesale/receivings.py) — never stored, so it can never disagree with
     the packages themselves."""
@@ -190,9 +190,9 @@ class Receiving(Base):
     supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
     # The gate this delivery landed at, as its short address.
     gate: Mapped[str] = mapped_column(String(255), nullable=False)
-    received_date: Mapped[date] = mapped_column(Date, nullable=False)
+    received_on: Mapped[date] = mapped_column("received_date", Date, nullable=False)
     total_packages: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    total_pairs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_quantity_pairs: Mapped[int] = mapped_column("total_pairs", Integer, nullable=False, default=0)
     total_unit: Mapped[WholesaleUnit] = mapped_column(
         Enum(WholesaleUnit, name="wholesale_unit", values_callable=lambda enum_cls: [m.value for m in enum_cls]),
         nullable=False,
@@ -213,7 +213,7 @@ class Receiving(Base):
 class ReceivingPackage(Base):
     """One physical box. A package nobody has opened yet has no contents recorded at
     all (opened=False, items empty) — not the same as a package that turned out to hold
-    nothing. received_date is nullable rather than an empty string, since packages of one
+    nothing. received_on is nullable rather than an empty string, since packages of one
     delivery do not all arrive together — a few can follow a week later — and the date
     belongs to the package once it does."""
 
@@ -229,7 +229,7 @@ class ReceivingPackage(Base):
     )
     package_no: Mapped[int] = mapped_column(Integer, nullable=False)
     opened: Mapped[bool] = mapped_column(nullable=False, default=False)
-    received_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    received_on: Mapped[date | None] = mapped_column("received_date", Date, nullable=True)
     note: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -242,10 +242,10 @@ class ReceivingPackage(Base):
 
 class ReceivingItem(Base):
     """One product found inside a package. A package rarely holds just one: a box
-    packed at the factory can carry several stock codes together. qty_pairs is computed
+    packed at the factory can carry several stock codes together. quantity_pairs is computed
     server-side from the quantity and unit typed in — the same "stored in pairs, shown in
-    whatever unit it was typed in" rule every other quantity here follows. color_qty is
-    kept as free text (checked for format, not cross-checked against qty_pairs): staff
+    whatever unit it was typed in" rule every other quantity here follows. color_breakdown is
+    kept as free text (checked for format, not cross-checked against quantity_pairs): staff
     fill in how many and what colours as two separate facts about the same box, the way
     the Receiving screen's two inputs already work."""
 
@@ -263,8 +263,8 @@ class ReceivingItem(Base):
         nullable=False,
         default=ProductGroup.MAN,
     )
-    color_qty: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
-    # Parsed from color_qty on every write — a cache of the parse, not a second source of
+    color_breakdown: Mapped[str] = mapped_column("color_qty", String(1000), nullable=False, default="")
+    # Parsed from color_breakdown on every write — a cache of the parse, not a second source of
     # truth, exactly as CustomerOrderLine.colors already works.
     colors: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     unit: Mapped[WholesaleUnit] = mapped_column(
@@ -272,7 +272,7 @@ class ReceivingItem(Base):
         nullable=False,
         default=WholesaleUnit.SET,
     )
-    qty_pairs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    quantity_pairs: Mapped[int] = mapped_column("qty_pairs", Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     package: Mapped["ReceivingPackage"] = relationship(back_populates="items")
@@ -319,7 +319,7 @@ class SupplierVoucher(Base):
     voucher_no: Mapped[str] = mapped_column(String(30), nullable=False)
     supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
     voucher_date: Mapped[date] = mapped_column(Date, nullable=False)
-    cargo_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    carrier_name: Mapped[str] = mapped_column("cargo_name", String(255), nullable=False, default="")
     total_packages: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -347,13 +347,13 @@ class SupplierVoucherLine(Base):
         Enum(ProductGroup, name="wholesale_product_group", values_callable=lambda enum_cls: [m.value for m in enum_cls]),
         nullable=False,
     )
-    color_qty: Mapped[str] = mapped_column(String(1000), nullable=False)
+    color_breakdown: Mapped[str] = mapped_column("color_qty", String(1000), nullable=False)
     colors: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     unit: Mapped[WholesaleUnit] = mapped_column(
         Enum(WholesaleUnit, name="wholesale_unit", values_callable=lambda enum_cls: [m.value for m in enum_cls]),
         nullable=False,
     )
-    wanted_pairs: Mapped[int] = mapped_column(Integer, nullable=False)
+    quantity_pairs: Mapped[int] = mapped_column("wanted_pairs", Integer, nullable=False)
     buying_price: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -416,10 +416,12 @@ class CustomerOrderLine(Base):
     description: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     product_group: Mapped[ProductGroup] = mapped_column(Enum(ProductGroup, name="wholesale_product_group", values_callable=lambda e: [m.value for m in e]), nullable=False)
     supplier_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    color_qty: Mapped[str] = mapped_column(String(1000), nullable=False)
+    color_breakdown: Mapped[str] = mapped_column("color_qty", String(1000), nullable=False)
     colors: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     unit: Mapped[WholesaleUnit] = mapped_column(Enum(WholesaleUnit, name="wholesale_unit", values_callable=lambda e: [m.value for m in e]), nullable=False)
-    wanted_pairs: Mapped[int] = mapped_column(Integer, nullable=False)
+    quantity_pairs: Mapped[int] = mapped_column("wanted_pairs", Integer, nullable=False)
+    allocated_quantity_pairs: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    allocated_color_breakdown: Mapped[str] = mapped_column(String(1000), nullable=False, default="", server_default="")
     selling_price: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
     order: Mapped["CustomerOrder"] = relationship(back_populates="lines")
 
@@ -449,12 +451,62 @@ class WholesaleStockMovement(Base):
         Enum(ProductGroup, name="wholesale_product_group", values_callable=lambda e: [m.value for m in e]),
         nullable=False,
     )
-    color_qty: Mapped[str] = mapped_column(String(1000), nullable=False)
+    color_breakdown: Mapped[str] = mapped_column("color_qty", String(1000), nullable=False)
     colors: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    qty_pairs: Mapped[int] = mapped_column(Integer, nullable=False)
+    quantity_pairs: Mapped[int] = mapped_column("qty_pairs", Integer, nullable=False)
     location: Mapped[str] = mapped_column(String(255), nullable=False)
-    delivered_on: Mapped[date] = mapped_column(Date, nullable=False)
+    delivery_address: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
+    delivered_on: Mapped[date] = mapped_column("moved_on", Date, nullable=False)
     note: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
+    recorded_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    branch: Mapped["Branch | None"] = relationship()
+    order: Mapped["CustomerOrder"] = relationship()
+
+
+class AllocationEvent(Base):
+    """One reservation of arrived stock against a customer-order line.
+
+    `allocate_order_line` (app/services/wholesale/orders.py) overwrites the line's
+    `allocated_quantity_pairs`/`allocated_color_breakdown` in place — those columns only
+    ever hold the current state, the way a stock count does. This table is the append-only
+    log of each time that state changed, so the Allocation Record screen has something to
+    list: who allocated what, to which order, and when. Written whenever the resulting
+    value differs from what was there before; a save that leaves the allocation unchanged
+    writes no row.
+    """
+
+    __tablename__ = "wholesale_allocation_events"
+    __table_args__ = (
+        Index("ix_wholesale_allocation_events_branch_id_created_at", "branch_id", "created_at"),
+        Index("ix_wholesale_allocation_events_order_line_id", "order_line_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True)
+    order_id: Mapped[str] = mapped_column(
+        ForeignKey("wholesale_customer_orders.id", ondelete="CASCADE"), nullable=False
+    )
+    order_line_id: Mapped[str] = mapped_column(
+        ForeignKey("wholesale_customer_order_lines.id", ondelete="CASCADE"), nullable=False
+    )
+    order_no: Mapped[str] = mapped_column(String(30), nullable=False)
+    customer_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stock_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    product_group: Mapped[ProductGroup] = mapped_column(
+        Enum(ProductGroup, name="wholesale_product_group", values_callable=lambda e: [m.value for m in e]),
+        nullable=False,
+    )
+    unit: Mapped[WholesaleUnit] = mapped_column(
+        Enum(WholesaleUnit, name="wholesale_unit", values_callable=lambda e: [m.value for m in e]),
+        nullable=False,
+    )
+    previous_color_breakdown: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
+    previous_quantity_pairs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    color_breakdown: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
+    quantity_pairs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     recorded_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

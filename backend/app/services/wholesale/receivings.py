@@ -14,7 +14,7 @@ RECEIVING_STATUSES = ["recorded", "checking", "checked", "issue"]
 
 @dataclass
 class ItemLike:
-    qty_pairs: int
+    quantity_pairs: int
 
 
 @dataclass
@@ -26,7 +26,7 @@ class PackageLike:
 def package_pairs(items: list[ItemLike]) -> int:
     """Everything found in one package, in pairs — whatever units its products were
     counted in. Pairs are the one thing every screen agrees on."""
-    return sum(item.qty_pairs for item in items)
+    return sum(item.quantity_pairs for item in items)
 
 
 def opened_count(packages: list[PackageLike]) -> int:

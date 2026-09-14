@@ -30,14 +30,14 @@ def get_voucher(db: Session, voucher_id: str, branch_id: str | None) -> Supplier
 
 
 def _line(line_in) -> SupplierVoucherLine:
-    color_qty = line_in.color_qty.strip()
-    problem = color_qty_problem(color_qty)
+    color_breakdown = line_in.color_breakdown.strip()
+    problem = color_qty_problem(color_breakdown)
     if problem:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, problem)
     return SupplierVoucherLine(
         stock_code=line_in.stock_code.strip(), description=line_in.description.strip(),
-        product_group=line_in.product_group, color_qty=color_qty, colors=colors_as_json(color_qty),
-        unit=line_in.unit, wanted_pairs=color_qty_pairs(color_qty, line_in.unit), buying_price=line_in.buying_price,
+        product_group=line_in.product_group, color_breakdown=color_breakdown, colors=colors_as_json(color_breakdown),
+        unit=line_in.unit, quantity_pairs=color_qty_pairs(color_breakdown, line_in.unit), buying_price=line_in.buying_price,
     )
 
 
@@ -58,7 +58,7 @@ def create_voucher(db: Session, branch_id: str | None, payload) -> SupplierVouch
         voucher = SupplierVoucher(
             branch_id=branch_id, voucher_no=allocate_reference(db, SupplierVoucher.voucher_no, branch_id, "VCH", date.today()),
             supplier_name=payload.supplier_name.strip(), voucher_date=payload.voucher_date,
-            cargo_name=payload.cargo_name.strip(), total_packages=payload.total_packages,
+            carrier_name=payload.carrier_name.strip(), total_packages=payload.total_packages,
             lines=[_line(line) for line in payload.lines],
         )
         db.add(voucher)
@@ -73,7 +73,7 @@ def update_voucher(db: Session, voucher_id: str, branch_id: str | None, payload)
     voucher = _load(db, voucher_id, branch_id)
     voucher.supplier_name = payload.supplier_name.strip()
     voucher.voucher_date = payload.voucher_date
-    voucher.cargo_name = payload.cargo_name.strip()
+    voucher.carrier_name = payload.carrier_name.strip()
     voucher.total_packages = payload.total_packages
     voucher.lines = [_line(line) for line in payload.lines]
     db.commit()
@@ -89,7 +89,7 @@ def delete_voucher(db: Session, voucher_id: str, branch_id: str | None) -> None:
 
 def add_payment(db: Session, voucher_id: str, branch_id: str | None, user_id: str, payload) -> WholesalePayment:
     voucher = _load(db, voucher_id, branch_id)
-    total = sum(float(line.wanted_pairs) * float(line.buying_price) for line in voucher.lines)
+    total = sum(float(line.quantity_pairs) * float(line.buying_price) for line in voucher.lines)
     paid = sum(float(payment.amount) for payment in voucher.payments)
     if paid + payload.amount > total:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Payment cannot exceed the voucher balance")
@@ -113,7 +113,7 @@ def delete_payment(db: Session, voucher_id: str, payment_id: str, branch_id: str
 def received_pairs_by_voucher_no(db: Session, voucher_nos: list[str], branch_id: str | None) -> dict[str, int]:
     if not voucher_nos:
         return {}
-    query = (db.query(Receiving.voucher_no, func.coalesce(func.sum(ReceivingItem.qty_pairs), 0))
+    query = (db.query(Receiving.voucher_no, func.coalesce(func.sum(ReceivingItem.quantity_pairs), 0))
             .join(ReceivingPackage, ReceivingPackage.receiving_id == Receiving.id)
             .join(ReceivingItem, ReceivingItem.package_id == ReceivingPackage.id)
             .filter(Receiving.voucher_no.in_(voucher_nos), ReceivingPackage.opened.is_(True)))
@@ -140,7 +140,7 @@ def received_pairs_by_voucher_stock(
         db.query(
             Receiving.voucher_no,
             ReceivingItem.stock_code,
-            func.coalesce(func.sum(ReceivingItem.qty_pairs), 0),
+            func.coalesce(func.sum(ReceivingItem.quantity_pairs), 0),
         )
         .join(ReceivingPackage, ReceivingPackage.receiving_id == Receiving.id)
         .join(ReceivingItem, ReceivingItem.package_id == ReceivingPackage.id)
@@ -156,3 +156,27 @@ def received_pairs_by_voucher_stock(
         (voucher_no, stock_code): int(pairs)
         for voucher_no, stock_code, pairs in rows
     }
+
+
+def stock_codes_with_open_vouchers(
+    db: Session,
+    branch_id: str | None,
+    stock_codes: set[str],
+) -> set[str]:
+    """Which of these stock codes already have a supplier voucher naming them —
+    existence only, regardless of whether the goods it describes have arrived yet.
+    A customer order reads this as "we have started buying it," the same way its own
+    received_quantity_pairs says "we have started delivering it": the order itself never records
+    which voucher it came from, so this is worked out by stock code, not a stored link.
+    """
+    if not stock_codes:
+        return set()
+    query = (
+        db.query(SupplierVoucherLine.stock_code)
+        .join(SupplierVoucher, SupplierVoucherLine.voucher_id == SupplierVoucher.id)
+        .filter(SupplierVoucherLine.stock_code.in_(stock_codes))
+        .distinct()
+    )
+    if branch_id is not None:
+        query = query.filter(SupplierVoucher.branch_id == branch_id)
+    return {row[0] for row in query.all()}

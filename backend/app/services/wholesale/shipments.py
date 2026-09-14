@@ -23,12 +23,12 @@ class LegInput:
     packages_sent: int
 
 
-def shipment_pairs(total_pairs: int) -> int:
-    """total_pairs is already stored in pairs — this exists so callers read one name for
+def shipment_pairs(total_quantity_pairs: int) -> int:
+    """total_quantity_pairs is already stored in pairs — this exists so callers read one name for
     the figure regardless of which table it comes from, matching shipmentPairs on the
-    front end (which converts total_qty via total_unit; here total_pairs already is that
+    front end (which converts total_quantity_pairs via total_unit; here total_quantity_pairs already is that
     conversion, computed once on write)."""
-    return total_pairs
+    return total_quantity_pairs
 
 
 def cargo_remaining(shipment: Shipment) -> int:
@@ -133,7 +133,7 @@ def shipment_derived(shipment: Shipment, final_received_override: int | None = N
     )
     legs = shipment.legs
     return {
-        "total_pairs": shipment_pairs(shipment.total_pairs),
+        "total_quantity_pairs": shipment_pairs(shipment.total_quantity_pairs),
         "final_received_packages": final_received,
         "cargo_remaining": cargo_remaining(shipment),
         "final_remaining": final_remaining(shipment, final_received),

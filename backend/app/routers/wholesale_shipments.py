@@ -52,11 +52,11 @@ def _shipment_out(shipment: Shipment, final_received_override: int | None = None
         "shipment_no": shipment.shipment_no,
         "voucher_no": shipment.voucher_no,
         "supplier_name": shipment.supplier_name,
-        "cargo_name": shipment.cargo_name,
-        "final_location": shipment.final_location,
-        "sent_date": shipment.sent_date,
+        "carrier_name": shipment.carrier_name,
+        "final_destination": shipment.final_destination,
+        "sent_on": shipment.sent_on,
         "total_packages": shipment.total_packages,
-        "total_pairs": shipment.total_pairs,
+        "total_quantity_pairs": shipment.total_quantity_pairs,
         "total_unit": shipment.total_unit.value,
         "packages_sent_by_cargo": shipment.packages_sent_by_cargo,
         # Overridden by whatever the gate has actually recorded, once a receiving
@@ -92,7 +92,7 @@ def list_shipments_endpoint(
         rows = [
             row for row in rows
             if query in row["shipment_no"].lower() or query in row["voucher_no"].lower()
-            or query in row["supplier_name"].lower() or query in row["cargo_name"].lower()
+            or query in row["supplier_name"].lower() or query in row["carrier_name"].lower()
             or any(query in leg["stop_name"].lower() for leg in row["legs"])
         ]
     if shipment_status:

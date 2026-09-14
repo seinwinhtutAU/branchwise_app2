@@ -29,7 +29,7 @@ def _payload() -> dict:
                 "description": "Sandal",
                 "product_group": "man",
                 "supplier_name": "Goody Factory",
-                "color_qty": "black2s",
+                "color_breakdown": "black2s",
                 "unit": "set",
                 "selling_price": 18000,
             }
@@ -45,7 +45,7 @@ def test_customer_order_persists_updates_and_caps_payments(authed_client: TestCl
     assert created.status_code == 201
     order = created.json()
     assert order["order_no"].startswith("ORD-")
-    assert order["total_qty"] == 12
+    assert order["total_quantity_pairs"] == 12
     assert order["total_amount"] == 216000
     assert order["order_status"] == "created"
 
@@ -75,7 +75,7 @@ def test_customer_order_rejects_empty_colours_and_other_branch(authed_client: Te
     branch = _branch(db_session)
     _user(db_session, UserRole.WHOLESALE, branch.id)
     invalid = _payload()
-    invalid["lines"][0]["color_qty"] = ""
+    invalid["lines"][0]["color_breakdown"] = ""
     assert authed_client.post("/api/wholesale/orders", json=invalid).status_code == 422
 
     created = authed_client.post("/api/wholesale/orders", json=_payload()).json()
@@ -106,3 +106,21 @@ def test_customer_order_list_filters_and_pages_on_the_server(authed_client: Test
     assert paged.status_code == 200
     assert paged.headers["X-Total-Count"] == "2"
     assert len(paged.json()) == 1
+
+
+def test_customer_order_shows_processing_once_a_voucher_is_placed_for_it(authed_client: TestClient, db_session: Session) -> None:
+    branch = _branch(db_session)
+    _user(db_session, UserRole.WHOLESALE, branch.id)
+    order = authed_client.post("/api/wholesale/orders", json=_payload()).json()
+    assert order["order_status"] == "created"
+
+    voucher_payload = {
+        "supplier_name": "Goody Factory", "voucher_date": "2026-09-13", "carrier_name": "Cargo", "total_packages": 1,
+        "lines": [{"stock_code": "A1001", "description": "Sandal", "product_group": "man", "color_breakdown": "black5s", "unit": "set", "buying_price": 18000}],
+    }
+    voucher = authed_client.post("/api/wholesale/supplier-vouchers", json=voucher_payload)
+    assert voucher.status_code == 201
+
+    reread = authed_client.get(f"/api/wholesale/orders/{order['order_id']}")
+    assert reread.status_code == 200
+    assert reread.json()["order_status"] == "processing"

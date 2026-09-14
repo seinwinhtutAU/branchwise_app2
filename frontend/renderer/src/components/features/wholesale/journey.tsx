@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import {
   JourneyArrow,
   JourneyCard,
@@ -17,7 +18,7 @@ import {
   type Receiving,
 } from "@renderer/components/features/wholesale/receivings";
 import { formatQty } from "@renderer/components/features/wholesale/shared";
-import { formatIn } from "@renderer/components/features/wholesale/units";
+import { formatIn, type Unit } from "@renderer/components/features/wholesale/units";
 
 // One journey, drawn once. A customer order, a supplier voucher and a shipment are three
 // views of the same goods moving, so they show the same cards with the same figures — not
@@ -30,6 +31,10 @@ export function DeliveryJourney({
   receivings = [],
   before = [],
   after = [],
+  includeGateCount = true,
+  expectedPackages,
+  expectedQtyPairs,
+  expectedUnit,
 }: {
   shipment: Shipment;
   /** So "Final received" can show what has actually been opened and counted, not just
@@ -40,6 +45,14 @@ export function DeliveryJourney({
   before?: React.ReactNode[];
   /** Cards to show after they reach the gate. */
   after?: React.ReactNode[];
+  /** Whether to show the receiving gate's package-count card. */
+  includeGateCount?: boolean;
+  /** Supplier voucher package target, when the journey is shown from a voucher. */
+  expectedPackages?: number;
+  /** Supplier voucher quantity target in pairs, when it is the source of truth. */
+  expectedQtyPairs?: number;
+  /** Unit used to present the expected quantity. */
+  expectedUnit?: Unit;
 }): React.JSX.Element {
   // A package the gate has logged is not the same as one anyone has opened and checked
   // against the voucher — see final_received_packages in ./store. This is the number
@@ -55,6 +68,12 @@ export function DeliveryJourney({
     (sum, receiving) => sum + countedPairs(receiving),
     0,
   );
+  const packagesToReceive = expectedPackages ?? shipment.total_packages;
+  const quantityToReceive = expectedQtyPairs ?? shipmentPairs(shipment);
+  const quantityUnit = expectedUnit ?? shipment.total_unit;
+  const packagesComplete =
+    packagesToReceive > 0 && openedPackages === packagesToReceive;
+  const quantityMatches = countedQty === quantityToReceive;
 
   const cards: React.ReactNode[] = [
     ...before,
@@ -74,7 +93,7 @@ export function DeliveryJourney({
       key="cargo"
       stage="cargo"
       title="Cargo"
-      subtitle={shipment.cargo_name}
+      subtitle={shipment.carrier_name}
       done={
         shipment.packages_sent_by_cargo > 0 && cargoRemaining(shipment) === 0
       }
@@ -126,7 +145,7 @@ export function DeliveryJourney({
       key="final"
       stage="final"
       title="Final received"
-      subtitle={shipment.final_location}
+      subtitle={shipment.final_destination}
       done={
         shipment.final_received_packages > 0 && finalRemaining(shipment) === 0
       }
@@ -146,38 +165,39 @@ export function DeliveryJourney({
         }
       />
     </JourneyCard>,
-    <JourneyCard
-      key="counted"
-      stage="final"
-      title="Counted at the gate"
-      subtitle={shipment.final_location}
-      done={
-        shipment.final_received_packages > 0 &&
-        openedPackages === shipment.final_received_packages
-      }
-      doneLabel="Everything counted"
-    >
-      <JourneyRow
-        label="Packages opened"
-        value={`${formatQty(openedPackages)} / ${formatQty(shipment.final_received_packages)}`}
-        good={
-          shipment.final_received_packages > 0
-            ? openedPackages === shipment.final_received_packages
-            : undefined
-        }
-      />
-      <JourneyRow label="Quantity" value={formatIn(countedQty, "set")} />
-    </JourneyCard>,
+    ...(includeGateCount
+      ? [
+          <JourneyCard
+            key="counted"
+            stage="final"
+            title="Counted at the gate"
+            subtitle={shipment.final_destination}
+            done={packagesComplete && quantityMatches}
+            doneLabel="Everything counted"
+          >
+            <JourneyRow
+              label="Packages opened"
+              value={`${formatQty(openedPackages)} / ${formatQty(packagesToReceive)}`}
+              good={packagesComplete && quantityMatches}
+            />
+            <JourneyRow
+              label="Quantity"
+              value={`${formatIn(countedQty, quantityUnit)} / ${formatIn(quantityToReceive, quantityUnit)}`}
+              good={quantityMatches}
+            />
+          </JourneyCard>,
+        ]
+      : []),
     ...after,
   ];
 
   return (
-    <div className="flex items-stretch overflow-x-auto pb-2">
+    <div className="flex items-stretch min-w-0 overflow-x-auto pb-2">
       {cards.map((card, index) => (
-        <div key={index} className="flex items-stretch">
+        <Fragment key={index}>
           {index > 0 && <JourneyArrow />}
           {card}
-        </div>
+        </Fragment>
       ))}
     </div>
   );

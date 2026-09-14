@@ -76,11 +76,11 @@ def _seed_shipments(db, branch: Branch, shipments: list[dict], *, dry_run: bool)
             shipment_no=entry["shipment_no"],
             voucher_no=entry["voucher_no"],
             supplier_name=entry["supplier_name"],
-            cargo_name=entry["cargo_name"],
-            final_location=entry["final_location"],
-            sent_date=date.fromisoformat(entry["sent_date"]),
+            carrier_name=entry["cargo_name"],
+            final_destination=entry["final_location"],
+            sent_on=date.fromisoformat(entry["sent_date"]),
             total_packages=entry["total_packages"],
-            total_pairs=entry["total_pairs"],
+            total_quantity_pairs=entry["total_pairs"],
             total_unit=entry["total_unit"],
             packages_sent_by_cargo=entry["packages_sent_by_cargo"],
             final_received_packages=entry["final_received_packages"],
@@ -127,10 +127,10 @@ def _seed_vouchers(
                     stock_code=line["stock_code"],
                     description=line["description"],
                     product_group=ProductGroup(line["group"]),
-                    color_qty=color_qty,
+                    color_breakdown=color_qty,
                     colors=colors_as_json(color_qty),
                     unit=unit,
-                    wanted_pairs=to_pairs(line["qty"], unit),
+                    quantity_pairs=to_pairs(line["qty"], unit),
                     buying_price=line["buying_price"],
                 )
             )
@@ -150,7 +150,7 @@ def _seed_vouchers(
                 voucher_no=entry["voucher_no"],
                 supplier_name=entry["supplier_name"],
                 voucher_date=date.fromisoformat(entry["voucher_date"]),
-                cargo_name=entry["cargo_name"],
+                carrier_name=entry["cargo_name"],
                 total_packages=entry["total_packages"],
                 lines=lines,
                 payments=payments,
@@ -209,17 +209,17 @@ def _seed_receivings(
                         stock_code=item["stock_code"],
                         description=item["description"],
                         product_group=ProductGroup(item["group"]),
-                        color_qty=color_qty,
+                        color_breakdown=color_qty,
                         colors=colors_as_json(color_qty),
                         unit=item_unit,
-                        qty_pairs=to_pairs(item["qty"], item_unit),
+                        quantity_pairs=to_pairs(item["qty"], item_unit),
                     )
                 )
             packages.append(
                 ReceivingPackage(
                     package_no=package["package_no"],
                     opened=package["opened"],
-                    received_date=(
+                    received_on=(
                         date.fromisoformat(package["received_date"])
                         if package["received_date"]
                         else None
@@ -238,9 +238,9 @@ def _seed_receivings(
                 voucher_no=shipment.voucher_no,
                 supplier_name=shipment.supplier_name,
                 gate=entry["gate"],
-                received_date=date.fromisoformat(entry["received_date"]),
+                received_on=date.fromisoformat(entry["received_date"]),
                 total_packages=len(packages),
-                total_pairs=to_pairs(entry["total_qty"], unit),
+                total_quantity_pairs=to_pairs(entry["total_qty"], unit),
                 total_unit=unit,
                 packages=packages,
                 costs=costs,
@@ -272,8 +272,8 @@ def _seed_orders(db, branch: Branch, orders: list[dict], *, dry_run: bool, actor
                 CustomerOrderLine(
                     stock_code=line["stock_code"], description=line["description"],
                     product_group=ProductGroup(line["group"]), supplier_name=line["supplier_name"],
-                    color_qty=color_qty, colors=colors_as_json(color_qty), unit=unit,
-                    wanted_pairs=to_pairs(line["qty"], unit), selling_price=line["selling_price"],
+                    color_breakdown=color_qty, colors=colors_as_json(color_qty), unit=unit,
+                    quantity_pairs=to_pairs(line["qty"], unit), selling_price=line["selling_price"],
                 )
             )
         payments = [
@@ -319,8 +319,8 @@ def _seed_outgoing(db, branch: Branch, movements: list[dict], *, dry_run: bool, 
         db.add(WholesaleStockMovement(
             branch_id=branch.id, order_id=order.id, stock_code=source.stock_code,
             description=source.description, product_group=source.product_group,
-            color_qty=color_qty, colors=colors_as_json(color_qty),
-            qty_pairs=to_pairs(entry["qty"], WholesaleUnit(entry["unit"])),
+            color_breakdown=color_qty, colors=colors_as_json(color_qty),
+            quantity_pairs=to_pairs(entry["qty"], WholesaleUnit(entry["unit"])),
             location=entry["location"], delivered_on=date.fromisoformat(entry["date"]),
             note=entry["seed_key"], recorded_by_user_id=actor_id,
         ))

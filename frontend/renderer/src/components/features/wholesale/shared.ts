@@ -36,8 +36,8 @@ const UNIT_LETTERS: Record<string, Unit> = {
   d: "dozen",
 };
 
-export function parseColorQty(text: string): ColorQty[] {
-  return text
+export function parseColorQty(text: string | null | undefined): ColorQty[] {
+  return (text ?? "")
     .split(/[+,]/)
     .map((part) => part.trim())
     .filter(Boolean)

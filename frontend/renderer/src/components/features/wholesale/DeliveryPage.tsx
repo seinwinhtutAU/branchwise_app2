@@ -1,6 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
+import { z } from "zod";
 import { type Session } from "@renderer/lib/auth";
-import { useCachedFetch } from "@renderer/lib/useCachedFetch";
+import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
 import {
   CountField,
@@ -108,11 +112,14 @@ import {
 // with one difference: this detail sheet is the one you type into. Packages move a stop
 // at a time, and this is where that gets written down.
 //
-// Backed by /api/wholesale/shipments (see wholesale/api.ts). An edit is applied to the
-// screen at once and sent to the server after a short pause, rather than on every
-// keystroke; the flow figures (packages_sent_by_cargo, each leg, final_received_packages)
-// are re-settled both here (for instant feedback) and on the server (which is
-// authoritative — see app/services/wholesale/shipments.py::normalise_flow).
+// Backed by /api/wholesale/shipments (see wholesale/api.ts), read through React Query
+// (see @renderer/lib/queryClient.ts) rather than the hand-rolled useCachedFetch. An edit
+// is applied to the screen at once and sent to the server after a short pause, rather
+// than on every keystroke; the flow figures (packages_sent_by_cargo, each leg,
+// final_received_packages) are re-settled both here (for instant feedback) and on the
+// server (which is authoritative — see app/services/wholesale/shipments.py::normalise_flow).
+
+const SHIPMENTS_QUERY_KEY = ["wholesale", "shipments"] as const;
 
 type View = "list" | "detail" | "new";
 type StatusFilter = ShipmentStatus | "all";
@@ -120,8 +127,8 @@ type StatusFilter = ShipmentStatus | "all";
 const STATUS_LABELS: Record<ShipmentStatus, string> = {
   waiting_at_cargo: "Waiting at cargo",
   in_transit: "On the way",
-  partly_delivered: "Partly delivered",
-  completed: "All delivered",
+  partly_delivered: "Partly shipped",
+  completed: "All shipped",
 };
 
 // Filled, not tinted — the same treatment the order and voucher badges use.
@@ -155,12 +162,21 @@ export default function DeliveryPage({
   session: Session;
 }): React.JSX.Element {
   const showToast = useToast();
+  const queryClient = useQueryClient();
   const {
     data: wire,
-    isRefreshing,
-    failed,
-    reload,
-  } = useCachedFetch<ShipmentWire[]>(SHIPMENTS_URL, session, "shipments");
+    isFetching: isRefreshing,
+    isError: failed,
+  } = useQuery({
+    queryKey: SHIPMENTS_QUERY_KEY,
+    queryFn: () => fetchJson<ShipmentWire[]>(SHIPMENTS_URL, session),
+  });
+  useLoadErrorToast(failed, "shipments");
+
+  async function reload(): Promise<void> {
+    await queryClient.invalidateQueries({ queryKey: SHIPMENTS_QUERY_KEY });
+  }
+
   const shipments = useMemo(
     () => (wire ? shipmentsFromWire(wire) : []),
     [wire],
@@ -186,7 +202,7 @@ export default function DeliveryPage({
   async function persistShipment(shipment: Shipment): Promise<void> {
     try {
       await apiUpdateShipment(session, shipment.shipment_id, shipment);
-      reload();
+      await reload();
       showToast("success", "Shipment saved.");
     } catch (error) {
       reportSaveFailure(error, "Could not save the shipment.");
@@ -195,20 +211,26 @@ export default function DeliveryPage({
 
   function deleteShipment(shipmentId: string): void {
     apiDeleteShipment(session, shipmentId)
-      .then(() => {
+      .then(async () => {
         setSelectedId((current) => (current === shipmentId ? null : current));
         setView("list");
+        await reload();
       })
-      .catch((error) => reportSaveFailure(error, "Could not delete the shipment."));
+      .catch((error) =>
+        reportSaveFailure(error, "Could not delete the shipment."),
+      );
   }
 
   function addShipment(input: NewShipmentInput): void {
     apiCreateShipment(session, input)
-      .then((created) => {
+      .then(async (created) => {
         setSelectedId(created.shipment_id);
         setView("detail");
+        await reload();
       })
-      .catch((error) => reportSaveFailure(error, "Could not create the shipment."));
+      .catch((error) =>
+        reportSaveFailure(error, "Could not create the shipment."),
+      );
   }
 
   const selected =
@@ -230,7 +252,12 @@ export default function DeliveryPage({
   }
 
   if (view === "new") {
-    return <NewShipmentForm onCancel={() => setView("list")} onCreate={addShipment} />;
+    return (
+      <NewShipmentForm
+        onCancel={() => setView("list")}
+        onCreate={addShipment}
+      />
+    );
   }
 
   if (view === "detail" && selected) {
@@ -291,7 +318,7 @@ function ShipmentList({
         shipment.shipment_no.toLowerCase().includes(query) ||
         shipment.voucher_no.toLowerCase().includes(query) ||
         shipment.supplier_name.toLowerCase().includes(query) ||
-        shipment.cargo_name.toLowerCase().includes(query) ||
+        shipment.carrier_name.toLowerCase().includes(query) ||
         shipment.legs.some((leg) =>
           leg.stop_name.toLowerCase().includes(query),
         );
@@ -324,7 +351,7 @@ function ShipmentList({
           sub="shipments"
         />
         <FigureCard
-          label="All delivered"
+          label="All shipped"
           value={formatQty(countBy("completed"))}
           sub="shipments"
           tone="success"
@@ -347,7 +374,7 @@ function ShipmentList({
         <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
           <div>
             <h2 className="text-base font-semibold text-text-primary tracking-tight">
-              Delivery
+              Shipments
             </h2>
             <p className="text-sm text-text-muted mt-0.5">
               Manage all shipments.
@@ -370,7 +397,7 @@ function ShipmentList({
         </div>
 
         <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-bg-subtle">
-          <div className="w-full sm:w-80">
+          <div className="w-full sm:w-[28rem] lg:w-[32rem]">
             <Input
               aria-label="Search shipments"
               placeholder="Search shipment no., voucher, supplier, cargo or destination"
@@ -438,14 +465,14 @@ function ShipmentList({
                   <Th className="whitespace-nowrap">Voucher no.</Th>
                   <Th className="whitespace-nowrap">Supplier / Factory</Th>
                   <Th>Cargo</Th>
-                  <Th className="whitespace-nowrap">Sent on</Th>
+                  <Th className="whitespace-nowrap">Shipment date</Th>
                   <Th className="text-right whitespace-nowrap">
                     Total packages
                   </Th>
                   <Th className="text-right whitespace-nowrap">
                     Final received
                   </Th>
-                  <Th className="w-44 whitespace-nowrap">Delivery progress</Th>
+                  <Th className="w-44 whitespace-nowrap">Shipment progress</Th>
                   <Th>Status</Th>
                   <Th className="w-12" aria-label="Actions" />
                 </Tr>
@@ -470,10 +497,10 @@ function ShipmentList({
                       {shipment.supplier_name}
                     </Td>
                     <Td className="text-text-secondary whitespace-nowrap">
-                      {shipment.cargo_name}
+                      {shipment.carrier_name}
                     </Td>
                     <Td className="text-text-muted whitespace-nowrap">
-                      {formatDate(shipment.sent_date)}
+                      {formatDate(shipment.sent_on)}
                     </Td>
                     <Td className="text-right tabular-nums font-medium">
                       {formatQty(shipment.total_packages)}
@@ -616,6 +643,37 @@ function RowMenu({
 
 // ── Detail ───────────────────────────────────────────────────────────────────
 
+const shipmentDetailLegSchema = z.object({
+  leg_id: z.string(),
+  leg_order: z.number().finite().min(0),
+  stop_name: z.string(),
+  carrier_name: z.string(),
+  packages_received: z.number().finite().min(0),
+  packages_sent: z.number().finite().min(0),
+});
+
+const shipmentDetailSchema = z.object({
+  shipment: z.object({
+    shipment_id: z.string(),
+    shipment_no: z.string(),
+    voucher_no: z.string(),
+    supplier_name: z.string(),
+    carrier_name: z.string().trim().min(1, "Enter a cargo name."),
+    final_destination: z.string().trim().min(1, "Enter a receiving gate."),
+    sent_on: z.string().trim().min(1, "Choose a shipment date."),
+    total_packages: z.number().finite().min(0),
+    total_quantity_pairs: z.number().finite().min(0),
+    total_unit: z.enum(["pair", "set", "dozen"]),
+    packages_sent_by_cargo: z.number().finite().min(0),
+    final_received_packages: z.number().finite().min(0),
+    legs: z.array(shipmentDetailLegSchema),
+  }),
+});
+
+interface ShipmentDetailFormValues {
+  shipment: Shipment;
+}
+
 function ShipmentDetail({
   shipment: serverShipment,
   onBack,
@@ -628,21 +686,47 @@ function ShipmentDetail({
   onDelete: () => void;
 }): React.JSX.Element {
   // Edits stay in this local draft until the user explicitly presses Save changes.
-  const [draft, setDraft] = useState(serverShipment);
   const [saving, setSaving] = useState(false);
+  const {
+    control,
+    handleSubmit,
+    reset,
+    setValue,
+    formState: { errors, isDirty },
+  } = useForm<ShipmentDetailFormValues>({
+    resolver: zodResolver(shipmentDetailSchema),
+    defaultValues: { shipment: serverShipment },
+    mode: "onBlur",
+    reValidateMode: "onChange",
+  });
+  const { replace: replaceLegs } = useFieldArray({
+    control,
+    name: "shipment.legs",
+  });
+  const shipment = useWatch({ control, name: "shipment" }) as Shipment;
+
   useEffect(() => {
-    setDraft(serverShipment);
-  }, [serverShipment]);
-  const shipment = draft;
+    reset({ shipment: serverShipment });
+  }, [reset, serverShipment]);
   const { receivings, vouchers } = useWholesale();
-  const voucher = vouchers.find((entry) => entry.voucher_no === shipment.voucher_no);
+  const voucher = vouchers.find(
+    (entry) => entry.voucher_no === shipment.voucher_no,
+  );
+  // Once a receiving has been raised, the gate's own count is the only one that means
+  // anything — the server ignores final_received_packages entirely once a receiving
+  // exists for this shipment (see _shipment_out's use of final_received_by_shipment).
+  // Leaving this box editable made an edit here look like it saved and then silently
+  // reverted, because the very next fetch replaced it with the receiving's own count.
+  const hasReceiving = receivings.some(
+    (entry) => entry.shipment_no === shipment.shipment_no,
+  );
   // Same rule as when the shipment is first created: flag it plainly, but let it stand
   // — a real short-shipment happens, and this should not block saving it.
   const quantityMismatch =
-    voucher && shipmentPairs(shipment) !== voucher.total_qty
-      ? `The voucher says ${formatIn(voucher.total_qty, "set")}.`
+    voucher && shipmentPairs(shipment) !== voucher.total_quantity_pairs
+      ? `The voucher says ${formatIn(voucher.total_quantity_pairs, "set")}.`
       : undefined;
-  const hasChanges = JSON.stringify(shipment) !== JSON.stringify(serverShipment);
+  const hasChanges = isDirty;
 
   const pct = arrivedPct(shipment);
   const heading = intoFinal(shipment);
@@ -653,10 +737,10 @@ function ShipmentDetail({
   const [editingLeg, setEditingLeg] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  async function saveChanges(): Promise<void> {
+  async function saveChanges(values: ShipmentDetailFormValues): Promise<void> {
     setSaving(true);
     try {
-      await onSave(shipment);
+      await onSave(values.shipment);
     } finally {
       setSaving(false);
     }
@@ -671,7 +755,14 @@ function ShipmentDetail({
       packages_sent_by_cargo: settled.packages_sent_by_cargo,
       final_received_packages: settled.final_received_packages,
     };
-    setDraft((current) => ({ ...current, ...merged }));
+    if (merged.legs) replaceLegs(merged.legs);
+    for (const [key, value] of Object.entries(merged)) {
+      if (key === "legs") continue;
+      setValue(`shipment.${key}` as "shipment.carrier_name", value as never, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    }
   }
 
   function setLeg(index: number, patch: Partial<ShipmentLeg>): void {
@@ -708,7 +799,7 @@ function ShipmentDetail({
       <div>
         <Button variant="ghost" size="sm" onClick={onBack}>
           <ChevronLeftIcon className="w-4 h-4" />
-          Back to delivery
+          Back to shipments
         </Button>
       </div>
 
@@ -722,13 +813,13 @@ function ShipmentDetail({
               <StatusBadge status={shipmentStatus(shipment)} />
             </div>
             <p className="mt-0.5 truncate text-sm text-text-muted">
-              {shipment.supplier_name} · {formatDate(shipment.sent_date)}
+              {shipment.supplier_name} · {formatDate(shipment.sent_on)}
             </p>
           </div>
           <div className="flex items-center gap-2">
             <Button
               size="sm"
-              onClick={() => void saveChanges()}
+              onClick={() => void handleSubmit(saveChanges)()}
               loading={saving}
               disabled={!hasChanges}
             >
@@ -763,7 +854,7 @@ function ShipmentDetail({
           </div>
         </div>
 
-        <div className="px-6 py-6 flex flex-col gap-8">
+        <div className="px-6 py-6 flex flex-col gap-10">
           <section>
             <SectionLabel>Shipment information</SectionLabel>
             <div className="grid gap-4 lg:grid-cols-2">
@@ -790,47 +881,96 @@ function ShipmentDetail({
               </div>
               <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
                 <h3 className="mb-3 text-sm font-semibold text-text-primary">
-                  Delivery
+                  Shipment details
                 </h3>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <SuggestInput
-                    label="Cargo"
-                    placeholder="Shwe Moe Cargo"
-                    suggestions={CARGO_NAMES}
-                    value={shipment.cargo_name}
-                    onChange={(next) => apply({ cargo_name: next })}
+                  <Controller
+                    control={control}
+                    name="shipment.carrier_name"
+                    render={({ field }) => (
+                      <SuggestInput
+                        label="Cargo"
+                        placeholder="Shwe Moe Cargo"
+                        suggestions={CARGO_NAMES}
+                        value={field.value}
+                        onChange={(next) => {
+                          field.onChange(next);
+                          apply({ carrier_name: next });
+                        }}
+                        error={errors.shipment?.carrier_name?.message}
+                      />
+                    )}
                   />
-                  <SuggestInput
-                    label="Receiving gate"
-                    placeholder="Bogyoke Rd, Mawlamyine"
-                    suggestions={RECEIVING_GATES}
-                    value={shipment.final_location}
-                    onChange={(next) => apply({ final_location: next })}
+                  <Controller
+                    control={control}
+                    name="shipment.final_destination"
+                    render={({ field }) => (
+                      <SuggestInput
+                        label="Receiving gate"
+                        placeholder="Bogyoke Rd, Mawlamyine"
+                        suggestions={RECEIVING_GATES}
+                        value={field.value}
+                        onChange={(next) => {
+                          field.onChange(next);
+                          apply({ final_destination: next });
+                        }}
+                        error={errors.shipment?.final_destination?.message}
+                      />
+                    )}
                   />
-                  <Input
-                    label="Sent on"
-                    type="date"
-                    className={EDITABLE}
-                    value={shipment.sent_date}
-                    onChange={(event) =>
-                      apply({ sent_date: event.target.value })
-                    }
+                  <Controller
+                    control={control}
+                    name="shipment.sent_on"
+                    render={({ field }) => (
+                      <Input
+                        label="Shipment date"
+                        type="date"
+                        className={EDITABLE}
+                        value={field.value}
+                        onChange={field.onChange}
+                        onBlur={field.onBlur}
+                        error={errors.shipment?.sent_on?.message}
+                      />
+                    )}
                   />
-                  <CountField
-                    label="Packages"
-                    value={shipment.total_packages}
-                    onChange={(next) => apply({ total_packages: next })}
+                  <Controller
+                    control={control}
+                    name="shipment.total_packages"
+                    render={({ field }) => (
+                      <CountField
+                        label="Packages"
+                        value={field.value}
+                        onChange={(next) => {
+                          field.onChange(next);
+                          apply({ total_packages: next });
+                        }}
+                      />
+                    )}
                   />
                   <div className="sm:col-span-1">
-                    <QuantityField
-                      label="Quantity"
-                      unitLabel="Unit the products are counted in"
-                      value={shipment.total_qty}
-                      unit={shipment.total_unit}
-                      hint={formatIn(shipmentPairs(shipment), "pair")}
-                      error={quantityMismatch}
-                      onChange={(next) => apply({ total_qty: next })}
-                      onUnitChange={(total_unit) => apply({ total_unit })}
+                    <Controller
+                      control={control}
+                      name="shipment.total_quantity_pairs"
+                      render={({ field }) => (
+                        <QuantityField
+                          label="Quantity"
+                          unitLabel="Unit the products are counted in"
+                          value={field.value}
+                          unit={shipment.total_unit}
+                          hint={formatIn(shipmentPairs(shipment), "pair")}
+                          error={quantityMismatch}
+                          onChange={(next) => {
+                            field.onChange(next);
+                            apply({ total_quantity_pairs: next });
+                          }}
+                          onUnitChange={(total_unit) =>
+                            setValue("shipment.total_unit", total_unit, {
+                              shouldDirty: true,
+                              shouldValidate: true,
+                            })
+                          }
+                        />
+                      )}
                     />
                   </div>
                 </div>
@@ -839,13 +979,17 @@ function ShipmentDetail({
           </section>
 
           <section>
-            <SectionLabel>Delivery journey</SectionLabel>
-            <DeliveryJourney shipment={shipment} receivings={receivings} />
+            <SectionLabel>Shipment journey</SectionLabel>
+            <DeliveryJourney
+              shipment={shipment}
+              receivings={receivings}
+              includeGateCount={false}
+            />
           </section>
 
           <section>
             <SectionLabel>Package tracking</SectionLabel>
-            <TableContainer>
+            <TableContainer className="[&>table]:min-w-max">
               <thead>
                 <Tr>
                   <Th
@@ -861,7 +1005,7 @@ function ShipmentDetail({
                     className="text-white text-center"
                     colSpan={2}
                   >
-                    {shipment.cargo_name}
+                    {shipment.carrier_name}
                   </Th>
                   {shipment.legs.map((leg, index) => (
                     <Fragment key={leg.leg_id}>
@@ -900,9 +1044,6 @@ function ShipmentDetail({
                             title={`Remove ${leg.stop_name}`}
                             onClick={() => removeLeg(index)}
                             className={cn(
-                              // Always a visible disc, not a faint glyph on a coloured
-                              // band — it was easy to miss. Turning red on hover says
-                              // what pressing it does before it is pressed.
                               "flex items-center justify-center w-5 h-5 rounded-full shrink-0",
                               "bg-white/25 text-white",
                               "transition-colors duration-150",
@@ -927,7 +1068,7 @@ function ShipmentDetail({
                   >
                     <span className="block">Final received</span>
                     <span className="block text-[10px] font-normal normal-case text-white/70">
-                      {shipment.final_location}
+                      {shipment.final_destination}
                     </span>
                   </Th>
                 </Tr>
@@ -960,12 +1101,15 @@ function ShipmentDetail({
                     <BigCount value={shipment.total_packages} />
                   </Td>
                   <Td className="bg-bg-subtle text-center">
-                    <BigCount value={shipmentPairs(shipment)} />
+                    <BigCount
+                      value={shipmentPairs(shipment)}
+                      unit={shipment.total_unit}
+                    />
                   </Td>
                   <ArrowCell body />
                   <Td className="text-center">
                     <PackageInput
-                      label={`Packages sent by ${shipment.cargo_name}`}
+                      label={`Packages sent by ${shipment.carrier_name}`}
                       value={shipment.packages_sent_by_cargo}
                       max={shipment.total_packages}
                       onChange={(next) =>
@@ -1015,14 +1159,23 @@ function ShipmentDetail({
                   ))}
                   <ArrowCell body />
                   <Td className="text-center">
-                    <PackageInput
-                      label="Packages finally received"
-                      value={shipment.final_received_packages}
-                      max={heading}
-                      onChange={(next) =>
-                        apply({ final_received_packages: next })
-                      }
-                    />
+                    {hasReceiving ? (
+                      <div className="flex flex-col items-center gap-0.5">
+                        <BigCount value={shipment.final_received_packages} />
+                        <span className="text-[10px] text-text-muted">
+                          From Receiving
+                        </span>
+                      </div>
+                    ) : (
+                      <PackageInput
+                        label="Packages finally received"
+                        value={shipment.final_received_packages}
+                        max={heading}
+                        onChange={(next) =>
+                          apply({ final_received_packages: next })
+                        }
+                      />
+                    )}
                   </Td>
                   <Td className="text-center">
                     <LeftOver
@@ -1065,9 +1218,9 @@ function ShipmentDetail({
               <DestinationForm
                 title={`New destination, straight after ${
                   insertAt === 0
-                    ? shipment.cargo_name
+                    ? shipment.carrier_name
                     : (shipment.legs[insertAt - 1]?.stop_name ??
-                      shipment.cargo_name)
+                      shipment.carrier_name)
                 }`}
                 submitLabel="Add destination"
                 onSubmit={(stopName, carrierName) => {
@@ -1080,10 +1233,10 @@ function ShipmentDetail({
           </section>
 
           <section>
-            <SectionLabel>Delivery progress</SectionLabel>
+            <SectionLabel>Shipment progress</SectionLabel>
             <div className="flex items-center justify-between text-sm mb-2">
               <span className="font-medium text-text-secondary">
-                Delivery progress
+                Shipment progress
               </span>
               <span className="tabular-nums font-semibold text-text-primary">
                 {formatQty(shipment.final_received_packages)} /{" "}
@@ -1095,7 +1248,7 @@ function ShipmentDetail({
               aria-valuenow={pct}
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-label="Delivery progress"
+              aria-label="Shipment progress"
               className="h-2 rounded-full bg-bg-raised overflow-hidden"
             >
               <div
@@ -1193,9 +1346,6 @@ function ArrowHead({
         title={insertLabel}
         onClick={onInsert}
         className={cn(
-          // A permanent pale blue disc with a blue border: quiet enough not to shout from
-          // a header row, but never invisible — a bare icon in a narrow gap was easy to
-          // lose among the numbers.
           "mx-auto flex items-center justify-center w-7 h-7 rounded-full",
           "bg-brand-subtle border border-brand/40 text-brand",
           "transition-colors duration-150",
@@ -1225,10 +1375,16 @@ function ArrowCell({ body = false }: { body?: boolean }): React.JSX.Element {
 }
 
 /** A figure that cannot be typed into — what the supplier says is in the shipment. */
-function BigCount({ value }: { value: number }): React.JSX.Element {
+function BigCount({
+  value,
+  unit,
+}: {
+  value: number;
+  unit?: Unit;
+}): React.JSX.Element {
   return (
     <span className="text-lg font-bold tabular-nums text-text-primary">
-      {formatQty(value)}
+      {unit ? formatIn(value, unit) : formatQty(value)}
     </span>
   );
 }
@@ -1316,6 +1472,35 @@ interface DraftStop {
 
 const EMPTY_STOP: DraftStop = { stop_name: "", carrier_name: "" };
 
+const shipmentFormSchema = z.object({
+  voucher_no: z.string().trim().min(1, "Choose a supplier voucher."),
+  carrier_name: z.string().trim().min(1, "Enter a cargo provider."),
+  final_destination: z.string().trim().min(1, "Enter a receiving gate."),
+  sent_on: z.string().trim().min(1, "Choose a shipment date."),
+  total_packages: z
+    .string()
+    .regex(/^\d*$/, "Packages can only contain numbers."),
+  total_sets: z.string().regex(/^\d*$/, "Quantity can only contain numbers."),
+  total_unit: z.enum(["set", "pair", "dozen"]),
+  stops: z.array(
+    z.object({
+      stop_name: z.string(),
+      carrier_name: z.string(),
+    }),
+  ),
+});
+
+interface ShipmentFormValues {
+  voucher_no: string;
+  carrier_name: string;
+  final_destination: string;
+  sent_on: string;
+  total_packages: string;
+  total_sets: string;
+  total_unit: Unit;
+  stops: DraftStop[];
+}
+
 const STEPS = ["Shipment", "Destinations", "Review"] as const;
 
 function NewShipmentForm({
@@ -1326,81 +1511,160 @@ function NewShipmentForm({
   onCreate: (input: NewShipmentInput) => void;
 }): React.JSX.Element {
   const [step, setStep] = useState(0);
-  const [voucherNo, setVoucherNumber] = useState("");
-  const [cargoName, setCargoName] = useState("");
-  const [finalLocation, setFinalLocation] = useState("");
-  const [sentDate, setShippedDate] = useState(todayIso());
-  const [totalPackages, setTotalPackages] = useState("");
-  const [totalSets, setTotalSets] = useState("");
-  const [totalUnit, setTotalUnit] = useState<Unit>("set");
-  const [stops, setStops] = useState<DraftStop[]>([{ ...EMPTY_STOP }]);
+  const {
+    control,
+    register,
+    handleSubmit,
+    setValue,
+    trigger,
+    formState: { errors, isDirty },
+  } = useForm<ShipmentFormValues>({
+    resolver: zodResolver(shipmentFormSchema),
+    defaultValues: {
+      voucher_no: "",
+      carrier_name: "",
+      final_destination: "",
+      sent_on: todayIso(),
+      total_packages: "",
+      total_sets: "",
+      total_unit: "set",
+      stops: [{ ...EMPTY_STOP }],
+    },
+    mode: "onBlur",
+    reValidateMode: "onChange",
+  });
+  const { fields, append, remove, replace } = useFieldArray({
+    control,
+    name: "stops",
+  });
+  const values = useWatch({ control }) as ShipmentFormValues;
+  const {
+    voucher_no: voucherNo,
+    carrier_name: cargoName,
+    final_destination: finalLocation,
+    sent_on: sentDate,
+    total_packages: totalPackages,
+    total_sets: totalSets,
+    total_unit: totalUnit,
+    stops,
+  } = values;
 
   const { vouchers } = useWholesale();
   const voucher = vouchers.find((entry) => entry.voucher_no === voucherNo);
   const filledStops = stops.filter((stop) => stop.stop_name.trim() !== "");
-  const canLeaveShipment =
-    voucher !== undefined &&
-    cargoName.trim() !== "" &&
-    finalLocation.trim() !== "";
 
   // The voucher already says what is coming — flag it plainly if what's being shipped
   // reads differently, rather than leave a quiet hint as the only sign of a mismatch.
   // Still lets the shipment go: a real short-shipment happens, but a typo should not
   // read as one.
   const quantityMismatch =
-    voucher && totalSets.trim() !== "" &&
-    toPairs(Number(totalSets) || 0, totalUnit) !== voucher.total_qty
-      ? `The voucher says ${formatIn(voucher.total_qty, "set")}.`
+    voucher &&
+    totalSets.trim() !== "" &&
+    toPairs(Number(totalSets) || 0, totalUnit) !== voucher.total_quantity_pairs
+      ? `The voucher says ${formatIn(voucher.total_quantity_pairs, "set")}.`
       : undefined;
 
-  function updateStop(index: number, patch: Partial<DraftStop>): void {
-    setStops((current) =>
-      current.map((stop, position) =>
-        position === index ? { ...stop, ...patch } : stop,
-      ),
+  function selectVoucher(nextVoucherNo: string): void {
+    setValue("voucher_no", nextVoucherNo, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    const picked = vouchers.find((entry) => entry.voucher_no === nextVoucherNo);
+    const pickedCargo = picked?.carrier_name.trim();
+    setValue(
+      "carrier_name",
+      pickedCargo && pickedCargo !== "—" ? pickedCargo : "",
+      { shouldDirty: true, shouldValidate: true },
+    );
+    setValue("total_packages", picked ? String(picked.total_packages) : "", {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    // The voucher's quantity is stored in pairs. Show a whole number of sets when it
+    // divides evenly; otherwise keep the pair value so nothing gets rounded.
+    if (!picked) {
+      setValue("total_sets", "", { shouldDirty: true });
+      setValue("total_unit", "set", { shouldDirty: true });
+      return;
+    }
+    const wholeSets = picked.total_quantity_pairs % PAIRS_PER.set === 0;
+    setValue("total_unit", wholeSets ? "set" : "pair", {
+      shouldDirty: true,
+    });
+    setValue(
+      "total_sets",
+      String(wholeSets ? picked.total_quantity_pairs / PAIRS_PER.set : picked.total_quantity_pairs),
+      { shouldDirty: true },
     );
   }
 
   function removeStop(index: number): void {
-    setStops((current) =>
-      current.length === 1
-        ? [{ ...EMPTY_STOP }]
-        : current.filter((_, position) => position !== index),
-    );
+    if (fields.length === 1) {
+      replace([{ ...EMPTY_STOP }]);
+      return;
+    }
+    remove(index);
   }
 
-  function submit(): void {
+  async function moveToDestinations(): Promise<void> {
+    const valid = await trigger([
+      "voucher_no",
+      "carrier_name",
+      "final_destination",
+      "sent_on",
+      "total_packages",
+      "total_sets",
+      "total_unit",
+    ]);
+    if (valid && voucher) setStep(1);
+  }
+
+  async function moveToReview(): Promise<void> {
+    if (await trigger("stops")) setStep(2);
+  }
+
+  function submit(values: ShipmentFormValues): void {
+    const voucher = vouchers.find(
+      (entry) => entry.voucher_no === values.voucher_no,
+    );
     if (!voucher) return;
     onCreate({
       voucher_no: voucher.voucher_no,
       supplier_name: voucher.supplier_name,
-      cargo_name: cargoName.trim(),
-      final_location: finalLocation.trim(),
-      sent_date: sentDate,
-      total_packages: Number(totalPackages) || voucher.total_packages,
-      total_qty: Number(totalSets) || 0,
-      total_unit: totalUnit,
+      carrier_name: values.carrier_name.trim(),
+      final_destination: values.final_destination.trim(),
+      sent_on: values.sent_on,
+      total_packages: Number(values.total_packages) || voucher.total_packages,
+      total_quantity_pairs: Number(values.total_sets) || 0,
+      total_unit: values.total_unit,
       // Nothing has moved at the moment a shipment is written down.
       packages_sent_by_cargo: 0,
       final_received_packages: 0,
-      legs: filledStops.map((stop, index) => ({
-        // Placeholders only — the server assigns the real ids and never reads these.
-        leg_id: `sl-draft-${index}`,
-        leg_order: index + 1,
-        stop_name: stop.stop_name.trim(),
-        carrier_name: stop.carrier_name.trim() || "—",
-        packages_received: 0,
-        packages_sent: 0,
-      })),
+      legs: values.stops
+        .filter((stop) => stop.stop_name.trim() !== "")
+        .map((stop, index) => ({
+          // Placeholders only — the server assigns the real ids and never reads these.
+          leg_id: `sl-draft-${index}`,
+          leg_order: index + 1,
+          stop_name: stop.stop_name.trim(),
+          carrier_name: stop.carrier_name.trim() || "—",
+          packages_received: 0,
+          packages_sent: 0,
+        })),
     });
   }
 
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <Button variant="ghost" size="sm" onClick={onCancel}>
+        <Button
+          variant="ghost"
+          size="sm"
+          title={isDirty ? "This new shipment has unsaved changes." : undefined}
+          onClick={onCancel}
+        >
           <ChevronLeftIcon className="w-4 h-4" />
-          Back to delivery
+          Back to shipments
         </Button>
       </div>
 
@@ -1416,98 +1680,112 @@ function NewShipmentForm({
           <div className="px-6 py-6 flex flex-col gap-5">
             <SectionLabel>Step 1 — which voucher is travelling</SectionLabel>
             <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-              <Select
-                label={<Required>Supplier voucher</Required>}
-                className={EDITABLE}
-                value={voucherNo}
-                onChange={(event) => {
-                  setVoucherNumber(event.target.value);
-                  const picked = vouchers.find(
-                    (entry) => entry.voucher_no === event.target.value,
-                  );
-                  setTotalPackages(picked ? String(picked.total_packages) : "");
-                  // The voucher already says how many packages and how much is inside
-                  // them, so neither is typed again here. Its figure is kept in pairs:
-                  // shown in sets when it divides evenly, which is how the goods are
-                  // counted, and left in pairs when it does not, so nothing is rounded
-                  // into a figure nobody counted.
-                  if (!picked) {
-                    setTotalSets("");
-                    setTotalUnit("set");
-                    return;
-                  }
-                  const wholeSets = picked.total_qty % PAIRS_PER.set === 0;
-                  setTotalUnit(wholeSets ? "set" : "pair");
-                  setTotalSets(
-                    String(
-                      wholeSets
-                        ? picked.total_qty / PAIRS_PER.set
-                        : picked.total_qty,
-                    ),
-                  );
-                }}
-              >
-                <option value="">Choose…</option>
-                {vouchers.map((entry) => (
-                  <option key={entry.voucher_id} value={entry.voucher_no}>
-                    {entry.voucher_no} — {entry.supplier_name}
-                  </option>
-                ))}
-              </Select>
-              <SuggestInput
-                label={<Required>Cargo</Required>}
-                placeholder="Shwe Moe Cargo"
-                suggestions={CARGO_NAMES}
-                value={cargoName}
-                onChange={setCargoName}
+              <Controller
+                control={control}
+                name="voucher_no"
+                render={() => (
+                  <Select
+                    label={<Required>Supplier voucher</Required>}
+                    className={EDITABLE}
+                    value={voucherNo}
+                    error={errors.voucher_no?.message}
+                    onChange={(event) => selectVoucher(event.target.value)}
+                  >
+                    <option value="">Choose…</option>
+                    {vouchers.map((entry) => (
+                      <option key={entry.voucher_id} value={entry.voucher_no}>
+                        {entry.voucher_no} — {entry.supplier_name}
+                      </option>
+                    ))}
+                  </Select>
+                )}
               />
-              <SuggestInput
-                label={<Required>Receiving gate</Required>}
-                placeholder="Bogyoke Rd, Mawlamyine"
-                suggestions={RECEIVING_GATES}
-                value={finalLocation}
-                onChange={setFinalLocation}
+              <Controller
+                control={control}
+                name="carrier_name"
+                render={({ field }) => (
+                  <SuggestInput
+                    label={<Required>Cargo</Required>}
+                    placeholder="Shwe Moe Cargo"
+                    suggestions={CARGO_NAMES}
+                    value={field.value}
+                    onChange={field.onChange}
+                    error={errors.carrier_name?.message}
+                  />
+                )}
+              />
+              <Controller
+                control={control}
+                name="final_destination"
+                render={({ field }) => (
+                  <SuggestInput
+                    label={<Required>Receiving gate</Required>}
+                    placeholder="Bogyoke Rd, Mawlamyine"
+                    suggestions={RECEIVING_GATES}
+                    value={field.value}
+                    onChange={field.onChange}
+                    error={errors.final_destination?.message}
+                  />
+                )}
               />
               <Input
-                label="Sent on"
+                label="Shipment date"
                 type="date"
                 className={EDITABLE}
-                value={sentDate}
-                onChange={(event) => setShippedDate(event.target.value)}
+                error={errors.sent_on?.message}
+                {...register("sent_on")}
               />
-              <Input
-                label="Packages"
-                type="text"
-                inputMode="numeric"
-                placeholder="0"
-                className={cn(EDITABLE, "text-right")}
-                value={totalPackages}
-                onChange={(event) =>
-                  setTotalPackages(onlyDigits(event.target.value))
-                }
-                hint={
-                  voucher
-                    ? `${formatQty(voucher.total_packages)} on the voucher.`
-                    : "Pick a voucher and this fills itself in."
-                }
+              <Controller
+                control={control}
+                name="total_packages"
+                render={({ field }) => (
+                  <Input
+                    label="Packages"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="0"
+                    className={cn(EDITABLE, "text-right")}
+                    value={field.value}
+                    onChange={(event) =>
+                      field.onChange(onlyDigits(event.target.value))
+                    }
+                    error={errors.total_packages?.message}
+                    hint={
+                      voucher
+                        ? `${formatQty(voucher.total_packages)} on the voucher.`
+                        : "Pick a voucher and this fills itself in."
+                    }
+                  />
+                )}
               />
-              <QuantityInput
-                label="Quantity"
-                unitLabel="Unit the products are counted in"
-                value={totalSets}
-                unit={totalUnit}
-                onChange={setTotalSets}
-                onUnitChange={setTotalUnit}
-                error={quantityMismatch}
-                hint={
-                  voucher
-                    ? `${formatIn(voucher.total_qty, "set")} on the voucher.`
-                    : "Pick a voucher and this fills itself in."
-                }
+              <Controller
+                control={control}
+                name="total_sets"
+                render={({ field }) => (
+                  <QuantityInput
+                    label="Quantity"
+                    unitLabel="Unit the products are counted in"
+                    value={field.value}
+                    unit={totalUnit}
+                    onChange={field.onChange}
+                    onUnitChange={(unit) =>
+                      setValue("total_unit", unit, {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                      })
+                    }
+                    error={errors.total_sets?.message ?? quantityMismatch}
+                    hint={
+                      voucher
+                        ? `${formatIn(voucher.total_quantity_pairs, "set")} on the voucher.`
+                        : "Pick a voucher and this fills itself in."
+                    }
+                  />
+                )}
               />
             </div>
             <div className="flex justify-end">
-              <Button disabled={!canLeaveShipment} onClick={() => setStep(1)}>
+              <Button onClick={() => void moveToDestinations()}>
                 Next: destinations
                 <ChevronRightIcon className="w-4 h-4" />
               </Button>
@@ -1520,70 +1798,76 @@ function NewShipmentForm({
             <SectionLabel>Step 2 — destinations on the way</SectionLabel>
 
             <div className="border border-border rounded-lg divide-y divide-border">
-              {stops.map((stop, index) => (
-                <div
-                  key={index}
-                  className="grid gap-3 grid-cols-1 md:grid-cols-12 items-start p-3"
-                >
-                  <span className="md:col-span-1 text-sm font-semibold text-text-muted md:pt-9">
-                    {index + 1}
-                  </span>
-                  <div className="md:col-span-4">
-                    <Select
-                      label="Destination"
-                      className={EDITABLE}
-                      value={stop.stop_name}
-                      onChange={(event) =>
-                        updateStop(index, { stop_name: event.target.value })
-                      }
-                    >
-                      <option value="">Choose…</option>
-                      {DESTINATION_NAMES.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                    </Select>
+              {fields.map((field, index) => {
+                return (
+                  <div
+                    key={field.id}
+                    className="grid gap-3 grid-cols-1 md:grid-cols-12 items-start p-3"
+                  >
+                    <span className="md:col-span-1 text-sm font-semibold text-text-muted md:pt-9">
+                      {index + 1}
+                    </span>
+                    <div className="md:col-span-4">
+                      <Controller
+                        control={control}
+                        name={`stops.${index}.stop_name`}
+                        render={({ field: destinationField }) => (
+                          <Select
+                            label="Destination"
+                            className={EDITABLE}
+                            {...destinationField}
+                          >
+                            <option value="">Choose…</option>
+                            {DESTINATION_NAMES.map((name) => (
+                              <option key={name} value={name}>
+                                {name}
+                              </option>
+                            ))}
+                          </Select>
+                        )}
+                      />
+                    </div>
+                    <div className="md:col-span-5">
+                      <Controller
+                        control={control}
+                        name={`stops.${index}.carrier_name`}
+                        render={({ field: carrierField }) => (
+                          <Select
+                            label="Carrier"
+                            className={EDITABLE}
+                            {...carrierField}
+                          >
+                            <option value="">Choose…</option>
+                            {CARRIER_NAMES.map((name) => (
+                              <option key={name} value={name}>
+                                {name}
+                              </option>
+                            ))}
+                          </Select>
+                        )}
+                      />
+                    </div>
+                    <div className="md:col-span-2 flex md:justify-end md:pt-7">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className={SOFT_RED}
+                        aria-label={`Remove destination ${index + 1}`}
+                        onClick={() => removeStop(index)}
+                      >
+                        <TrashIcon className="w-4 h-4" />
+                        Remove
+                      </Button>
+                    </div>
                   </div>
-                  <div className="md:col-span-5">
-                    <Select
-                      label="Carrier"
-                      className={EDITABLE}
-                      value={stop.carrier_name}
-                      onChange={(event) =>
-                        updateStop(index, { carrier_name: event.target.value })
-                      }
-                    >
-                      <option value="">Choose…</option>
-                      {CARRIER_NAMES.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                  <div className="md:col-span-2 flex md:justify-end md:pt-7">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className={SOFT_RED}
-                      aria-label={`Remove destination ${index + 1}`}
-                      onClick={() => removeStop(index)}
-                    >
-                      <TrashIcon className="w-4 h-4" />
-                      Remove
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <div>
               <Button
                 variant="secondary"
                 className={SOFT_BLUE}
-                onClick={() =>
-                  setStops((current) => [...current, { ...EMPTY_STOP }])
-                }
+                onClick={() => append({ ...EMPTY_STOP })}
               >
                 <PlusIcon className="w-4 h-4" />
                 Add another destination
@@ -1599,7 +1883,7 @@ function NewShipmentForm({
                 <ChevronLeftIcon className="w-4 h-4" />
                 Back
               </Button>
-              <Button onClick={() => setStep(2)}>
+              <Button onClick={() => void moveToReview()}>
                 Next: review
                 <ChevronRightIcon className="w-4 h-4" />
               </Button>
@@ -1619,7 +1903,7 @@ function NewShipmentForm({
               />
               <ReviewFact label="Cargo" value={cargoName || "—"} />
               <ReviewFact label="Receiving gate" value={finalLocation || "—"} />
-              <ReviewFact label="Sent on" value={formatDate(sentDate)} />
+              <ReviewFact label="Shipment date" value={formatDate(sentDate)} />
               <ReviewFact
                 label="Total packages"
                 value={formatQty(
@@ -1635,7 +1919,7 @@ function NewShipmentForm({
               />
             </dl>
             <div>
-              <SectionLabel>Delivery journey</SectionLabel>
+              <SectionLabel>Shipment journey</SectionLabel>
               <JourneyPreview
                 supplierName={voucher?.supplier_name ?? "—"}
                 cargoName={cargoName}
@@ -1655,7 +1939,7 @@ function NewShipmentForm({
                 <ChevronLeftIcon className="w-4 h-4" />
                 Back
               </Button>
-              <Button onClick={submit}>
+              <Button onClick={handleSubmit(submit)}>
                 <CheckIcon className="w-4 h-4" />
                 Confirm shipment
               </Button>

@@ -42,18 +42,18 @@ export interface Shipment {
   /** Which supplier voucher is travelling as this shipment. */
   voucher_no: string;
   supplier_name: string;
-  cargo_name: string;
+  carrier_name: string;
   /** The receiving gate the shipment lands at — one of our own places, named, because
    *  "here" means a different town depending on which shipment you are looking at. This
    *  is where the voucher's goods are received and counted, and the last place they sit
    *  before going out to customers. Gate and warehouse are the same building, so it is
    *  simply the town. */
-  final_location: string;
-  sent_date: string;
+  final_destination: string;
+  sent_on: string;
   total_packages: number;
   /** What is inside those packages — the supplier's own count of the goods, alongside
    *  the count of boxes they travel in, in whatever unit the voucher is written in. */
-  total_qty: number;
+  total_quantity_pairs: number;
   total_unit: Unit;
   packages_sent_by_cargo: number;
   final_received_packages: number;
@@ -63,7 +63,7 @@ export interface Shipment {
 /** Packages the cargo company still has not sent. */
 /** The goods on this shipment, in pairs. */
 export function shipmentPairs(shipment: Shipment): number {
-  return toPairs(shipment.total_qty, shipment.total_unit);
+  return toPairs(shipment.total_quantity_pairs, shipment.total_unit);
 }
 
 export function cargoRemaining(shipment: Shipment): number {
@@ -180,11 +180,11 @@ export const SEED_SHIPMENTS: Shipment[] = [
     shipment_no: "SHP-260827-0001",
     voucher_no: "VCH-260825-0001",
     supplier_name: "Goody Factory",
-    cargo_name: "Shwe Moe Cargo",
-    final_location: "Bogyoke Rd, Mawlamyine",
-    sent_date: "2026-08-27",
+    carrier_name: "Shwe Moe Cargo",
+    final_destination: "Bogyoke Rd, Mawlamyine",
+    sent_on: "2026-08-27",
     total_packages: 10,
-    total_qty: 50,
+    total_quantity_pairs: 50,
     total_unit: "set",
     packages_sent_by_cargo: 10,
     final_received_packages: 7,
@@ -204,11 +204,11 @@ export const SEED_SHIPMENTS: Shipment[] = [
     shipment_no: "SHP-260830-0001",
     voucher_no: "VCH-260828-0001",
     supplier_name: "Lek",
-    cargo_name: "Ayar Cargo",
-    final_location: "Zay Gyi St, Magway",
-    sent_date: "2026-08-30",
+    carrier_name: "Ayar Cargo",
+    final_destination: "Zay Gyi St, Magway",
+    sent_on: "2026-08-30",
     total_packages: 8,
-    total_qty: 27,
+    total_quantity_pairs: 27,
     total_unit: "set",
     packages_sent_by_cargo: 8,
     final_received_packages: 8,
@@ -228,11 +228,11 @@ export const SEED_SHIPMENTS: Shipment[] = [
     shipment_no: "SHP-260903-0001",
     voucher_no: "VCH-260901-0001",
     supplier_name: "Panda Shoes",
-    cargo_name: "Tiger Cargo",
-    final_location: "Zay Gyi St, Magway",
-    sent_date: "2026-09-03",
+    carrier_name: "Tiger Cargo",
+    final_destination: "Zay Gyi St, Magway",
+    sent_on: "2026-09-03",
     total_packages: 20,
-    total_qty: 66,
+    total_quantity_pairs: 66,
     total_unit: "set",
     packages_sent_by_cargo: 0,
     final_received_packages: 0,
@@ -243,11 +243,11 @@ export const SEED_SHIPMENTS: Shipment[] = [
     shipment_no: "SHP-260906-0001",
     voucher_no: "VCH-260905-0001",
     supplier_name: "Maldini",
-    cargo_name: "Shwe Moe Cargo",
-    final_location: "Bogyoke Rd, Mawlamyine",
-    sent_date: "2026-09-06",
+    carrier_name: "Shwe Moe Cargo",
+    final_destination: "Bogyoke Rd, Mawlamyine",
+    sent_on: "2026-09-06",
     total_packages: 6,
-    total_qty: 20,
+    total_quantity_pairs: 20,
     total_unit: "set",
     packages_sent_by_cargo: 6,
     final_received_packages: 6,

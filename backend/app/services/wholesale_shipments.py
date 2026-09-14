@@ -32,7 +32,7 @@ def list_shipments(db: Session, branch_id: str | None) -> list[Shipment]:
     query = db.query(Shipment).options(selectinload(Shipment.legs))
     if branch_id is not None:
         query = query.filter(Shipment.branch_id == branch_id)
-    return query.order_by(Shipment.sent_date.desc(), Shipment.shipment_no.desc()).all()
+    return query.order_by(Shipment.sent_on.desc(), Shipment.shipment_no.desc()).all()
 
 
 def get_shipment(db: Session, shipment_id: str, branch_id: str | None) -> Shipment:
@@ -72,10 +72,10 @@ def create_shipment(db: Session, branch_id: str | None, payload) -> Shipment:
             shipment_no=shipment_no,
             voucher_no=payload.voucher_no,
             supplier_name=payload.supplier_name,
-            cargo_name=payload.cargo_name,
-            final_location=payload.final_location,
-            sent_date=payload.sent_date,
-            total_pairs=payload.total_pairs,
+            carrier_name=payload.carrier_name,
+            final_destination=payload.final_destination,
+            sent_on=payload.sent_on,
+            total_quantity_pairs=payload.total_quantity_pairs,
             total_unit=payload.total_unit,
             total_packages=0,
             packages_sent_by_cargo=0,

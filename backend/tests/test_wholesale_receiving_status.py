@@ -15,14 +15,14 @@ from app.services.wholesale.receivings import (
 
 
 def test_a_package_nobody_has_opened_contributes_nothing() -> None:
-    packages = [PackageLike(opened=False, items=[ItemLike(qty_pairs=100)])]
+    packages = [PackageLike(opened=False, items=[ItemLike(quantity_pairs=100)])]
     assert counted_pairs(packages) == 0
 
 
 def test_counted_pairs_sums_only_opened_packages() -> None:
     packages = [
-        PackageLike(opened=True, items=[ItemLike(qty_pairs=18), ItemLike(qty_pairs=6)]),
-        PackageLike(opened=False, items=[ItemLike(qty_pairs=24)]),
+        PackageLike(opened=True, items=[ItemLike(quantity_pairs=18), ItemLike(quantity_pairs=6)]),
+        PackageLike(opened=False, items=[ItemLike(quantity_pairs=24)]),
     ]
     assert counted_pairs(packages) == 24
     assert package_pairs(packages[0].items) == 24
@@ -35,19 +35,19 @@ def test_status_is_recorded_when_nothing_is_opened_yet() -> None:
 
 def test_status_is_checking_while_some_packages_are_still_shut() -> None:
     packages = [
-        PackageLike(opened=True, items=[ItemLike(qty_pairs=50)]),
+        PackageLike(opened=True, items=[ItemLike(quantity_pairs=50)]),
         PackageLike(opened=False, items=[]),
     ]
     assert receiving_status(packages, expected_pairs=100) == "checking"
 
 
 def test_status_is_checked_when_everything_opened_matches_the_voucher() -> None:
-    packages = [PackageLike(opened=True, items=[ItemLike(qty_pairs=50)])]
+    packages = [PackageLike(opened=True, items=[ItemLike(quantity_pairs=50)])]
     assert receiving_status(packages, expected_pairs=50) == "checked"
 
 
 def test_status_is_issue_when_the_count_does_not_match() -> None:
-    packages = [PackageLike(opened=True, items=[ItemLike(qty_pairs=42)])]
+    packages = [PackageLike(opened=True, items=[ItemLike(quantity_pairs=42)])]
     assert receiving_status(packages, expected_pairs=50) == "issue"
     assert pairs_difference(packages, expected_pairs=50) == -8
 

@@ -1,5 +1,16 @@
-import { createPortal } from "react-dom";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  autoUpdate,
+  flip,
+  FloatingPortal,
+  offset,
+  shift,
+  size,
+  useFloating,
+} from "@floating-ui/react";
+import { useEffect, useRef, useState } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
+import { z } from "zod";
 import { cn } from "@renderer/lib/utils";
 import { Input } from "@renderer/components/ui/Input";
 import { Textarea } from "@renderer/components/ui/Textarea";
@@ -242,20 +253,23 @@ export function FigureCard({
   value,
   sub,
   tone = "brand",
+  compact = false,
 }: {
   label: string;
   value: string;
   sub?: string;
   tone?: Tone;
+  compact?: boolean;
 }): React.JSX.Element {
   return (
-    <div className="bg-bg-base border border-border rounded-xl p-5">
-      <span className="block text-xs font-semibold uppercase tracking-wide text-text-muted mb-2">
+    <div className={cn("bg-bg-base border border-border rounded-xl", compact ? "p-3" : "p-5")}>
+      <span className={cn("block text-xs font-semibold uppercase tracking-wide text-text-muted", compact ? "mb-1" : "mb-2")}>
         {label}
       </span>
       <span
         className={cn(
-          "block text-2xl font-bold tabular-nums leading-none mb-1.5",
+          "block font-bold tabular-nums leading-none",
+          compact ? "text-xl mb-1" : "text-2xl mb-1.5",
           toneText(tone),
         )}
       >
@@ -332,40 +346,40 @@ export function StatusPill({
  *  grey rather than colour-coded: it is a label, not a status, and colour on this screen
  *  already means "good" or "still owed". */
 export function GroupTag({
-  group,
+  product_group,
 }: {
-  group: ProductGroup;
+  product_group: ProductGroup;
 }): React.JSX.Element {
   return (
     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-bg-subtle border border-border text-text-secondary whitespace-nowrap">
-      {GROUP_LABELS[group]}
+      {GROUP_LABELS[product_group]}
     </span>
   );
 }
 
-/** A product value on one table line: description first, group underneath.
+/** A product value on one table line: description first, product_group underneath.
  *
  *  The stock code is rendered by the surrounding table because it may also need a copy
  *  action. Keeping the remaining values as plain stacked text makes the Product column
  *  read like one compact three-line value instead of a nested badge. */
 export function ProductCell({
   description,
-  group,
+  product_group,
 }: {
   description: string;
-  group: ProductGroup;
+  product_group: ProductGroup;
 }): React.JSX.Element {
   return (
     <div className="flex min-w-[9rem] flex-col items-start gap-0.5">
       <span className="break-words text-text-primary leading-snug">
         {description || "—"}
       </span>
-      <span className="text-xs text-text-muted">{GROUP_LABELS[group]}</span>
+      <span className="text-xs text-text-muted">{GROUP_LABELS[product_group]}</span>
     </div>
   );
 }
 
-/** Picks a product's group inside a table cell. */
+/** Picks a product's product_group inside a table cell. */
 export function GroupSelect({
   label,
   value,
@@ -373,7 +387,7 @@ export function GroupSelect({
 }: {
   label: string;
   value: ProductGroup;
-  onChange: (group: ProductGroup) => void;
+  onChange: (product_group: ProductGroup) => void;
 }): React.JSX.Element {
   return (
     <div className="relative">
@@ -388,9 +402,9 @@ export function GroupSelect({
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base focus:border-transparent",
         )}
       >
-        {PRODUCT_GROUPS.map((group) => (
-          <option key={group} value={group}>
-            {GROUP_LABELS[group]}
+        {PRODUCT_GROUPS.map((product_group) => (
+          <option key={product_group} value={product_group}>
+            {GROUP_LABELS[product_group]}
           </option>
         ))}
       </select>
@@ -549,78 +563,52 @@ export function FloatingLayer({
   className,
   align = "left",
   matchAnchorWidth = false,
-  estimatedHeight = 180,
 }: {
   anchorRef: React.RefObject<HTMLElement | null>;
   children: React.ReactNode;
   className: string;
   align?: "left" | "right";
   matchAnchorWidth?: boolean;
-  estimatedHeight?: number;
 }): React.JSX.Element {
-  const layerRef = useRef<HTMLDivElement>(null);
-  const [style, setStyle] = useState<React.CSSProperties>({
-    position: "fixed",
-    left: 0,
-    top: 0,
-    visibility: "hidden",
+  const { refs, floatingStyles } = useFloating({
+    placement: align === "right" ? "bottom-end" : "bottom-start",
+    strategy: "fixed",
+    whileElementsMounted: autoUpdate,
+    middleware: [
+      offset(4),
+      flip({ padding: 8 }),
+      shift({ padding: 8 }),
+      size({
+        padding: 8,
+        apply({ availableHeight, elements, rects }) {
+          if (matchAnchorWidth) {
+            elements.floating.style.width = `${rects.reference.width}px`;
+          }
+          elements.floating.style.maxHeight = `${Math.max(0, availableHeight)}px`;
+        },
+      }),
+    ],
   });
 
-  useLayoutEffect(() => {
-    function positionLayer(): void {
-      const anchor = anchorRef.current;
-      if (!anchor) return;
+  useEffect(() => {
+    refs.setReference(anchorRef.current);
+  }, [anchorRef, refs]);
 
-      const anchorBox = anchor.getBoundingClientRect();
-      const layer = layerRef.current;
-      const width = matchAnchorWidth
-        ? anchorBox.width
-        : Math.max(layer?.offsetWidth ?? 0, 176);
-      const height = layer?.offsetHeight || estimatedHeight;
-      const gap = 4;
-      const viewportPadding = 8;
-      const opensBelow =
-        anchorBox.bottom + gap + height <= window.innerHeight - viewportPadding;
-      const top = opensBelow
-        ? anchorBox.bottom + gap
-        : Math.max(viewportPadding, anchorBox.top - height - gap);
-      const naturalLeft =
-        align === "right" ? anchorBox.right - width : anchorBox.left;
-      const left = Math.min(
-        Math.max(viewportPadding, naturalLeft),
-        Math.max(viewportPadding, window.innerWidth - width - viewportPadding),
-      );
-
-      setStyle({
-        position: "fixed",
-        top,
-        left,
-        width: matchAnchorWidth ? width : undefined,
-        maxHeight: `calc(100vh - ${viewportPadding * 2}px)`,
-        visibility: "visible",
-        zIndex: 100,
-      });
-    }
-
-    positionLayer();
-    window.addEventListener("resize", positionLayer);
-    document.addEventListener("scroll", positionLayer, true);
-    return () => {
-      window.removeEventListener("resize", positionLayer);
-      document.removeEventListener("scroll", positionLayer, true);
-    };
-  }, [align, anchorRef, estimatedHeight, matchAnchorWidth]);
-
-  return createPortal(
-    <div
-      ref={layerRef}
-      style={style}
-      onMouseDown={(event) => event.stopPropagation()}
-      className={className}
-    >
-      {children}
-    </div>,
-    document.body,
+  return (
+    <FloatingPortal>
+      <div
+        ref={refs.setFloating}
+        style={{
+          ...floatingStyles,
+          visibility: refs.reference.current ? "visible" : "hidden",
+          zIndex: 100,
+        }}
+        onMouseDown={(event) => event.stopPropagation()}
+        className={className}
+      >
+        {children}
+      </div>
+    </FloatingPortal>
   );
 }
 
@@ -1079,10 +1067,17 @@ export function JourneyRow({
   );
 }
 
-export function JourneyArrow(): React.JSX.Element {
+export function JourneyArrow({
+  direction = "right",
+}: {
+  direction?: "left" | "right";
+} = {}): React.JSX.Element {
   return (
     <div
-      className="flex items-center px-2 shrink-0 text-text-muted"
+      className={cn(
+        "flex items-center px-2 shrink-0 text-text-muted",
+        direction === "left" && "rotate-180",
+      )}
       aria-hidden
     >
       <ArrowRightIcon className="w-6 h-6" />
@@ -1096,22 +1091,26 @@ export function JourneyArrow(): React.JSX.Element {
  *  it empty or invalid, which made an existing payment feel impossible to edit in place. The
  *  committed amount (and so "Paid so far") only updates once the typed value is valid. */
 function PaymentAmountCell({
-  payment,
+  paid_on,
+  value,
   balance,
-  onUpdate,
+  onChange,
+  error,
 }: {
-  payment: Payment;
+  paid_on: string;
+  value: number;
   balance: number;
-  onUpdate: (payment: Payment) => void;
+  onChange: (amount: number) => void;
+  error?: string;
 }): React.JSX.Element {
-  const [text, setText] = useState(String(payment.amount));
-  const room = balance + payment.amount;
+  const [text, setText] = useState(String(value));
+  const room = balance + value;
 
   // The committed amount can change from outside this box — another edit reverted, the
   // voucher/order reloaded after Save — so the draft still has to follow it.
   useEffect(() => {
-    setText(String(payment.amount));
-  }, [payment.amount]);
+    setText(String(value));
+  }, [value]);
 
   const typed = Number(text) || 0;
   const tooMuch = text.trim() !== "" && typed > room;
@@ -1120,21 +1119,39 @@ function PaymentAmountCell({
     setText(next);
     const amount = Number(next) || 0;
     if (amount > 0 && amount <= room) {
-      onUpdate({ ...payment, amount });
+      onChange(amount);
     }
   }
 
   return (
     <CellInput
-      label={`Amount for payment on ${formatDate(payment.date)}`}
+      label={`Amount for payment on ${formatDate(paid_on)}`}
       placeholder="0"
       numeric
       className="text-right"
       value={text}
       onChange={handleChange}
-      error={tooMuch ? `Only ${formatKyat(room)} is available.` : undefined}
+      error={tooMuch ? `Only ${formatKyat(room)} is available.` : error}
     />
   );
+}
+
+const paymentFormSchema = z.object({
+  payments: z.array(
+    z.object({
+      payment_id: z.string(),
+      paid_on: z.string().trim().min(1, "Choose a payment date."),
+      amount: z
+        .number()
+        .finite("Enter a valid amount.")
+        .min(0, "Amount cannot be negative."),
+      note: z.string(),
+    }),
+  ),
+});
+
+interface PaymentsFormValues {
+  payments: Payment[];
 }
 
 /** The money taken against one order or one voucher, and the box for writing down the
@@ -1166,6 +1183,23 @@ export function PaymentsTable({
   onRemove: (paymentId: string) => void;
   readOnly?: boolean;
 }): React.JSX.Element {
+  const {
+    control,
+    handleSubmit,
+    reset,
+    setValue,
+    formState: { errors, isDirty },
+  } = useForm<PaymentsFormValues>({
+    resolver: zodResolver(paymentFormSchema),
+    defaultValues: { payments },
+    mode: "onBlur",
+    reValidateMode: "onChange",
+  });
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: "payments",
+  });
+  const formPayments = useWatch({ control, name: "payments" }) as Payment[];
   // A new row joins the table the moment "Add payment" is pressed — the same way a new
   // product line does — rather than living in a separate draft form the amount has to
   // clear a "save" gate to leave. addingId just remembers which row that was, so a
@@ -1176,16 +1210,42 @@ export function PaymentsTable({
     if (readOnly) setAddingId(null);
   }, [readOnly]);
 
+  // Detail pages own the staged order/voucher draft. Reflect their updates here, while
+  // RHF owns the inputs between edits and supplies field-level validation.
+  useEffect(() => {
+    reset({ payments });
+  }, [payments, reset]);
+
   function addPayment(): void {
     const id = `pay-${Date.now()}`;
     setAddingId(id);
-    onAdd({ payment_id: id, date: todayIso(), amount: 0, note: "" });
+    const payment = { payment_id: id, paid_on: todayIso(), amount: 0, note: "" };
+    append(payment);
+    onAdd(payment);
   }
 
   function cancelAdd(): void {
     if (!addingId) return;
+    const index = formPayments.findIndex(
+      (payment) => payment.payment_id === addingId,
+    );
+    if (index >= 0) remove(index);
     onRemove(addingId);
     setAddingId(null);
+  }
+
+  function removePayment(index: number, paymentId: string): void {
+    remove(index);
+    onRemove(paymentId);
+    if (paymentId === addingId) setAddingId(null);
+  }
+
+  function commitPayment(index: number, payment: Payment): void {
+    setValue(`payments.${index}`, payment, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    void handleSubmit(() => onUpdate?.(payment))();
   }
 
   return (
@@ -1200,77 +1260,116 @@ export function PaymentsTable({
           </Tr>
         </Thead>
         <Tbody>
-          {payments.length === 0 && (
+          {formPayments.length === 0 && (
             <Tr>
-              <Td colSpan={readOnly ? 3 : 4} className="text-text-muted text-sm">
+              <Td
+                colSpan={readOnly ? 3 : 4}
+                className="text-text-muted text-sm"
+              >
                 Nothing paid yet.
               </Td>
             </Tr>
           )}
-          {payments.map((payment) => (
-            <Tr key={payment.payment_id}>
-              {onUpdate && !readOnly ? (
-                <Td>
-                  <CellInput
-                    label={`Payment date for ${formatKyat(payment.amount)}`}
-                    placeholder=""
-                    type="date"
-                    value={payment.date}
-                    onChange={(date) => onUpdate({ ...payment, date })}
-                  />
-                </Td>
-              ) : (
-                <Td className="whitespace-nowrap">
-                  {formatDate(payment.date)}
-                </Td>
-              )}
-              {onUpdate && !readOnly ? (
-                <Td>
-                  <PaymentAmountCell
-                    payment={payment}
-                    balance={balance}
-                    onUpdate={onUpdate}
-                  />
-                </Td>
-              ) : (
-                <Td className="text-right tabular-nums font-medium">
-                  {formatKyat(payment.amount)}
-                </Td>
-              )}
-              {onUpdate && !readOnly ? (
-                <Td>
-                  <CellInput
-                    label={`Note for payment on ${formatDate(payment.date)}`}
-                    placeholder="Deposit, transfer, cash…"
-                    value={payment.note}
-                    onChange={(note) => onUpdate({ ...payment, note })}
-                  />
-                </Td>
-              ) : (
-                <Td className="text-text-muted">{payment.note || "—"}</Td>
-              )}
-              {!readOnly && <Td className="text-center">
-                <button
-                  type="button"
-                  onClick={() => onRemove(payment.payment_id)}
-                  title="Remove this payment"
-                  aria-label={`Remove the payment of ${formatKyat(payment.amount)}`}
-                  className={cn(
-                    "p-1.5 rounded-md transition-colors duration-150",
-                    SOFT_RED,
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
-                  )}
-                >
-                  <TrashIcon className="w-4 h-4" />
-                </button>
-              </Td>}
-            </Tr>
-          ))}
+          {fields.map((field, index) => {
+            const payment = formPayments[index];
+            if (!payment) return null;
+            return (
+              <Tr key={field.id}>
+                {onUpdate && !readOnly ? (
+                  <Td>
+                    <Controller
+                      control={control}
+                      name={`payments.${index}.paid_on`}
+                      render={({ field: dateField }) => (
+                        <CellInput
+                          label={`Payment date for ${formatKyat(payment.amount)}`}
+                          placeholder=""
+                          type="date"
+                          value={dateField.value}
+                          onChange={(date) => {
+                            dateField.onChange(date);
+                            commitPayment(index, { ...payment, paid_on: date });
+                          }}
+                          error={errors.payments?.[index]?.paid_on?.message}
+                        />
+                      )}
+                    />
+                  </Td>
+                ) : (
+                  <Td className="whitespace-nowrap">
+                    {formatDate(payment.paid_on)}
+                  </Td>
+                )}
+                {onUpdate && !readOnly ? (
+                  <Td>
+                    <Controller
+                      control={control}
+                      name={`payments.${index}.amount`}
+                      render={({ field: amountField }) => (
+                        <PaymentAmountCell
+                          paid_on={payment.paid_on}
+                          value={amountField.value}
+                          balance={balance}
+                          onChange={(amount) => {
+                            amountField.onChange(amount);
+                            commitPayment(index, { ...payment, amount });
+                          }}
+                          error={errors.payments?.[index]?.amount?.message}
+                        />
+                      )}
+                    />
+                  </Td>
+                ) : (
+                  <Td className="text-right tabular-nums font-medium">
+                    {formatKyat(payment.amount)}
+                  </Td>
+                )}
+                {onUpdate && !readOnly ? (
+                  <Td>
+                    <Controller
+                      control={control}
+                      name={`payments.${index}.note`}
+                      render={({ field: noteField }) => (
+                        <CellInput
+                          label={`Note for payment on ${formatDate(payment.paid_on)}`}
+                          placeholder="Deposit, transfer, cash…"
+                          value={noteField.value}
+                          onChange={(note) => {
+                            noteField.onChange(note);
+                            commitPayment(index, { ...payment, note });
+                          }}
+                        />
+                      )}
+                    />
+                  </Td>
+                ) : (
+                  <Td className="text-text-muted">{payment.note || "—"}</Td>
+                )}
+                {!readOnly && (
+                  <Td className="text-center">
+                    <button
+                      type="button"
+                      onClick={() => removePayment(index, payment.payment_id)}
+                      title="Remove this payment"
+                      aria-label={`Remove the payment of ${formatKyat(payment.amount)}`}
+                      className={cn(
+                        "p-1.5 rounded-md transition-colors duration-150",
+                        SOFT_RED,
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
+                      )}
+                    >
+                      <TrashIcon className="w-4 h-4" />
+                    </button>
+                  </Td>
+                )}
+              </Tr>
+            );
+          })}
           <Tr className="bg-bg-subtle hover:bg-bg-subtle">
             <Td className="font-semibold">Paid so far</Td>
             <Td className="text-right tabular-nums font-semibold text-success">
               {formatKyat(
-                payments.reduce((sum, payment) => sum + payment.amount, 0),
+                formPayments.reduce((sum, payment) => sum + payment.amount, 0),
               )}
             </Td>
             <Td colSpan={readOnly ? 1 : 2} className="text-text-muted">
@@ -1285,7 +1384,15 @@ export function PaymentsTable({
       <div className="flex flex-wrap items-center gap-2">
         {!readOnly ? (
           <>
-            <Button size="sm" onClick={addPayment}>
+            <Button
+              size="sm"
+              title={
+                isDirty
+                  ? "Payment changes are pending Save changes."
+                  : undefined
+              }
+              onClick={addPayment}
+            >
               <PlusIcon className="w-4 h-4" />
               Add payment
             </Button>
@@ -1300,12 +1407,8 @@ export function PaymentsTable({
               </Button>
             )}
           </>
-        ) : (
-          <span className="text-xs text-text-muted">
-            Switch to Edit to add or remove payments.
-          </span>
-        )}
-        {balance <= 0 && payments.length > 0 && (
+        ) : null}
+        {balance <= 0 && formPayments.length > 0 && (
           <span className="text-xs text-text-muted">
             This {who} has paid in full.
           </span>

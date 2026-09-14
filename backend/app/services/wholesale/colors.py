@@ -113,8 +113,8 @@ def color_qty_pairs_by_color(text: str, row_unit: WholesaleUnit) -> dict[str, in
 
 def colors_as_json(text: str) -> list[dict]:
     """The parsed form written alongside the raw string, so a reader never has to
-    re-parse color_qty. This is a cache of the parse, not a second source of truth —
-    color_qty is what a later edit is validated against."""
+    re-parse color_breakdown. This is a cache of the parse, not a second source of truth —
+    color_breakdown is what a later edit is validated against."""
     return [
         {"color": entry.color, "qty": entry.qty, "unit": entry.unit.value if entry.unit else None}
         for entry in parse_color_qty(text)

@@ -29,10 +29,18 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^4.0.0",
+    "@floating-ui/react": "^0.27.20",
+    "@hookform/resolvers": "^5.9.1",
+    "@tanstack/query-sync-storage-persister": "^5.102.8",
+    "@tanstack/react-query": "^5.102.8",
+    "@tanstack/react-query-persist-client": "^5.102.8",
+    "@tanstack/react-table": "^8.21.3",
     "clsx": "^2.1.1",
     "electron-updater": "^6.3.9",
+    "react-hook-form": "^7.88.0",
     "tailwind-merge": "^3.6.0",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-latest/xlsx-latest.tgz"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-latest/xlsx-latest.tgz",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-ts": "^3.0.0",

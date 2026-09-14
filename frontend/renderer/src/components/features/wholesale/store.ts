@@ -14,30 +14,29 @@
 //     and the order corrects itself; there is nowhere else to adjust it.
 //   • Counting a package at the gate is what a supplier voucher means by "received", and
 //     the packages recorded at the gate are what the shipment means by "finally received".
-//   • An order's status follows its goods: nothing delivered is still created, something
-//     delivered is processing, everything delivered is completed. Cancelled is the one
-//     status a person sets, and nothing overrides it.
+//   • An order's status follows its goods: nothing bought or delivered is still created,
+//     a supplier voucher naming something it needs is processing, something actually
+//     delivered is partly delivered, everything delivered is completed. Cancelled is the
+//     one status a person sets, and nothing overrides it.
 //
 // `settle` below is where all of that happens, and it runs after every change, so no
 // screen has to remember to keep another screen honest.
 //
-// Front-end only for what has not moved to the backend yet: as of the Delivery screen
-// (phase 1 of the wholesale backend rollout), shipments are read from Postgres and
-// pushed in here by hydrateShipments — see wholesale/DeliveryPage.tsx and wholesale/api.ts.
-// Everything else here still lives only until the window reloads, phase by phase.
+// Front-end only for what has not moved to the backend yet: shipments, orders and their
+// persisted allocations are read from Postgres and pushed in here by the owning pages.
+// The remaining seed-backed slices continue to be phased over without changing the
+// screen-facing state shape.
 
 import { useSyncExternalStore } from "react";
 import {
   SEED_ORDERS,
   type CustomerOrder,
-  type OrderStatus,
   type Payment,
 } from "./customerOrders";
 import { SEED_VOUCHERS, type SupplierVoucher } from "./supplierVouchers";
 import { SEED_SHIPMENTS, type Shipment } from "./shipments";
 import { SEED_RECEIVINGS, type Receiving } from "./receivings";
 import { SEED_OUTGOING, type StockMovement } from "./stock";
-import { toPairs } from "./units";
 
 export interface WholesaleState {
   orders: CustomerOrder[];
@@ -231,121 +230,22 @@ export function removeVoucherPayment(
 // ── Settling ─────────────────────────────────────────────────────────────────
 
 /** Re-reads every worked-out figure from the thing that actually happened. Run after each
- *  change, so an edit anywhere leaves the whole workspace agreeing with itself. */
+ *  change, so an edit anywhere leaves the whole workspace agreeing with itself.
+ *
+ *  Orders are not settled here: the backend is authoritative for them (see
+ *  wholesale_orders.py::_out) and returns total_quantity_pairs/received_quantity_pairs/order_status already
+ *  computed on every fetch. This store's own `outgoing` field is never updated from the
+ *  real backend — Inventory computes its deliveries locally from its own fetch instead of
+ *  hydrating them in here — so recomputing an order's received quantity from `outgoing`
+ *  would silently overwrite a correct, freshly-fetched status with one based on stale (or
+ *  entirely absent) local data the moment `hydrateOrders` ran. */
 function settle(next: WholesaleState): WholesaleState {
   return {
     ...next,
-    orders: next.orders.map((order) => settleOrder(order, next.outgoing)),
-    vouchers: next.vouchers.map((voucher) =>
-      settleVoucher(voucher, next.receivings),
-    ),
     shipments: next.shipments.map((shipment) =>
       settleShipment(shipment, next.receivings),
     ),
   };
-}
-
-/** What a customer has been given is the goods that left the shelf against their order,
- *  product by product, and never more of a product than they asked for. The order's own
- *  figure is the sum of its lines, and its status follows both. */
-function settleOrder(
-  order: CustomerOrder,
-  outgoing: StockMovement[],
-): CustomerOrder {
-  const delivered = new Map<string, number>();
-  for (const movement of outgoing) {
-    if (movement.kind !== "out" || movement.reference !== order.order_no)
-      continue;
-    delivered.set(
-      movement.stock_code,
-      (delivered.get(movement.stock_code) ?? 0) + movement.pairs,
-    );
-  }
-
-  const lines = order.lines.map((line) => {
-    const left = delivered.get(line.stock_code) ?? 0;
-    const credit = Math.min(left, line.wanted_qty);
-    delivered.set(line.stock_code, left - credit);
-    return line.received_qty === credit
-      ? line
-      : { ...line, received_qty: credit };
-  });
-
-  const wanted = lines.reduce((sum, line) => sum + line.wanted_qty, 0);
-  const received = lines.reduce((sum, line) => sum + line.received_qty, 0);
-  const status: OrderStatus =
-    order.order_status === "cancelled"
-      ? "cancelled"
-      : wanted > 0 && received >= wanted
-        ? "completed"
-        : received > 0
-          ? "processing"
-          : "created";
-
-  const same =
-    order.total_qty === wanted &&
-    order.received_qty === received &&
-    order.order_status === status &&
-    lines.every((line, index) => line === order.lines[index]);
-
-  return same
-    ? order
-    : {
-        ...order,
-        lines,
-        total_qty: wanted,
-        received_qty: received,
-        order_status: status,
-      };
-}
-
-/** A voucher has received whatever the gate has counted against it — and until a
- *  receiving exists for it, nothing. */
-function settleVoucher(
-  voucher: SupplierVoucher,
-  receivings: Receiving[],
-): SupplierVoucher {
-  const total = voucher.lines.reduce((sum, line) => sum + line.voucher_qty, 0);
-  const receivedByStock = new Map<string, number>();
-  for (const receiving of receivings) {
-    if (receiving.voucher_no !== voucher.voucher_no) continue;
-    for (const entry of receiving.packages) {
-      if (!entry.opened) continue;
-      for (const item of entry.items) {
-        receivedByStock.set(
-          item.stock_code,
-          (receivedByStock.get(item.stock_code) ?? 0) +
-            toPairs(item.qty, item.unit),
-        );
-      }
-    }
-  }
-
-  const remainingByStock = new Map(receivedByStock);
-  const lines = voucher.lines.map((line) => {
-    const received = Math.min(
-      remainingByStock.get(line.stock_code) ?? 0,
-      line.voucher_qty,
-    );
-    remainingByStock.set(
-      line.stock_code,
-      Math.max(0, (remainingByStock.get(line.stock_code) ?? 0) - received),
-    );
-    return line.received_qty === received
-      ? line
-      : { ...line, received_qty: received };
-  });
-  const received = lines.reduce(
-    (sum, line) => sum + (line.received_qty ?? 0),
-    0,
-  );
-  const same =
-    voucher.total_qty === total &&
-    voucher.received_qty === received &&
-    lines.every((line, index) => line === voucher.lines[index]);
-  return same
-    ? voucher
-    : { ...voucher, lines, total_qty: total, received_qty: received };
 }
 
 /** A shipment has finally received however many packages the gate wrote down. Before any

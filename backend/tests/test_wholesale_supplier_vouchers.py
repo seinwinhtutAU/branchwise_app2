@@ -18,8 +18,8 @@ def _branch(db: Session) -> Branch:
 
 
 def _payload() -> dict:
-    return {"supplier_name": "Goody Factory", "voucher_date": "2026-09-12", "cargo_name": "Shwe Moe Cargo", "total_packages": 2,
-            "lines": [{"stock_code": "A1001", "description": "Sandal", "product_group": "man", "color_qty": "black2s", "unit": "set", "buying_price": 18000}]}
+    return {"supplier_name": "Goody Factory", "voucher_date": "2026-09-12", "carrier_name": "Shwe Moe Cargo", "total_packages": 2,
+            "lines": [{"stock_code": "A1001", "description": "Sandal", "product_group": "man", "color_breakdown": "black2s", "unit": "set", "buying_price": 18000}]}
 
 
 def test_supplier_voucher_persists_lines_and_capped_payments(authed_client: TestClient, db_session: Session) -> None:
@@ -29,8 +29,8 @@ def test_supplier_voucher_persists_lines_and_capped_payments(authed_client: Test
     assert created.status_code == 201
     voucher = created.json()
     assert voucher["voucher_no"].startswith("VCH-")
-    assert voucher["total_qty"] == 12
-    assert voucher["balance"] == 216000
+    assert voucher["total_quantity_pairs"] == 12
+    assert voucher["balance_due"] == 216000
 
     payment = authed_client.post(f"/api/wholesale/supplier-vouchers/{voucher['voucher_id']}/payments", json={"paid_on": "2026-09-12", "amount": 100000, "note": "Advance"})
     assert payment.status_code == 201

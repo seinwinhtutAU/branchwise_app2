@@ -6,8 +6,9 @@ from sqlalchemy.orm import Session
 from app.core.security import get_current_app_user
 from app.db.session import get_db
 from app.models.user import User, UserRole
-from app.schemas.wholesale_inventory import DeliveryIn, DeliveryUpdate
+from app.schemas.wholesale_inventory import DeliveryBatchIn, DeliveryIn, DeliveryUpdate
 from app.services.wholesale.inventory import (
+    create_delivery_batch,
     create_delivery,
     delete_delivery,
     movements,
@@ -27,7 +28,7 @@ def _require_wholesale(user: User) -> None:
 def list_inventory(
     search: Annotated[str, Query(max_length=100)] = "",
     location: Annotated[str | None, Query(max_length=255)] = None,
-    movement_kind: Annotated[str | None, Query(alias="kind")] = None,
+    movement_type: Annotated[str | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 100,
     user: User = Depends(get_current_app_user),
@@ -41,12 +42,12 @@ def list_inventory(
         rows = [
             row for row in rows
             if query in row["stock_code"].lower() or query in row["description"].lower()
-            or query in row["location"].lower() or query in row["color_qty"].lower()
+            or query in row["location"].lower() or query in row["color_breakdown"].lower()
         ]
     if location:
         rows = [row for row in rows if row["location"] == location]
-    if movement_kind:
-        rows = [row for row in rows if row["kind"] == movement_kind]
+    if movement_type:
+        rows = [row for row in rows if row["movement_type"] == movement_type]
     response.headers["X-Total-Count"] = str(len(rows))
     start = (page - 1) * page_size
     return rows[start : start + page_size]
@@ -66,6 +67,21 @@ def create_customer_delivery(payload: DeliveryIn, user: User = Depends(get_curre
     _require_wholesale(user)
     created = create_delivery(db, user.branch_id, user.id, payload)
     return next(movement for movement in outgoing_movements(db, user.branch_id) if movement["movement_id"] == created.id)
+
+
+@router.post("/deliveries/batch", status_code=status.HTTP_201_CREATED)
+def create_customer_delivery_batch(
+    payload: DeliveryBatchIn,
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    _require_wholesale(user)
+    created = create_delivery_batch(db, user.branch_id, user.id, payload)
+    by_id = {
+        movement["movement_id"]: movement
+        for movement in outgoing_movements(db, user.branch_id)
+    }
+    return [by_id[movement.id] for movement in created]
 
 
 @router.put("/deliveries/{movement_id}")

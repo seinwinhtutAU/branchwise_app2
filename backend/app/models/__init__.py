@@ -7,6 +7,7 @@ from app.models.sale import Sale, SaleLine
 from app.models.stock_level import StockLevel
 from app.models.user import User, UserRole
 from app.models.wholesale import (
+    AllocationEvent,
     ProductGroup,
     CustomerOrder,
     CustomerOrderLine,
@@ -24,6 +25,7 @@ from app.models.wholesale import (
 )
 
 __all__ = [
+    "AllocationEvent",
     "AppSetting",
     "Branch",
     "CustomerOrder",

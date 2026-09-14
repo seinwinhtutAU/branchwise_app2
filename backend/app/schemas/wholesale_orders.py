@@ -7,7 +7,7 @@ class OrderLineIn(BaseModel):
     description: str = Field(default="", max_length=500)
     product_group: ProductGroup
     supplier_name: str = Field(default="", max_length=255)
-    color_qty: str = Field(min_length=1, max_length=1000)
+    color_breakdown: str = Field(min_length=1, max_length=1000)
     unit: WholesaleUnit = WholesaleUnit.SET
     selling_price: float = Field(ge=0)
 
@@ -24,3 +24,13 @@ class OrderPaymentIn(BaseModel):
     paid_on: date
     amount: float = Field(gt=0)
     note: str = Field(default="", max_length=1000)
+
+
+class OrderLineAllocationIn(BaseModel):
+    """The colour quantities reserved for one open customer-order line.
+
+    An empty value deliberately clears an existing allocation. Quantities are parsed
+    and converted to pairs on the server from the order line's unit.
+    """
+
+    color_breakdown: str = Field(default="", max_length=1000)

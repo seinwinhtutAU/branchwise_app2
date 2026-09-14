@@ -1,10 +1,10 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@renderer/lib/auth";
 import {
-  clearFetchCache,
-  useCachedFetchMany,
+  clearQueryCache,
   useImportedDataWatch,
-} from "@renderer/lib/useCachedFetch";
+  useUrlQueries,
+} from "@renderer/lib/queryClient";
 import {
   ACTIONABLE_SEVERITIES,
   dashboardUrl,
@@ -136,6 +136,7 @@ type Section =
   | "delivery"
   | "receiving"
   | "stock"
+  | "customerDeliveries"
   | "wholesale"
   | "settings";
 
@@ -186,9 +187,14 @@ const RETAIL_NAV_ITEMS: NavItem[] = [
 const WHOLESALE_NAV_ITEMS: NavItem[] = [
   { id: "orders", label: "Customer Orders", icon: <ClipboardIcon /> },
   { id: "vouchers", label: "Supplier Vouchers", icon: <VoucherIcon /> },
-  { id: "delivery", label: "Delivery", icon: <TruckIcon /> },
+  { id: "delivery", label: "Shipment", icon: <TruckIcon /> },
   { id: "receiving", label: "Receiving", icon: <ReceivingIcon /> },
   { id: "stock", label: "Inventory", icon: <InventoryIcon /> },
+  {
+    id: "customerDeliveries",
+    label: "Customer deliveries",
+    icon: <TruckIcon />,
+  },
   { id: "wholesale", label: "Wholesale", icon: <WarehouseIcon /> },
 ];
 
@@ -245,9 +251,10 @@ const SECTION_TITLES: Record<Section, string> = {
   warnings: "Warning",
   orders: "Customer orders",
   vouchers: "Supplier vouchers",
-  delivery: "Delivery",
+  delivery: "Shipment",
   receiving: "Receiving",
   stock: "Inventory",
+  customerDeliveries: "Customer deliveries",
   wholesale: "Wholesale",
   settings: "Settings",
 };
@@ -554,7 +561,7 @@ function App(): React.JSX.Element {
     );
   }, [isAdmin, isWholesale, profile?.branch_id, retailBranchOptions]);
 
-  const { data: branchHealth } = useCachedFetchMany<OverviewData>(
+  const { data: branchHealth } = useUrlQueries<OverviewData>(
     businessAlertUrls,
     session,
     "business alerts",
@@ -701,7 +708,7 @@ function App(): React.JSX.Element {
     setSession(null);
     // Drop every cached page: the next account may be scoped to a different branch, and
     // serving it this one's numbers would be both wrong and a disclosure.
-    clearFetchCache();
+    clearQueryCache();
     clearLastKnown();
     setProfile(null);
     setOverviewBranchId(null);
@@ -1022,13 +1029,7 @@ function App(): React.JSX.Element {
                 />
               )}
               {section === "vouchers" && (
-                <SupplierVouchersPage
-                  session={session}
-                  onOpenOrder={(orderId) => {
-                    setOrderTarget(orderId);
-                    setSection("orders");
-                  }}
-                />
+                <SupplierVouchersPage session={session} />
               )}
               {section === "delivery" && <DeliveryPage session={session} />}
               {section === "receiving" && (
@@ -1041,6 +1042,19 @@ function App(): React.JSX.Element {
               {section === "stock" && (
                 <WholesaleInventoryPage
                   session={session}
+                  initialTab="stock"
+                  showTabs={false}
+                  onOpenReceiving={(receivingNo) => {
+                    setReceivingTarget(receivingNo);
+                    setSection("receiving");
+                  }}
+                />
+              )}
+              {section === "customerDeliveries" && (
+                <WholesaleInventoryPage
+                  session={session}
+                  initialTab="deliveries"
+                  showTabs={false}
                   onOpenReceiving={(receivingNo) => {
                     setReceivingTarget(receivingNo);
                     setSection("receiving");

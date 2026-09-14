@@ -22,24 +22,24 @@ def _out(voucher, received_pairs: int, received_by_stock: dict[str, int] | None 
     remaining_by_stock = dict(received_by_stock or {})
     lines = []
     for line in voucher.lines:
-        received = min(remaining_by_stock.get(line.stock_code, 0), line.wanted_pairs)
+        received = min(remaining_by_stock.get(line.stock_code, 0), line.quantity_pairs)
         remaining_by_stock[line.stock_code] = max(
             0, remaining_by_stock.get(line.stock_code, 0) - received
         )
         lines.append({"voucher_line_id": line.id, "stock_code": line.stock_code, "description": line.description,
-                      "group": line.product_group.value, "color_qty": line.color_qty, "unit": line.unit.value,
-                      "voucher_qty": line.wanted_pairs, "received_qty": received,
+                      "product_group": line.product_group.value, "color_breakdown": line.color_breakdown, "unit": line.unit.value,
+                      "quantity_pairs": line.quantity_pairs, "received_quantity_pairs": received,
                       "buying_price": float(line.buying_price)})
-    payments = [{"payment_id": payment.id, "date": payment.paid_on, "amount": float(payment.amount), "note": payment.note} for payment in voucher.payments]
-    total = sum(line["voucher_qty"] * line["buying_price"] for line in lines)
+    payments = [{"payment_id": payment.id, "paid_on": payment.paid_on, "amount": float(payment.amount), "note": payment.note} for payment in voucher.payments]
+    total = sum(line["quantity_pairs"] * line["buying_price"] for line in lines)
     paid = sum(payment["amount"] for payment in payments)
     return {"voucher_id": voucher.id, "branch_id": voucher.branch_id, "voucher_no": voucher.voucher_no,
             "supplier_name": voucher.supplier_name, "voucher_date": voucher.voucher_date,
-            "cargo_name": voucher.cargo_name, "total_packages": voucher.total_packages,
-            "total_qty": sum(line["voucher_qty"] for line in lines),
-            "received_qty": sum(line["received_qty"] for line in lines),
+            "carrier_name": voucher.carrier_name, "total_packages": voucher.total_packages,
+            "total_quantity_pairs": sum(line["quantity_pairs"] for line in lines),
+            "received_quantity_pairs": sum(line["received_quantity_pairs"] for line in lines),
             "lines": lines, "payment": {"account_id": voucher.id, "payments": payments},
-            "total_amount": total, "paid_amount": paid, "balance": max(0, total - paid)}
+            "total_amount": total, "paid_amount": paid, "balance_due": max(0, total - paid)}
 
 
 def _one(db: Session, voucher) -> dict:
@@ -93,13 +93,13 @@ def list_supplier_vouchers(
         rows = [
             row for row in rows
             if query in row["voucher_no"].lower() or query in row["supplier_name"].lower()
-            or query in row["cargo_name"].lower()
+            or query in row["carrier_name"].lower()
             or any(query in line["stock_code"].lower() or query in line["description"].lower() for line in row["lines"])
         ]
     if payment_status:
         rows = [
             row for row in rows
-            if ("paid" if row["balance"] == 0 else "partial" if row["paid_amount"] > 0 else "unpaid") == payment_status
+            if ("paid" if row["balance_due"] == 0 else "partial" if row["paid_amount"] > 0 else "unpaid") == payment_status
         ]
     response.headers["X-Total-Count"] = str(len(rows))
     start = (page - 1) * page_size
@@ -128,7 +128,7 @@ def delete_supplier_voucher(voucher_id: str, user: User = Depends(get_current_ap
 def create_payment(voucher_id: str, payload: VoucherPaymentIn, user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> dict:
     _require_wholesale(user)
     payment = add_payment(db, voucher_id, user.branch_id, user.id, payload)
-    return {"payment_id": payment.id, "date": payment.paid_on, "amount": float(payment.amount), "note": payment.note}
+    return {"payment_id": payment.id, "paid_on": payment.paid_on, "amount": float(payment.amount), "note": payment.note}
 
 
 @router.delete("/{voucher_id}/payments/{payment_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -32,11 +32,13 @@ export interface ReceivingItem {
   /** What the product actually is, so a line reads as a shoe and not as a code. */
   description: string;
   /** Man, lady or child — the range the business thinks in. */
-  group: ProductGroup;
+  product_group: ProductGroup;
   /** Colors and their counts as staff write them, e.g. "black10,pink10". */
-  color_qty: string;
+  color_breakdown: string;
   /** How many, in whatever unit this box is counted in. */
-  qty: number;
+  quantity: number;
+  /** Normalized quantity used for stock calculations when this came from the API. */
+  quantity_pairs?: number;
   unit: Unit;
 }
 
@@ -49,7 +51,7 @@ export interface ReceivingPackage {
   /** The day this particular package turned up. Packages of one delivery do not all
    *  arrive together — a few can follow a week later — so the date belongs to the
    *  package, not only to the delivery as a whole. Empty until it arrives. */
-  received_date: string;
+  received_on: string;
   items: ReceivingItem[];
   note: string;
 }
@@ -58,7 +60,7 @@ export interface ReceivingPackage {
  *  in. Pairs are the one thing every screen agrees on. */
 export function packagePairs(entry: ReceivingPackage): number {
   return entry.items.reduce(
-    (sum, item) => sum + toPairs(item.qty, item.unit),
+    (sum, item) => sum + toPairs(item.quantity, item.unit),
     0,
   );
 }
@@ -68,9 +70,9 @@ export function emptyItem(seed: string, unit: Unit = "set"): ReceivingItem {
     item_id: `ai-${seed}-${Math.random().toString(36).slice(2, 8)}`,
     stock_code: "",
     description: "",
-    group: "man",
-    color_qty: "",
-    qty: 0,
+    product_group: "man",
+    color_breakdown: "",
+    quantity: 0,
     unit,
   };
 }
@@ -115,7 +117,7 @@ export interface Receiving {
   supplier_name: string;
   /** The gate they landed at, as its short address. */
   gate: string;
-  received_date: string;
+  received_on: string;
   /** How many packages are due to arrive at the gate. */
   total_packages: number;
   /** Every charge this delivery has picked up. */
@@ -123,7 +125,7 @@ export interface Receiving {
   /** How much is due inside those packages, from the supplier's voucher, in the unit the
    *  voucher is written in. What is received is checked against it in pairs, so the two
    *  can be compared even when they are counted differently. */
-  total_qty: number;
+  total_quantity_pairs: number;
   total_unit: Unit;
   packages: ReceivingPackage[];
 }
@@ -179,7 +181,7 @@ export function countedPairs(receiving: Receiving): number {
 
 /** What the voucher says is coming, in pairs. */
 export function expectedPairs(receiving: Receiving): number {
-  return toPairs(receiving.total_qty, receiving.total_unit);
+  return toPairs(receiving.total_quantity_pairs, receiving.total_unit);
 }
 
 export function pairsDifference(receiving: Receiving): number {
@@ -190,10 +192,23 @@ export function checkedPct(receiving: Receiving): number {
   return sharePct(openedCount(receiving), receiving.packages.length);
 }
 
-export function receivingStatus(receiving: Receiving): ReceivingStatus {
+/** expectedPackages is the shipment's own total_packages, when known — a receiving can
+ *  grow box by box as more of them turn up, so every box added so far being open only
+ *  means the count is final once "Received packages" has actually caught up with that.
+ *  Short of that it still reads as "checking", the same as an unopened box would. */
+export function receivingStatus(
+  receiving: Receiving,
+  expectedPackages?: number,
+): ReceivingStatus {
   const opened = openedCount(receiving);
   if (opened === 0) return "recorded";
   if (opened < receiving.packages.length) return "checking";
+  if (
+    expectedPackages !== undefined &&
+    receiving.total_packages < expectedPackages
+  ) {
+    return "checking";
+  }
   return pairsDifference(receiving) === 0 ? "checked" : "issue";
 }
 
@@ -204,7 +219,7 @@ export function emptyPackages(count: number, seed: string): ReceivingPackage[] {
     package_id: `ap-${seed}-${index + 1}`,
     package_no: index + 1,
     opened: false,
-    received_date: "",
+    received_on: "",
     items: [],
     note: "",
   }));
@@ -241,7 +256,7 @@ export const SEED_RECEIVINGS: Receiving[] = [
     voucher_no: "VCH-260825-0001",
     supplier_name: "Goody Factory",
     gate: "Bogyoke Rd, Mawlamyine",
-    received_date: "2026-09-08",
+    received_on: "2026-09-08",
     total_packages: 7,
     costs: [
       {
@@ -269,31 +284,31 @@ export const SEED_RECEIVINGS: Receiving[] = [
         note: "Four men, an hour",
       },
     ],
-    total_qty: 50,
+    total_quantity_pairs: 50,
     total_unit: "set",
     packages: [
       {
         package_id: "ap-1-1",
         package_no: 1,
         opened: true,
-        received_date: "2026-09-08",
+        received_on: "2026-09-08",
         items: [
           {
             item_id: "ai-1-1",
             stock_code: "A1001",
             description: "Men's leather sandal",
-            group: "man",
-            color_qty: "black3s",
-            qty: 3,
+            product_group: "man",
+            color_breakdown: "black3s",
+            quantity: 3,
             unit: "set",
           },
           {
             item_id: "ai-1-2",
             stock_code: "A1002",
             description: "Men's slipper",
-            group: "man",
-            color_qty: "white1s",
-            qty: 1,
+            product_group: "man",
+            color_breakdown: "white1s",
+            quantity: 1,
             unit: "set",
           },
         ],
@@ -303,15 +318,15 @@ export const SEED_RECEIVINGS: Receiving[] = [
         package_id: "ap-1-2",
         package_no: 2,
         opened: true,
-        received_date: "2026-09-08",
+        received_on: "2026-09-08",
         items: [
           {
             item_id: "ai-1-3",
             stock_code: "A1001",
             description: "Men's leather sandal",
-            group: "man",
-            color_qty: "black4s",
-            qty: 4,
+            product_group: "man",
+            color_breakdown: "black4s",
+            quantity: 4,
             unit: "set",
           },
         ],
@@ -321,24 +336,24 @@ export const SEED_RECEIVINGS: Receiving[] = [
         package_id: "ap-1-3",
         package_no: 3,
         opened: true,
-        received_date: "2026-09-11",
+        received_on: "2026-09-11",
         items: [
           {
             item_id: "ai-1-4",
             stock_code: "A1002",
             description: "Men's slipper",
-            group: "man",
-            color_qty: "white2s",
-            qty: 2,
+            product_group: "man",
+            color_breakdown: "white2s",
+            quantity: 2,
             unit: "set",
           },
           {
             item_id: "ai-1-5",
             stock_code: "A1001",
             description: "Men's leather sandal",
-            group: "man",
-            color_qty: "black2s",
-            qty: 2,
+            product_group: "man",
+            color_breakdown: "black2s",
+            quantity: 2,
             unit: "set",
           },
         ],
@@ -348,15 +363,15 @@ export const SEED_RECEIVINGS: Receiving[] = [
         package_id: "ap-1-4",
         package_no: 4,
         opened: true,
-        received_date: "2026-09-11",
+        received_on: "2026-09-11",
         items: [
           {
             item_id: "ai-1-6",
             stock_code: "A1002",
             description: "Men's slipper",
-            group: "man",
-            color_qty: "white3s",
-            qty: 3,
+            product_group: "man",
+            color_breakdown: "white3s",
+            quantity: 3,
             unit: "set",
           },
         ],
@@ -366,7 +381,7 @@ export const SEED_RECEIVINGS: Receiving[] = [
         package_id: "ap-1-5",
         package_no: 5,
         opened: false,
-        received_date: "",
+        received_on: "",
         items: [],
         note: "",
       },
@@ -374,7 +389,7 @@ export const SEED_RECEIVINGS: Receiving[] = [
         package_id: "ap-1-6",
         package_no: 6,
         opened: false,
-        received_date: "",
+        received_on: "",
         items: [],
         note: "",
       },
@@ -382,7 +397,7 @@ export const SEED_RECEIVINGS: Receiving[] = [
         package_id: "ap-1-7",
         package_no: 7,
         opened: false,
-        received_date: "",
+        received_on: "",
         items: [],
         note: "",
       },
@@ -395,7 +410,7 @@ export const SEED_RECEIVINGS: Receiving[] = [
     voucher_no: "VCH-260828-0001",
     supplier_name: "Lek",
     gate: "Zay Gyi St, Magway",
-    received_date: "2026-09-04",
+    received_on: "2026-09-04",
     total_packages: 8,
     costs: [
       {
@@ -407,7 +422,7 @@ export const SEED_RECEIVINGS: Receiving[] = [
         note: "",
       },
     ],
-    total_qty: 27,
+    total_quantity_pairs: 27,
     total_unit: "set",
     // Seven boxes of three sets and a last one of six: 27 sets, exactly what the voucher
     // promised, so this receiving reads as "all received".
@@ -415,16 +430,16 @@ export const SEED_RECEIVINGS: Receiving[] = [
       package_id: `ap-2-${index + 1}`,
       package_no: index + 1,
       opened: true,
-      received_date: "2026-09-04",
+      received_on: "2026-09-04",
       items: [
         {
           item_id: `ai-2-${index + 1}`,
           stock_code: "B2001",
           description: "Ladies' flat sandal",
-          group: "lady",
-          color_qty:
+          product_group: "lady",
+          color_breakdown:
             index === 7 ? "brown6s" : index % 2 === 0 ? "brown3s" : "black3s",
-          qty: index === 7 ? 6 : 3,
+          quantity: index === 7 ? 6 : 3,
           unit: "set",
         },
       ],
@@ -438,7 +453,7 @@ export const SEED_RECEIVINGS: Receiving[] = [
     voucher_no: "VCH-260905-0001",
     supplier_name: "Maldini",
     gate: "Bogyoke Rd, Mawlamyine",
-    received_date: "2026-09-09",
+    received_on: "2026-09-09",
     total_packages: 6,
     costs: [
       {
@@ -450,7 +465,7 @@ export const SEED_RECEIVINGS: Receiving[] = [
         note: "",
       },
     ],
-    total_qty: 20,
+    total_quantity_pairs: 20,
     total_unit: "set",
     packages: emptyPackages(6, "3"),
   },

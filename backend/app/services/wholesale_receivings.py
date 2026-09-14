@@ -1,7 +1,7 @@
 """Owns the transactions for the Receiving screen: a delivery landing at a gate, the
 packages it is due to arrive in, and what is actually found once each is opened. See
 app/services/wholesale/receivings.py for the derived figures and
-app/services/wholesale/colors.py for the colour grammar every item's color_qty is
+app/services/wholesale/colors.py for the colour grammar every item's color_breakdown is
 checked against.
 """
 
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.wholesale import Receiving, ReceivingCost, ReceivingItem, ReceivingPackage
 from app.services.wholesale.colors import color_qty_problem, colors_as_json
 from app.services.wholesale.references import allocate_reference, retry_on_reference_collision
-from app.services.wholesale.units import to_pairs
+from app.services.wholesale.units import from_pairs, to_pairs
 from app.services.wholesale_shipments import get_shipment
 
 _LOAD_OPTIONS = (
@@ -36,7 +36,7 @@ def list_receivings(db: Session, branch_id: str | None) -> list[Receiving]:
     query = db.query(Receiving).options(*_LOAD_OPTIONS)
     if branch_id is not None:
         query = query.filter(Receiving.branch_id == branch_id)
-    return query.order_by(Receiving.received_date.desc(), Receiving.receiving_no.desc()).all()
+    return query.order_by(Receiving.received_on.desc(), Receiving.receiving_no.desc()).all()
 
 
 def get_receiving(db: Session, receiving_id: str, branch_id: str | None) -> Receiving:
@@ -63,9 +63,9 @@ def create_receiving(db: Session, branch_id: str | None, payload) -> Receiving:
             voucher_no=shipment.voucher_no,
             supplier_name=shipment.supplier_name,
             gate=payload.gate,
-            received_date=payload.received_date,
+            received_on=payload.received_on,
             total_packages=payload.total_packages,
-            total_pairs=payload.total_pairs,
+            total_quantity_pairs=payload.total_quantity_pairs,
             total_unit=payload.total_unit,
             packages=_empty_packages(payload.total_packages),
         )
@@ -124,18 +124,18 @@ def delete_receiving(db: Session, receiving_id: str, branch_id: str | None) -> N
 
 
 def _item_from_payload(item_in) -> ReceivingItem:
-    color_qty = item_in.color_qty.strip()
-    problem = color_qty_problem(color_qty)
+    color_breakdown = item_in.color_breakdown.strip()
+    problem = color_qty_problem(color_breakdown)
     if problem:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, problem)
     return ReceivingItem(
         stock_code=item_in.stock_code.strip(),
         description=item_in.description.strip(),
         product_group=item_in.product_group,
-        color_qty=color_qty,
-        colors=colors_as_json(color_qty),
+        color_breakdown=color_breakdown,
+        colors=colors_as_json(color_breakdown),
         unit=item_in.unit,
-        qty_pairs=to_pairs(item_in.qty, item_in.unit),
+        quantity_pairs=to_pairs(item_in.quantity, item_in.unit),
     )
 
 

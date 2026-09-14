@@ -28,11 +28,11 @@ def _shipment_payload(**overrides) -> dict:
     payload = {
         "voucher_no": "VCH-260825-0001",
         "supplier_name": "Goody Factory",
-        "cargo_name": "Shwe Moe Cargo",
-        "final_location": "Bogyoke Rd, Mawlamyine",
-        "sent_date": "2026-08-27",
+        "carrier_name": "Shwe Moe Cargo",
+        "final_destination": "Bogyoke Rd, Mawlamyine",
+        "sent_on": "2026-08-27",
         "total_packages": 10,
-        "total_pairs": 300,
+        "total_quantity_pairs": 300,
         "total_unit": "pair",
         "packages_sent_by_cargo": 10,
         "final_received_packages": 7,
@@ -59,7 +59,7 @@ def test_creating_a_shipment_assigns_a_reference_number_and_reads_back(
     assert response.status_code == 201
     body = response.json()
     # The reference is dated to when it was raised (today), not the shipment's own
-    # sent_date — the same rule frontend/.../wholesale/shared.ts::nextReference follows.
+    # sent_on — the same rule frontend/.../wholesale/shared.ts::nextReference follows.
     today = date.today().strftime("%y%m%d")
     assert body["shipment_no"] == f"SHP-{today}-0001"
     assert body["total_packages"] == 10
@@ -109,13 +109,13 @@ def test_partial_update_leaves_other_fields_untouched(authed_client: TestClient,
     shipment_id = authed_client.post("/api/wholesale/shipments", json=_shipment_payload()).json()["shipment_id"]
 
     response = authed_client.patch(
-        f"/api/wholesale/shipments/{shipment_id}", json={"cargo_name": "Ayar Cargo"}
+        f"/api/wholesale/shipments/{shipment_id}", json={"carrier_name": "Ayar Cargo"}
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["cargo_name"] == "Ayar Cargo"
+    assert body["carrier_name"] == "Ayar Cargo"
     assert body["supplier_name"] == "Goody Factory"
-    assert body["final_location"] == "Bogyoke Rd, Mawlamyine"
+    assert body["final_destination"] == "Bogyoke Rd, Mawlamyine"
 
 
 def test_replacing_legs_re_normalises_the_flow(authed_client: TestClient, db_session: Session):
@@ -161,11 +161,11 @@ def test_another_branchs_shipment_is_404_not_403(authed_client: TestClient, db_s
         shipment_no="SHP-260827-0001",
         voucher_no="VCH-260825-0001",
         supplier_name="Goody Factory",
-        cargo_name="Shwe Moe Cargo",
-        final_location="Zay Gyi St, Magway",
-        sent_date=date(2026, 8, 27),
+        carrier_name="Shwe Moe Cargo",
+        final_destination="Zay Gyi St, Magway",
+        sent_on=date(2026, 8, 27),
         total_packages=5,
-        total_pairs=100,
+        total_quantity_pairs=100,
     )
     db_session.add(other_shipment)
     db_session.commit()

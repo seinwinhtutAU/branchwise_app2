@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
+import { z } from "zod";
 import { type Session } from "@renderer/lib/auth";
-import { useCachedFetch } from "@renderer/lib/useCachedFetch";
+import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
 import {
   CellInput,
@@ -54,6 +58,7 @@ import {
   PlusIcon,
   SearchIcon,
   TrashIcon,
+  WarehouseIcon,
 } from "@renderer/components/ui/icons";
 import { DeliveryJourney } from "@renderer/components/features/wholesale/journey";
 import {
@@ -100,6 +105,7 @@ import {
 import {
   hydrateVouchers,
   hydrateOrders,
+  saveOrders,
   saveVouchers,
   useWholesale,
 } from "@renderer/components/features/wholesale/store";
@@ -112,6 +118,7 @@ import {
   deleteSupplierVoucher,
   removeSupplierVoucherPayment,
   ordersFromWire,
+  updateCustomerOrder,
   updateSupplierVoucher,
   vouchersFromWire,
   type NewSupplierVoucherInput,
@@ -129,11 +136,11 @@ import {
 const sets = (qty: number): string => formatIn(qty, "set");
 
 function lineReceivedQty(line: SupplierVoucherLine): number {
-  return line.received_qty ?? 0;
+  return line.received_quantity_pairs ?? 0;
 }
 
 function lineRemainingQty(line: SupplierVoucherLine): number {
-  return Math.max(0, line.voucher_qty - lineReceivedQty(line));
+  return Math.max(0, line.quantity_pairs - lineReceivedQty(line));
 }
 
 // The wholesale Supplier Vouchers screen — the supplier's (factory's) own document for
@@ -141,9 +148,13 @@ function lineRemainingQty(line: SupplierVoucherLine): number {
 // one panel holding header, filters, table and pagination; a read-only detail sheet; a
 // three-step wizard), the ERD's fields, and this app's own tokens and primitives.
 //
-// No backend. Vouchers live in component state, so a new one survives moving between the
-// three views but not a reload; every place a request will eventually go is a
-// `saveVouchers` call in this file.
+// Reads and writes the backend through React Query rather than the hand-rolled
+// useCachedFetch — see @renderer/lib/queryClient.ts. The shared store is still hydrated
+// with each query's own answer, since other screens still read vouchers/orders from
+// there; nothing here recomputes what the query already got right.
+
+const VOUCHERS_QUERY_KEY = ["wholesale", "supplier-vouchers"] as const;
+const ORDERS_QUERY_KEY = ["wholesale", "orders"] as const;
 
 type View = "list" | "to_order" | "detail" | "new";
 type VoucherDetailMode = "view" | "edit";
@@ -224,27 +235,39 @@ function PaymentBadge({
 
 export default function SupplierVouchersPage({
   session,
-  onOpenOrder,
 }: {
   session: Session;
-  onOpenOrder: (orderId: string) => void;
 }): React.JSX.Element {
   const showToast = useToast();
+  const queryClient = useQueryClient();
   const {
     data: wire,
-    isRefreshing,
-    reload,
-  } = useCachedFetch<SupplierVoucherWire[]>(
-    SUPPLIER_VOUCHERS_URL,
-    session,
-    "supplier vouchers",
-  );
-  useEffect(() => { if (wire) hydrateVouchers(vouchersFromWire(wire)); }, [wire]);
-  const { data: orderWire } = useCachedFetch<CustomerOrder[]>(
-    CUSTOMER_ORDERS_URL,
-    session,
-    "customer orders for supplier planning",
-  );
+    isFetching: isRefreshing,
+    isError,
+  } = useQuery({
+    queryKey: VOUCHERS_QUERY_KEY,
+    queryFn: () =>
+      fetchJson<SupplierVoucherWire[]>(SUPPLIER_VOUCHERS_URL, session),
+  });
+  useLoadErrorToast(isError, "supplier vouchers");
+  useEffect(() => {
+    if (wire) hydrateVouchers(vouchersFromWire(wire));
+  }, [wire]);
+
+  async function reload(): Promise<void> {
+    await queryClient.invalidateQueries({ queryKey: VOUCHERS_QUERY_KEY });
+  }
+
+  const { data: orderWire, isError: ordersFailed } = useQuery({
+    queryKey: ORDERS_QUERY_KEY,
+    queryFn: () => fetchJson<CustomerOrder[]>(CUSTOMER_ORDERS_URL, session),
+  });
+  useLoadErrorToast(ordersFailed, "customer orders for supplier planning");
+
+  async function reloadOrders(): Promise<void> {
+    await queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY });
+  }
+
   useEffect(() => {
     if (orderWire) hydrateOrders(ordersFromWire(orderWire));
   }, [orderWire]);
@@ -253,7 +276,9 @@ export default function SupplierVouchersPage({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openMode, setOpenMode] = useState<VoucherDetailMode>("view");
   const [newSupplierName, setNewSupplierName] = useState("");
-  const [newOrderLines, setNewOrderLines] = useState<OpenOrderLine[] | undefined>();
+  const [newOrderLines, setNewOrderLines] = useState<
+    OpenOrderLine[] | undefined
+  >();
 
   const selected =
     vouchers.find((voucher) => voucher.voucher_id === selectedId) ?? null;
@@ -268,10 +293,20 @@ export default function SupplierVouchersPage({
   }
 
   function deleteVoucher(voucherId: string): void {
-    deleteSupplierVoucher(session, voucherId).then(async () => {
-      setSelectedId((current) => (current === voucherId ? null : current));
-      setView("list"); await reload();
-    }).catch((error) => showToast("error", error instanceof WholesaleApiError ? error.message : "Could not delete the voucher."));
+    deleteSupplierVoucher(session, voucherId)
+      .then(async () => {
+        setSelectedId((current) => (current === voucherId ? null : current));
+        setView("list");
+        await reload();
+      })
+      .catch((error) =>
+        showToast(
+          "error",
+          error instanceof WholesaleApiError
+            ? error.message
+            : "Could not delete the voucher.",
+        ),
+      );
   }
 
   async function persistVoucher(
@@ -282,7 +317,7 @@ export default function SupplierVouchersPage({
       await updateSupplierVoucher(session, voucher.voucher_id, {
         supplier_name: voucher.supplier_name,
         voucher_date: voucher.voucher_date,
-        cargo_name: voucher.cargo_name,
+        carrier_name: voucher.carrier_name,
         total_packages: voucher.total_packages,
         lines: voucher.lines,
       });
@@ -299,7 +334,7 @@ export default function SupplierVouchersPage({
         left: (typeof currentPayments)[number],
         right: (typeof currentPayments)[number],
       ): boolean =>
-        left.date !== right.date ||
+        left.paid_on !== right.paid_on ||
         left.amount !== right.amount ||
         left.note !== right.note;
 
@@ -326,7 +361,11 @@ export default function SupplierVouchersPage({
           try {
             await addSupplierVoucherPayment(session, voucher.voucher_id, next);
           } catch (error) {
-            await addSupplierVoucherPayment(session, voucher.voucher_id, payment);
+            await addSupplierVoucherPayment(
+              session,
+              voucher.voucher_id,
+              payment,
+            );
             throw error;
           }
         }
@@ -354,13 +393,22 @@ export default function SupplierVouchersPage({
   }
 
   function addVoucher(input: NewSupplierVoucherInput): void {
-    createSupplierVoucher(session, input).then(async (voucher) => {
-      saveVouchers((current) => [voucher, ...current]);
-      setSelectedId(voucher.voucher_id);
-      setOpenMode("edit");
-      setView("detail");
-      await reload();
-    }).catch((error) => showToast("error", error instanceof WholesaleApiError ? error.message : "Could not create the voucher."));
+    createSupplierVoucher(session, input)
+      .then(async (voucher) => {
+        saveVouchers((current) => [voucher, ...current]);
+        setSelectedId(voucher.voucher_id);
+        setOpenMode("edit");
+        setView("detail");
+        await reload();
+      })
+      .catch((error) =>
+        showToast(
+          "error",
+          error instanceof WholesaleApiError
+            ? error.message
+            : "Could not create the voucher.",
+        ),
+      );
   }
 
   function startNewVoucher(
@@ -372,12 +420,53 @@ export default function SupplierVouchersPage({
     setView("new");
   }
 
+  async function assignOrderLineSupplier(
+    orderId: string,
+    orderLineId: string,
+    supplierName: string,
+  ): Promise<void> {
+    const order = orders.find((candidate) => candidate.order_id === orderId);
+    const trimmedSupplier = supplierName.trim();
+    if (!order || !trimmedSupplier) return;
+
+    try {
+      const updatedOrder = await updateCustomerOrder(session, orderId, {
+        customer_name: order.customer_name,
+        customer_phone: order.customer_phone,
+        customer_address: order.customer_address,
+        order_date: order.order_date,
+        lines: order.lines.map((line) =>
+          line.order_line_id === orderLineId
+            ? { ...line, supplier_name: trimmedSupplier }
+            : line,
+        ),
+      });
+      saveOrders((current) =>
+        current.map((candidate) =>
+          candidate.order_id === updatedOrder.order_id
+            ? updatedOrder
+            : candidate,
+        ),
+      );
+      reloadOrders();
+      showToast("success", "Factory assigned to product.");
+    } catch (error) {
+      showToast(
+        "error",
+        error instanceof WholesaleApiError
+          ? error.message
+          : "Could not assign the factory.",
+      );
+    }
+  }
+
   if (view === "new") {
     return (
       <NewVoucherForm
         nextVoucherNo={nextVoucherNo(vouchers)}
         initialSupplierName={newSupplierName}
         initialOrderLines={newOrderLines}
+        lockedSupplier={Boolean(newSupplierName)}
         onCancel={() => {
           setNewSupplierName("");
           setNewOrderLines(undefined);
@@ -399,7 +488,7 @@ export default function SupplierVouchersPage({
         onCreateVoucher={(supplierName, orderLines) =>
           startNewVoucher(supplierName, orderLines)
         }
-        onOpenOrder={onOpenOrder}
+        onAssignSupplier={assignOrderLineSupplier}
       />
     );
   }
@@ -463,7 +552,7 @@ function VoucherList({
   const [page, setPage] = useState(1);
 
   const totalQty = vouchers.reduce(
-    (sum, voucher) => sum + voucher.total_qty,
+    (sum, voucher) => sum + voucher.total_quantity_pairs,
     0,
   );
   const remainingAll = vouchers.reduce(
@@ -488,7 +577,7 @@ function VoucherList({
         query === "" ||
         voucher.voucher_no.toLowerCase().includes(query) ||
         voucher.supplier_name.toLowerCase().includes(query) ||
-        voucher.cargo_name.toLowerCase().includes(query) ||
+        voucher.carrier_name.toLowerCase().includes(query) ||
         voucher.lines.some(
           (line) =>
             line.stock_code.toLowerCase().includes(query) ||
@@ -562,10 +651,6 @@ function VoucherList({
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="secondary" size="sm" onClick={onToOrder}>
-              <ClipboardIcon className="w-4 h-4" />
-              To order
-            </Button>
             <Button
               variant="secondary"
               size="sm"
@@ -588,7 +673,7 @@ function VoucherList({
         />
 
         <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-bg-subtle">
-          <div className="w-full sm:w-80">
+          <div className="w-full sm:w-[28rem] lg:w-[32rem]">
             <Input
               aria-label="Search vouchers"
               placeholder="Search voucher no., supplier, cargo or product"
@@ -675,9 +760,9 @@ function VoucherList({
                   <Th className="text-right whitespace-nowrap">
                     Total packages
                   </Th>
-                  <Th className="text-right whitespace-nowrap">Ordered qty</Th>
+                  <Th className="text-right whitespace-nowrap">Ordered quantity</Th>
                   <Th className="text-right whitespace-nowrap">
-                    Remaining qty
+                    Remaining quantity
                   </Th>
                   <Th className="whitespace-nowrap">Receiving status</Th>
                   <Th className="whitespace-nowrap">Payment status</Th>
@@ -706,7 +791,7 @@ function VoucherList({
                         {formatQty(voucher.total_packages)}
                       </Td>
                       <Td className="text-right tabular-nums font-medium">
-                        {sets(voucher.total_qty)}
+                        {sets(voucher.total_quantity_pairs)}
                       </Td>
                       <Td className="text-right tabular-nums font-semibold text-error">
                         {sets(remaining)}
@@ -780,7 +865,7 @@ function supplierDemandGroups(
         total: lines.reduce((sum, line) => sum + line.remaining, 0),
       };
     })
-    .filter((group) => group.lines.length > 0)
+    .filter((product_group) => product_group.lines.length > 0)
     .sort((a, b) => {
       if (a.supplierName === UNASSIGNED_SUPPLIER) return -1;
       if (b.supplierName === UNASSIGNED_SUPPLIER) return 1;
@@ -834,21 +919,65 @@ function ToOrderView({
   onRefresh,
   refreshing,
   onCreateVoucher,
-  onOpenOrder,
+  onAssignSupplier,
 }: {
   orders: CustomerOrder[];
   vouchers: SupplierVoucher[];
   onOpenVouchers: () => void;
   onRefresh: () => void;
   refreshing: boolean;
-  onCreateVoucher: (supplierName: string, lines: OpenOrderLine[]) => void;
-  onOpenOrder: (orderId: string) => void;
+  onCreateVoucher: (supplierName: string, orderLines: OpenOrderLine[]) => void;
+  onAssignSupplier: (
+    orderId: string,
+    orderLineId: string,
+    supplierName: string,
+  ) => Promise<void>;
 }): React.JSX.Element {
+  const [supplierDrafts, setSupplierDrafts] = useState<Record<string, string>>(
+    {},
+  );
+  const [savingLineId, setSavingLineId] = useState<string | null>(null);
+  const [selectedSupplier, setSelectedSupplier] = useState<string | null>(null);
+  const [selectedLineIds, setSelectedLineIds] = useState<string[]>([]);
   const groups = useMemo(
     () => supplierDemandGroups(orders, vouchers),
     [orders, vouchers],
   );
-  const totalQty = groups.reduce((sum, group) => sum + group.total, 0);
+  const totalQty = groups.reduce((sum, product_group) => sum + product_group.total, 0);
+  const selectedGroup = groups.find(
+    (product_group) => product_group.supplierName === selectedSupplier,
+  );
+  const selectedLines =
+    selectedGroup?.lines.filter((line) =>
+      selectedLineIds.includes(line.order_line_id),
+    ) ?? [];
+  const selectedTotal = selectedLines.reduce(
+    (sum, line) => sum + line.remaining,
+    0,
+  );
+  const allProductsSelected =
+    !!selectedGroup &&
+    selectedGroup.lines.length > 0 &&
+    selectedGroup.lines.every((line) =>
+      selectedLineIds.includes(line.order_line_id),
+    );
+
+  async function saveSupplier(line: OpenOrderLine): Promise<void> {
+    const supplierName = supplierDrafts[line.order_line_id]?.trim() ?? "";
+    if (!supplierName || savingLineId) return;
+
+    setSavingLineId(line.order_line_id);
+    try {
+      await onAssignSupplier(line.order_id, line.order_line_id, supplierName);
+      setSupplierDrafts((current) => {
+        const next = { ...current };
+        delete next[line.order_line_id];
+        return next;
+      });
+    } finally {
+      setSavingLineId(null);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -861,7 +990,9 @@ function ToOrderView({
         />
         <FigureCard
           label="Products waiting"
-          value={formatQty(groups.reduce((sum, group) => sum + group.lines.length, 0))}
+          value={formatQty(
+            groups.reduce((sum, product_group) => sum + product_group.lines.length, 0),
+          )}
           sub="products to request"
         />
         <FigureCard
@@ -874,13 +1005,15 @@ function ToOrderView({
 
       <Panel>
         <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-          <div>
-            <h2 className="text-base font-semibold text-text-primary tracking-tight">
-              Create from customer orders
-            </h2>
-            <p className="text-sm text-text-muted mt-0.5">
-              Customer order quantities not yet included in a supplier voucher.
-            </p>
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold text-text-primary tracking-tight">
+                Create from customer orders
+              </h2>
+              <p className="text-sm text-text-muted mt-0.5">
+                Customer order products still waiting for a supplier voucher.
+              </p>
+            </div>
           </div>
           <Button
             variant="secondary"
@@ -904,111 +1037,279 @@ function ToOrderView({
             title="Nothing to order"
             description="All open customer demand is already covered by supplier vouchers."
           />
-        ) : (
-          <div className="flex flex-col divide-y divide-border">
-            {groups.map((group) => {
-              const isUnassigned =
-                group.supplierName === UNASSIGNED_SUPPLIER;
-              return (
-                <section key={group.supplierName}>
-                  <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 bg-bg-subtle">
-                  <div>
-                    <h3
-                      className={cn(
-                        "font-semibold",
-                        isUnassigned ? "text-warning" : "text-text-primary",
-                      )}
-                    >
-                      {isUnassigned
-                        ? "Supplier / Factory not chosen"
-                        : group.supplierName}
-                    </h3>
-                    <p className="text-sm text-text-muted">
-                      {isUnassigned
-                        ? "Assign a factory before creating a supplier voucher."
-                        : `${formatQty(group.lines.length)} product${group.lines.length === 1 ? "" : "s"} · ${sets(group.total)} to request`}
-                    </p>
-                  </div>
-                  {!isUnassigned && (
-                    <Button
-                      size="sm"
-                      onClick={() =>
-                        onCreateVoucher(group.supplierName, group.lines)
-                      }
-                    >
-                      <PlusIcon className="w-4 h-4" />
-                      Create voucher
-                    </Button>
-                  )}
-                  </div>
-                  <TableContainer className="border-0 rounded-none">
-                    <Thead>
-                      <Tr>
-                        <Th>Order</Th>
-                        <Th>Customer</Th>
-                        <Th>Product</Th>
-                        <Th>Colors to request</Th>
-                        <Th className="text-right whitespace-nowrap">
-                          Qty to request
-                        </Th>
-                        {isUnassigned && <Th className="w-28">Action</Th>}
-                      </Tr>
-                    </Thead>
-                    <Tbody>
-                      {group.lines.map((line, index) => (
-                        <Tr key={`${line.order_no}-${line.stock_code}-${index}`}>
-                          <Td className="whitespace-nowrap">
-                            <Reference value={line.order_no} what="order no." />
-                          </Td>
-                          <Td className="font-medium whitespace-nowrap">
-                            {line.customer_name}
-                        </Td>
-                        <Td>
-                          <div className="flex min-w-0 flex-col items-start gap-0.5">
-                            <div className="flex min-w-0 items-center gap-1">
-                              <span className="break-words font-semibold text-brand">
-                                {line.stock_code || "No stock code"}
-                              </span>
-                              {line.stock_code && (
-                                <CopyButton
-                                  value={line.stock_code}
-                                  what="stock code"
-                                />
-                              )}
-                            </div>
-                            <span className="break-words text-text-primary">
-                              {line.description || "—"}
-                            </span>
-                            <span className="text-xs text-text-muted">
-                              {GROUP_LABELS[line.group]}
-                            </span>
-                          </div>
-                        </Td>
-                          <Td className="font-mono text-xs text-text-secondary whitespace-normal break-words">
-                            {line.color_qty || "—"}
-                          </Td>
-                          <Td className="text-right tabular-nums font-semibold text-error whitespace-nowrap">
-                            {sets(line.remaining)}
-                          </Td>
-                          {isUnassigned && (
-                            <Td>
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                className={SOFT_BLUE}
-                                onClick={() => onOpenOrder(line.order_id)}
-                              >
-                                Open order
-                              </Button>
-                            </Td>
+        ) : !selectedGroup ? (
+          <div className="p-6">
+            <div className="mb-5">
+              <h3 className="font-semibold text-text-primary">
+                Choose a factory
+              </h3>
+              <p className="mt-1 text-sm text-text-muted">
+                Select a factory to see only the customer-order products it
+                needs to supply.
+              </p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {groups.map((product_group) => {
+                const isUnassigned = product_group.supplierName === UNASSIGNED_SUPPLIER;
+                return (
+                  <section
+                    key={product_group.supplierName}
+                    className="product_group flex flex-col overflow-hidden rounded-xl border border-border bg-bg-base transition-all duration-150 hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-sm"
+                  >
+                    <div className="flex items-center justify-between gap-3 border-b border-border bg-bg-subtle/40 px-5 py-4">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span
+                          className={cn(
+                            "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                            isUnassigned
+                              ? "bg-warning-subtle text-warning"
+                              : "bg-brand-subtle text-brand",
                           )}
-                        </Tr>
-                      ))}
-                    </Tbody>
-                  </TableContainer>
-                </section>
-              );
-            })}
+                        >
+                          <WarehouseIcon className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                            Factory
+                          </p>
+                          <h4
+                            className={cn(
+                              "mt-0.5 break-words text-base font-semibold",
+                              isUnassigned
+                                ? "text-warning"
+                                : "text-text-primary",
+                            )}
+                          >
+                            {isUnassigned
+                              ? "Factory not chosen"
+                              : product_group.supplierName}
+                          </h4>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 divide-x divide-border">
+                      <div className="px-5 py-4">
+                        <p className="text-xs font-medium text-text-muted">
+                          Products
+                        </p>
+                        <p className="mt-1 text-lg font-semibold tabular-nums text-text-primary">
+                          {formatQty(product_group.lines.length)}
+                        </p>
+                      </div>
+                      <div className="px-5 py-4">
+                        <p className="text-xs font-medium text-text-muted">
+                          To request
+                        </p>
+                        <p className="mt-1 text-lg font-semibold tabular-nums text-text-primary">
+                          {sets(product_group.total)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="px-5 pb-5">
+                      <Button
+                        className="w-full justify-center"
+                        size="sm"
+                        variant={isUnassigned ? "secondary" : "primary"}
+                        onClick={() => {
+                          setSelectedSupplier(product_group.supplierName);
+                          setSelectedLineIds(
+                            product_group.lines.map((line) => line.order_line_id),
+                          );
+                        }}
+                      >
+                        {isUnassigned ? "Assign factory" : "Choose products"}
+                        <ChevronRightIcon className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col">
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-bg-subtle px-6 py-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    aria-label="Back to factories"
+                    title="Back to factories"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border text-text-muted transition-colors duration-150 hover:border-brand/50 hover:bg-brand-subtle hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+                    onClick={() => {
+                      setSelectedSupplier(null);
+                      setSelectedLineIds([]);
+                    }}
+                  >
+                    <ChevronLeftIcon className="h-4 w-4" />
+                  </button>
+                  <h3
+                    className={cn(
+                      "font-semibold",
+                      selectedGroup.supplierName === UNASSIGNED_SUPPLIER
+                        ? "text-warning"
+                        : "text-text-primary",
+                    )}
+                  >
+                    {selectedGroup.supplierName === UNASSIGNED_SUPPLIER
+                      ? "Factory not chosen"
+                      : selectedGroup.supplierName}
+                  </h3>
+                </div>
+                <p className="text-sm text-text-muted">
+                  {selectedGroup.supplierName === UNASSIGNED_SUPPLIER
+                    ? "Assign a factory to each product before creating a supplier voucher."
+                    : `${formatQty(selectedGroup.lines.length)} product${selectedGroup.lines.length === 1 ? "" : "s"} · ${sets(selectedGroup.total)} to request`}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                <span className="text-sm text-text-muted">
+                  {formatQty(selectedLines.length)} selected ·{" "}
+                  {sets(selectedTotal)}
+                </span>
+                {selectedGroup.supplierName !== UNASSIGNED_SUPPLIER && (
+                  <Button
+                    size="sm"
+                    disabled={selectedLines.length === 0}
+                    onClick={() =>
+                      onCreateVoucher(selectedGroup.supplierName, selectedLines)
+                    }
+                  >
+                    <PlusIcon className="w-4 h-4" />
+                    Create voucher
+                  </Button>
+                )}
+              </div>
+            </div>
+            <TableContainer className="rounded-none border-0">
+              <Thead>
+                <Tr>
+                  <Th>
+                    <label className="flex cursor-pointer items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-brand"
+                        aria-label="Select all products"
+                        checked={allProductsSelected}
+                        ref={(element) => {
+                          if (element) {
+                            element.indeterminate =
+                              selectedLines.length > 0 && !allProductsSelected;
+                          }
+                        }}
+                        onChange={(event) =>
+                          setSelectedLineIds(
+                            event.target.checked
+                              ? selectedGroup.lines.map(
+                                  (line) => line.order_line_id,
+                                )
+                              : [],
+                          )
+                        }
+                      />
+                      <span>Order</span>
+                    </label>
+                  </Th>
+                  <Th>Customer</Th>
+                  <Th>Product</Th>
+                  <Th>Colors</Th>
+                  <Th className="text-right whitespace-nowrap">
+                    Qty to request
+                  </Th>
+                  {selectedGroup.supplierName === UNASSIGNED_SUPPLIER && (
+                    <Th className="min-w-[17rem]">Factory</Th>
+                  )}
+                </Tr>
+              </Thead>
+              <Tbody>
+                {selectedGroup.lines.map((line, index) => (
+                  <Tr key={`${line.order_no}-${line.stock_code}-${index}`}>
+                    <Td>
+                      <div className="flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-brand"
+                          aria-label={`Select ${line.stock_code || "product"} from ${line.order_no}`}
+                          checked={selectedLineIds.includes(line.order_line_id)}
+                          onChange={(event) =>
+                            setSelectedLineIds((current) =>
+                              event.target.checked
+                                ? [...new Set([...current, line.order_line_id])]
+                                : current.filter(
+                                    (id) => id !== line.order_line_id,
+                                  ),
+                            )
+                          }
+                        />
+                        <Reference value={line.order_no} what="order no." />
+                      </div>
+                    </Td>
+                    <Td className="font-medium whitespace-nowrap">
+                      {line.customer_name}
+                    </Td>
+                    <Td>
+                      <div className="flex min-w-0 flex-col items-start gap-0.5">
+                        <div className="flex min-w-0 items-center gap-1">
+                          <span className="break-words font-semibold text-brand">
+                            {line.stock_code || "No stock code"}
+                          </span>
+                          {line.stock_code && (
+                            <CopyButton
+                              value={line.stock_code}
+                              what="stock code"
+                            />
+                          )}
+                        </div>
+                        <span className="break-words text-text-primary">
+                          {line.description || "—"}
+                        </span>
+                        <span className="text-xs text-text-muted">
+                          {GROUP_LABELS[line.product_group]}
+                        </span>
+                      </div>
+                    </Td>
+                    <Td className="font-mono text-xs text-text-secondary whitespace-normal break-words">
+                      {line.color_breakdown || "—"}
+                    </Td>
+                    <Td className="text-right tabular-nums font-semibold text-error whitespace-nowrap">
+                      {sets(line.remaining)}
+                    </Td>
+                    {selectedGroup.supplierName === UNASSIGNED_SUPPLIER && (
+                      <Td>
+                        <div className="flex min-w-[16rem] items-start gap-2">
+                          <div className="min-w-0 flex-1">
+                            <SuggestInput
+                              bare
+                              label={`Factory for ${line.stock_code || "product"} in ${line.order_no}`}
+                              placeholder="Choose or type factory"
+                              suggestions={SUPPLIER_NAMES}
+                              value={supplierDrafts[line.order_line_id] ?? ""}
+                              onChange={(value) =>
+                                setSupplierDrafts((current) => ({
+                                  ...current,
+                                  [line.order_line_id]: value,
+                                }))
+                              }
+                            />
+                          </div>
+                          <Button
+                            size="sm"
+                            onClick={() => void saveSupplier(line)}
+                            loading={savingLineId === line.order_line_id}
+                            disabled={
+                              !supplierDrafts[line.order_line_id]?.trim() ||
+                              savingLineId !== null
+                            }
+                          >
+                            Save
+                          </Button>
+                        </div>
+                      </Td>
+                    )}
+                  </Tr>
+                ))}
+              </Tbody>
+            </TableContainer>
           </div>
         )}
       </Panel>
@@ -1036,7 +1337,7 @@ function customersWaitingFor(
     if (orderRemaining(order) <= 0) continue;
     const qty = order.lines
       .filter((line) => line.stock_code === stockCode)
-      .reduce((sum, line) => sum + line.wanted_qty, 0);
+      .reduce((sum, line) => sum + line.quantity_pairs, 0);
     if (qty > 0) {
       waiting.push({
         name: order.customer_name,
@@ -1054,13 +1355,14 @@ function customersWaitingFor(
 // goods are counted at the gate (see diagram/wholesale/erd.mmd).
 interface OpenOrderLine {
   order_id: string;
+  order_line_id: string;
   order_no: string;
   customer_name: string;
   supplier_name: string;
   stock_code: string;
   description: string;
-  group: ProductGroup;
-  color_qty: string;
+  product_group: ProductGroup;
+  color_breakdown: string;
   remaining: number;
 }
 
@@ -1080,7 +1382,7 @@ function openOrderLines(
       const key = line.stock_code.trim().toLowerCase();
       const requested = requestedByCode.get(key) ?? {};
       for (const [color, pairs] of Object.entries(
-        colorPairsForText(line.color_qty, line.unit),
+        colorPairsForText(line.color_breakdown, line.unit),
       )) {
         requested[color] = (requested[color] ?? 0) + pairs;
       }
@@ -1098,13 +1400,17 @@ function openOrderLines(
       } else if (lineSupplier.toLowerCase() !== wanted) {
         continue;
       }
-      const requested = requestedByCode.get(line.stock_code.trim().toLowerCase()) ?? {};
-      const demand = colorPairsForText(line.color_qty, line.unit);
+      const requested =
+        requestedByCode.get(line.stock_code.trim().toLowerCase()) ?? {};
+      const demand = colorPairsForText(line.color_breakdown, line.unit);
       const remainingColors: ColorPairs = {};
       let openQty = lineRemaining(line);
       for (const [color, pairs] of Object.entries(demand)) {
         const alreadyRequested = Math.min(pairs, requested[color] ?? 0);
-        requested[color] = Math.max(0, (requested[color] ?? 0) - alreadyRequested);
+        requested[color] = Math.max(
+          0,
+          (requested[color] ?? 0) - alreadyRequested,
+        );
         const available = Math.max(0, pairs - alreadyRequested);
         const take = Math.min(available, openQty);
         if (take > 0) remainingColors[color] = take;
@@ -1114,13 +1420,14 @@ function openOrderLines(
       if (openPairs <= 0) continue;
       rows.push({
         order_id: order.order_id,
+        order_line_id: line.order_line_id,
         order_no: order.order_no,
         customer_name: order.customer_name,
         supplier_name: line.supplier_name,
         stock_code: line.stock_code,
         description: line.description,
-        group: line.group,
-        color_qty: colorQtyFromPairs(remainingColors),
+        product_group: line.product_group,
+        color_breakdown: colorQtyFromPairs(remainingColors),
         remaining: openPairs,
       });
     }
@@ -1167,14 +1474,14 @@ function draftLinesFromOpenOrderLines(rows: OpenOrderLine[]): DraftLine[] {
     if (existing >= 0) {
       lines[existing] = {
         ...lines[existing],
-        color_qty: mergeColorQty(lines[existing].color_qty, row.color_qty),
+        color_breakdown: mergeColorQty(lines[existing].color_breakdown, row.color_breakdown),
       };
     } else {
       lines.push({
         stock_code: row.stock_code,
         description: row.description,
-        group: row.group,
-        color_qty: row.color_qty,
+        product_group: row.product_group,
+        color_breakdown: row.color_breakdown,
         buying_price: "",
       });
     }
@@ -1327,7 +1634,7 @@ function VoucherInfoView({
             label="Voucher date"
             value={formatDate(voucher.voucher_date)}
           />
-          <ReadOnlyField label="Cargo" value={voucher.cargo_name} />
+          <ReadOnlyField label="Cargo" value={voucher.carrier_name} />
           <ReadOnlyField
             label="Packages"
             value={formatQty(voucher.total_packages)}
@@ -1349,9 +1656,9 @@ function VoucherProductsView({
         <Tr>
           <Th className="min-w-[18rem]">Product</Th>
           <Th className="min-w-[11rem]">Colors</Th>
-          <Th className="text-right whitespace-nowrap">Ordered qty</Th>
-          <Th className="text-right whitespace-nowrap">Received qty</Th>
-          <Th className="text-right whitespace-nowrap">Remaining qty</Th>
+          <Th className="text-right whitespace-nowrap">Ordered quantity</Th>
+          <Th className="text-right whitespace-nowrap">Received quantity</Th>
+          <Th className="text-right whitespace-nowrap">Qty to receive</Th>
           <Th className="text-right min-w-[7rem]">Buying price</Th>
           <Th className="text-right">Amount</Th>
           <Th>Customers</Th>
@@ -1374,15 +1681,15 @@ function VoucherProductsView({
                   {line.description || "—"}
                 </span>
                 <span className="text-xs text-text-muted">
-                  {GROUP_LABELS[line.group]}
+                  {GROUP_LABELS[line.product_group]}
                 </span>
               </div>
             </Td>
             <Td className="whitespace-normal break-words text-text-secondary">
-              {line.color_qty || "—"}
+              {line.color_breakdown || "—"}
             </Td>
             <Td className="text-right tabular-nums">
-              {sets(line.voucher_qty)}
+              {sets(line.quantity_pairs)}
             </Td>
             <Td className="text-right tabular-nums">
               {sets(lineReceivedQty(line))}
@@ -1394,12 +1701,12 @@ function VoucherProductsView({
               {formatKyat(line.buying_price)}
             </Td>
             <Td className="text-right tabular-nums font-medium whitespace-nowrap">
-              {formatKyat(line.voucher_qty * line.buying_price)}
+              {formatKyat(line.quantity_pairs * line.buying_price)}
             </Td>
             <Td>
               <WaitingList
                 stockCode={line.stock_code}
-                voucherQty={line.voucher_qty}
+                voucherQty={line.quantity_pairs}
               />
             </Td>
           </Tr>
@@ -1409,10 +1716,10 @@ function VoucherProductsView({
             Total
           </Td>
           <Td className="text-right tabular-nums font-semibold">
-            {sets(voucher.total_qty)}
+            {sets(voucher.total_quantity_pairs)}
           </Td>
           <Td className="text-right tabular-nums font-semibold text-success">
-            {sets(voucher.received_qty)}
+            {sets(voucher.received_quantity_pairs)}
           </Td>
           <Td className="text-right tabular-nums font-semibold text-error">
             {sets(remainingQty(voucher))}
@@ -1428,6 +1735,71 @@ function VoucherProductsView({
   );
 }
 
+function InlineProgress({
+  label,
+  value,
+  pct,
+  warn = false,
+}: {
+  label: string;
+  value: string;
+  pct: number;
+  warn?: boolean;
+}): React.JSX.Element {
+  return (
+    <div className="w-full min-w-0 sm:w-72">
+      <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+        <span className="font-medium text-text-secondary">{label}</span>
+        <span className="shrink-0 tabular-nums font-semibold text-text-primary">
+          {value}
+        </span>
+      </div>
+      <ThinBar pct={pct} label={label} warn={warn} />
+    </div>
+  );
+}
+
+const supplierVoucherDetailLineSchema = z.object({
+  voucher_line_id: z.string(),
+  stock_code: z.string(),
+  description: z.string(),
+  product_group: z.enum(["man", "lady", "child"]),
+  color_breakdown: z.string(),
+  unit: z.enum(["pair", "set", "dozen"]),
+  quantity_pairs: z.number().finite().min(0),
+  received_quantity_pairs: z.number().finite().min(0).optional(),
+  buying_price: z.number().finite().min(0),
+});
+
+const supplierVoucherDetailSchema = z.object({
+  voucher: z.object({
+    voucher_id: z.string(),
+    voucher_no: z.string(),
+    supplier_name: z.string().trim().min(1, "Enter a supplier name."),
+    voucher_date: z.string().trim().min(1, "Choose a voucher date."),
+    total_packages: z.number().finite().min(0),
+    carrier_name: z.string(),
+    total_quantity_pairs: z.number().finite().min(0),
+    received_quantity_pairs: z.number().finite().min(0),
+    payment: z.object({
+      account_id: z.string(),
+      payments: z.array(
+        z.object({
+          payment_id: z.string(),
+          paid_on: z.string(),
+          amount: z.number().finite().min(0),
+          note: z.string(),
+        }),
+      ),
+    }),
+    lines: z.array(supplierVoucherDetailLineSchema),
+  }),
+});
+
+interface SupplierVoucherDetailFormValues {
+  voucher: SupplierVoucher;
+}
+
 function VoucherDetail({
   voucher: initialVoucher,
   initialMode,
@@ -1436,40 +1808,82 @@ function VoucherDetail({
 }: {
   voucher: SupplierVoucher;
   initialMode: VoucherDetailMode;
-  onSave: (voucher: SupplierVoucher, originalVoucher: SupplierVoucher) => Promise<void>;
+  onSave: (
+    voucher: SupplierVoucher,
+    originalVoucher: SupplierVoucher,
+  ) => Promise<void>;
   onBack: () => void;
 }): React.JSX.Element {
-  const [voucher, setVoucher] = useState(initialVoucher);
   const [detailMode, setDetailMode] = useState<VoucherDetailMode>(initialMode);
   const [saving, setSaving] = useState(false);
   const [addingLineId, setAddingLineId] = useState<string | null>(null);
-  useEffect(() => {
-    setVoucher(initialVoucher);
-    setAddingLineId(null);
-  }, [initialVoucher]);
+  const {
+    control,
+    getValues,
+    handleSubmit,
+    reset,
+    setValue,
+    formState: { errors, isDirty },
+  } = useForm<SupplierVoucherDetailFormValues>({
+    resolver: zodResolver(supplierVoucherDetailSchema),
+    defaultValues: { voucher: initialVoucher },
+    mode: "onBlur",
+    reValidateMode: "onChange",
+  });
+  const {
+    fields: lineFields,
+    append,
+    remove,
+    replace,
+  } = useFieldArray({
+    control,
+    name: "voucher.lines",
+  });
+  const voucher = useWatch({ control, name: "voucher" }) as SupplierVoucher;
 
-  // total_qty/received_qty are the server's own running totals across voucher.lines
+  useEffect(() => {
+    reset({ voucher: initialVoucher });
+    setAddingLineId(null);
+  }, [initialVoucher, reset]);
+
+  // total_quantity_pairs/received_quantity_pairs are the server's own running totals across voucher.lines
   // (see _out in the router) — recomputed here the same way whenever a line changes,
   // so the header figures never lag behind an edit still sitting unsaved on screen.
   function apply(patch: Partial<SupplierVoucher>): void {
-    setVoucher((current) => {
-      const next = { ...current, ...patch };
-      if (!patch.lines) return next;
-      return {
-        ...next,
-        total_qty: next.lines.reduce((sum, line) => sum + line.voucher_qty, 0),
-        received_qty: next.lines.reduce(
-          (sum, line) => sum + lineReceivedQty(line),
-          0,
-        ),
-      };
-    });
+    if (patch.lines) {
+      replace(patch.lines);
+      setValue(
+        "voucher.total_quantity_pairs",
+        patch.lines.reduce((sum, line) => sum + line.quantity_pairs, 0),
+        { shouldDirty: true, shouldValidate: true },
+      );
+      setValue(
+        "voucher.received_quantity_pairs",
+        patch.lines.reduce((sum, line) => sum + lineReceivedQty(line), 0),
+        { shouldDirty: true, shouldValidate: true },
+      );
+    }
+    if (patch.payment) {
+      setValue("voucher.payment", patch.payment, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    }
+    for (const [key, value] of Object.entries(patch)) {
+      if (key === "lines" || key === "payment") continue;
+      setValue(`voucher.${key}` as "voucher.supplier_name", value as never, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    }
   }
 
-  async function saveChanges(): Promise<void> {
+  async function saveChanges(
+    values: SupplierVoucherDetailFormValues,
+  ): Promise<void> {
     setSaving(true);
     try {
-      await onSave(voucher, initialVoucher);
+      await onSave(values.voucher, initialVoucher);
     } finally {
       setSaving(false);
     }
@@ -1485,17 +1899,16 @@ function VoucherDetail({
   // A voucher is corrected the way it was written: change the colours and the quantity
   // follows, the same rule the wizard uses.
   function setLine(index: number, patch: Partial<SupplierVoucherLine>): void {
-    apply({
-      lines: voucher.lines.map((line, position) =>
-        position === index ? { ...line, ...patch } : line,
-      ),
-    });
+    const lines = getValues("voucher.lines").map((line, position) =>
+      position === index ? { ...line, ...patch } : line,
+    );
+    apply({ lines });
   }
 
   function setColors(index: number, colors: string): void {
     setLine(index, {
-      color_qty: colors,
-      voucher_qty: colorQtyPairs(colors, "set"),
+      color_breakdown: colors,
+      quantity_pairs: colorQtyPairs(colors, "set"),
     });
   }
 
@@ -1507,30 +1920,24 @@ function VoucherDetail({
         ? {
             stock_code: code,
             description: known.description,
-            group: known.group,
+            product_group: known.product_group,
           }
         : { stock_code: code },
     );
   }
 
   function addLine(): void {
-    if (addingLineId) return;
     const lineId = `fvl-${Date.now()}`;
     setAddingLineId(lineId);
-    apply({
-      lines: [
-        ...voucher.lines,
-        {
-          voucher_line_id: lineId,
-          stock_code: "",
-          description: "",
-          group: "man",
-          color_qty: "",
-          unit: "set",
-          voucher_qty: 0,
-          buying_price: 0,
-        },
-      ],
+    append({
+      voucher_line_id: lineId,
+      stock_code: "",
+      description: "",
+      product_group: "man",
+      color_breakdown: "",
+      unit: "set",
+      quantity_pairs: 0,
+      buying_price: 0,
     });
   }
 
@@ -1538,18 +1945,26 @@ function VoucherDetail({
     if (voucher.lines[index]?.voucher_line_id === addingLineId) {
       setAddingLineId(null);
     }
-    apply({
-      lines: voucher.lines.filter((_, position) => position !== index),
-    });
+    const lines = voucher.lines.filter((_, position) => position !== index);
+    remove(index);
+    setValue(
+      "voucher.total_quantity_pairs",
+      lines.reduce((sum, line) => sum + line.quantity_pairs, 0),
+      { shouldDirty: true, shouldValidate: true },
+    );
+    setValue(
+      "voucher.received_quantity_pairs",
+      lines.reduce((sum, line) => sum + lineReceivedQty(line), 0),
+      { shouldDirty: true, shouldValidate: true },
+    );
   }
 
   function cancelAddLine(): void {
     if (!addingLineId) return;
-    apply({
-      lines: voucher.lines.filter(
-        (line) => line.voucher_line_id !== addingLineId,
-      ),
-    });
+    const index = voucher.lines.findIndex(
+      (line) => line.voucher_line_id === addingLineId,
+    );
+    if (index >= 0) removeLine(index);
     setAddingLineId(null);
   }
 
@@ -1589,7 +2004,7 @@ function VoucherDetail({
     });
   }
 
-  const hasChanges = JSON.stringify(voucher) !== JSON.stringify(initialVoucher);
+  const hasChanges = isDirty;
 
   return (
     <div className="flex flex-col gap-5">
@@ -1642,7 +2057,7 @@ function VoucherDetail({
             {(detailMode === "edit" || hasChanges) && (
               <Button
                 size="sm"
-                onClick={() => void saveChanges()}
+                onClick={() => void handleSubmit(saveChanges)()}
                 loading={saving}
                 disabled={!hasChanges}
               >
@@ -1653,7 +2068,7 @@ function VoucherDetail({
           </div>
         </div>
 
-        <div className="px-6 py-6 flex flex-col gap-8">
+        <div className="px-6 py-6 flex flex-col gap-10">
           <section>
             <SectionLabel>Voucher information</SectionLabel>
             {detailMode === "view" ? (
@@ -1664,12 +2079,19 @@ function VoucherDetail({
                   <h3 className="mb-3 text-sm font-semibold text-text-primary">
                     Supplier
                   </h3>
-                  <SuggestInput
-                    label="Supplier / Factory"
-                    placeholder="Goody Factory"
-                    suggestions={SUPPLIER_NAMES}
-                    value={voucher.supplier_name}
-                    onChange={(next) => apply({ supplier_name: next })}
+                  <Controller
+                    control={control}
+                    name="voucher.supplier_name"
+                    render={({ field }) => (
+                      <SuggestInput
+                        label="Supplier / Factory"
+                        placeholder="Goody Factory"
+                        suggestions={SUPPLIER_NAMES}
+                        value={field.value}
+                        onChange={field.onChange}
+                        error={errors.voucher?.supplier_name?.message}
+                      />
+                    )}
                   />
                 </div>
                 <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
@@ -1677,32 +2099,50 @@ function VoucherDetail({
                     Voucher
                   </h3>
                   <div className="grid gap-3 sm:grid-cols-2">
-              <ReadOnlyField
-                label="Voucher no."
-                value={voucher.voucher_no}
-                copyable
-              />
-              <Input
-                label="Date"
-                type="date"
-                className={EDITABLE}
-                value={voucher.voucher_date}
-                onChange={(event) =>
-                  apply({ voucher_date: event.target.value })
-                }
-              />
-              <SuggestInput
-                label="Cargo"
-                placeholder="Shwe Moe Cargo"
-                suggestions={CARGO_NAMES}
-                value={voucher.cargo_name}
-                onChange={(next) => apply({ cargo_name: next })}
-              />
-              <CountField
-                label="Packages"
-                value={voucher.total_packages}
-                onChange={(next) => apply({ total_packages: next })}
-              />
+                    <ReadOnlyField
+                      label="Voucher no."
+                      value={voucher.voucher_no}
+                      copyable
+                    />
+                    <Controller
+                      control={control}
+                      name="voucher.voucher_date"
+                      render={({ field }) => (
+                        <Input
+                          label="Date"
+                          type="date"
+                          className={EDITABLE}
+                          value={field.value}
+                          onChange={field.onChange}
+                          onBlur={field.onBlur}
+                          error={errors.voucher?.voucher_date?.message}
+                        />
+                      )}
+                    />
+                    <Controller
+                      control={control}
+                      name="voucher.carrier_name"
+                      render={({ field }) => (
+                        <SuggestInput
+                          label="Cargo"
+                          placeholder="Shwe Moe Cargo"
+                          suggestions={CARGO_NAMES}
+                          value={field.value}
+                          onChange={field.onChange}
+                        />
+                      )}
+                    />
+                    <Controller
+                      control={control}
+                      name="voucher.total_packages"
+                      render={({ field }) => (
+                        <CountField
+                          label="Packages"
+                          value={field.value}
+                          onChange={field.onChange}
+                        />
+                      )}
+                    />
                   </div>
                 </div>
               </div>
@@ -1710,233 +2150,252 @@ function VoucherDetail({
           </section>
 
           <section>
-            <SectionLabel>Products</SectionLabel>
+            <div className="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+              <h3 className="pt-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
+                Products
+              </h3>
+              <InlineProgress
+                label="Receiving"
+                value={`${sets(voucher.received_quantity_pairs)} / ${sets(voucher.total_quantity_pairs)} (${pct}%)`}
+                pct={pct}
+              />
+            </div>
             {detailMode === "view" ? (
               <VoucherProductsView voucher={voucher} />
             ) : (
               <>
-              <TableContainer>
-              <Thead className="top-0">
-                <Tr>
-                  <Th className="min-w-[18rem]">Product</Th>
-                  <Th className="min-w-[11rem]">Colors</Th>
-                  <Th className="text-right whitespace-nowrap">Ordered qty</Th>
-                  <Th className="text-right whitespace-nowrap">Received qty</Th>
-                  <Th className="text-right whitespace-nowrap">Remaining qty</Th>
-                  <Th className="text-right min-w-[7rem]">Buying price</Th>
-                  <Th className="text-right">Amount</Th>
-                  <Th>Customers</Th>
-                </Tr>
-              </Thead>
-              <Tbody>
-                {voucher.lines.map((line, index) => (
-                  <Tr key={line.voucher_line_id}>
-                    <Td>
-                      <div className="flex flex-col gap-1.5">
-                        <div className="flex items-center gap-1">
-                          <SuggestInput
-                            bare
-                            label={`Stock code for product ${index + 1}`}
-                            placeholder="A1001"
-                            suggestions={STOCK_CODES}
-                            value={line.stock_code}
-                            onChange={(next) => setStockCode(index, next)}
-                            error={
-                              duplicateStockCodeProblem(voucher.lines, index) ??
-                              undefined
-                            }
-                          />
-                          <CopyButton
-                            value={line.stock_code}
-                            what="stock code"
-                          />
-                        </div>
-                        <CellInput
-                          label={`Description for product ${index + 1}`}
-                          placeholder="Men's leather sandal"
-                          multiline
-                          value={line.description}
-                          onChange={(next) =>
-                            setLine(index, { description: next })
-                          }
-                        />
-                        <GroupSelect
-                          label={`Group for product ${index + 1}`}
-                          value={line.group}
-                          onChange={(group) => setLine(index, { group })}
-                        />
-                      </div>
-                    </Td>
-                    <Td>
-                      <CellInput
-                        label={`Colors for product ${index + 1}`}
-                        placeholder="black10s,pink2p"
-                        multiline
-                        value={line.color_qty}
-                        onChange={(next) => setColors(index, next)}
-                        error={colorQtyProblem(line.color_qty) ?? undefined}
-                      />
-                    </Td>
-                    <Td className="text-right tabular-nums">
-                      {sets(line.voucher_qty)}
-                    </Td>
-                    <Td className="text-right tabular-nums">
-                      {sets(lineReceivedQty(line))}
-                    </Td>
-                    <Td className="text-right tabular-nums">
-                      {sets(lineRemainingQty(line))}
-                    </Td>
-                    <Td>
-                      <CellInput
-                        label={`Buying price for product ${index + 1}`}
-                        placeholder="0"
-                        numeric
-                        className="text-right"
-                        value={String(line.buying_price)}
-                        onChange={(next) =>
-                          setLine(index, { buying_price: Number(next) || 0 })
-                        }
-                      />
-                    </Td>
-                    <Td className="text-right tabular-nums font-medium whitespace-nowrap">
-                      {formatKyat(line.voucher_qty * line.buying_price)}
-                      <button
-                        type="button"
-                        onClick={() => removeLine(index)}
-                        title="Remove this product"
-                        aria-label={`Remove product ${index + 1}`}
-                        className={cn(
-                          "ml-2 p-1 rounded-md align-middle transition-colors duration-150",
-                          SOFT_RED,
-                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
-                        )}
-                      >
-                        <TrashIcon className="w-4 h-4" />
-                      </button>
-                    </Td>
-                    <Td>
-                      <WaitingList
-                        stockCode={line.stock_code}
-                        voucherQty={line.voucher_qty}
-                      />
-                    </Td>
-                  </Tr>
-                ))}
-                <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-                  <Td className="font-semibold" colSpan={2}>
-                    Total
-                  </Td>
-                  <Td className="text-right tabular-nums font-semibold">
-                    {sets(voucher.total_qty)}
-                  </Td>
-                  <Td className="text-right tabular-nums font-semibold text-success">
-                    {sets(voucher.received_qty)}
-                  </Td>
-                  <Td className="text-right tabular-nums font-semibold text-error">
-                    {sets(remaining)}
-                  </Td>
-                  <Td />
-                  <Td className="text-right tabular-nums font-semibold text-brand">
-                    {formatKyat(amount)}
-                  </Td>
-                  <Td />
-                </Tr>
-              </Tbody>
-            </TableContainer>
-              <div className="mt-3">
-                <Button
-                  size="sm"
-                  onClick={addLine}
-              >
-                  <PlusIcon className="w-4 h-4" />
-                  Add product
-                </Button>
-                {addingLineId && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={cancelAddLine}
-                    className={cn(SOFT_RED, "ml-2")}
-                  >
-                    Cancel
+                <TableContainer>
+                  <Thead className="top-0">
+                    <Tr>
+                      <Th className="min-w-[18rem]">Product</Th>
+                      <Th className="min-w-[11rem]">Colors</Th>
+                      <Th className="text-right whitespace-nowrap">
+                        Ordered quantity
+                      </Th>
+                      <Th className="text-right whitespace-nowrap">
+                        Received quantity
+                      </Th>
+                      <Th className="text-right whitespace-nowrap">
+                        Qty to receive
+                      </Th>
+                      <Th className="text-right min-w-[7rem]">Buying price</Th>
+                      <Th className="text-right">Amount</Th>
+                      <Th>Customers</Th>
+                    </Tr>
+                  </Thead>
+                  <Tbody>
+                    {lineFields.map((field, index) => {
+                      const line = voucher.lines[index];
+                      if (!line) return null;
+                      return (
+                        <Tr key={field.id}>
+                          <Td>
+                            <div className="flex flex-col gap-1.5">
+                              <div className="flex items-center gap-1">
+                                <Controller
+                                  control={control}
+                                  name={`voucher.lines.${index}.stock_code`}
+                                  render={({ field: stockField }) => (
+                                    <SuggestInput
+                                      bare
+                                      label={`Stock code for product ${index + 1}`}
+                                      placeholder="A1001"
+                                      suggestions={STOCK_CODES}
+                                      value={stockField.value}
+                                      onChange={(next) => {
+                                        stockField.onChange(next);
+                                        setStockCode(index, next);
+                                      }}
+                                      error={
+                                        duplicateStockCodeProblem(
+                                          voucher.lines,
+                                          index,
+                                        ) ?? undefined
+                                      }
+                                    />
+                                  )}
+                                />
+                                <CopyButton
+                                  value={line.stock_code}
+                                  what="stock code"
+                                />
+                              </div>
+                              <Controller
+                                control={control}
+                                name={`voucher.lines.${index}.description`}
+                                render={({ field: descriptionField }) => (
+                                  <CellInput
+                                    label={`Description for product ${index + 1}`}
+                                    placeholder="Men's leather sandal"
+                                    multiline
+                                    value={descriptionField.value}
+                                    onChange={descriptionField.onChange}
+                                  />
+                                )}
+                              />
+                              <Controller
+                                control={control}
+                                name={`voucher.lines.${index}.product_group`}
+                                render={({ field: groupField }) => (
+                                  <GroupSelect
+                                    label={`Group for product ${index + 1}`}
+                                    value={groupField.value}
+                                    onChange={groupField.onChange}
+                                  />
+                                )}
+                              />
+                            </div>
+                          </Td>
+                          <Td>
+                            <Controller
+                              control={control}
+                              name={`voucher.lines.${index}.color_breakdown`}
+                              render={({ field: colorField }) => (
+                                <CellInput
+                                  label={`Colors for product ${index + 1}`}
+                                  placeholder="black10s,pink2p"
+                                  multiline
+                                  value={colorField.value}
+                                  onChange={(next) => {
+                                    colorField.onChange(next);
+                                    setColors(index, next);
+                                  }}
+                                  error={
+                                    colorQtyProblem(line.color_breakdown) ?? undefined
+                                  }
+                                />
+                              )}
+                            />
+                          </Td>
+                          <Td className="text-right tabular-nums">
+                            {sets(line.quantity_pairs)}
+                          </Td>
+                          <Td className="text-right tabular-nums">
+                            {sets(lineReceivedQty(line))}
+                          </Td>
+                          <Td className="text-right tabular-nums">
+                            {sets(lineRemainingQty(line))}
+                          </Td>
+                          <Td>
+                            <Controller
+                              control={control}
+                              name={`voucher.lines.${index}.buying_price`}
+                              render={({ field: priceField }) => (
+                                <CellInput
+                                  label={`Buying price for product ${index + 1}`}
+                                  placeholder="0"
+                                  numeric
+                                  className="text-right"
+                                  value={String(priceField.value)}
+                                  onChange={(next) => {
+                                    const buyingPrice = Number(next) || 0;
+                                    priceField.onChange(buyingPrice);
+                                    setLine(index, {
+                                      buying_price: buyingPrice,
+                                    });
+                                  }}
+                                  error={
+                                    errors.voucher?.lines?.[index]?.buying_price
+                                      ?.message
+                                  }
+                                />
+                              )}
+                            />
+                          </Td>
+                          <Td className="text-right tabular-nums font-medium whitespace-nowrap">
+                            {formatKyat(line.quantity_pairs * line.buying_price)}
+                            <button
+                              type="button"
+                              onClick={() => removeLine(index)}
+                              title="Remove this product"
+                              aria-label={`Remove product ${index + 1}`}
+                              className={cn(
+                                "ml-2 p-1 rounded-md align-middle transition-colors duration-150",
+                                SOFT_RED,
+                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
+                              )}
+                            >
+                              <TrashIcon className="w-4 h-4" />
+                            </button>
+                          </Td>
+                          <Td>
+                            <WaitingList
+                              stockCode={line.stock_code}
+                              voucherQty={line.quantity_pairs}
+                            />
+                          </Td>
+                        </Tr>
+                      );
+                    })}
+                    <Tr className="bg-bg-subtle hover:bg-bg-subtle">
+                      <Td className="font-semibold" colSpan={2}>
+                        Total
+                      </Td>
+                      <Td className="text-right tabular-nums font-semibold">
+                        {sets(voucher.total_quantity_pairs)}
+                      </Td>
+                      <Td className="text-right tabular-nums font-semibold text-success">
+                        {sets(voucher.received_quantity_pairs)}
+                      </Td>
+                      <Td className="text-right tabular-nums font-semibold text-error">
+                        {sets(remaining)}
+                      </Td>
+                      <Td />
+                      <Td className="text-right tabular-nums font-semibold text-brand">
+                        {formatKyat(amount)}
+                      </Td>
+                      <Td />
+                    </Tr>
+                  </Tbody>
+                </TableContainer>
+                <div className="mt-3">
+                  <Button size="sm" onClick={addLine}>
+                    <PlusIcon className="w-4 h-4" />
+                    Add product
                   </Button>
-                )}
-              </div>
+                  {addingLineId && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={cancelAddLine}
+                      className={cn(SOFT_RED, "ml-2")}
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                </div>
               </>
             )}
           </section>
 
           <section>
-            <SectionLabel>Receiving</SectionLabel>
-            <div className="grid gap-3 grid-cols-1 sm:grid-cols-3 mb-4">
-              <BigFigure label="Ordered qty" value={sets(voucher.total_qty)} />
-              <BigFigure
-                label="Received qty"
-                value={sets(voucher.received_qty)}
-                tone="success"
-              />
-              <BigFigure
-                label="Remaining qty"
-                value={sets(remaining)}
-                tone="error"
-              />
-            </div>
-            <div className="flex items-center justify-between text-sm mb-2">
-              <span className="font-medium text-text-secondary">
-                Receiving progress
-              </span>
-              <span className="tabular-nums font-semibold text-text-primary">
-                {sets(voucher.received_qty)} / {sets(voucher.total_qty)} ({pct}
-                %)
-              </span>
-            </div>
-            <ThinBar pct={pct} label="Receiving progress" />
-          </section>
-
-          <section>
-            <SectionLabel>Delivery journey</SectionLabel>
-            <VoucherJourney voucher={voucher} />
-          </section>
-
-          <section>
-            <SectionLabel>Payment</SectionLabel>
-            <div className="grid gap-3 grid-cols-1 sm:grid-cols-3 mb-4">
-              <MoneyFigure label="Voucher total" value={formatKyat(amount)} />
-              <MoneyFigure
+            <div className="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+              <h3 className="pt-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
+                Payment
+              </h3>
+              <InlineProgress
                 label="Paid so far"
-                value={formatKyat(paid)}
-                tone="success"
-              />
-              <MoneyFigure
-                label="Unpaid amount"
-                value={formatKyat(balance)}
-                tone={balance > 0 ? "error" : "success"}
+                value={`${formatKyat(paid)} / ${formatKyat(amount)} (${paidShare}%)`}
+                pct={paidShare}
+                warn
               />
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 text-sm mb-2">
-              <span className="font-medium text-text-secondary">
-                Paid so far
-              </span>
-              <span className="tabular-nums font-semibold text-text-primary">
-                {formatKyat(paid)} / {formatKyat(amount)} ({paidShare}%)
-              </span>
-            </div>
-            <ThinBar pct={paidShare} label="Paid so far" warn />
-            <div className="mt-5">
-              {/* The same table the customer side uses, so money paid to a supplier is
-                  written down exactly the way money from a customer is. */}
-              <PaymentsTable
-                payments={voucher.payment.payments}
-                balance={balance}
-                who="supplier"
-                onAdd={addPayment}
-                onUpdate={(payment) =>
-                  setPayment(payment.payment_id, payment)
-                }
-                onRemove={removePayment}
-                readOnly={detailMode === "view"}
-              />
-            </div>
+            {/* The same table the customer side uses, so money paid to a supplier is
+                written down exactly the way money from a customer is. */}
+            <PaymentsTable
+              payments={voucher.payment.payments}
+              balance={balance}
+              who="supplier"
+              onAdd={addPayment}
+              onUpdate={(payment) => setPayment(payment.payment_id, payment)}
+              onRemove={removePayment}
+              readOnly={detailMode === "view"}
+            />
+          </section>
+
+          <section>
+            <SectionLabel>Shipment journey</SectionLabel>
+            <VoucherJourney voucher={voucher} />
           </section>
         </div>
       </Panel>
@@ -1965,25 +2424,31 @@ function WaitingList({
   }
 
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="min-w-[12rem]">
       {waiting.map((entry) => (
-        <span
+        <div
           key={`${entry.orderNo}-${entry.name}`}
-          className="inline-flex max-w-full flex-col rounded-full bg-brand-subtle px-2 py-1 text-xs font-medium text-brand"
+          className="border-b border-border/60 py-2 first:pt-0 last:border-0 last:pb-0"
         >
-          <span className="whitespace-nowrap">
-            {entry.name} ({sets(entry.qty)})
-          </span>
-          <span className="inline-flex items-center gap-0.5 break-words text-[10px] font-normal text-brand/75">
-            {entry.orderNo}
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="min-w-0 truncate font-medium text-text-primary">
+              {entry.name}
+            </span>
+            <span className="shrink-0 font-semibold tabular-nums text-brand">
+              {sets(entry.qty)}
+            </span>
+          </div>
+          <div className="mt-0.5 inline-flex max-w-full items-center gap-0.5 text-xs text-text-muted">
+            <span className="break-words">{entry.orderNo}</span>
             <CopyButton value={entry.orderNo} what="order no." />
-          </span>
-        </span>
+          </div>
+        </div>
       ))}
       {spare > 0 && (
-        <span className="inline-flex items-center rounded-full bg-bg-raised text-text-secondary text-xs font-medium px-2 py-0.5 whitespace-nowrap">
-          {sets(spare)} unallocated
-        </span>
+        <div className="mt-2 flex items-center justify-between gap-3 rounded-md bg-bg-raised px-2 py-1.5 text-xs text-text-secondary">
+          <span>Unallocated</span>
+          <span className="font-semibold tabular-nums">{sets(spare)}</span>
+        </div>
       )}
     </div>
   );
@@ -2009,7 +2474,7 @@ function VoucherJourney({
       title="Voucher taken"
       subtitle={formatDate(voucher.voucher_date)}
     >
-      <JourneyRow label="Ordered" value={sets(voucher.total_qty)} />
+      <JourneyRow label="Ordered" value={sets(voucher.total_quantity_pairs)} />
     </JourneyCard>
   );
 
@@ -2028,6 +2493,8 @@ function VoucherJourney({
       shipment={shipment}
       receivings={receivings}
       before={[taken]}
+      expectedPackages={voucher.total_packages}
+      expectedQtyPairs={voucher.total_quantity_pairs}
     />
   );
 }
@@ -2061,99 +2528,97 @@ function ThinBar({
   );
 }
 
-function BigFigure({
-  label,
-  value,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string;
-  tone?: "neutral" | "warning" | "success" | "error";
-}): React.JSX.Element {
-  return (
-    <div
-      className={cn(
-        "rounded-lg border px-4 py-3 text-center",
-        tone === "success" && "bg-success-subtle border-success/30",
-        tone === "warning" && "bg-warning-subtle border-warning/30",
-        tone === "error" && "bg-error-subtle border-error/30",
-        tone === "neutral" && "bg-bg-subtle border-border",
-      )}
-    >
-      <div className="text-xs uppercase tracking-wide text-text-muted mb-1">
-        {label}
-      </div>
-      <div
-        className={cn(
-          "text-xl font-bold tabular-nums leading-none",
-          tone === "success" && "text-success",
-          tone === "warning" && "text-warning",
-          tone === "error" && "text-error",
-          tone === "neutral" && "text-text-primary",
-        )}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function MoneyFigure({
-  label,
-  value,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string;
-  tone?: "neutral" | "success" | "error";
-}): React.JSX.Element {
-  return (
-    <div
-      className={cn(
-        "rounded-lg border px-4 py-3 text-center",
-        tone === "success" && "bg-success-subtle border-success/30",
-        tone === "error" && "bg-error-subtle border-error/30",
-        tone === "neutral" && "bg-bg-subtle border-border",
-      )}
-    >
-      <div className="text-xs uppercase tracking-wide text-text-muted mb-1">
-        {label}
-      </div>
-      <div
-        className={cn(
-          "text-base font-bold tabular-nums leading-none",
-          tone === "success" && "text-success",
-          tone === "error" && "text-error",
-          tone === "neutral" && "text-text-primary",
-        )}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
 // ── New voucher ──────────────────────────────────────────────────────────────
 
 interface DraftLine {
   stock_code: string;
   description: string;
-  group: ProductGroup;
-  color_qty: string;
+  product_group: ProductGroup;
+  color_breakdown: string;
   buying_price: string;
+}
+
+const voucherDraftLineSchema = z
+  .object({
+    stock_code: z.string(),
+    description: z.string(),
+    product_group: z.enum(["man", "lady", "child"]),
+    color_breakdown: z.string(),
+    buying_price: z
+      .string()
+      .regex(/^\d*$/, "Buying price can only contain numbers."),
+  })
+  .superRefine((line, context) => {
+    const hasProductDetails =
+      line.stock_code.trim() !== "" ||
+      line.description.trim() !== "" ||
+      line.color_breakdown.trim() !== "" ||
+      line.buying_price.trim() !== "";
+
+    // A blank draft row is harmless until staff begin entering it. Detailed color
+    // syntax and server-backed checks deliberately remain outside this local schema.
+    if (!hasProductDetails) return;
+
+    if (line.stock_code.trim() === "") {
+      context.addIssue({
+        code: "custom",
+        path: ["stock_code"],
+        message: "Enter a stock code.",
+      });
+    }
+    if (line.description.trim() === "") {
+      context.addIssue({
+        code: "custom",
+        path: ["description"],
+        message: "Enter a description.",
+      });
+    }
+    if (line.color_breakdown.trim() === "") {
+      context.addIssue({
+        code: "custom",
+        path: ["color_breakdown"],
+        message: "Enter colors and quantities.",
+      });
+    }
+  });
+
+const supplierVoucherFormSchema = z
+  .object({
+    voucher_date: z.string().trim().min(1, "Choose a voucher date."),
+    supplier_name: z.string().trim().min(1, "Choose a supplier or factory."),
+    carrier_name: z.string(),
+    packages: z.string().regex(/^\d*$/, "Packages can only contain numbers."),
+    lines: z.array(voucherDraftLineSchema),
+  })
+  .superRefine((values, context) => {
+    if (!values.lines.some((line) => line.stock_code.trim() !== "")) {
+      context.addIssue({
+        code: "custom",
+        path: ["lines"],
+        message: "Add at least one product.",
+      });
+    }
+  });
+
+interface SupplierVoucherFormValues {
+  voucher_date: string;
+  supplier_name: string;
+  carrier_name: string;
+  packages: string;
+  lines: DraftLine[];
 }
 
 /** The pairs one drafted row comes to: its colors read in its own unit. */
 function draftPairs(line: DraftLine): number {
   // A colour with no letter of its own is counted in sets.
-  return colorQtyPairs(line.color_qty, "set");
+  return colorQtyPairs(line.color_breakdown, "set");
 }
 
 const EMPTY_LINE: DraftLine = {
   stock_code: "",
   description: "",
-  group: "man",
-  color_qty: "",
+  product_group: "man",
+  color_breakdown: "",
   buying_price: "",
 };
 
@@ -2163,23 +2628,59 @@ function NewVoucherForm({
   nextVoucherNo: voucherNo,
   initialSupplierName = "",
   initialOrderLines,
+  lockedSupplier = false,
+  title = "New supplier voucher",
+  backLabel = "Back to vouchers",
   onCancel,
   onCreate,
 }: {
   nextVoucherNo: string;
   initialSupplierName?: string;
   initialOrderLines?: OpenOrderLine[];
+  /** The factory was selected in Create from customer orders and must not change here. */
+  lockedSupplier?: boolean;
+  title?: string;
+  backLabel?: string;
   onCancel: () => void;
   onCreate: (input: NewSupplierVoucherInput) => void;
 }): React.JSX.Element {
   const [step, setStep] = useState(0);
-  const [voucherDate, setVoucherDate] = useState(todayIso());
-  const [supplierName, setSupplierName] = useState(initialSupplierName);
-  const [cargoName, setCargoName] = useState("");
-  const [packages, setPackages] = useState("");
-  const [lines, setLines] = useState<DraftLine[]>(() =>
-    initialOrderLines ? draftLinesFromOpenOrderLines(initialOrderLines) : [{ ...EMPTY_LINE }],
-  );
+  const {
+    control,
+    register,
+    handleSubmit,
+    clearErrors,
+    setError,
+    setValue,
+    trigger,
+    getValues,
+    formState: { errors, isDirty },
+  } = useForm<SupplierVoucherFormValues>({
+    resolver: zodResolver(supplierVoucherFormSchema),
+    defaultValues: {
+      voucher_date: todayIso(),
+      supplier_name: initialSupplierName,
+      carrier_name: "",
+      packages: "",
+      lines: initialOrderLines
+        ? draftLinesFromOpenOrderLines(initialOrderLines)
+        : [{ ...EMPTY_LINE }],
+    },
+    mode: "onBlur",
+    reValidateMode: "onChange",
+  });
+  const { fields, append, remove, replace } = useFieldArray({
+    control,
+    name: "lines",
+  });
+  const values = useWatch({ control }) as SupplierVoucherFormValues;
+  const {
+    voucher_date: voucherDate,
+    supplier_name: supplierName,
+    carrier_name: cargoName,
+    packages,
+  } = values;
+  const lines = values.lines;
   const [showOrderPicker, setShowOrderPicker] = useState(false);
 
   const { orders, vouchers } = useWholesale();
@@ -2194,105 +2695,135 @@ function NewVoucherForm({
     (sum, line) => sum + draftPairs(line) * (Number(line.buying_price) || 0),
     0,
   );
-  const canLeaveSupplier = supplierName.trim() !== "";
-  const colorProblem = lines
-    .map((line) => colorQtyProblem(line.color_qty))
-    .find((problem) => problem !== null);
-  // Every row that names a product has to say how much of it: a stock code with no
-  // colours counts nothing, and a line worth nothing on an order is a line nobody can
-  // deliver against.
-  const emptyColors = filledLines.some((line) => line.color_qty.trim() === "");
-  const hasDuplicateStockCode = lines.some(
-    (_, index) => duplicateStockCodeProblem(lines, index) !== null,
-  );
-  const canLeaveProducts =
-    filledLines.length > 0 &&
-    totalQty > 0 &&
-    !emptyColors &&
-    colorProblem === undefined &&
-    !hasDuplicateStockCode;
-
-  function updateLine(index: number, patch: Partial<DraftLine>): void {
-    setLines((current) =>
-      current.map((line, position) =>
-        position === index ? { ...line, ...patch } : line,
-      ),
-    );
-  }
-
-  // A code we already buy fills its own description and group in, so the same shoe is not
+  // A code we already buy fills its own description and product_group in, so the same shoe is not
   // written two slightly different ways on two vouchers.
   function setStockCode(index: number, code: string): void {
     const known = productOf(code);
-    updateLine(
-      index,
-      known
-        ? {
-            stock_code: code,
-            description: known.description,
-            group: known.group,
-          }
-        : { stock_code: code },
-    );
+    setValue(`lines.${index}.stock_code`, code, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    if (known) {
+      setValue(`lines.${index}.description`, known.description, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+      setValue(`lines.${index}.product_group`, known.product_group, { shouldDirty: true });
+    }
   }
 
   function removeLine(index: number): void {
-    setLines((current) =>
-      current.length === 1
-        ? [{ ...EMPTY_LINE }]
-        : current.filter((_, position) => position !== index),
-    );
+    if (fields.length === 1) {
+      replace([{ ...EMPTY_LINE }]);
+      return;
+    }
+    remove(index);
   }
 
   // Customer demand is an optional shortcut. Adding a line here merges colours into an
   // existing stock-code row, while the manual product rows remain available below.
   function importOrderLine(source: OpenOrderLine): void {
-    setLines((current) => {
-      const code = source.stock_code.trim().toLowerCase();
-      const matchIndex = current.findIndex(
-        (line) => line.stock_code.trim().toLowerCase() === code,
-      );
-      if (matchIndex !== -1) {
-        const existing = current[matchIndex];
-        const combined = mergeColorQty(existing.color_qty, source.color_qty);
-        return current.map((line, index) =>
-          index === matchIndex ? { ...line, color_qty: combined } : line,
-        );
-      }
-      const filled: DraftLine = {
-        stock_code: source.stock_code,
-        description: source.description,
-        group: source.group,
-        color_qty: source.color_qty,
-        buying_price: "",
-      };
-      const emptyIndex = current.findIndex(
-        (line) => line.stock_code.trim() === "",
-      );
-      return emptyIndex !== -1
-        ? current.map((line, index) => (index === emptyIndex ? filled : line))
-        : [...current, filled];
-    });
+    const current = getValues("lines");
+    const code = source.stock_code.trim().toLowerCase();
+    const matchIndex = current.findIndex(
+      (line) => line.stock_code.trim().toLowerCase() === code,
+    );
+    if (matchIndex !== -1) {
+      const existing = current[matchIndex];
+      const combined = mergeColorQty(existing.color_breakdown, source.color_breakdown);
+      setValue(`lines.${matchIndex}.color_breakdown`, combined, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+      return;
+    }
+    const filled: DraftLine = {
+      stock_code: source.stock_code,
+      description: source.description,
+      product_group: source.product_group,
+      color_breakdown: source.color_breakdown,
+      buying_price: "",
+    };
+    const emptyIndex = current.findIndex(
+      (line) => line.stock_code.trim() === "",
+    );
+    if (emptyIndex !== -1) {
+      setValue(`lines.${emptyIndex}`, filled, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+      return;
+    }
+    append(filled);
   }
 
-  function submit(): void {
-    const voucherLines: SupplierVoucherLine[] = filledLines.map(
-      (line, index) => ({
+  async function moveToProducts(): Promise<void> {
+    const valid = await trigger([
+      "voucher_date",
+      "supplier_name",
+      "carrier_name",
+      "packages",
+    ]);
+    if (valid) setStep(1);
+  }
+
+  async function moveToReview(): Promise<void> {
+    clearErrors("lines");
+    const valid = await trigger("lines");
+    const colorProblem = lines.findIndex(
+      (line) => colorQtyProblem(line.color_breakdown) !== null,
+    );
+    if (colorProblem >= 0) {
+      setError(`lines.${colorProblem}.color_breakdown`, {
+        type: "validate",
+        message: colorQtyProblem(lines[colorProblem].color_breakdown) ?? undefined,
+      });
+    }
+    const duplicateStockCode = lines.findIndex(
+      (_, index) => duplicateStockCodeProblem(lines, index) !== null,
+    );
+    if (duplicateStockCode >= 0) {
+      setError(`lines.${duplicateStockCode}.stock_code`, {
+        type: "validate",
+        message:
+          duplicateStockCodeProblem(lines, duplicateStockCode) ?? undefined,
+      });
+    }
+    const hasProductQuantity = filledLines.some((line) => draftPairs(line) > 0);
+    if (!hasProductQuantity) {
+      setError("lines", {
+        type: "validate",
+        message: "Add a product with at least one color quantity.",
+      });
+    }
+    if (
+      valid &&
+      colorProblem < 0 &&
+      duplicateStockCode < 0 &&
+      hasProductQuantity
+    ) {
+      setStep(2);
+    }
+  }
+
+  function submit(values: SupplierVoucherFormValues): void {
+    const voucherLines: SupplierVoucherLine[] = values.lines
+      .filter((line) => line.stock_code.trim() !== "")
+      .map((line, index) => ({
         voucher_line_id: `line-${index}`,
         stock_code: line.stock_code.trim(),
         description: line.description.trim(),
-        group: line.group,
-        color_qty: line.color_qty.trim(),
+        product_group: line.product_group,
+        color_breakdown: line.color_breakdown.trim(),
         unit: "set",
-        voucher_qty: draftPairs(line),
+        quantity_pairs: draftPairs(line),
         buying_price: Number(line.buying_price) || 0,
-      }),
-    );
+      }));
     onCreate({
-      supplier_name: supplierName.trim(),
-      voucher_date: voucherDate,
-      total_packages: Number(packages) || 0,
-      cargo_name: cargoName.trim(),
+      supplier_name: values.supplier_name.trim(),
+      voucher_date: values.voucher_date,
+      total_packages: Number(values.packages) || 0,
+      carrier_name: values.carrier_name.trim(),
       lines: voucherLines,
     });
   }
@@ -2300,49 +2831,69 @@ function NewVoucherForm({
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <Button variant="ghost" size="sm" onClick={onCancel}>
+        <Button
+          variant="ghost"
+          size="sm"
+          title={isDirty ? "This new voucher has unsaved changes." : undefined}
+          onClick={onCancel}
+        >
           <ChevronLeftIcon className="w-4 h-4" />
-          Back to vouchers
+          {backLabel}
         </Button>
       </div>
 
       <Panel>
         <div className="px-6 py-5 border-b border-border">
           <h2 className="text-lg font-semibold text-text-primary tracking-tight mb-5">
-            New supplier voucher
+            {title}
           </h2>
-          <StepBar steps={STEPS} step={step} />
+          <StepBar
+            steps={
+              lockedSupplier ? ["Voucher details", "Products", "Review"] : STEPS
+            }
+            step={step}
+          />
         </div>
 
         {step === 0 && (
           <div className="px-6 py-6 flex flex-col gap-5">
-            <SectionLabel>Step 1 — supplier &amp; shipment</SectionLabel>
+            <SectionLabel>
+              Step 1 —{" "}
+              {lockedSupplier ? "voucher details" : "supplier & shipment"}
+            </SectionLabel>
             <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
               <Input
                 label="Date"
                 type="date"
                 className={EDITABLE}
-                value={voucherDate}
-                onChange={(event) => setVoucherDate(event.target.value)}
+                error={errors.voucher_date?.message}
+                {...register("voucher_date")}
               />
-              <Select
-                label={<Required>Supplier / Factory</Required>}
-                className={EDITABLE}
-                value={supplierName}
-                onChange={(event) => setSupplierName(event.target.value)}
-              >
-                <option value="">Choose…</option>
-                {SUPPLIER_NAMES.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </Select>
+              {lockedSupplier ? (
+                <ReadOnlyField
+                  label="Supplier / Factory"
+                  value={supplierName}
+                />
+              ) : (
+                <Select
+                  label={<Required>Supplier / Factory</Required>}
+                  className={EDITABLE}
+                  error={errors.supplier_name?.message}
+                  {...register("supplier_name")}
+                >
+                  <option value="">Choose…</option>
+                  {SUPPLIER_NAMES.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </Select>
+              )}
               <Select
                 label="Cargo"
                 className={EDITABLE}
-                value={cargoName}
-                onChange={(event) => setCargoName(event.target.value)}
+                error={errors.carrier_name?.message}
+                {...register("carrier_name")}
               >
                 <option value="">Choose…</option>
                 {CARGO_NAMES.map((name) => (
@@ -2357,15 +2908,19 @@ function NewVoucherForm({
                 inputMode="numeric"
                 placeholder="0"
                 className={cn(EDITABLE, "text-right")}
+                error={errors.packages?.message}
                 value={packages}
                 onChange={(event) =>
-                  setPackages(onlyDigits(event.target.value))
+                  setValue("packages", onlyDigits(event.target.value), {
+                    shouldDirty: true,
+                    shouldValidate: true,
+                  })
                 }
                 hint="How many packages the supplier says it is sending."
               />
             </div>
             <div className="flex justify-end">
-              <Button disabled={!canLeaveSupplier} onClick={() => setStep(1)}>
+              <Button onClick={() => void moveToProducts()}>
                 Next: products
                 <ChevronRightIcon className="w-4 h-4" />
               </Button>
@@ -2397,11 +2952,11 @@ function NewVoucherForm({
                     : "No open products"}
                 </span>
               </button>
-              {showOrderPicker && (
-                orderLines.length === 0 ? (
+              {showOrderPicker &&
+                (orderLines.length === 0 ? (
                   <p className="border-t border-border px-4 pb-4 pt-3 text-sm text-text-muted">
-                    No open customer-order products are waiting for {supplierName}.
-                    You can add a product manually below.
+                    No open customer-order products are waiting for{" "}
+                    {supplierName}. You can add a product manually below.
                   </p>
                 ) : (
                   <TableContainer className="rounded-none border-0 border-t border-border">
@@ -2410,7 +2965,7 @@ function NewVoucherForm({
                         <Th className="whitespace-nowrap">Order no.</Th>
                         <Th>Customer</Th>
                         <Th className="min-w-[12rem]">Product</Th>
-                        <Th>Colors to request</Th>
+                        <Th>Colors</Th>
                         <Th className="whitespace-nowrap text-right">
                           Qty to request
                         </Th>
@@ -2443,12 +2998,12 @@ function NewVoucherForm({
                                 {row.description || "—"}
                               </span>
                               <span className="text-xs text-text-muted">
-                                {GROUP_LABELS[row.group]}
+                                {GROUP_LABELS[row.product_group]}
                               </span>
                             </div>
                           </Td>
                           <Td className="whitespace-normal break-words font-mono text-xs text-text-secondary">
-                            {row.color_qty || "—"}
+                            {row.color_breakdown || "—"}
                           </Td>
                           <Td className="whitespace-nowrap text-right font-semibold tabular-nums text-error">
                             {sets(row.remaining)}
@@ -2468,8 +3023,7 @@ function NewVoucherForm({
                       ))}
                     </Tbody>
                   </TableContainer>
-                )
-              )}
+                ))}
             </div>
 
             <TableContainer>
@@ -2477,63 +3031,93 @@ function NewVoucherForm({
                 <Tr>
                   <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[13rem]">Colors</Th>
-                  <Th className="text-right whitespace-nowrap">Ordered qty</Th>
+                  <Th className="text-right whitespace-nowrap">Ordered quantity</Th>
                   <Th className="text-right min-w-[8rem]">Buying price</Th>
                   <Th className="text-right min-w-[8rem]">Amount</Th>
                 </Tr>
               </Thead>
               <Tbody>
-                {lines.map((line, index) => {
+                {fields.map((field, index) => {
+                  const line = lines[index] ?? EMPTY_LINE;
                   const lineQty = draftPairs(line);
                   const lineAmount = lineQty * (Number(line.buying_price) || 0);
                   return (
-                    <Tr key={index}>
+                    <Tr key={field.id}>
                       <Td className="min-w-[18rem]">
                         <div className="flex min-w-0 flex-col gap-1.5">
                           <div className="flex min-w-0 items-start gap-1">
-                            <SuggestInput
-                              bare
-                              label={`Stock code for product ${index + 1}`}
-                              placeholder="A1001"
-                              suggestions={STOCK_CODES}
-                              value={line.stock_code}
-                              onChange={(next) => setStockCode(index, next)}
-                              error={
-                                duplicateStockCodeProblem(lines, index) ??
-                                undefined
-                              }
+                            <Controller
+                              control={control}
+                              name={`lines.${index}.stock_code`}
+                              render={() => (
+                                <SuggestInput
+                                  bare
+                                  label={`Stock code for product ${index + 1}`}
+                                  placeholder="A1001"
+                                  suggestions={STOCK_CODES}
+                                  value={line.stock_code}
+                                  onChange={(next) => setStockCode(index, next)}
+                                  error={
+                                    errors.lines?.[index]?.stock_code
+                                      ?.message ??
+                                    duplicateStockCodeProblem(lines, index) ??
+                                    undefined
+                                  }
+                                />
+                              )}
                             />
                             <CopyButton
                               value={line.stock_code}
                               what="stock code"
                             />
                           </div>
-                          <CellInput
-                            label={`Description for product ${index + 1}`}
-                            placeholder="Men's leather sandal"
-                            multiline
-                            value={line.description}
-                            onChange={(next) =>
-                              updateLine(index, { description: next })
-                            }
+                          <Controller
+                            control={control}
+                            name={`lines.${index}.description`}
+                            render={({ field: descriptionField }) => (
+                              <CellInput
+                                label={`Description for product ${index + 1}`}
+                                placeholder="Men's leather sandal"
+                                multiline
+                                value={descriptionField.value}
+                                onChange={descriptionField.onChange}
+                                error={
+                                  errors.lines?.[index]?.description?.message
+                                }
+                              />
+                            )}
                           />
-                          <GroupSelect
-                            label={`Group for product ${index + 1}`}
-                            value={line.group}
-                            onChange={(group) => updateLine(index, { group })}
+                          <Controller
+                            control={control}
+                            name={`lines.${index}.product_group`}
+                            render={({ field: groupField }) => (
+                              <GroupSelect
+                                label={`Group for product ${index + 1}`}
+                                value={groupField.value}
+                                onChange={groupField.onChange}
+                              />
+                            )}
                           />
                         </div>
                       </Td>
                       <Td>
-                        <CellInput
-                          label={`Colors for product ${index + 1}`}
-                          placeholder="black10s,pink2p"
-                          multiline
-                          value={line.color_qty}
-                          onChange={(next) =>
-                            updateLine(index, { color_qty: next })
-                          }
-                          error={colorQtyProblem(line.color_qty) ?? undefined}
+                        <Controller
+                          control={control}
+                          name={`lines.${index}.color_breakdown`}
+                          render={({ field: colorField }) => (
+                            <CellInput
+                              label={`Colors for product ${index + 1}`}
+                              placeholder="black10s,pink2p"
+                              multiline
+                              value={colorField.value}
+                              onChange={colorField.onChange}
+                              error={
+                                errors.lines?.[index]?.color_breakdown?.message ??
+                                colorQtyProblem(line.color_breakdown) ??
+                                undefined
+                              }
+                            />
+                          )}
                         />
                         <span className="mt-1 block text-xs text-text-muted">
                           {lineQty > 0
@@ -2545,17 +3129,22 @@ function NewVoucherForm({
                         {sets(lineQty)}
                       </Td>
                       <Td>
-                        <CellInput
-                          label={`Buying price for product ${index + 1}`}
-                          placeholder="0"
-                          numeric
-                          className="text-right"
-                          value={line.buying_price}
-                          onChange={(next) =>
-                            updateLine(index, {
-                              buying_price: onlyDigits(next),
-                            })
-                          }
+                        <Controller
+                          control={control}
+                          name={`lines.${index}.buying_price`}
+                          render={({ field: priceField }) => (
+                            <CellInput
+                              label={`Buying price for product ${index + 1}`}
+                              placeholder="0"
+                              numeric
+                              className="text-right"
+                              value={priceField.value}
+                              onChange={priceField.onChange}
+                              error={
+                                errors.lines?.[index]?.buying_price?.message
+                              }
+                            />
+                          )}
                         />
                       </Td>
                       <Td className="text-right tabular-nums font-medium whitespace-nowrap">
@@ -2588,13 +3177,15 @@ function NewVoucherForm({
               </Tbody>
             </TableContainer>
 
+            {errors.lines?.message && (
+              <p className="text-sm text-error">{errors.lines.message}</p>
+            )}
+
             <div>
               <Button
                 variant="secondary"
                 className={SOFT_BLUE}
-                onClick={() =>
-                  setLines((current) => [...current, { ...EMPTY_LINE }])
-                }
+                onClick={() => append({ ...EMPTY_LINE })}
               >
                 <PlusIcon className="w-4 h-4" />
                 Add another product
@@ -2610,7 +3201,7 @@ function NewVoucherForm({
                 <ChevronLeftIcon className="w-4 h-4" />
                 Back
               </Button>
-              <Button disabled={!canLeaveProducts} onClick={() => setStep(2)}>
+              <Button onClick={() => void moveToReview()}>
                 Next: review
                 <ChevronRightIcon className="w-4 h-4" />
               </Button>
@@ -2636,7 +3227,7 @@ function NewVoucherForm({
                 <Tr>
                   <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[13rem]">Colors</Th>
-                  <Th className="text-right whitespace-nowrap">Ordered qty</Th>
+                  <Th className="text-right whitespace-nowrap">Ordered quantity</Th>
                   <Th className="text-right min-w-[8rem] whitespace-nowrap">
                     Buying price
                   </Th>
@@ -2663,16 +3254,14 @@ function NewVoucherForm({
                           </div>
                           <ProductCell
                             description={line.description}
-                            group={line.group}
+                            product_group={line.product_group}
                           />
                         </div>
                       </Td>
                       <Td className="font-mono text-xs text-text-secondary break-words">
-                        {line.color_qty || "—"}
+                        {line.color_breakdown || "—"}
                       </Td>
-                      <Td className="text-right tabular-nums">
-                        {sets(qty)}
-                      </Td>
+                      <Td className="text-right tabular-nums">{sets(qty)}</Td>
                       <Td className="text-right tabular-nums text-text-secondary">
                         {formatKyat(Number(line.buying_price) || 0)}
                       </Td>
@@ -2705,7 +3294,7 @@ function NewVoucherForm({
                 <ChevronLeftIcon className="w-4 h-4" />
                 Back
               </Button>
-              <Button onClick={submit}>
+              <Button onClick={handleSubmit(submit)}>
                 <CheckIcon className="w-4 h-4" />
                 Confirm voucher
               </Button>

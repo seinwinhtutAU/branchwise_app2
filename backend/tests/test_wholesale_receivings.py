@@ -27,11 +27,11 @@ def _shipment_payload() -> dict:
     return {
         "voucher_no": "VCH-260825-0001",
         "supplier_name": "Goody Factory",
-        "cargo_name": "Shwe Moe Cargo",
-        "final_location": "Bogyoke Rd, Mawlamyine",
-        "sent_date": "2026-08-27",
+        "carrier_name": "Shwe Moe Cargo",
+        "final_destination": "Bogyoke Rd, Mawlamyine",
+        "sent_on": "2026-08-27",
         "total_packages": 2,
-        "total_pairs": 12,
+        "total_quantity_pairs": 12,
         "total_unit": "set",
         "packages_sent_by_cargo": 2,
         "final_received_packages": 0,
@@ -57,9 +57,9 @@ def test_receiving_crud_packages_costs_and_shipment_figure(
         json={
             "shipment_id": shipment_id,
             "gate": "Bogyoke Rd, Mawlamyine",
-            "received_date": "2026-09-12",
+            "received_on": "2026-09-12",
             "total_packages": 2,
-            "total_pairs": 12,
+            "total_quantity_pairs": 12,
             "total_unit": "set",
         },
     )
@@ -75,22 +75,22 @@ def test_receiving_crud_packages_costs_and_shipment_figure(
         f"/api/wholesale/receivings/{body['receiving_id']}/packages/{package_id}",
         json={
             "opened": True,
-            "received_date": "2026-09-12",
+            "received_on": "2026-09-12",
             "note": "Counted at the gate",
             "items": [
                 {
                     "stock_code": "A1001",
                     "description": "Men's sandal",
                     "product_group": "man",
-                    "color_qty": "black1s",
-                    "qty": 1,
+                    "color_breakdown": "black1s",
+                    "quantity": 1,
                     "unit": "set",
                 }
             ],
         },
     )
     assert updated.status_code == 200
-    assert updated.json()["counted_pairs"] == 6
+    assert updated.json()["counted_quantity_pairs"] == 6
     assert updated.json()["receiving_status"] == "checking"
 
     costs = authed_client.put(
@@ -124,9 +124,9 @@ def test_receiving_rejects_other_branch_and_retail_account(
         json={
             "shipment_id": shipment_id,
             "gate": "Gate",
-            "received_date": "2026-09-12",
+            "received_on": "2026-09-12",
             "total_packages": 1,
-            "total_pairs": 6,
+            "total_quantity_pairs": 6,
             "total_unit": "set",
         },
     )

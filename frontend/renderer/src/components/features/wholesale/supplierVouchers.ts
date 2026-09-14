@@ -26,15 +26,15 @@ export interface SupplierVoucherLine {
   /** What the product actually is, so a line reads as a shoe and not as a code. */
   description: string;
   /** Man, lady or child — the range the business thinks in. */
-  group: ProductGroup;
+  product_group: ProductGroup;
   /** Colors and their counts as staff write them, e.g. "black10,pink10". */
-  color_qty: string;
+  color_breakdown: string;
   /** The unit the colors were written in. */
   unit: Unit;
-  /** Total pairs across those colors — derived from color_qty and the unit. */
-  voucher_qty: number;
+  /** Total pairs across those colors — derived from color_breakdown and the unit. */
+  quantity_pairs: number;
   /** Total pairs received for this stock code from opened receiving packages. */
-  received_qty?: number;
+  received_quantity_pairs?: number;
   buying_price: number;
 }
 
@@ -53,7 +53,7 @@ export function paidAmount(voucher: SupplierVoucher): number {
   );
 }
 
-/** A voucher as the business holds it. `received_qty` is not typed by anyone: it is what
+/** A voucher as the business holds it. `received_quantity_pairs` is not typed by anyone: it is what
  *  the receiving gate has counted against this voucher, written back whenever a package is
  *  opened (see ./store). A voucher no goods have arrived for is simply waiting. */
 export interface SupplierVoucher {
@@ -64,31 +64,31 @@ export interface SupplierVoucher {
   voucher_date: string;
   /** How many packages the supplier says it is sending. */
   total_packages: number;
-  cargo_name: string;
-  total_qty: number;
-  received_qty: number;
+  carrier_name: string;
+  total_quantity_pairs: number;
+  received_quantity_pairs: number;
   payment: VoucherPayment;
   lines: SupplierVoucherLine[];
 }
 
 export function voucherAmount(voucher: SupplierVoucher): number {
   return voucher.lines.reduce(
-    (sum, line) => sum + line.voucher_qty * line.buying_price,
+    (sum, line) => sum + line.quantity_pairs * line.buying_price,
     0,
   );
 }
 
 export function remainingQty(voucher: SupplierVoucher): number {
-  return Math.max(0, voucher.total_qty - voucher.received_qty);
+  return Math.max(0, voucher.total_quantity_pairs - voucher.received_quantity_pairs);
 }
 
 export function receivedPct(voucher: SupplierVoucher): number {
-  return sharePct(voucher.received_qty, voucher.total_qty);
+  return sharePct(voucher.received_quantity_pairs, voucher.total_quantity_pairs);
 }
 
 export function receivingStatus(voucher: SupplierVoucher): ReceivingStatus {
-  if (voucher.received_qty <= 0) return "waiting";
-  if (voucher.received_qty >= voucher.total_qty) return "fully_received";
+  if (voucher.received_quantity_pairs <= 0) return "waiting";
+  if (voucher.received_quantity_pairs >= voucher.total_quantity_pairs) return "fully_received";
   return "partly_received";
 }
 
@@ -123,15 +123,15 @@ export const SEED_VOUCHERS: SupplierVoucher[] = [
     supplier_name: "Goody Factory",
     voucher_date: "2026-08-25",
     total_packages: 10,
-    cargo_name: "Shwe Moe Cargo",
-    total_qty: 300,
-    received_qty: 90,
+    carrier_name: "Shwe Moe Cargo",
+    total_quantity_pairs: 300,
+    received_quantity_pairs: 90,
     payment: {
       account_id: "pa-v1",
       payments: [
         {
           payment_id: "payv-1",
-          date: "2026-08-25",
+          paid_on: "2026-08-25",
           amount: 2000000,
           note: "Advance to the factory",
         },
@@ -142,20 +142,20 @@ export const SEED_VOUCHERS: SupplierVoucher[] = [
         voucher_line_id: "fvl-1",
         stock_code: "A1001",
         description: "Men's leather sandal",
-        group: "man",
-        color_qty: "black90p,white60p",
+        product_group: "man",
+        color_breakdown: "black90p,white60p",
         unit: "pair",
-        voucher_qty: 150,
+        quantity_pairs: 150,
         buying_price: 18000,
       },
       {
         voucher_line_id: "fvl-2",
         stock_code: "A1002",
         description: "Men's slipper",
-        group: "man",
-        color_qty: "white80p,pink70p",
+        product_group: "man",
+        color_breakdown: "white80p,pink70p",
         unit: "pair",
-        voucher_qty: 150,
+        quantity_pairs: 150,
         buying_price: 20000,
       },
     ],
@@ -166,21 +166,21 @@ export const SEED_VOUCHERS: SupplierVoucher[] = [
     supplier_name: "Lek",
     voucher_date: "2026-08-28",
     total_packages: 8,
-    cargo_name: "Ayar Cargo",
-    total_qty: 162,
-    received_qty: 162,
+    carrier_name: "Ayar Cargo",
+    total_quantity_pairs: 162,
+    received_quantity_pairs: 162,
     payment: {
       account_id: "pa-v2",
       payments: [
         {
           payment_id: "payv-2",
-          date: "2026-08-28",
+          paid_on: "2026-08-28",
           amount: 2000000,
           note: "Advance",
         },
         {
           payment_id: "payv-3",
-          date: "2026-09-04",
+          paid_on: "2026-09-04",
           amount: 1120000,
           note: "On arrival",
         },
@@ -191,10 +191,10 @@ export const SEED_VOUCHERS: SupplierVoucher[] = [
         voucher_line_id: "fvl-3",
         stock_code: "B2001",
         description: "Ladies' flat sandal",
-        group: "lady",
-        color_qty: "brown102p,black60p",
+        product_group: "lady",
+        color_breakdown: "brown102p,black60p",
         unit: "pair",
-        voucher_qty: 162,
+        quantity_pairs: 162,
         buying_price: 19500,
       },
     ],
@@ -205,9 +205,9 @@ export const SEED_VOUCHERS: SupplierVoucher[] = [
     supplier_name: "Panda Shoes",
     voucher_date: "2026-09-01",
     total_packages: 20,
-    cargo_name: "Tiger Cargo",
-    total_qty: 396,
-    received_qty: 0,
+    carrier_name: "Tiger Cargo",
+    total_quantity_pairs: 396,
+    received_quantity_pairs: 0,
     payment: {
       account_id: "pa-v3",
       payments: [],
@@ -217,20 +217,20 @@ export const SEED_VOUCHERS: SupplierVoucher[] = [
         voucher_line_id: "fvl-4",
         stock_code: "C3001",
         description: "Kids' school shoe",
-        group: "child",
-        color_qty: "navy120p,black78p",
+        product_group: "child",
+        color_breakdown: "navy120p,black78p",
         unit: "pair",
-        voucher_qty: 198,
+        quantity_pairs: 198,
         buying_price: 17000,
       },
       {
         voucher_line_id: "fvl-5",
         stock_code: "C3002",
         description: "Kids' sandal",
-        group: "child",
-        color_qty: "red100p,white98p",
+        product_group: "child",
+        color_breakdown: "red100p,white98p",
         unit: "pair",
-        voucher_qty: 198,
+        quantity_pairs: 198,
         buying_price: 17000,
       },
     ],
@@ -241,15 +241,15 @@ export const SEED_VOUCHERS: SupplierVoucher[] = [
     supplier_name: "Maldini",
     voucher_date: "2026-09-05",
     total_packages: 6,
-    cargo_name: "Shwe Moe Cargo",
-    total_qty: 120,
-    received_qty: 0,
+    carrier_name: "Shwe Moe Cargo",
+    total_quantity_pairs: 120,
+    received_quantity_pairs: 0,
     payment: {
       account_id: "pa-v4",
       payments: [
         {
           payment_id: "payv-4",
-          date: "2026-09-05",
+          paid_on: "2026-09-05",
           amount: 1200000,
           note: "Advance",
         },
@@ -260,10 +260,10 @@ export const SEED_VOUCHERS: SupplierVoucher[] = [
         voucher_line_id: "fvl-6",
         stock_code: "D4001",
         description: "Ladies' rubber slipper",
-        group: "lady",
-        color_qty: "beige120p",
+        product_group: "lady",
+        color_breakdown: "beige120p",
         unit: "pair",
-        voucher_qty: 120,
+        quantity_pairs: 120,
         buying_price: 19000,
       },
     ],

@@ -36,6 +36,7 @@ from app.services.wholesale_receivings import (
     update_package,
     update_receiving,
 )
+from app.services.wholesale.units import from_pairs
 
 router = APIRouter(prefix="/api/wholesale/receivings", tags=["wholesale"])
 
@@ -50,24 +51,25 @@ def _item_out(item: ReceivingItem) -> dict:
         "item_id": item.id,
         "stock_code": item.stock_code,
         "description": item.description,
-        "group": item.product_group.value,
-        "color_qty": item.color_qty,
+        "product_group": item.product_group.value,
+        "color_breakdown": item.color_breakdown,
         "colors": item.colors,
+        "quantity": from_pairs(item.quantity_pairs, item.unit),
         "unit": item.unit.value,
-        "qty_pairs": item.qty_pairs,
+        "quantity_pairs": item.quantity_pairs,
     }
 
 
 def _package_out(package: ReceivingPackage) -> dict:
-    items_like = [ItemLike(qty_pairs=item.qty_pairs) for item in package.items]
+    items_like = [ItemLike(quantity_pairs=item.quantity_pairs) for item in package.items]
     return {
         "package_id": package.id,
         "package_no": package.package_no,
         "opened": package.opened,
-        "received_date": package.received_date,
+        "received_on": package.received_on,
         "note": package.note,
         "items": [_item_out(item) for item in package.items],
-        "pairs": sum(item.qty_pairs for item in items_like),
+        "quantity_pairs": sum(item.quantity_pairs for item in items_like),
     }
 
 
@@ -85,10 +87,10 @@ def _cost_out(cost: ReceivingCost) -> dict:
 def _receiving_out(receiving: Receiving) -> dict:
     packages = sorted(receiving.packages, key=lambda entry: entry.package_no)
     packages_like = [
-        PackageLike(opened=package.opened, items=[ItemLike(qty_pairs=item.qty_pairs) for item in package.items])
+        PackageLike(opened=package.opened, items=[ItemLike(quantity_pairs=item.quantity_pairs) for item in package.items])
         for package in packages
     ]
-    expected = receiving.total_pairs
+    expected = receiving.total_quantity_pairs
     counted = counted_pairs(packages_like)
     costs = [(cost.stage, float(cost.amount)) for cost in receiving.costs]
 
@@ -101,16 +103,16 @@ def _receiving_out(receiving: Receiving) -> dict:
         "voucher_no": receiving.voucher_no,
         "supplier_name": receiving.supplier_name,
         "gate": receiving.gate,
-        "received_date": receiving.received_date,
+        "received_on": receiving.received_on,
         "total_packages": receiving.total_packages,
-        "total_pairs": receiving.total_pairs,
+        "total_quantity_pairs": receiving.total_quantity_pairs,
         "total_unit": receiving.total_unit.value,
         "packages": [_package_out(package) for package in packages],
         "costs": [_cost_out(cost) for cost in receiving.costs],
-        "counted_pairs": counted,
-        "expected_pairs": expected,
-        "pairs_difference": counted - expected,
-        "opened_count": opened_count(packages_like),
+        "counted_quantity_pairs": counted,
+        "expected_quantity_pairs": expected,
+        "quantity_difference_pairs": counted - expected,
+        "opened_package_count": opened_count(packages_like),
         "checked_pct": checked_pct(packages_like),
         "receiving_status": receiving_status(packages_like, expected),
         "total_cost": sum(float(cost.amount) for cost in receiving.costs),

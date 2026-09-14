@@ -23,11 +23,11 @@ class ShipmentCreate(BaseModel):
     branch_id: str | None = None
     voucher_no: str = Field(min_length=1, max_length=30)
     supplier_name: str = Field(min_length=1, max_length=255)
-    cargo_name: str = ""
-    final_location: str = Field(min_length=1, max_length=255)
-    sent_date: date
+    carrier_name: str = ""
+    final_destination: str = Field(min_length=1, max_length=255)
+    sent_on: date
     total_packages: int = Field(ge=0)
-    total_pairs: int = Field(ge=0)
+    total_quantity_pairs: int = Field(ge=0)
     total_unit: WholesaleUnit = WholesaleUnit.SET
     packages_sent_by_cargo: int = Field(ge=0, default=0)
     final_received_packages: int = Field(ge=0, default=0)
@@ -41,11 +41,11 @@ class ShipmentUpdate(BaseModel):
 
     voucher_no: str | None = Field(default=None, min_length=1, max_length=30)
     supplier_name: str | None = Field(default=None, min_length=1, max_length=255)
-    cargo_name: str | None = None
-    final_location: str | None = Field(default=None, min_length=1, max_length=255)
-    sent_date: date | None = None
+    carrier_name: str | None = None
+    final_destination: str | None = Field(default=None, min_length=1, max_length=255)
+    sent_on: date | None = None
     total_packages: int | None = Field(default=None, ge=0)
-    total_pairs: int | None = Field(default=None, ge=0)
+    total_quantity_pairs: int | None = Field(default=None, ge=0)
     total_unit: WholesaleUnit | None = None
     packages_sent_by_cargo: int | None = Field(default=None, ge=0)
     final_received_packages: int | None = Field(default=None, ge=0)

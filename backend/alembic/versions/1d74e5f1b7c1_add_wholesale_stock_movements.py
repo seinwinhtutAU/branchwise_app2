@@ -38,7 +38,7 @@ def upgrade() -> None:
         sa.Column("colors", sa.JSON(), nullable=False),
         sa.Column("qty_pairs", sa.Integer(), nullable=False),
         sa.Column("location", sa.String(255), nullable=False),
-        sa.Column("delivered_on", sa.Date(), nullable=False),
+        sa.Column("moved_on", sa.Date(), nullable=False),
         sa.Column("note", sa.String(1000), nullable=False),
         sa.Column("recorded_by_user_id", sa.String(36), nullable=False),
         sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()")),

@@ -3,17 +3,18 @@
 // timed out may already have been applied — so a timeout is reported as "reload to see
 // whether it saved" rather than silently sent again.
 //
-// Reads go through useCachedFetch (see each page), which already knows how to retry, and
-// wraps the same apiBaseUrl. This file is deliberately just the write side plus the
-// per-entity request/response shapes, since a read is one line at the call site.
+// Reads go through React Query (see each page's useQuery/useQueries call), which already
+// knows how to retry, and wraps the same apiBaseUrl. This file is deliberately just the
+// write side plus the per-entity request/response shapes, since a read is one line at
+// the call site.
 
 import { apiBaseUrl, type Session } from "@renderer/lib/auth";
 import { RequestTimeoutError } from "@renderer/lib/network";
-import { invalidateCachedPages } from "@renderer/lib/useCachedFetch";
+import { invalidateEverything } from "@renderer/lib/queryClient";
 import { type Shipment, type ShipmentLeg } from "./shipments";
 import { type Receiving, type ReceivingCost, type ReceivingPackage } from "./receivings";
 import { type SupplierVoucher } from "./supplierVouchers";
-import { type CustomerOrder } from "./customerOrders";
+import { type AllocationEvent, type CustomerOrder } from "./customerOrders";
 import { type StockMovement } from "./stock";
 import { fromPairs, PAIRS_PER } from "./units";
 
@@ -50,7 +51,7 @@ async function request<T>(
   }
 
   if (response.status === 204) {
-    invalidateCachedPages();
+    invalidateEverything();
     return undefined as T;
   }
 
@@ -59,7 +60,7 @@ async function request<T>(
     throw new WholesaleApiError(body?.detail ?? `Request failed: ${response.status}`);
   }
 
-  invalidateCachedPages();
+  invalidateEverything();
   return body as T;
 }
 
@@ -78,11 +79,11 @@ export interface ShipmentWire {
   shipment_no: string;
   voucher_no: string;
   supplier_name: string;
-  cargo_name: string;
-  final_location: string;
-  sent_date: string;
+  carrier_name: string;
+  final_destination: string;
+  sent_on: string;
   total_packages: number;
-  total_pairs: number;
+  total_quantity_pairs: number;
   total_unit: string;
   packages_sent_by_cargo: number;
   final_received_packages: number;
@@ -91,8 +92,8 @@ export interface ShipmentWire {
 
 export const SHIPMENTS_URL = `${apiBaseUrl}/api/wholesale/shipments`;
 
-/** The wire shape uses total_pairs (what the server actually stores); the screens still
- *  say total_qty (what it was written in), converted here at the one seam rather than
+/** The wire shape uses total_quantity_pairs (what the server actually stores); the screens still
+ *  say total_quantity_pairs (what it was written in), converted here at the one seam rather than
  *  renamed through every call site. */
 export function shipmentFromWire(wire: ShipmentWire): Shipment {
   return {
@@ -100,11 +101,13 @@ export function shipmentFromWire(wire: ShipmentWire): Shipment {
     shipment_no: wire.shipment_no,
     voucher_no: wire.voucher_no,
     supplier_name: wire.supplier_name,
-    cargo_name: wire.cargo_name,
-    final_location: wire.final_location,
-    sent_date: wire.sent_date,
+    carrier_name: wire.carrier_name,
+    final_destination: wire.final_destination,
+    sent_on: wire.sent_on,
     total_packages: wire.total_packages,
-    total_qty: wire.total_pairs,
+    // Shipment responses carry the normalized pair total; the screen model stores the
+    // value in the shipment's displayed unit and converts it back at the one seam.
+    total_quantity_pairs: fromPairs(wire.total_quantity_pairs, wire.total_unit as Shipment["total_unit"]),
     total_unit: wire.total_unit as Shipment["total_unit"],
     packages_sent_by_cargo: wire.packages_sent_by_cargo,
     final_received_packages: wire.final_received_packages,
@@ -131,11 +134,11 @@ function legToWire(leg: ShipmentLeg): ShipmentLegWire {
 export interface NewShipmentInput {
   voucher_no: string;
   supplier_name: string;
-  cargo_name: string;
-  final_location: string;
-  sent_date: string;
+  carrier_name: string;
+  final_destination: string;
+  sent_on: string;
   total_packages: number;
-  total_qty: number;
+  total_quantity_pairs: number;
   total_unit: Shipment["total_unit"];
   packages_sent_by_cargo: number;
   final_received_packages: number;
@@ -155,11 +158,11 @@ export async function createShipment(
     body: {
       voucher_no: input.voucher_no,
       supplier_name: input.supplier_name,
-      cargo_name: input.cargo_name,
-      final_location: input.final_location,
-      sent_date: input.sent_date,
+      carrier_name: input.carrier_name,
+      final_destination: input.final_destination,
+      sent_on: input.sent_on,
       total_packages: input.total_packages,
-      total_pairs: input.total_qty,
+      total_quantity_pairs: input.total_quantity_pairs,
       total_unit: input.total_unit,
       packages_sent_by_cargo: input.packages_sent_by_cargo,
       final_received_packages: input.final_received_packages,
@@ -177,11 +180,11 @@ export async function updateShipment(
   const body: Record<string, unknown> = {};
   if (patch.voucher_no !== undefined) body.voucher_no = patch.voucher_no;
   if (patch.supplier_name !== undefined) body.supplier_name = patch.supplier_name;
-  if (patch.cargo_name !== undefined) body.cargo_name = patch.cargo_name;
-  if (patch.final_location !== undefined) body.final_location = patch.final_location;
-  if (patch.sent_date !== undefined) body.sent_date = patch.sent_date;
+  if (patch.carrier_name !== undefined) body.carrier_name = patch.carrier_name;
+  if (patch.final_destination !== undefined) body.final_destination = patch.final_destination;
+  if (patch.sent_on !== undefined) body.sent_on = patch.sent_on;
   if (patch.total_packages !== undefined) body.total_packages = patch.total_packages;
-  if (patch.total_qty !== undefined) body.total_pairs = patch.total_qty;
+  if (patch.total_quantity_pairs !== undefined) body.total_quantity_pairs = patch.total_quantity_pairs;
   if (patch.total_unit !== undefined) body.total_unit = patch.total_unit;
   if (patch.packages_sent_by_cargo !== undefined)
     body.packages_sent_by_cargo = patch.packages_sent_by_cargo;
@@ -209,17 +212,18 @@ interface ReceivingItemWire {
   item_id: string;
   stock_code: string;
   description: string;
-  group: "man" | "lady" | "child";
-  color_qty: string;
+  product_group: "man" | "lady" | "child";
+  color_breakdown: string;
+  quantity: number;
   unit: Receiving["total_unit"];
-  qty_pairs: number;
+  quantity_pairs: number;
 }
 
 interface ReceivingPackageWire {
   package_id: string;
   package_no: number;
   opened: boolean;
-  received_date: string | null;
+  received_on: string | null;
   note: string;
   items: ReceivingItemWire[];
 }
@@ -241,9 +245,9 @@ export interface ReceivingWire {
   voucher_no: string;
   supplier_name: string;
   gate: string;
-  received_date: string;
+  received_on: string;
   total_packages: number;
-  total_pairs: number;
+  total_quantity_pairs: number;
   total_unit: Receiving["total_unit"];
   packages: ReceivingPackageWire[];
   costs: ReceivingCostWire[];
@@ -256,15 +260,16 @@ function packageFromWire(wire: ReceivingPackageWire): ReceivingPackage {
     package_id: wire.package_id,
     package_no: wire.package_no,
     opened: wire.opened,
-    received_date: wire.received_date ?? "",
+    received_on: wire.received_on ?? "",
     note: wire.note,
     items: wire.items.map((item) => ({
       item_id: item.item_id,
       stock_code: item.stock_code,
       description: item.description,
-      group: item.group,
-      color_qty: item.color_qty,
-      qty: fromPairs(item.qty_pairs, item.unit),
+      product_group: item.product_group,
+      color_breakdown: item.color_breakdown,
+      quantity: item.quantity,
+      quantity_pairs: item.quantity_pairs,
       unit: item.unit,
     })),
   };
@@ -278,9 +283,9 @@ export function receivingFromWire(wire: ReceivingWire): Receiving {
     voucher_no: wire.voucher_no,
     supplier_name: wire.supplier_name,
     gate: wire.gate,
-    received_date: wire.received_date,
+    received_on: wire.received_on,
     total_packages: wire.total_packages,
-    total_qty: fromPairs(wire.total_pairs, wire.total_unit),
+    total_quantity_pairs: fromPairs(wire.total_quantity_pairs, wire.total_unit),
     total_unit: wire.total_unit,
     packages: wire.packages.map(packageFromWire),
     costs: wire.costs,
@@ -294,36 +299,36 @@ export function receivingsFromWire(wires: ReceivingWire[]): Receiving[] {
 export interface NewReceivingInput {
   shipment_id: string;
   gate: string;
-  received_date: string;
+  received_on: string;
   total_packages: number;
-  total_qty: number;
+  total_quantity_pairs: number;
   total_unit: Receiving["total_unit"];
   costs: ReceivingCost[];
 }
 
 function packageToWire(entry: ReceivingPackage): {
   opened: boolean;
-  received_date: string | null;
+  received_on: string | null;
   note: string;
   items: {
     stock_code: string;
     description: string;
     product_group: "man" | "lady" | "child";
-    color_qty: string;
-    qty: number;
+    color_breakdown: string;
+    quantity: number;
     unit: Receiving["total_unit"];
   }[];
 } {
   return {
     opened: entry.opened,
-    received_date: entry.received_date || null,
+    received_on: entry.received_on || null,
     note: entry.note,
     items: entry.items.map((item) => ({
       stock_code: item.stock_code,
       description: item.description,
-      product_group: item.group,
-      color_qty: item.color_qty,
-      qty: item.qty,
+      product_group: item.product_group,
+      color_breakdown: item.color_breakdown,
+      quantity: item.quantity,
       unit: item.unit,
     })),
   };
@@ -351,9 +356,9 @@ export async function createReceiving(session: Session, input: NewReceivingInput
     body: {
       shipment_id: input.shipment_id,
       gate: input.gate,
-      received_date: input.received_date,
+      received_on: input.received_on,
       total_packages: input.total_packages,
-      total_pairs: input.total_qty * PAIRS_PER[input.total_unit],
+      total_quantity_pairs: input.total_quantity_pairs * PAIRS_PER[input.total_unit],
       total_unit: input.total_unit,
     },
   });
@@ -364,14 +369,13 @@ export async function createReceiving(session: Session, input: NewReceivingInput
 export async function updateReceiving(
   session: Session,
   receivingId: string,
-  patch: Pick<Receiving, "gate" | "received_date" | "total_packages" | "total_qty" | "total_unit">,
+  patch: Pick<Receiving, "gate" | "received_on" | "total_packages" | "total_quantity_pairs" | "total_unit">,
 ): Promise<Receiving> {
   const wire = await request<ReceivingWire>(session, `/api/wholesale/receivings/${receivingId}`, {
     method: "PATCH",
     body: {
       ...patch,
-      total_pairs: patch.total_qty * PAIRS_PER[patch.total_unit],
-      total_qty: undefined,
+      total_quantity_pairs: patch.total_quantity_pairs * PAIRS_PER[patch.total_unit],
     },
   });
   return receivingFromWire(wire);
@@ -419,7 +423,7 @@ export function vouchersFromWire(wires: SupplierVoucherWire[]): SupplierVoucher[
 export interface NewSupplierVoucherInput {
   supplier_name: string;
   voucher_date: string;
-  cargo_name: string;
+  carrier_name: string;
   total_packages: number;
   lines: SupplierVoucher["lines"];
 }
@@ -427,13 +431,13 @@ export interface NewSupplierVoucherInput {
 function voucherBody(input: NewSupplierVoucherInput): {
   supplier_name: string;
   voucher_date: string;
-  cargo_name: string;
+  carrier_name: string;
   total_packages: number;
   lines: {
     stock_code: string;
     description: string;
     product_group: "man" | "lady" | "child";
-    color_qty: string;
+    color_breakdown: string;
     unit: SupplierVoucher["lines"][number]["unit"];
     buying_price: number;
   }[];
@@ -441,13 +445,13 @@ function voucherBody(input: NewSupplierVoucherInput): {
   return {
     supplier_name: input.supplier_name,
     voucher_date: input.voucher_date,
-    cargo_name: input.cargo_name,
+    carrier_name: input.carrier_name,
     total_packages: input.total_packages,
     lines: input.lines.map((line) => ({
       stock_code: line.stock_code,
       description: line.description,
-      product_group: line.group,
-      color_qty: line.color_qty,
+      product_group: line.product_group,
+      color_breakdown: line.color_breakdown,
       unit: line.unit,
       buying_price: line.buying_price,
     })),
@@ -467,7 +471,7 @@ export async function deleteSupplierVoucher(session: Session, voucherId: string)
 }
 
 export async function addSupplierVoucherPayment(session: Session, voucherId: string, payment: SupplierVoucher["payment"]["payments"][number]): Promise<void> {
-  await request(session, `/api/wholesale/supplier-vouchers/${voucherId}/payments`, { method: "POST", body: { paid_on: payment.date, amount: payment.amount, note: payment.note } });
+  await request(session, `/api/wholesale/supplier-vouchers/${voucherId}/payments`, { method: "POST", body: { paid_on: payment.paid_on, amount: payment.amount, note: payment.note } });
 }
 
 export async function removeSupplierVoucherPayment(session: Session, voucherId: string, paymentId: string): Promise<void> {
@@ -477,18 +481,31 @@ export async function removeSupplierVoucherPayment(session: Session, voucherId: 
 // ── Customer orders ────────────────────────────────────────────────────────
 
 export const CUSTOMER_ORDERS_URL = `${apiBaseUrl}/api/wholesale/orders`;
+export const ALLOCATION_EVENTS_URL = `${apiBaseUrl}/api/wholesale/orders/allocations`;
+export function allocationEventsFromWire(wires: AllocationEvent[]): AllocationEvent[] { return wires; }
 export interface NewCustomerOrderInput {
   customer_name: string; customer_phone: string; customer_address: string; order_date: string; lines: CustomerOrder["lines"];
 }
 export function ordersFromWire(wires: CustomerOrder[]): CustomerOrder[] { return wires; }
 function orderBody(input: NewCustomerOrderInput): object {
-  return { ...input, lines: input.lines.map((line) => ({ stock_code: line.stock_code, description: line.description, product_group: line.group, supplier_name: line.supplier_name, color_qty: line.color_qty, unit: line.unit, selling_price: line.selling_price })) };
+  return { ...input, lines: input.lines.map((line) => ({ stock_code: line.stock_code, description: line.description, product_group: line.product_group, supplier_name: line.supplier_name, color_breakdown: line.color_breakdown, unit: line.unit, selling_price: line.selling_price })) };
 }
 export async function createCustomerOrder(session: Session, input: NewCustomerOrderInput): Promise<CustomerOrder> {
   return request<CustomerOrder>(session, "/api/wholesale/orders", { method: "POST", body: orderBody(input) });
 }
 export async function cancelCustomerOrder(session: Session, orderId: string): Promise<CustomerOrder> {
   return request<CustomerOrder>(session, `/api/wholesale/orders/${orderId}/cancel`, { method: "POST" });
+}
+
+export async function updateCustomerOrderLineAllocation(
+  session: Session,
+  orderLineId: string,
+  colorBreakdown: string,
+): Promise<CustomerOrder> {
+  return request<CustomerOrder>(session, `/api/wholesale/orders/lines/${orderLineId}/allocation`, {
+    method: "PUT",
+    body: { color_breakdown: colorBreakdown },
+  });
 }
 
 export async function updateCustomerOrder(
@@ -513,7 +530,7 @@ export async function addCustomerOrderPayment(
 ): Promise<void> {
   await request<void>(session, `/api/wholesale/orders/${orderId}/payments`, {
     method: "POST",
-    body: { paid_on: payment.date, amount: payment.amount, note: payment.note },
+    body: { paid_on: payment.paid_on, amount: payment.amount, note: payment.note },
   });
 }
 
@@ -531,8 +548,36 @@ export async function removeCustomerOrderPayment(
 
 export const WHOLESALE_INVENTORY_URL = `${apiBaseUrl}/api/wholesale/inventory`;
 
-export function inventoryMovementsFromWire(wires: StockMovement[]): StockMovement[] {
-  return wires;
+/** The current API uses descriptive field names, while desktop clients with an older
+ * backend can still receive the original inventory field names. Normalize at the wire
+ * boundary so a stale response cannot crash the stock or delivery views. */
+export type InventoryMovementWire = Partial<StockMovement> & {
+  kind?: StockMovement["movement_type"];
+  group?: StockMovement["product_group"];
+  color_qty?: string;
+  pairs?: number;
+  date?: string;
+  party?: string;
+};
+
+export function inventoryMovementsFromWire(
+  wires: InventoryMovementWire[],
+): StockMovement[] {
+  return wires.map((wire) => ({
+    movement_id: wire.movement_id ?? "",
+    movement_type: wire.movement_type ?? wire.kind ?? "in",
+    stock_code: wire.stock_code ?? "",
+    description: wire.description ?? "",
+    product_group: wire.product_group ?? wire.group ?? "man",
+    color_breakdown: wire.color_breakdown ?? wire.color_qty ?? "",
+    quantity_pairs: wire.quantity_pairs ?? wire.pairs ?? 0,
+    location: wire.location ?? "",
+    moved_on: wire.moved_on ?? wire.date ?? "",
+    reference: wire.reference ?? "",
+    counterparty_name: wire.counterparty_name ?? wire.party ?? "",
+    note: wire.note ?? "",
+    delivery_address: wire.delivery_address,
+  }));
 }
 
 export async function createCustomerDelivery(
@@ -544,9 +589,38 @@ export async function createCustomerDelivery(
     method: "POST",
     body: {
       order_id: orderId, stock_code: movement.stock_code, location: movement.location,
-      color_qty: movement.color_qty, unit: "set", delivered_on: movement.date, note: movement.note,
+      color_breakdown: movement.color_breakdown, unit: "set", delivered_on: movement.moved_on, note: movement.note,
     },
   });
+}
+
+export interface CustomerDeliveryBatchInput {
+  order_id: string;
+  delivered_on: string;
+  delivery_address: string;
+  note: string;
+  lines: {
+    stock_code: string;
+    location: string;
+    color_breakdown: string;
+  }[];
+}
+
+export async function createCustomerDeliveryBatch(
+  session: Session,
+  input: CustomerDeliveryBatchInput,
+): Promise<StockMovement[]> {
+  return request<StockMovement[]>(
+    session,
+    "/api/wholesale/inventory/deliveries/batch",
+    {
+      method: "POST",
+      body: {
+        ...input,
+        lines: input.lines.map((line) => ({ ...line, unit: "set" })),
+      },
+    },
+  );
 }
 
 export async function updateCustomerDelivery(
@@ -556,8 +630,8 @@ export async function updateCustomerDelivery(
   return request<StockMovement>(session, `/api/wholesale/inventory/deliveries/${movement.movement_id}`, {
     method: "PUT",
     body: {
-      location: movement.location, color_qty: movement.color_qty, unit: "set",
-      delivered_on: movement.date, note: movement.note,
+      location: movement.location, color_breakdown: movement.color_breakdown, unit: "set",
+      delivered_on: movement.moved_on, note: movement.note,
     },
   });
 }
