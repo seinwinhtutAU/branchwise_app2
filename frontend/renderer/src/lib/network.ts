@@ -130,12 +130,20 @@ export function installNetworkResilience(): () => void {
           // A backend that answers but can't reach Neon is still offline as far as
           // every page in this app is concerned.
           if (response.ok && body?.database === "ok") {
+            // eslint-disable-next-line no-console -- diagnostic trail for intermittent
+            // "no connection" reports; see connection.ts for the resulting status change.
+            console.log(`[connection] probe succeeded after ${Date.now() - startedAt}ms — reconnected`);
             reportRequestSuccess(Date.now() - startedAt);
             stopProbing();
+          } else {
+            // eslint-disable-next-line no-console
+            console.debug(`[connection] probe answered but database is not ok:`, body);
           }
         })
-        .catch(() => {
+        .catch((error) => {
           // Still down. The next tick tries again; no toast, the banner already says so.
+          // eslint-disable-next-line no-console
+          console.debug(`[connection] probe still failing: ${(error as Error)?.message ?? error}`);
         })
         .finally(() => {
           probeInFlight = false;
@@ -191,6 +199,15 @@ export function installNetworkResilience(): () => void {
         if (callerSignal?.aborted) throw error;
         lastError = timeout.timedOut() ? new RequestTimeoutError(url) : error;
         const isLastAttempt = attempt === attempts - 1;
+        // eslint-disable-next-line no-console -- diagnostic trail for intermittent "no
+        // connection" reports: exactly which request failed, how, and after how long.
+        console.warn(
+          `[connection] ${method} ${url} failed on attempt ${attempt + 1}/${attempts} after ${
+            Date.now() - startedAt
+          }ms (${timeout.timedOut() ? "timed out" : (error as Error)?.name || "network error"}: ${
+            (error as Error)?.message ?? error
+          })${isLastAttempt ? " — giving up" : `, retrying in ${RETRY_DELAYS_MS[attempt]}ms`}`,
+        );
         if (isLastAttempt) break;
         await delay(RETRY_DELAYS_MS[attempt]);
       } finally {

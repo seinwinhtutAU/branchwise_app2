@@ -624,7 +624,7 @@ export async function removeCustomerOrderPayment(
   });
 }
 
-// ── Inventory and customer deliveries ──────────────────────────────────────
+// ── Inventory movements ────────────────────────────────────────────────────
 
 export const WHOLESALE_INVENTORY_URL = `${apiBaseUrl}/api/wholesale/inventory`;
 
@@ -658,64 +658,4 @@ export function inventoryMovementsFromWire(
     note: wire.note ?? "",
     delivery_address: wire.delivery_address,
   }));
-}
-
-export async function createCustomerDelivery(
-  session: Session,
-  orderId: string,
-  movement: StockMovement,
-): Promise<StockMovement> {
-  return request<StockMovement>(session, "/api/wholesale/inventory/deliveries", {
-    method: "POST",
-    body: {
-      order_id: orderId, stock_code: movement.stock_code, location: movement.location,
-      color_breakdown: movement.color_breakdown, unit: "set", delivered_on: movement.moved_on, note: movement.note,
-    },
-  });
-}
-
-export interface CustomerDeliveryBatchInput {
-  order_id: string;
-  delivered_on: string;
-  delivery_address: string;
-  note: string;
-  lines: {
-    stock_code: string;
-    location: string;
-    color_breakdown: string;
-  }[];
-}
-
-export async function createCustomerDeliveryBatch(
-  session: Session,
-  input: CustomerDeliveryBatchInput,
-): Promise<StockMovement[]> {
-  return request<StockMovement[]>(
-    session,
-    "/api/wholesale/inventory/deliveries/batch",
-    {
-      method: "POST",
-      body: {
-        ...input,
-        lines: input.lines.map((line) => ({ ...line, unit: "set" })),
-      },
-    },
-  );
-}
-
-export async function updateCustomerDelivery(
-  session: Session,
-  movement: StockMovement,
-): Promise<StockMovement> {
-  return request<StockMovement>(session, `/api/wholesale/inventory/deliveries/${movement.movement_id}`, {
-    method: "PUT",
-    body: {
-      location: movement.location, color_breakdown: movement.color_breakdown, unit: "set",
-      delivered_on: movement.moved_on, note: movement.note,
-    },
-  });
-}
-
-export async function deleteCustomerDelivery(session: Session, movementId: string): Promise<void> {
-  await request<void>(session, `/api/wholesale/inventory/deliveries/${movementId}`, { method: "DELETE" });
 }

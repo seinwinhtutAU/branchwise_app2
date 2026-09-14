@@ -94,14 +94,12 @@ import {
   WholesaleApiError,
   addCustomerOrderPayment,
   cancelCustomerOrder,
-  createCustomerDeliveryBatch,
   createCustomerOrder,
   ordersFromWire,
   removeCustomerOrderPayment,
   updateCustomerOrder,
   updateCustomerOrderLineAllocation,
   inventoryMovementsFromWire,
-  type CustomerDeliveryBatchInput,
   type InventoryMovementWire,
   type NewCustomerOrderInput,
 } from "@renderer/components/features/wholesale/api";
@@ -272,24 +270,6 @@ export default function CustomerOrdersPage({
     }
   }
 
-  async function saveDelivery(input: CustomerDeliveryBatchInput): Promise<void> {
-    try {
-      await createCustomerDeliveryBatch(session, input);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY }),
-        queryClient.invalidateQueries({ queryKey: ["wholesale", "inventory"] }),
-      ]);
-      showToast("success", "Customer delivery recorded.");
-    } catch (error) {
-      showToast(
-        "error",
-        error instanceof WholesaleApiError
-          ? error.message
-          : "Could not record this customer delivery.",
-      );
-      throw error;
-    }
-  }
   const [view, setView] = useState<View>("list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openMode, setOpenMode] = useState<OrderDetailMode>("view");
@@ -458,13 +438,12 @@ export default function CustomerOrdersPage({
 
   if (view === "allocate" && selected) {
     return (
-      <AllocateAndDeliveryView
+      <AllocationView
         order={selected}
         orders={orders}
         inventoryLines={inventoryLines}
         inventoryLoading={isInventoryFetching}
         onSaveAllocation={saveAllocation}
-        onSaveDelivery={saveDelivery}
         onBack={() => setView("list")}
       />
     );
@@ -867,7 +846,7 @@ function RowMenu({
           {onAllocate && (
             <MenuItem
               icon={<WarehouseIcon className="w-4 h-4" />}
-              label="Fulfill order"
+            label="Allocate stock"
               onClick={() => {
                 setOpen(false);
                 onAllocate();
@@ -1180,303 +1159,12 @@ function AllocationTable({
   );
 }
 
-function deliveryLocationsForLine(
-  line: CustomerOrderLine,
-  inventoryLines: StockLine[],
-): string[] {
-  return [
-    ...new Set(
-      inventoryLines
-        .filter((stockLine) => stockLine.stock_code === line.stock_code)
-        .map((stockLine) => stockLine.location)
-        .filter((location) => location !== ""),
-    ),
-  ];
-}
-
-function availableDeliveryColors(
-  line: CustomerOrderLine,
-  order: CustomerOrder,
-  orders: CustomerOrder[],
-  inventoryLines: StockLine[],
-  location: string,
-): ColorPairs {
-  const stockColors = inventoryLines
-    .filter(
-      (stockLine) =>
-        stockLine.stock_code === line.stock_code &&
-        stockLine.location === location,
-    )
-    .reduce(
-      (colors, stockLine) => mergeColorPairs(colors, stockLine.color_quantities_pairs),
-      {},
-    );
-  return subtractColorPairs(
-    stockColors,
-    allocationsFromOtherOrders(orders, line.stock_code, order.order_id),
-  );
-}
-
-function deliveryValidationMessage(
-  line: CustomerOrderLine,
-  draft: string,
-  allocatedColors: ColorPairs,
-  availableColors: ColorPairs,
-  inventoryLoading: boolean,
-): string | null {
-  if (draft.trim() === "" || inventoryLoading) return null;
-  const parseError = colorQtyProblem(draft);
-  if (parseError) return parseError;
-  const requestedColors = colorPairsForText(draft, line.unit);
-  const requestedPairs = Object.values(requestedColors).reduce(
-    (sum, pairs) => sum + pairs,
-    0,
-  );
-  if (requestedPairs > lineRemaining(line)) {
-    return `Delivery cannot exceed ${sets(lineRemaining(line))}.`;
-  }
-  for (const [color, pairs] of Object.entries(requestedColors)) {
-    if (pairs > (allocatedColors[color] ?? 0)) {
-      return `Only ${formatIn(allocatedColors[color] ?? 0, "pair")} of ${color} is allocated for delivery.`;
-    }
-    if (pairs > (availableColors[color] ?? 0)) {
-      return `Only ${formatIn(availableColors[color] ?? 0, "pair")} of ${color} is available at this location.`;
-    }
-  }
-  return null;
-}
-
-function DeliveryView({
-  order,
-  orders,
-  inventoryLines,
-  inventoryLoading,
-  onSaveDelivery,
-  onBack,
-}: {
-  order: CustomerOrder;
-  orders: CustomerOrder[];
-  inventoryLines: StockLine[];
-  inventoryLoading: boolean;
-  onSaveDelivery: (input: CustomerDeliveryBatchInput) => Promise<void>;
-  onBack: () => void;
-}): React.JSX.Element {
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [fromLocation, setFromLocation] = useState("");
-  const [deliveryDate, setDeliveryDate] = useState(todayIso());
-  const [deliveryAddress, setDeliveryAddress] = useState(order.customer_address);
-  const [deliveryNote, setDeliveryNote] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    setDeliveryAddress(order.customer_address);
-  }, [order.customer_address]);
-
-  const locationOptions = [
-    ...new Set(order.lines.flatMap((line) => deliveryLocationsForLine(line, inventoryLines))),
-  ];
-  const selectedLocation = fromLocation || locationOptions[0] || "";
-
-  const rows = order.lines.map((line) => {
-    const allocatedColors = colorPairsForText(
-      line.allocated_color_breakdown ?? "",
-      line.unit,
-    );
-    const availableColors = availableDeliveryColors(
-      line,
-      order,
-      orders,
-      inventoryLines,
-      selectedLocation,
-    );
-    const draft = drafts[line.order_line_id] ?? "";
-    return {
-      line,
-      location,
-      draft,
-      problem: deliveryValidationMessage(
-        line,
-        draft,
-        allocatedColors,
-        availableColors,
-        inventoryLoading,
-      ),
-      availableColors,
-      allocatedColors,
-      pairs: Object.values(colorPairsForText(draft, line.unit)).reduce(
-        (sum, pairs) => sum + pairs,
-        0,
-      ),
-    };
-  });
-  const selectedRows = rows.filter((row) => row.pairs > 0);
-  const canSave =
-    !inventoryLoading &&
-    deliveryDate.trim() !== "" &&
-    selectedLocation !== "" &&
-    selectedRows.length > 0 &&
-    selectedRows.every((row) => row.problem === null);
-
-  async function saveDelivery(): Promise<void> {
-    if (!canSave || saving) return;
-    setSaving(true);
-    try {
-      await onSaveDelivery({
-        order_id: order.order_id,
-        delivered_on: deliveryDate,
-        delivery_address: deliveryAddress.trim(),
-        note: deliveryNote.trim(),
-        lines: selectedRows.map((row) => ({
-          stock_code: row.line.stock_code,
-          location: selectedLocation,
-          color_breakdown: row.draft.trim(),
-        })),
-      });
-      setDrafts({});
-      setDeliveryNote("");
-      setDeliveryDate(todayIso());
-      setFromLocation("");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="border-b border-border-strong pb-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h3 className="text-base font-semibold text-text-primary">Delivery details</h3>
-            <p className="mt-1 text-sm text-text-secondary">Enter where and when this delivery is going.</p>
-          </div>
-          <span className="text-sm font-semibold tabular-nums text-brand">{formatQty(selectedRows.reduce((sum, row) => sum + row.pairs, 0))} pairs selected</span>
-        </div>
-        <div className="mt-3 grid gap-2 sm:grid-cols-4">
-          <Select
-            label="From location"
-            value={selectedLocation}
-            onChange={(event) => setFromLocation(event.target.value)}
-            disabled={inventoryLoading || locationOptions.length === 0}
-          >
-            {locationOptions.length === 0 ? (
-              <option value="">No stock location</option>
-            ) : (
-              locationOptions.map((entry) => <option key={entry} value={entry}>{entry}</option>)
-            )}
-          </Select>
-          <Input
-            label="Delivery date"
-            type="date"
-            value={deliveryDate}
-            onChange={(event) => setDeliveryDate(event.target.value)}
-          />
-          <Input
-            label="Delivery address"
-            value={deliveryAddress}
-            onChange={(event) => setDeliveryAddress(event.target.value)}
-            placeholder="Customer address"
-          />
-          <Input
-            label="Delivery note"
-            value={deliveryNote}
-            onChange={(event) => setDeliveryNote(event.target.value)}
-            placeholder="Optional note"
-          />
-        </div>
-      </div>
-
-      <TableContainer>
-        <Thead className="top-0">
-          <Tr>
-            <Th className="min-w-[15rem]">Product</Th>
-            <Th className="text-right whitespace-nowrap">Ordered qty</Th>
-            <Th className="text-right whitespace-nowrap">Delivered qty</Th>
-            <Th className="text-right whitespace-nowrap">Remaining qty</Th>
-            <Th className="min-w-[13rem]">Allocated colors</Th>
-            <Th className="min-w-[13rem]">Available to deliver</Th>
-            <Th className="min-w-[17rem]">Deliver colors</Th>
-          </Tr>
-        </Thead>
-        <Tbody>
-          {rows.map((row) => {
-            const deliverableColors = Object.entries(row.allocatedColors).reduce<ColorPairs>(
-              (colors, [color, pairs]) => {
-                const deliverablePairs = Math.min(pairs, row.availableColors[color] ?? 0);
-                if (deliverablePairs > 0) colors[color] = deliverablePairs;
-                return colors;
-              },
-              {},
-            );
-            const availablePairs = Object.values(deliverableColors).reduce((sum, pairs) => sum + pairs, 0);
-            const canDeliver = (row.line.allocated_quantity_pairs ?? 0) > 0;
-            return (
-              <Tr key={row.line.order_line_id}>
-                <Td>
-                  <div className="flex min-w-[15rem] flex-col gap-0.5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-bold text-brand">{row.line.stock_code || "No stock code"}</span>
-                      <span className="text-xs text-text-muted">{GROUP_LABELS[row.line.product_group]}</span>
-                    </div>
-                    <span className="font-semibold text-text-primary">{row.line.description || "Unnamed product"}</span>
-                  </div>
-                </Td>
-                <Td className="whitespace-nowrap text-right tabular-nums">{sets(row.line.quantity_pairs)}</Td>
-                <Td className="whitespace-nowrap text-right tabular-nums text-success">{sets(row.line.delivered_quantity_pairs)}</Td>
-                <Td className="whitespace-nowrap text-right tabular-nums font-semibold text-error">{sets(lineRemaining(row.line))}</Td>
-                <Td>
-                  <span className="font-bold text-brand">{formatColorPairs(row.allocatedColors) || "No allocation"}</span>
-                </Td>
-                <Td>
-                  <div className="min-w-[13rem]">
-                    <div className="font-semibold tabular-nums text-brand">
-                      {inventoryLoading ? "—" : `${formatQty(availablePairs)} pairs`}
-                    </div>
-                    <div className="mt-0.5 text-xs text-text-secondary">
-                      {inventoryLoading
-                        ? "Checking stock…"
-                        : availablePairs > 0
-                          ? <span className="font-bold text-brand">{formatColorPairs(deliverableColors)}</span>
-                          : "No allocated colors available."}
-                    </div>
-                  </div>
-                </Td>
-                <Td>
-                  <Input
-                    aria-label={`Delivery by color for ${order.order_no} ${row.line.stock_code}`}
-                    placeholder="Enter delivery"
-                    value={row.draft}
-                    onChange={(event) =>
-                      setDrafts((current) => ({ ...current, [row.line.order_line_id]: event.target.value }))
-                    }
-                    error={row.problem ?? undefined}
-                    disabled={!canDeliver || inventoryLoading || selectedLocation === ""}
-                  />
-                </Td>
-              </Tr>
-            );
-          })}
-        </Tbody>
-      </TableContainer>
-
-      <div className="flex flex-wrap justify-between gap-2">
-        <Button variant="ghost" onClick={onBack}>
-          Back to allocation
-        </Button>
-        <Button onClick={() => void saveDelivery()} loading={saving} disabled={!canSave}>
-          Record delivery
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function AllocateAndDeliveryView({
+function AllocationView({
   order,
   orders,
   inventoryLines,
   inventoryLoading,
   onSaveAllocation,
-  onSaveDelivery,
   onBack,
 }: {
   order: CustomerOrder;
@@ -1484,12 +1172,9 @@ function AllocateAndDeliveryView({
   inventoryLines: StockLine[];
   inventoryLoading: boolean;
   onSaveAllocation: (lineId: string, colorBreakdown: string) => Promise<void>;
-  onSaveDelivery: (input: CustomerDeliveryBatchInput) => Promise<void>;
   onBack: () => void;
 }): React.JSX.Element {
-  const [step, setStep] = useState(0);
   const allocatedPairs = order.lines.reduce((sum, line) => sum + (line.allocated_quantity_pairs ?? 0), 0);
-  const remainingPairs = remainingQty(order);
 
   return (
     <div className="flex flex-col gap-3">
@@ -1511,57 +1196,22 @@ function AllocateAndDeliveryView({
           <div className="mt-3 grid gap-3 sm:grid-cols-4">
             <FigureCard label="Ordered" value={sets(order.total_quantity_pairs)} tone="neutral" className="border-border-strong" />
             <FigureCard label="Allocated" value={sets(allocatedPairs)} tone="brand" className="border-border-strong" />
-            <FigureCard label="Delivered" value={sets(order.delivered_quantity_pairs)} tone="success" className="border-border-strong" />
             <FigureCard
               label="Remaining"
-              value={sets(remainingPairs)}
-              tone={remainingPairs > 0 ? "error" : "success"}
+              value={sets(remainingQty(order))}
+              tone="error"
               className="border-border-strong"
             />
           </div>
-          <div className="mt-3 mb-5">
-            <div className="mb-1 flex items-center justify-between text-xs">
-              <span className="font-medium text-text-secondary">Fulfillment progress</span>
-              <span className="font-semibold tabular-nums text-text-primary">{sets(order.delivered_quantity_pairs)} / {sets(order.total_quantity_pairs)}</span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-bg-raised">
-              <div
-                className="h-full rounded-full bg-brand transition-[width] duration-300 motion-reduce:transition-none"
-                style={{ width: `${order.total_quantity_pairs > 0 ? Math.min(100, Math.round((order.delivered_quantity_pairs / order.total_quantity_pairs) * 100)) : 0}%` }}
-              />
-            </div>
-          </div>
-          <div className="mt-4">
-            <StepBar steps={["Allocate", "Delivery"]} step={step} />
-          </div>
         </div>
         <div className="px-5 py-4">
-          {step === 0 ? (
-            <>
-              <AllocationTable
-                order={order}
-                orders={orders}
-                inventoryLines={inventoryLines}
-                inventoryLoading={inventoryLoading}
-                onSaveAllocation={onSaveAllocation}
-              />
-              <div className="mt-4 flex justify-end">
-                <Button onClick={() => setStep(1)}>
-                  Continue to delivery
-                  <ChevronRightIcon className="h-4 w-4" />
-                </Button>
-              </div>
-            </>
-          ) : (
-            <DeliveryView
-              order={order}
-              orders={orders}
-              inventoryLines={inventoryLines}
-              inventoryLoading={inventoryLoading}
-              onSaveDelivery={onSaveDelivery}
-              onBack={() => setStep(0)}
-            />
-          )}
+          <AllocationTable
+            order={order}
+            orders={orders}
+            inventoryLines={inventoryLines}
+            inventoryLoading={inventoryLoading}
+            onSaveAllocation={onSaveAllocation}
+          />
         </div>
       </Panel>
     </div>

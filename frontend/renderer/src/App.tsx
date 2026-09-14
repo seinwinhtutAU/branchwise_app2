@@ -136,7 +136,6 @@ type Section =
   | "delivery"
   | "receiving"
   | "stock"
-  | "customerDeliveries"
   | "wholesale"
   | "settings";
 
@@ -190,11 +189,6 @@ const WHOLESALE_NAV_ITEMS: NavItem[] = [
   { id: "delivery", label: "Shipment", icon: <TruckIcon /> },
   { id: "receiving", label: "Receiving", icon: <ReceivingIcon /> },
   { id: "stock", label: "Inventory", icon: <InventoryIcon /> },
-  {
-    id: "customerDeliveries",
-    label: "Customer deliveries",
-    icon: <TruckIcon />,
-  },
   { id: "wholesale", label: "Wholesale", icon: <WarehouseIcon /> },
 ];
 
@@ -254,7 +248,6 @@ const SECTION_TITLES: Record<Section, string> = {
   delivery: "Shipment",
   receiving: "Receiving",
   stock: "Inventory",
-  customerDeliveries: "Customer deliveries",
   wholesale: "Wholesale",
   settings: "Settings",
 };
@@ -1042,19 +1035,6 @@ function App(): React.JSX.Element {
               {section === "stock" && (
                 <WholesaleInventoryPage
                   session={session}
-                  initialTab="stock"
-                  showTabs={false}
-                  onOpenReceiving={(receivingNo) => {
-                    setReceivingTarget(receivingNo);
-                    setSection("receiving");
-                  }}
-                />
-              )}
-              {section === "customerDeliveries" && (
-                <WholesaleInventoryPage
-                  session={session}
-                  initialTab="deliveries"
-                  showTabs={false}
                   onOpenReceiving={(receivingNo) => {
                     setReceivingTarget(receivingNo);
                     setSection("receiving");

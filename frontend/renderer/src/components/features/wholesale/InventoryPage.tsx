@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
-import { z } from "zod";
 import { type Session } from "@renderer/lib/auth";
 import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
-import { useToast } from "@renderer/lib/useToast";
 import { cn } from "@renderer/lib/utils";
 import { Button } from "@renderer/components/ui/Button";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
@@ -21,7 +17,6 @@ import {
   Tr,
 } from "@renderer/components/ui/Table";
 import {
-  CheckIcon,
   ChevronLeftIcon,
   EyeIcon,
   InventoryIcon,
@@ -31,8 +26,6 @@ import {
   WarehouseIcon,
 } from "@renderer/components/ui/icons";
 import {
-  CellInput,
-  FigureCard,
   FloatingLayer,
   MenuItem,
   PAGE_SIZE,
@@ -41,7 +34,6 @@ import {
   ReadOnlyField,
   Reference,
   SectionLabel,
-  SuggestInput,
   StatusPill,
 } from "@renderer/components/features/wholesale/ui";
 import {
@@ -70,25 +62,16 @@ import { hydrateOrders, useWholesale } from "@renderer/components/features/whole
 import {
   CUSTOMER_ORDERS_URL,
   WHOLESALE_INVENTORY_URL,
-  WholesaleApiError,
-  createCustomerDeliveryBatch,
   inventoryMovementsFromWire,
   ordersFromWire,
-  type CustomerDeliveryBatchInput,
   type InventoryMovementWire,
-  updateCustomerDelivery,
 } from "@renderer/components/features/wholesale/api";
 import {
-  colorQtyPairs,
-  colorQtyProblem,
   formatDate,
   formatQty,
   todayIso,
 } from "@renderer/components/features/wholesale/shared";
-import {
-  formatIn,
-  type Unit,
-} from "@renderer/components/features/wholesale/units";
+import { formatIn } from "@renderer/components/features/wholesale/units";
 import { GROUP_LABELS } from "@renderer/components/features/wholesale/products";
 import {
   remainingQty,
@@ -108,7 +91,6 @@ const INVENTORY_QUERY_KEY = ["wholesale", "inventory"] as const;
 const ORDERS_QUERY_KEY = ["wholesale", "orders"] as const;
 
 type View = "list" | "detail";
-type InventoryTab = "stock" | "deliveries";
 type InventorySection = "overview" | "locations" | "movement";
 type StockStatus =
   | "At Supplier"
@@ -122,56 +104,6 @@ const LOW_STOCK_THRESHOLD = 20;
 const OVERSTOCK_THRESHOLD = 150;
 const ESTIMATED_PAIR_PRICE = 19500;
 
-const customerDeliveryDraftSchema = z.object({
-  stock_code: z.string(),
-  location: z.string(),
-  color_breakdown: z.string(),
-});
-
-const customerDeliveryFormSchema = z.object({
-  order_id: z.string().trim().min(1, "Choose a customer order."),
-  order_search: z.string(),
-  from_location: z.string(),
-  to_location: z.string(),
-  delivered_on: z.string().trim().min(1, "Choose a delivery date."),
-  note: z.string(),
-  drafts: z.array(customerDeliveryDraftSchema),
-});
-
-interface CustomerDeliveryFormValues {
-  order_id: string;
-  order_search: string;
-  from_location: string;
-  to_location: string;
-  delivered_on: string;
-  note: string;
-  drafts: DeliveryDraftLine[];
-}
-
-const deliveryHistoryFormSchema = z.object({
-  drafts: z.array(
-    z.object({
-      movement_id: z.string(),
-      movement_type: z.enum(["in", "out"]),
-      stock_code: z.string(),
-      description: z.string(),
-      product_group: z.enum(["man", "lady", "child"]),
-      color_breakdown: z.string(),
-      quantity_pairs: z.number(),
-      location: z.string(),
-      moved_on: z.string().trim().min(1, "Choose a delivery date."),
-      reference: z.string(),
-      counterparty_name: z.string(),
-      note: z.string(),
-      delivery_address: z.string().optional(),
-    }),
-  ),
-});
-
-interface DeliveryHistoryFormValues {
-  drafts: StockMovement[];
-}
-
 const STOCK_STATUSES: StockStatus[] = [
   "At Supplier",
   "In Transit",
@@ -182,15 +114,10 @@ const STOCK_STATUSES: StockStatus[] = [
 export default function InventoryPage({
   session,
   onOpenReceiving,
-  initialTab = "stock",
-  showTabs = false,
 }: {
   session: Session;
   onOpenReceiving: (receivingNo: string) => void;
-  initialTab?: InventoryTab;
-  showTabs?: boolean;
 }): React.JSX.Element {
-  const showToast = useToast();
   const queryClient = useQueryClient();
   const {
     data: wire,
@@ -224,7 +151,6 @@ export default function InventoryPage({
   // fetched here so Stock Record can show the current orders waiting on each product.
   const { orders, receivings, outgoing, shipments, vouchers } = useWholesale();
   const [view, setView] = useState<View>("list");
-  const [tab, setTab] = useState<InventoryTab>(initialTab);
   const [selected, setSelected] = useState<{
     stock_code: string;
     location: string;
@@ -249,45 +175,6 @@ export default function InventoryPage({
             entry.location === selected.location,
         ) ?? null);
 
-  async function recordBatch(
-    input: CustomerDeliveryBatchInput,
-  ): Promise<boolean> {
-    try {
-      const created = await createCustomerDeliveryBatch(session, input);
-      await reload();
-      showToast(
-        "success",
-        `${formatQty(created.length)} product${created.length === 1 ? "" : "s"} delivered to the customer.`,
-      );
-      return true;
-    } catch (error) {
-      showToast(
-        "error",
-        error instanceof WholesaleApiError
-          ? error.message
-          : "Could not record this customer delivery.",
-      );
-      return false;
-    }
-  }
-
-  async function editDelivery(movement: StockMovement): Promise<boolean> {
-    try {
-      await updateCustomerDelivery(session, movement);
-      await reload();
-      showToast("success", "Delivery updated.");
-      return true;
-    } catch (error) {
-      showToast(
-        "error",
-        error instanceof WholesaleApiError
-          ? error.message
-          : "Could not update this delivery.",
-      );
-      return false;
-    }
-  }
-
   if (view === "detail" && line) {
     return (
       <StockDetail
@@ -303,16 +190,13 @@ export default function InventoryPage({
     );
   }
 
-  return tab === "stock" ? (
+  return (
     <StockList
       lines={lines}
       orders={ordersWithAllocations}
       movements={movements}
       shipments={shipments}
       vouchers={vouchers}
-      tab={tab}
-      onTabChange={setTab}
-      showTabs={showTabs}
       onOpen={(stockCode, location) => {
         setSelected({ stock_code: stockCode, location });
         setView("detail");
@@ -320,56 +204,6 @@ export default function InventoryPage({
       onRefresh={reload}
       refreshing={isRefreshing}
     />
-  ) : (
-    <CustomerDeliveries
-      lines={lines}
-      orders={ordersWithAllocations}
-      movements={movements}
-      onRefresh={reload}
-      refreshing={isRefreshing}
-      onSave={recordBatch}
-      onUpdate={editDelivery}
-    />
-  );
-}
-
-function InventoryTabs({
-  tab,
-  onChange,
-}: {
-  tab: InventoryTab;
-  onChange: (tab: InventoryTab) => void;
-}): React.JSX.Element {
-  return (
-    <div
-      role="tablist"
-      aria-label="Inventory view"
-      className="flex overflow-x-auto border-b border-border px-6"
-    >
-      {(
-        [
-          ["stock", "Stock"],
-          ["deliveries", "Customer deliveries"],
-        ] as const
-      ).map(([value, label]) => (
-        <button
-          key={value}
-          type="button"
-          role="tab"
-          aria-selected={tab === value}
-          onClick={() => onChange(value)}
-          className={cn(
-            "-mb-px shrink-0 border-b-2 px-5 py-4 text-sm font-semibold transition-colors duration-150",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
-            tab === value
-              ? "border-brand text-brand"
-              : "border-transparent text-text-muted hover:text-text-primary",
-          )}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
   );
 }
 
@@ -428,59 +262,8 @@ function InventoryRefreshButton({
   );
 }
 
-function CustomerDeliveryTabs({
-  active,
-  onCreate,
-  onHistory,
-}: {
-  active: "create" | "history";
-  onCreate: () => void;
-  onHistory: () => void;
-}): React.JSX.Element {
-  return (
-    <div className="flex items-center gap-1 px-6 pt-3 border-b border-border">
-      {(
-        [
-          ["create", "New delivery", onCreate],
-          ["history", "Delivery history", onHistory],
-        ] as const
-      ).map(([value, label, onClick]) => (
-        <button
-          key={value}
-          type="button"
-          role="tab"
-          aria-selected={active === value}
-          onClick={onClick}
-          className={cn(
-            "border-b-2 px-3 pb-3 text-sm font-semibold transition-colors duration-150",
-            active === value
-              ? "border-brand text-brand"
-              : "border-transparent text-text-muted hover:text-text-primary",
-          )}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// ── Customer deliveries ─────────────────────────────────────────────────────
-
-interface DeliveryDraftLine {
-  stock_code: string;
-  location: string;
-  color_breakdown: string;
-}
-
-function orderLabel(order: CustomerOrder): string {
-  return `${order.order_no} · ${order.customer_name}`;
-}
-
-/** Colour quantities reserved by every other open order's allocation for this stock
- *  code — the same rule the server enforces in `allocated_color_pairs_for_stock_code`
- *  (backend/app/services/wholesale/inventory.py). An order is always free to draw on
- *  its own allocation, so its own lines are excluded. */
+/** Colour quantities reserved by every other open order's allocation for a stock code.
+ * An order is always free to draw on its own allocation, but never on another order's. */
 function reservedColorPairsForStockCode(
   orders: CustomerOrder[],
   stockCode: string,
@@ -507,1042 +290,6 @@ function subtractColorPairs(colors: ColorPairs, reserved: ColorPairs): ColorPair
     result[color] = Math.max(0, pairs - (reserved[color] ?? 0));
   }
   return result;
-}
-
-function deliverySources(
-  order: CustomerOrder,
-  stockCode: string,
-  lines: StockLine[],
-  movements: StockMovement[],
-  orders: CustomerOrder[],
-): StockLine[] {
-  const needed = colorAvailabilityForOrder(
-    order,
-    stockCode,
-    {},
-    movements,
-  ).remaining;
-  const reserved = reservedColorPairsForStockCode(orders, stockCode, order.order_id);
-  return lines.filter((line) => {
-    if (line.stock_code !== stockCode) return false;
-    const available = subtractColorPairs(line.color_quantities_pairs, reserved);
-    return Object.entries(needed).some(([color]) => (available[color] ?? 0) > 0);
-  });
-}
-
-function partiallyDeliverableOrders(
-  orders: CustomerOrder[],
-  lines: StockLine[],
-  movements: StockMovement[],
-): CustomerOrder[] {
-  return orders.filter(
-    (order) =>
-      order.order_status !== "cancelled" &&
-      order.lines.some(
-        (line) =>
-          lineRemaining(line) > 0 &&
-          deliverySources(order, line.stock_code, lines, movements, orders).length > 0,
-      ),
-  );
-}
-
-function deliveryLocations(
-  order: CustomerOrder,
-  lines: StockLine[],
-  movements: StockMovement[],
-  orders: CustomerOrder[],
-): string[] {
-  return [
-    ...new Set(
-      order.lines.flatMap((line) =>
-        deliverySources(order, line.stock_code, lines, movements, orders).map(
-          (source) => source.location,
-        ),
-      ),
-    ),
-  ];
-}
-
-function initialDeliveryLines(
-  order: CustomerOrder,
-  fromLocation: string,
-): DeliveryDraftLine[] {
-  return order.lines
-    .filter((line) => lineRemaining(line) > 0)
-    .map((line) => ({
-      stock_code: line.stock_code,
-      location: fromLocation,
-      color_breakdown: "",
-    }));
-}
-
-interface DeliveryHistoryGroup {
-  key: string;
-  movements: StockMovement[];
-}
-
-function deliveryHistoryGroups(
-  movements: StockMovement[],
-): DeliveryHistoryGroup[] {
-  const groups = new Map<string, StockMovement[]>();
-  movements
-    .filter((movement) => movement.movement_type === "out")
-    .forEach((movement) => {
-      // A batch shares its order, date, destination, source and note across each
-      // product movement. Those fields let the history read as one delivery instead
-      // of exposing the implementation detail that the API stores one row per product.
-      const key = [
-        movement.reference,
-        movement.moved_on,
-        movement.location,
-        movement.delivery_address ?? "",
-        movement.note,
-      ].join("|");
-      groups.set(key, [...(groups.get(key) ?? []), movement]);
-    });
-
-  return [...groups.entries()]
-    .map(([key, grouped]) => ({ key, movements: grouped }))
-    .sort((a, b) => (a.movements[0].moved_on < b.movements[0].moved_on ? 1 : -1));
-}
-
-function deliveryHistoryQuantity(delivery: DeliveryHistoryGroup): number {
-  return delivery.movements.reduce((sum, movement) => sum + movement.quantity_pairs, 0);
-}
-
-function CustomerDeliveries({
-  lines,
-  orders,
-  movements,
-  onRefresh,
-  refreshing,
-  onSave,
-  onUpdate,
-}: {
-  lines: StockLine[];
-  orders: CustomerOrder[];
-  movements: StockMovement[];
-  onRefresh: () => void;
-  refreshing: boolean;
-  onSave: (input: CustomerDeliveryBatchInput) => Promise<boolean>;
-  onUpdate: (movement: StockMovement) => Promise<boolean>;
-}): React.JSX.Element {
-  const {
-    control,
-    handleSubmit,
-    setValue,
-    trigger,
-    formState: { errors, isDirty },
-  } = useForm<CustomerDeliveryFormValues>({
-    resolver: zodResolver(customerDeliveryFormSchema),
-    defaultValues: {
-      order_id: "",
-      order_search: "",
-      from_location: "",
-      to_location: "",
-      delivered_on: todayIso(),
-      note: "",
-      drafts: [],
-    },
-    mode: "onBlur",
-    reValidateMode: "onChange",
-  });
-  const { replace } = useFieldArray({ control, name: "drafts" });
-  const values = useWatch({ control }) as CustomerDeliveryFormValues;
-  const { order_id: orderId, from_location: fromLocation, drafts } = values;
-  const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<"create" | "history">("create");
-  const [selectedDeliveryKey, setSelectedDeliveryKey] = useState<string | null>(
-    null,
-  );
-  const availableOrders = useMemo(
-    () => partiallyDeliverableOrders(orders, lines, movements),
-    [orders, lines, movements],
-  );
-  const order = availableOrders.find((entry) => entry.order_id === orderId);
-
-  function selectOrder(nextOrder: CustomerOrder): void {
-    const initialLocation =
-      deliveryLocations(nextOrder, lines, movements, orders)[0] ?? "";
-    setValue("order_id", nextOrder.order_id, {
-      shouldDirty: true,
-      shouldValidate: true,
-    });
-    setValue("order_search", orderLabel(nextOrder), { shouldDirty: true });
-    setValue("from_location", initialLocation, { shouldDirty: true });
-    setValue("to_location", nextOrder.customer_address ?? "", {
-      shouldDirty: true,
-    });
-    replace(initialDeliveryLines(nextOrder, initialLocation));
-    setValue("note", "", { shouldDirty: true });
-    setValue("delivered_on", todayIso(), { shouldDirty: true });
-  }
-
-  function searchOrder(value: string): void {
-    setValue("order_search", value, { shouldDirty: true });
-    const selectedOrder = availableOrders.find(
-      (customerOrder) => orderLabel(customerOrder) === value,
-    );
-    if (selectedOrder) {
-      selectOrder(selectedOrder);
-      return;
-    }
-    setValue("order_id", "", { shouldDirty: true, shouldValidate: true });
-    setValue("from_location", "", { shouldDirty: true });
-    setValue("to_location", "", { shouldDirty: true });
-    replace([]);
-  }
-
-  function changeFromLocation(value: string): void {
-    setValue("from_location", value, { shouldDirty: true });
-    if (!order) return;
-    replace(initialDeliveryLines(order, value));
-  }
-
-  function updateDraft(
-    stockCode: string,
-    patch: Partial<DeliveryDraftLine>,
-  ): void {
-    const index = drafts.findIndex((draft) => draft.stock_code === stockCode);
-    if (index < 0) return;
-    setValue(
-      `drafts.${index}`,
-      { ...drafts[index], ...patch },
-      {
-        shouldDirty: true,
-        shouldValidate: true,
-      },
-    );
-  }
-
-  function stockSources(stockCode: string): StockLine[] {
-    return order
-      ? deliverySources(order, stockCode, lines, movements, orders).filter(
-          (source) => source.location === fromLocation,
-        )
-      : [];
-  }
-
-  function remainingColors(stockCode: string): ColorPairs {
-    if (!order) return {};
-    return colorAvailabilityForOrder(order, stockCode, {}, movements).remaining;
-  }
-
-  // What this order can actually draw from a stock line: its own colour quantities,
-  // less whatever other open orders have reserved through Allocations — an order is
-  // always free to draw on its own reservation, but never on someone else's.
-  function availableColors(stockCode: string, source: StockLine | undefined): ColorPairs {
-    if (!order || !source) return {};
-    return subtractColorPairs(
-      source.color_quantities_pairs,
-      reservedColorPairsForStockCode(orders, stockCode, order.order_id),
-    );
-  }
-
-  function fillAvailable(): void {
-    if (!order) return;
-    replace(
-      drafts.map((draft) => {
-        const source = stockSources(draft.stock_code).find(
-          (line) => line.location === draft.location,
-        );
-        if (!source) return draft;
-        const usable = availableColors(draft.stock_code, source);
-        const needed = colorAvailabilityForOrder(
-          order,
-          draft.stock_code,
-          usable,
-          movements,
-        ).remaining;
-        const deliverable = Object.fromEntries(
-          Object.entries(needed).map(([color, pairs]) => [
-            color,
-            Math.min(pairs, usable[color] ?? 0),
-          ]),
-        );
-        return { ...draft, color_breakdown: formatColorPairs(deliverable) };
-      }),
-    );
-  }
-
-  const draftRows = drafts.map((draft) => {
-    const source = stockSources(draft.stock_code).find(
-      (line) => line.location === draft.location,
-    );
-    const needed = remainingColors(draft.stock_code);
-    const pairs = colorQtyPairs(draft.color_breakdown, "set");
-    const reserved = order
-      ? reservedColorPairsForStockCode(orders, draft.stock_code, order.order_id)
-      : {};
-    const usable = availableColors(draft.stock_code, source);
-    const problem =
-      draft.color_breakdown.trim() === ""
-        ? null
-        : (colorQtyProblem(draft.color_breakdown) ??
-          deliveryColorProblem(draft.color_breakdown, "set", usable, needed, reserved));
-    return { draft, source, needed, pairs, problem };
-  });
-  const selectedRows = draftRows.filter((row) => row.pairs > 0);
-  const canSave =
-    order !== undefined &&
-    selectedRows.length > 0 &&
-    draftRows.every((row) => row.pairs === 0 || row.problem === null);
-
-  async function save(values: CustomerDeliveryFormValues): Promise<void> {
-    const order = availableOrders.find(
-      (entry) => entry.order_id === values.order_id,
-    );
-    if (!order || saving) return;
-    const isValid = await trigger();
-    if (!isValid || !canSave) return;
-    setSaving(true);
-    const saved = await onSave({
-      order_id: order.order_id,
-      delivered_on: values.delivered_on,
-      delivery_address: values.to_location.trim(),
-      note: values.note.trim(),
-      lines: selectedRows.map((row) => ({
-        stock_code: row.draft.stock_code,
-        location: row.draft.location,
-        color_breakdown: row.draft.color_breakdown.trim(),
-      })),
-    });
-    setSaving(false);
-    if (saved) {
-      replace(values.drafts.map((draft) => ({ ...draft, color_breakdown: "" })));
-      setValue("note", "", { shouldDirty: true });
-    }
-  }
-
-  const productsWaiting = availableOrders.reduce(
-    (sum, customerOrder) =>
-      sum +
-      customerOrder.lines.filter(
-        (line) =>
-          lineRemaining(line) > 0 &&
-          deliverySources(customerOrder, line.stock_code, lines, movements, orders)
-            .length > 0,
-      ).length,
-    0,
-  );
-  const selectedPairs = selectedRows.reduce((sum, row) => sum + row.pairs, 0);
-  const deliveryHistory = deliveryHistoryGroups(movements);
-
-  const selectedDelivery = deliveryHistory.find(
-    (delivery) => delivery.key === selectedDeliveryKey,
-  );
-
-  if (activeTab === "history" && selectedDelivery) {
-    return (
-      <DeliveryDetail
-        delivery={selectedDelivery}
-        onBack={() => setSelectedDeliveryKey(null)}
-        onUpdate={onUpdate}
-      />
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
-        <FigureCard
-          label="Orders ready to deliver"
-          value={formatQty(availableOrders.length)}
-          sub="with stock available now"
-        />
-        <FigureCard
-          label="Products to deliver"
-          value={formatQty(productsWaiting)}
-          sub="available to allocate now"
-          tone="neutral"
-        />
-        <FigureCard
-          label="Products selected"
-          value={formatQty(selectedRows.length)}
-          sub="in this delivery"
-        />
-        <FigureCard
-          label="Delivery qty"
-          value={formatIn(selectedPairs, "set")}
-          sub="ready to hand over"
-          tone={selectedPairs > 0 ? "success" : "neutral"}
-        />
-      </div>
-
-      <Panel>
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-          <div>
-            <h2 className="text-base font-semibold text-text-primary tracking-tight">
-              Customer deliveries
-            </h2>
-            <p className="mt-0.5 text-sm text-text-muted">
-              Select an order and record the products delivered from available
-              stock.
-            </p>
-          </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={onRefresh}
-            loading={refreshing}
-          >
-            Refresh
-          </Button>
-        </div>
-
-        <CustomerDeliveryTabs
-          active={activeTab}
-          onCreate={() => {
-            setSelectedDeliveryKey(null);
-            setActiveTab("create");
-          }}
-          onHistory={() => setActiveTab("history")}
-        />
-
-        {activeTab === "create" && (
-          <>
-            <div className="grid gap-4 border-b border-border bg-bg-subtle px-6 py-4 lg:grid-cols-[minmax(0,1fr)_14rem]">
-              <Controller
-                control={control}
-                name="order_search"
-                render={({ field }) => (
-                  <SuggestInput
-                    label="Customer order"
-                    placeholder="Type an order no. or customer name"
-                    suggestions={availableOrders.map(orderLabel)}
-                    value={field.value}
-                    onChange={searchOrder}
-                    error={errors.order_id?.message}
-                  />
-                )}
-              />
-              <div className="flex items-end">
-                <Button
-                  className="w-full"
-                  variant="secondary"
-                  disabled={!order}
-                  onClick={fillAvailable}
-                >
-                  Fill available
-                </Button>
-              </div>
-            </div>
-
-            {!order ? (
-              <EmptyState
-                icon={<InventoryIcon />}
-                title="Choose an order that can be delivered"
-                description="Type an order number or customer name. Suggestions only include orders with at least one product and color available in stock now."
-              />
-            ) : (
-              <div className="flex flex-col gap-5 px-6 py-5">
-                <div className="grid gap-4 rounded-lg border border-border bg-bg-subtle/50 p-4 lg:grid-cols-3">
-                  <ReadOnlyField label="Customer" value={order.customer_name} />
-                  <ReadOnlyField
-                    label="Customer order no."
-                    value={order.order_no}
-                    copyable
-                  />
-                  <div className="hidden lg:block" aria-hidden="true" />
-                  <Controller
-                    control={control}
-                    name="from_location"
-                    render={({ field }) => (
-                      <SuggestInput
-                        label="From location"
-                        placeholder="Type or choose a stock location"
-                        suggestions={deliveryLocations(order, lines, movements, orders)}
-                        value={field.value}
-                        onChange={changeFromLocation}
-                      />
-                    )}
-                  />
-                  <Controller
-                    control={control}
-                    name="to_location"
-                    render={({ field }) => (
-                      <Input
-                        label="To location"
-                        placeholder="Enter delivery address"
-                        value={field.value}
-                        onChange={field.onChange}
-                      />
-                    )}
-                  />
-                </div>
-
-                <TableContainer>
-                  <Thead className="top-0">
-                    <Tr>
-                      <Th className="min-w-[18rem]">Product</Th>
-                      <Th className="min-w-[12rem]">Stock needed</Th>
-                      <Th className="min-w-[13rem]">Available stock</Th>
-                      <Th className="min-w-[15rem]">Stock to deliver</Th>
-                      <Th className="text-right whitespace-nowrap">Qty</Th>
-                      <Th className="min-w-[10rem]">Status</Th>
-                    </Tr>
-                  </Thead>
-                  <Tbody>
-                    {draftRows.length === 0 ? (
-                      <Tr>
-                        <Td
-                          colSpan={6}
-                          className="py-8 text-center text-sm text-text-muted"
-                        >
-                          No outstanding order products are available at this
-                          location.
-                        </Td>
-                      </Tr>
-                    ) : (
-                      draftRows.map(
-                        ({ draft, source, needed, pairs, problem }, index) => {
-                          const orderLine = order.lines.find(
-                            (line) => line.stock_code === draft.stock_code,
-                          );
-                          return (
-                            <Tr key={draft.stock_code}>
-                              <Td>
-                                <div className="flex min-w-0 flex-col gap-0.5">
-                                  <div className="flex min-w-0 items-center gap-1">
-                                    <span className="font-semibold text-brand break-words">
-                                      {draft.stock_code || "No stock code"}
-                                    </span>
-                                    {draft.stock_code && (
-                                      <CopyButton
-                                        value={draft.stock_code}
-                                        what="stock code"
-                                      />
-                                    )}
-                                  </div>
-                                  <span className="text-text-secondary">
-                                    {orderLine?.description || "—"}
-                                  </span>
-                                  <span className="text-xs text-text-muted">
-                                    {orderLine
-                                      ? GROUP_LABELS[orderLine.product_group]
-                                      : "—"}
-                                  </span>
-                                </div>
-                              </Td>
-                              <Td className="font-mono text-xs text-text-secondary">
-                                {formatColorPairs(needed) ||
-                                  "Nothing remaining"}
-                              </Td>
-                              <Td className="font-mono text-xs text-text-secondary">
-                                {source ? (
-                                  <>
-                                    <span className="block">
-                                      {formatColorPairs(source.color_quantities_pairs) ||
-                                        "—"}
-                                    </span>
-                                    <span className="mt-0.5 block font-sans text-text-muted">
-                                      {formatIn(source.quantity_available_pairs, "set")} in
-                                      stock
-                                    </span>
-                                  </>
-                                ) : (
-                                  "No stock available"
-                                )}
-                              </Td>
-                              <Td>
-                                <Controller
-                                  control={control}
-                                  name={`drafts.${index}.color_breakdown`}
-                                  render={({ field }) => (
-                                    <CellInput
-                                      label={`Colors to deliver for ${draft.stock_code}`}
-                                      placeholder="black2s,pink1s"
-                                      value={field.value}
-                                      error={problem ?? undefined}
-                                      onChange={(color_breakdown) =>
-                                        updateDraft(draft.stock_code, {
-                                          color_breakdown,
-                                        })
-                                      }
-                                    />
-                                  )}
-                                />
-                              </Td>
-                              <Td className="text-right tabular-nums font-medium whitespace-nowrap">
-                                {pairs > 0 ? formatIn(pairs, "set") : "—"}
-                              </Td>
-                              <Td>
-                                {problem ? (
-                                  <div className="flex flex-col items-start gap-1">
-                                    <StatusPill
-                                      label="Cannot deliver"
-                                      className="bg-error text-white"
-                                    />
-                                    <span className="text-xs text-error">
-                                      {problem}
-                                    </span>
-                                  </div>
-                                ) : !source ? (
-                                  <StatusPill
-                                    label="Not available"
-                                    className="bg-error text-white"
-                                  />
-                                ) : pairs > 0 ? (
-                                  <StatusPill
-                                    label="Ready"
-                                    className="bg-success text-white"
-                                  />
-                                ) : (
-                                  <StatusPill
-                                    label="Not selected"
-                                    className="bg-text-secondary text-bg-base"
-                                  />
-                                )}
-                              </Td>
-                            </Tr>
-                          );
-                        },
-                      )
-                    )}
-                  </Tbody>
-                </TableContainer>
-
-                <div className="grid items-end gap-4 border-t border-border pt-5 md:grid-cols-[11rem_minmax(0,1fr)_auto]">
-                  <Controller
-                    control={control}
-                    name="delivered_on"
-                    render={({ field }) => (
-                      <Input
-                        label="Delivery date"
-                        type="date"
-                        value={field.value}
-                        onChange={field.onChange}
-                        error={errors.delivered_on?.message}
-                      />
-                    )}
-                  />
-                  <Controller
-                    control={control}
-                    name="note"
-                    render={({ field }) => (
-                      <Input
-                        label="Delivery note"
-                        placeholder="Collected by the customer"
-                        value={field.value}
-                        onChange={field.onChange}
-                      />
-                    )}
-                  />
-                  <Button
-                    title={
-                      isDirty ? "Delivery changes are pending." : undefined
-                    }
-                    onClick={handleSubmit(save)}
-                    loading={saving}
-                    disabled={!canSave}
-                  >
-                    <CheckIcon className="w-4 h-4" />
-                    Deliver {formatQty(selectedRows.length)} product
-                    {selectedRows.length === 1 ? "" : "s"}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </Panel>
-
-      {activeTab === "history" && (
-        <Panel>
-          <div className="flex flex-wrap items-center justify-between gap-2 px-6 py-4 border-b border-border">
-            <div>
-              <h2 className="text-base font-semibold text-text-primary tracking-tight">
-                Delivery history
-              </h2>
-              <p className="mt-0.5 text-sm text-text-muted">
-                Products already delivered to customers.
-              </p>
-            </div>
-            <span className="text-sm text-text-muted">
-              {formatQty(deliveryHistory.length)} deliver
-              {deliveryHistory.length === 1 ? "y" : "ies"}
-            </span>
-          </div>
-
-          <TableContainer className="border-0 rounded-none">
-            <Thead>
-              <Tr>
-                <Th className="whitespace-nowrap">Date</Th>
-                <Th className="whitespace-nowrap">Order no.</Th>
-                <Th>Customer</Th>
-                <Th>Products</Th>
-                <Th className="text-right whitespace-nowrap">Qty</Th>
-                <Th>Destination</Th>
-                <Th>Note</Th>
-                <Th className="w-28" aria-label="Actions" />
-              </Tr>
-            </Thead>
-            <Tbody>
-              {deliveryHistory.length === 0 ? (
-                <Tr>
-                  <Td
-                    colSpan={8}
-                    className="py-8 text-center text-sm text-text-muted"
-                  >
-                    No customer deliveries recorded yet.
-                  </Td>
-                </Tr>
-              ) : (
-                deliveryHistory.map((delivery) => {
-                  const first = delivery.movements[0];
-                  return (
-                    <Tr key={delivery.key}>
-                      <Td className="whitespace-nowrap text-text-muted">
-                        {formatDate(first.moved_on)}
-                      </Td>
-                      <Td className="whitespace-nowrap">
-                        <Reference value={first.reference} what="order no." />
-                      </Td>
-                      <Td className="whitespace-nowrap font-medium">
-                        {first.counterparty_name || "—"}
-                      </Td>
-                      <Td className="whitespace-normal break-words">
-                        <span className="font-medium text-text-primary">
-                          {formatQty(delivery.movements.length)} product
-                          {delivery.movements.length === 1 ? "" : "s"}
-                        </span>
-                      </Td>
-                      <Td className="text-right tabular-nums font-semibold whitespace-nowrap">
-                        {formatIn(deliveryHistoryQuantity(delivery), "set")}
-                      </Td>
-                      <Td className="text-text-secondary whitespace-normal break-words">
-                        {first.delivery_address || "—"}
-                      </Td>
-                      <Td className="max-w-[16rem] whitespace-normal break-words text-text-secondary">
-                        {first.note || "—"}
-                      </Td>
-                      <Td className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setSelectedDeliveryKey(delivery.key)}
-                        >
-                          View details
-                        </Button>
-                      </Td>
-                    </Tr>
-                  );
-                })
-              )}
-            </Tbody>
-          </TableContainer>
-        </Panel>
-      )}
-    </div>
-  );
-}
-
-function DeliveryDetail({
-  delivery,
-  onBack,
-  onUpdate,
-}: {
-  delivery: DeliveryHistoryGroup;
-  onBack: () => void;
-  onUpdate: (movement: StockMovement) => Promise<boolean>;
-}): React.JSX.Element {
-  const [detailMode, setDetailMode] = useState<"view" | "edit">("view");
-  const {
-    control,
-    handleSubmit,
-    setValue,
-    formState: { errors, isDirty },
-  } = useForm<DeliveryHistoryFormValues>({
-    resolver: zodResolver(deliveryHistoryFormSchema),
-    defaultValues: { drafts: delivery.movements },
-    mode: "onBlur",
-    reValidateMode: "onChange",
-  });
-  const drafts = useWatch({ control, name: "drafts" }) as StockMovement[];
-  const [saving, setSaving] = useState(false);
-  const first = drafts[0] ?? delivery.movements[0];
-  const hasChanges = drafts.some((draft, index) => {
-    const original = delivery.movements[index];
-    return (
-      draft.location !== original.location ||
-      draft.color_breakdown !== original.color_breakdown ||
-      draft.moved_on !== original.moved_on ||
-      draft.note !== original.note
-    );
-  });
-
-  function updateDraft(
-    movementId: string,
-    patch: Partial<StockMovement>,
-  ): void {
-    const index = drafts.findIndex((draft) => draft.movement_id === movementId);
-    if (index < 0) return;
-    setValue(
-      `drafts.${index}`,
-      { ...drafts[index], ...patch },
-      {
-        shouldDirty: true,
-        shouldValidate: true,
-      },
-    );
-  }
-
-  async function saveChanges(values: DeliveryHistoryFormValues): Promise<void> {
-    if (!hasChanges || saving) return;
-    setSaving(true);
-    try {
-      for (const [index, draft] of values.drafts.entries()) {
-        const original = delivery.movements[index];
-        const changed =
-          draft.location !== original.location ||
-          draft.color_breakdown !== original.color_breakdown ||
-          draft.moved_on !== original.moved_on ||
-          draft.note !== original.note;
-        if (changed && !(await onUpdate(draft))) return;
-      }
-      setDetailMode("view");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-5">
-      <Button variant="ghost" size="sm" onClick={onBack}>
-        <ChevronLeftIcon className="w-4 h-4" />
-        Back to delivery history
-      </Button>
-
-      <Panel>
-        <div className="grid items-center gap-3 px-6 py-4 border-b border-border lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-semibold text-text-primary tracking-tight">
-                {first.reference}
-              </h2>
-              <StatusPill label="Delivered" className="bg-success text-white" />
-            </div>
-            <p className="mt-0.5 truncate text-sm text-text-muted">
-              {first.counterparty_name} · {formatDate(first.moved_on)}
-            </p>
-          </div>
-
-          <div
-            role="tablist"
-            aria-label="Delivery detail mode"
-            className="order-2 flex w-full rounded-md bg-bg-subtle p-0.5 lg:order-none lg:w-auto lg:justify-self-center"
-          >
-            {(["view", "edit"] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                role="tab"
-                aria-selected={detailMode === mode}
-                onClick={() => setDetailMode(mode)}
-                className={cn(
-                  "flex-1 rounded-[5px] px-4 py-1.5 text-sm font-medium capitalize transition-colors duration-150 sm:flex-none",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
-                  detailMode === mode
-                    ? "bg-brand text-white shadow-sm"
-                    : "text-text-muted hover:text-text-primary",
-                )}
-              >
-                {mode}
-              </button>
-            ))}
-          </div>
-
-          <div className="order-3 flex items-center gap-2 lg:order-none lg:justify-self-end">
-            {detailMode === "edit" && (
-              <Button
-                size="sm"
-                title={
-                  isDirty
-                    ? "Delivery changes are pending Save changes."
-                    : undefined
-                }
-                onClick={handleSubmit(saveChanges)}
-                loading={saving}
-                disabled={!hasChanges}
-              >
-                <CheckIcon className="w-4 h-4" />
-                Save changes
-              </Button>
-            )}
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-6 p-6">
-          <section>
-            <SectionLabel>Delivery information</SectionLabel>
-            <div className="grid gap-4 rounded-lg border border-border bg-bg-subtle/50 p-4 sm:grid-cols-2 lg:grid-cols-3">
-              <ReadOnlyField label="Customer" value={first.counterparty_name || "—"} />
-              <ReadOnlyField
-                label="Customer order no."
-                value={first.reference}
-                copyable
-              />
-              <ReadOnlyField
-                label="Delivery date"
-                value={formatDate(first.moved_on)}
-              />
-              <ReadOnlyField
-                label="From location"
-                value={first.location || "—"}
-              />
-              <ReadOnlyField
-                label="Destination"
-                value={first.delivery_address || "—"}
-                wrap
-              />
-              <ReadOnlyField label="Note" value={first.note || "—"} wrap />
-            </div>
-          </section>
-
-          <section>
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <SectionLabel>Products delivered</SectionLabel>
-              <span className="text-xs text-text-muted">
-                {formatQty(drafts.length)} product
-                {drafts.length === 1 ? "" : "s"} ·{" "}
-                {formatIn(
-                  deliveryHistoryQuantity({ ...delivery, movements: drafts }),
-                  "set",
-                )}
-              </span>
-            </div>
-            <TableContainer>
-              <Thead className="top-0">
-                <Tr>
-                  <Th className="min-w-[16rem]">Product</Th>
-                  <Th>Colors</Th>
-                  <Th className="text-right whitespace-nowrap">Qty</Th>
-                  {detailMode === "edit" && (
-                    <>
-                      <Th>From</Th>
-                      <Th className="whitespace-nowrap">Date</Th>
-                      <Th>Note</Th>
-                    </>
-                  )}
-                </Tr>
-              </Thead>
-              <Tbody>
-                {drafts.map((movement, index) => (
-                  <Tr key={movement.movement_id}>
-                    <Td>
-                      <div className="flex min-w-0 flex-col gap-0.5">
-                        <div className="flex min-w-0 items-center gap-1">
-                          <span className="break-words font-semibold text-brand">
-                            {movement.stock_code || "No stock code"}
-                          </span>
-                          {movement.stock_code && (
-                            <CopyButton
-                              value={movement.stock_code}
-                              what="stock code"
-                            />
-                          )}
-                        </div>
-                        <span className="break-words text-text-primary">
-                          {movement.description || "—"}
-                        </span>
-                        <span className="text-xs text-text-muted">
-                          {GROUP_LABELS[movement.product_group]}
-                        </span>
-                      </div>
-                    </Td>
-                    <Td>
-                      {detailMode === "edit" ? (
-                        <Controller
-                          control={control}
-                          name={`drafts.${index}.color_breakdown`}
-                          render={({ field }) => (
-                            <CellInput
-                              label={`Colors delivered for ${movement.stock_code}`}
-                              placeholder="black2s,pink1s"
-                              value={field.value}
-                              onChange={(color_breakdown) =>
-                                updateDraft(movement.movement_id, { color_breakdown })
-                              }
-                            />
-                          )}
-                        />
-                      ) : (
-                        <span className="font-mono text-xs text-text-secondary break-words">
-                          {movement.color_breakdown || "—"}
-                        </span>
-                      )}
-                    </Td>
-                    <Td className="text-right tabular-nums font-semibold whitespace-nowrap">
-                      {formatIn(
-                        colorQtyPairs(movement.color_breakdown, "set"),
-                        "set",
-                      )}
-                    </Td>
-                    {detailMode === "edit" && (
-                      <>
-                        <Td>
-                          <Controller
-                            control={control}
-                            name={`drafts.${index}.location`}
-                            render={({ field }) => (
-                              <CellInput
-                                label={`Source location for ${movement.stock_code}`}
-                                placeholder="Source location"
-                                value={field.value}
-                                onChange={(location) =>
-                                  updateDraft(movement.movement_id, {
-                                    location,
-                                  })
-                                }
-                              />
-                            )}
-                          />
-                        </Td>
-                        <Td>
-                          <Controller
-                            control={control}
-                            name={`drafts.${index}.moved_on`}
-                            render={({ field }) => (
-                              <CellInput
-                                label={`Delivery date for ${movement.stock_code}`}
-                                placeholder=""
-                                type="date"
-                                value={field.value}
-                                onChange={(date) =>
-                                  updateDraft(movement.movement_id, { moved_on: date })
-                                }
-                                error={errors.drafts?.[index]?.moved_on?.message}
-                              />
-                            )}
-                          />
-                        </Td>
-                        <Td>
-                          <Controller
-                            control={control}
-                            name={`drafts.${index}.note`}
-                            render={({ field }) => (
-                              <CellInput
-                                label={`Note for ${movement.stock_code}`}
-                                placeholder="Optional note"
-                                value={field.value}
-                                onChange={(note) =>
-                                  updateDraft(movement.movement_id, { note })
-                                }
-                              />
-                            )}
-                          />
-                        </Td>
-                      </>
-                    )}
-                  </Tr>
-                ))}
-              </Tbody>
-            </TableContainer>
-          </section>
-        </div>
-      </Panel>
-    </div>
-  );
 }
 
 // ── List ─────────────────────────────────────────────────────────────────────
@@ -1611,24 +358,18 @@ function StockList({
   movements,
   shipments,
   vouchers,
-  tab,
-  onTabChange,
   onOpen,
   onRefresh,
   refreshing,
-  showTabs,
 }: {
       lines: StockLine[];
       orders: CustomerOrder[];
       movements: StockMovement[];
       shipments: Shipment[];
       vouchers: SupplierVoucher[];
-  tab: InventoryTab;
-  onTabChange: (tab: InventoryTab) => void;
   onOpen: (stockCode: string, location: string) => void;
   onRefresh: () => void;
   refreshing: boolean;
-  showTabs: boolean;
 }): React.JSX.Element {
   const [search, setSearch] = useState("");
   const [location, setLocation] = useState("all");
@@ -1762,8 +503,6 @@ function StockList({
             <InventoryRefreshButton onRefresh={onRefresh} refreshing={refreshing} />
           </div>
         </div>
-
-        {showTabs && <InventoryTabs tab={tab} onChange={onTabChange} />}
 
         <>
           <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-bg-subtle">
@@ -2707,31 +1446,6 @@ function formatColorPairs(quantity_pairs: ColorPairs): string {
       quantity % 6 === 0 ? `${color}${quantity / 6}s` : `${color}${quantity}p`,
     )
     .join(", ");
-}
-
-function deliveryColorProblem(
-  text: string,
-  unit: Unit,
-  stockColors: ColorPairs,
-  remainingColors: ColorPairs,
-  reservedColors: ColorPairs = {},
-): string | null {
-  if (text.trim() === "") return "Add at least one color to this delivery.";
-  const requested = colorPairsForText(text, unit);
-  for (const [color, pairs] of Object.entries(requested)) {
-    if ((remainingColors[color] ?? 0) <= 0) {
-      return `Color "${color}" is not still needed on this order.`;
-    }
-    if (pairs > (remainingColors[color] ?? 0)) {
-      return `Only ${formatIn(remainingColors[color], "pair")} of ${color} is still needed.`;
-    }
-    if (pairs > (stockColors[color] ?? 0)) {
-      return (reservedColors[color] ?? 0) > 0
-        ? `Color "${color}" is reserved for another customer order.`
-        : `Only ${formatIn(stockColors[color] ?? 0, "pair")} of ${color} is in stock.`;
-    }
-  }
-  return null;
 }
 
 function StockDetail({

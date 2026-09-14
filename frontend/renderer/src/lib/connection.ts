@@ -38,6 +38,9 @@ const listeners = new Set<() => void>();
 
 function set(next: ConnectionStatus): void {
   if (next === status) return;
+  // eslint-disable-next-line no-console -- deliberate diagnostic trail; see network.ts's
+  // per-attempt logging for the failure this transition followed from.
+  console.log(`[connection] ${status} -> ${next} at ${new Date().toISOString()}`);
   status = next;
   listeners.forEach((listener) => listener());
 }
