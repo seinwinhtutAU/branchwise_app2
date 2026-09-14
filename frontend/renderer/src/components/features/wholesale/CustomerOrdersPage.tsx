@@ -67,7 +67,6 @@ import {
   paymentStatus,
   receivedPct,
   remainingQty,
-  KNOWN_CUSTOMERS,
   type CustomerOrder,
   type CustomerOrderLine,
   type OrderStatus,
@@ -76,7 +75,6 @@ import {
   colorQtyPairs,
   colorQtyProblem,
   duplicateStockCodeProblem,
-  SUPPLIER_NAMES,
   formatDate,
   formatKyat,
   formatQty,
@@ -111,12 +109,14 @@ import {
   type ColorPairs,
   type StockLine,
 } from "@renderer/components/features/wholesale/stock";
+import { GROUP_LABELS, type ProductGroup } from "@renderer/components/features/wholesale/products";
 import {
-  GROUP_LABELS,
+  KNOWN_CUSTOMERS,
   STOCK_CODES,
   productOf,
-  type ProductGroup,
-} from "@renderer/components/features/wholesale/products";
+  SUPPLIER_NAMES,
+  useHydrateMasterData,
+} from "@renderer/components/features/wholesale/masterData";
 
 /** A quantity of goods, written in sets — the unit the business trades in. Pairs stay
  *  the figure underneath, so nothing is ever converted twice. */
@@ -217,6 +217,7 @@ export default function CustomerOrdersPage({
 }): React.JSX.Element {
   const showToast = useToast();
   const queryClient = useQueryClient();
+  useHydrateMasterData(session);
   const {
     data: wire,
     isFetching: isRefreshing,

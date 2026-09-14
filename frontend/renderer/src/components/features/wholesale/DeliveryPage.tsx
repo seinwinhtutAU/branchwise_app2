@@ -62,8 +62,6 @@ import {
 import {
   arrivedPct,
   cargoRemaining,
-  CARRIER_NAMES,
-  RECEIVING_GATES,
   normaliseFlow,
   finalRemaining,
   intoFinal,
@@ -72,13 +70,18 @@ import {
   shipmentPairs,
   shipmentStatus,
   SHIPMENT_STATUSES,
-  DESTINATION_NAMES,
   type Shipment,
   type ShipmentLeg,
   type ShipmentStatus,
 } from "@renderer/components/features/wholesale/shipments";
 import { DeliveryJourney } from "@renderer/components/features/wholesale/journey";
-import { CARGO_NAMES } from "@renderer/components/features/wholesale/supplierVouchers";
+import {
+  CARGO_NAMES,
+  CARRIER_NAMES,
+  DESTINATION_NAMES,
+  RECEIVING_GATES,
+  useHydrateMasterData,
+} from "@renderer/components/features/wholesale/masterData";
 import {
   formatDate,
   formatQty,
@@ -162,6 +165,7 @@ export default function DeliveryPage({
   session: Session;
 }): React.JSX.Element {
   const showToast = useToast();
+  useHydrateMasterData(session);
   const queryClient = useQueryClient();
   const {
     data: wire,

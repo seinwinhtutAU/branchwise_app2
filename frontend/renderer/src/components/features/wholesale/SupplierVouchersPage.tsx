@@ -62,7 +62,6 @@ import {
 } from "@renderer/components/ui/icons";
 import { DeliveryJourney } from "@renderer/components/features/wholesale/journey";
 import {
-  CARGO_NAMES,
   paidPct,
   paymentStatus,
   receivedPct,
@@ -82,7 +81,6 @@ import {
   type CustomerOrder,
 } from "@renderer/components/features/wholesale/customerOrders";
 import {
-  SUPPLIER_NAMES,
   formatDate,
   colorQtyPairs,
   colorQtyProblem,
@@ -124,12 +122,14 @@ import {
   type NewSupplierVoucherInput,
   type SupplierVoucherWire,
 } from "@renderer/components/features/wholesale/api";
+import { GROUP_LABELS, type ProductGroup } from "@renderer/components/features/wholesale/products";
 import {
-  GROUP_LABELS,
+  CARGO_NAMES,
   STOCK_CODES,
+  SUPPLIER_NAMES,
   productOf,
-  type ProductGroup,
-} from "@renderer/components/features/wholesale/products";
+  useHydrateMasterData,
+} from "@renderer/components/features/wholesale/masterData";
 
 /** A quantity of goods, written in sets — the unit the business trades in. Pairs stay
  *  the figure underneath, so nothing is ever converted twice. */
@@ -239,6 +239,7 @@ export default function SupplierVouchersPage({
   session: Session;
 }): React.JSX.Element {
   const showToast = useToast();
+  useHydrateMasterData(session);
   const queryClient = useQueryClient();
   const {
     data: wire,

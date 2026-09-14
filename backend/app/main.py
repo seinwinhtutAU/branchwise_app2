@@ -20,6 +20,7 @@ from app.routers import (
     wholesale_supplier_vouchers,
     wholesale_orders,
     wholesale_inventory,
+    wholesale_master_data,
 )
 
 
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
     app.include_router(wholesale_supplier_vouchers.router)
     app.include_router(wholesale_orders.router)
     app.include_router(wholesale_inventory.router)
+    app.include_router(wholesale_master_data.router)
 
     return app
 

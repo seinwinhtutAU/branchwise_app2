@@ -105,13 +105,6 @@ export function paidPct(voucher: SupplierVoucher): number {
 }
 
 /** The freight companies that bring shipments in. */
-export const CARGO_NAMES = [
-  "Shwe Moe Cargo",
-  "Ayar Cargo",
-  "Tiger Cargo",
-  "Golden Sea Cargo",
-];
-
 // ── Seed rows ────────────────────────────────────────────────────────────────
 // Stock codes match the ones on the seeded customer orders, so the two screens read as
 // one business rather than two unrelated demos.

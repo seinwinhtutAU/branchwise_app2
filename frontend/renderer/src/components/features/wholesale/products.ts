@@ -9,7 +9,7 @@
 // renamed later. This list is what the wizards offer while someone is typing, so the same
 // product is not written three different ways on three screens.
 //
-// Front-end only: no backend, so this is seed data.
+// Product master data is hydrated from the backend by masterData.ts.
 
 export type ProductGroup = "man" | "lady" | "child";
 
@@ -25,28 +25,6 @@ export interface Product {
   stock_code: string;
   description: string;
   product_group: ProductGroup;
-}
-
-export const SEED_PRODUCTS: Product[] = [
-  { stock_code: "A1001", description: "Men's leather sandal", product_group: "man" },
-  { stock_code: "A1002", description: "Men's slipper", product_group: "man" },
-  { stock_code: "A1003", description: "Men's sport sandal", product_group: "man" },
-  { stock_code: "B2001", description: "Ladies' flat sandal", product_group: "lady" },
-  { stock_code: "B2002", description: "Ladies' heel sandal", product_group: "lady" },
-  { stock_code: "C3001", description: "Kids' school shoe", product_group: "child" },
-  { stock_code: "C3002", description: "Kids' sandal", product_group: "child" },
-  { stock_code: "D4001", description: "Ladies' rubber slipper", product_group: "lady" },
-];
-
-export const STOCK_CODES: string[] = SEED_PRODUCTS.map(
-  (product) => product.stock_code,
-);
-
-/** The product a stock code stands for, or nothing when it is one we have not sold
- *  before. Used to fill a description and product_group in as soon as the code is typed. */
-export function productOf(stockCode: string): Product | undefined {
-  const code = stockCode.trim().toUpperCase();
-  return SEED_PRODUCTS.find((product) => product.stock_code === code);
 }
 
 /** A product on one line, short enough for a table cell: "Men's slipper · Man". */

@@ -213,11 +213,3 @@ export function nextReference(
 // ── Reference data ───────────────────────────────────────────────────────────
 // The suppliers (factories) the business buys from. The screens say "Supplier / Factory"
 // because staff use both words for the same company.
-
-export const SUPPLIER_NAMES = [
-  "Goody Factory",
-  "Lek",
-  "Nilin",
-  "Maldini",
-  "Panda Shoes",
-];

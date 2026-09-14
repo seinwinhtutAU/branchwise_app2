@@ -159,35 +159,6 @@ export function paidPct(order: CustomerOrder): number {
   return sharePct(paidAmount(order), orderAmount(order));
 }
 
-export const KNOWN_CUSTOMERS = [
-  {
-    name: "Ma Su Su Hlaing",
-    phone: "09-4500-12345",
-    address: "No. 24, Bogyoke Rd, Mawlamyine",
-  },
-  {
-    name: "Pone Pone",
-    phone: "09-9600-23456",
-    address: "112 Anawrahta Rd, Yangon",
-  },
-  {
-    name: "Ko Kaung Htet",
-    phone: "09-7800-34567",
-    address: "Zay Gyi Market, Magway",
-  },
-  {
-    name: "KKNN",
-    phone: "09-4500-45678",
-    address: "Shwe Taung St, Mawlamyine",
-  },
-  {
-    name: "Ma Kyi Phyu",
-    phone: "09-9600-56789",
-    address: "5 Ward, Insein, Yangon",
-  },
-  { name: "MPPA", phone: "09-7800-67890", address: "78th St, Mandalay" },
-];
-
 // ── Seed rows ────────────────────────────────────────────────────────────────
 
 export const SEED_ORDERS: CustomerOrder[] = [

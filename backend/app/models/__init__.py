@@ -6,6 +6,15 @@ from app.models.purchase import Purchase, PurchaseLine
 from app.models.sale import Sale, SaleLine
 from app.models.stock_level import StockLevel
 from app.models.user import User, UserRole
+from app.models.wholesale_master_data import (
+    WholesaleCargoCompany,
+    WholesaleCarrier,
+    WholesaleCustomer,
+    WholesaleDestination,
+    WholesaleProduct,
+    WholesaleReceivingGate,
+    WholesaleSupplier,
+)
 from app.models.wholesale import (
     AllocationEvent,
     ProductGroup,
@@ -53,4 +62,11 @@ __all__ = [
     "WholesaleUnit",
     "WholesalePayment",
     "WholesaleStockMovement",
+    "WholesaleProduct",
+    "WholesaleSupplier",
+    "WholesaleCustomer",
+    "WholesaleCargoCompany",
+    "WholesaleCarrier",
+    "WholesaleDestination",
+    "WholesaleReceivingGate",
 ]

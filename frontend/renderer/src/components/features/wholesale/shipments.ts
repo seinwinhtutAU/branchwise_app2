@@ -265,27 +265,7 @@ export const SEED_SHIPMENTS: Shipment[] = [
 ];
 
 /** The places shipments normally pass through on the way. */
-export const DESTINATION_NAMES = [
-  "Yangon",
-  "Mandalay",
-  "Magway",
-  "Mawlamyine",
-  "Bago",
-];
-
 /** Our own receiving gates, as the short address staff would write on a delivery note.
  *  A town is not enough — a town can hold more than one gate. Goods are received and
  *  stored in the same building, so this is the whole of a gate's identity. */
-export const RECEIVING_GATES = [
-  "Bogyoke Rd, Mawlamyine",
-  "Zay Gyi St, Magway",
-  "Anawrahta Rd, Yangon",
-];
-
 /** The local drivers and agents who move packages between stops. */
-export const CARRIER_NAMES = [
-  "U Hla Myint",
-  "Ko Zaw Lin",
-  "Ma Khin Khin",
-  "U Kyaw Thu",
-];

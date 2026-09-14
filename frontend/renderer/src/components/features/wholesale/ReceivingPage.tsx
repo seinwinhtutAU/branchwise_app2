@@ -73,7 +73,6 @@ import {
   type ReceivingPackage,
   type ReceivingStatus,
 } from "@renderer/components/features/wholesale/receivings";
-import { RECEIVING_GATES } from "@renderer/components/features/wholesale/shipments";
 import {
   colorQtyProblem,
   formatDate,
@@ -111,9 +110,11 @@ import {
   type ShipmentWire,
 } from "@renderer/components/features/wholesale/api";
 import {
+  RECEIVING_GATES,
   STOCK_CODES,
   productOf,
-} from "@renderer/components/features/wholesale/products";
+  useHydrateMasterData,
+} from "@renderer/components/features/wholesale/masterData";
 import { colorPairsForText } from "@renderer/components/features/wholesale/stock";
 import { type SupplierVoucher } from "@renderer/components/features/wholesale/supplierVouchers";
 
@@ -286,6 +287,7 @@ export default function ReceivingGatePage({
   onInitialReceivingOpened?: () => void;
 }): React.JSX.Element {
   const showToast = useToast();
+  useHydrateMasterData(session);
   const queryClient = useQueryClient();
   const {
     data: wire,
