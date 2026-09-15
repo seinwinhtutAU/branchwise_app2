@@ -176,6 +176,22 @@ export function paidPct(order: CustomerOrder): number {
   return sharePct(paidAmount(order), orderAmount(order));
 }
 
+/** The next operational action for staff on this order: deliver if goods are allocated,
+ *  allocate if stock remains to be allocated, or null if fulfilled/cancelled/nothing to do. */
+export function nextAction(order: CustomerOrder): "deliver" | "allocate" | null {
+  if (order.order_status === "cancelled" || order.order_status === "fulfilled") {
+    return null;
+  }
+  const allocated = order.lines.reduce(
+    (sum, line) => sum + (line.allocated_quantity_pairs ?? 0),
+    0,
+  );
+  const stillToAllocate = remainingQty(order) - allocated;
+  if (allocated > 0) return "deliver";
+  if (stillToAllocate > 0) return "allocate";
+  return null;
+}
+
 // ── Seed rows ────────────────────────────────────────────────────────────────
 
 export const SEED_ORDERS: CustomerOrder[] = [

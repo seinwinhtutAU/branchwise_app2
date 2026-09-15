@@ -158,14 +158,20 @@ def effective_allocated_color_pairs(
     ordered_colors = color_qty_pairs_by_color(line.color_breakdown, line.unit, line.unit_conversions)
     stored_colors = color_qty_pairs_by_color(line.allocated_color_breakdown, line.unit, line.unit_conversions)
     return {
-        color: min(
-            pairs,
-            max(0, ordered_colors.get(color, 0) - delivered_colors.get(color, 0)),
+        color: max(
+            0,
+            min(
+                pairs - delivered_colors.get(color, 0),
+                ordered_colors.get(color, 0) - delivered_colors.get(color, 0),
+            ),
         )
         for color, pairs in stored_colors.items()
-        if min(
-            pairs,
-            max(0, ordered_colors.get(color, 0) - delivered_colors.get(color, 0)),
+        if max(
+            0,
+            min(
+                pairs - delivered_colors.get(color, 0),
+                ordered_colors.get(color, 0) - delivered_colors.get(color, 0),
+            ),
         ) > 0
     }
 

@@ -129,6 +129,22 @@ export function colorPairsForText(
   return pairs;
 }
 
+export function serializeColorPairs(
+  pairs: ColorPairs,
+  setSize: number = PAIRS_PER.set,
+): string {
+  const parts: string[] = [];
+  for (const [color, count] of Object.entries(pairs)) {
+    if (count <= 0) continue;
+    const safeSetSize = setSize > 0 ? setSize : PAIRS_PER.set;
+    const sets = Math.floor(count / safeSetSize);
+    const rest = count % safeSetSize;
+    if (sets > 0) parts.push(`${color}${sets}s`);
+    if (rest > 0) parts.push(`${color}${rest}p`);
+  }
+  return parts.join(",");
+}
+
 export function colorPairsForOrder(
   order: CustomerOrder,
   stockCode: string,

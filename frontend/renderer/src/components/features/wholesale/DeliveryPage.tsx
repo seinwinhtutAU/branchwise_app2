@@ -7,24 +7,20 @@ import { type Session } from "@renderer/lib/auth";
 import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
 import {
-  CountField,
   EDITABLE,
   FigureCard,
   FloatingLayer,
   MenuItem,
   PAGE_SIZE,
   Panel,
-  QuantityField,
   QuantityInput,
   JourneyArrow,
   JourneyFace,
   JourneySoft,
   MismatchIconButton,
-  ReadOnlyField,
   Required,
   Reference,
   ReviewFact,
-  RowProgress,
   SOFT_BLUE,
   SOFT_RED,
   SectionLabel,
@@ -76,6 +72,7 @@ import {
   type ShipmentStatus,
 } from "@renderer/components/features/wholesale/shipments";
 import { DeliveryJourney } from "@renderer/components/features/wholesale/journey";
+
 import {
   CARGO_NAMES,
   CARRIER_NAMES,
@@ -216,6 +213,7 @@ export default function DeliveryPage({
 
   const [view, setView] = useState<View>("list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [focusSection, setFocusSection] = useState<"tracking" | undefined>(undefined);
 
   useEffect(() => {
     if (!initialShipmentId) return;
@@ -336,7 +334,11 @@ export default function DeliveryPage({
     return (
       <ShipmentDetail
         shipment={selected}
-        onBack={() => setView("list")}
+        focus={focusSection}
+        onBack={() => {
+          setFocusSection(undefined);
+          setView("list");
+        }}
         onSave={persistShipment}
         onDelete={() => deleteShipment(selected.shipment_id)}
         onWriteOff={writeOffShipment}
@@ -349,8 +351,9 @@ export default function DeliveryPage({
   return (
     <ShipmentList
       shipments={shipments}
-      onOpen={(shipmentId) => {
+      onOpen={(shipmentId, focus) => {
         setSelectedId(shipmentId);
+        setFocusSection(focus);
         setView("detail");
       }}
       onDelete={deleteShipment}
@@ -372,7 +375,7 @@ function ShipmentList({
   refreshing,
 }: {
   shipments: Shipment[];
-  onOpen: (shipmentId: string) => void;
+  onOpen: (shipmentId: string, focus?: "tracking") => void;
   onDelete: (shipmentId: string) => void;
   onNew: () => void;
   onRefresh: () => void;
@@ -450,18 +453,7 @@ function ShipmentList({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
-        <FigureCard
-          label="Total shipments"
-          value={formatQty(shipments.length)}
-          sub="shipments"
-        />
-        <FigureCard
-          label="All shipped"
-          value={formatQty(countBy("completed"))}
-          sub="shipments"
-          tone="success"
-        />
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
         <FigureCard
           label="On the way"
           value={formatQty(countBy("in_transit") + countBy("partly_delivered"))}
@@ -569,16 +561,9 @@ function ShipmentList({
                 <Tr>
                   <Th className="whitespace-nowrap">Shipment no.</Th>
                   <Th className="whitespace-nowrap">Voucher no.</Th>
-                  <Th className="whitespace-nowrap">Supplier / Factory</Th>
-                  <Th>Cargo</Th>
                   <Th className="whitespace-nowrap">Shipment date</Th>
-                  <Th className="text-right whitespace-nowrap">
-                    Total packages
-                  </Th>
-                  <Th className="text-right whitespace-nowrap">
-                    Final received
-                  </Th>
-                  <Th className="w-44 whitespace-nowrap">Shipment progress</Th>
+                  <Th className="whitespace-nowrap">Supplier / Factory</Th>
+                  <Th className="whitespace-nowrap">Packages</Th>
                   <Th>Status</Th>
                   <Th className="w-12" aria-label="Actions" />
                 </Tr>
@@ -618,23 +603,27 @@ function ShipmentList({
                         />
                       </Td>
                     )}
-                    <Td className="font-medium whitespace-nowrap">
-                      {shipment.supplier_name}
-                    </Td>
-                    <Td className="text-text-secondary whitespace-nowrap">
-                      {shipment.carrier_name}
-                    </Td>
                     <Td className="text-text-muted whitespace-nowrap">
                       {formatDate(shipment.sent_on)}
                     </Td>
-                    <Td className="text-right tabular-nums font-medium">
-                      {formatQty(shipment.total_packages)}
-                    </Td>
-                    <Td className="text-right tabular-nums font-medium text-success">
-                      {formatQty(shipment.final_received_packages)}
+                    <Td className="font-medium whitespace-nowrap">
+                      {shipment.supplier_name}
                     </Td>
                     <Td>
-                      <RowProgress pct={arrivedPct(shipment)} />
+                      <div className="flex flex-col gap-1 min-w-[6rem] max-w-[8rem]">
+                        <span className="tabular-nums text-xs font-medium text-text-primary">
+                          {formatQty(shipment.final_received_packages)} / {formatQty(shipment.total_packages)}
+                        </span>
+                        <div className="h-1.5 w-full rounded-full bg-bg-raised overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-full rounded-full transition-[width]",
+                              arrivedPct(shipment) === 100 ? "bg-success" : "bg-brand",
+                            )}
+                            style={{ width: `${arrivedPct(shipment)}%` }}
+                          />
+                        </div>
+                      </div>
                     </Td>
                     <Td>
                       <StatusBadge status={shipmentStatus(shipment)} />
@@ -808,9 +797,22 @@ interface ShipmentMismatchTarget {
   currentCount: number;
 }
 
+function isLegFinished(shipment: Shipment, index: number): boolean {
+  const leg = shipment.legs[index];
+  if (!leg) return false;
+  if (leg.packages_received === 0 && shipment.total_packages > 0) return false;
+  if (leg.packages_received !== leg.packages_sent) return false;
+  if (cargoRemaining(shipment) > 0) return false;
+  for (let i = 0; i <= index; i++) {
+    if (legRemaining(shipment, i) > 0) return false;
+  }
+  return true;
+}
+
 function ShipmentDetail({
   shipment: serverShipment,
   writeOffs,
+  focus,
   onBack,
   onSave,
   onDelete,
@@ -819,6 +821,7 @@ function ShipmentDetail({
 }: {
   shipment: Shipment;
   writeOffs: WriteOffWire[];
+  focus?: "tracking";
   onBack: () => void;
   onSave: (shipment: Shipment) => Promise<void>;
   onDelete: () => void;
@@ -839,6 +842,9 @@ function ShipmentDetail({
 }): React.JSX.Element {
   // Edits stay in this local draft until the user explicitly presses Save changes.
   const [saving, setSaving] = useState(false);
+  const trackingSectionRef = useRef<HTMLElement>(null);
+  const [expandedStops, setExpandedStops] = useState<Record<string, boolean>>({});
+
   const {
     control,
     handleSubmit,
@@ -860,6 +866,12 @@ function ShipmentDetail({
   useEffect(() => {
     reset({ shipment: serverShipment });
   }, [reset, serverShipment]);
+
+  useEffect(() => {
+    if (focus === "tracking") {
+      trackingSectionRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [focus]);
   const { receivings, vouchers } = useWholesale();
   const voucher = vouchers.find(
     (entry) => entry.voucher_no === shipment.voucher_no,
@@ -890,38 +902,10 @@ function ShipmentDetail({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [writeOffTarget, setWriteOffTarget] =
     useState<ShipmentMismatchTarget | null>(null);
-  const [stageChoices, setStageChoices] = useState<
-    ShipmentMismatchTarget[] | null
-  >(null);
   const [splitOpen, setSplitOpen] = useState(false);
 
   function latestMismatch(subjectId: string): WriteOffWire | undefined {
     return writeOffs.find((entry) => entry.subject_id === subjectId);
-  }
-
-  function openMismatchExplanation(): void {
-    const stages: ShipmentMismatchTarget[] = [
-      ...shipment.legs.map((leg, index) => ({
-        subjectId: leg.leg_id,
-        legId: leg.leg_id,
-        subject: `${shipment.shipment_no} at ${leg.stop_name}`,
-        remaining: legRemaining(shipment, index),
-        currentCount: leg.packages_sent,
-      })),
-      {
-        subjectId: shipment.shipment_id,
-        subject: `${shipment.shipment_no} at ${shipment.final_destination}`,
-        remaining: finalRemaining(shipment),
-        currentCount: shipment.total_packages,
-      },
-    ];
-    const outstanding = stages.filter((stage) => stage.remaining > 0);
-    const choices = outstanding.length > 0 ? outstanding : stages;
-    if (choices.length === 1) {
-      setWriteOffTarget(choices[0]);
-      return;
-    }
-    setStageChoices(choices);
   }
 
   async function saveChanges(values: ShipmentDetailFormValues): Promise<void> {
@@ -1069,122 +1053,105 @@ function ShipmentDetail({
           <div className="px-6 py-6 flex flex-col gap-10">
             <section>
               <SectionLabel>Shipment information</SectionLabel>
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-text-primary">
-                    Shipment
-                  </h3>
-                  <dl className="grid gap-3 sm:grid-cols-2">
-                    <ReadOnlyField
-                      label="Shipment no."
-                      value={shipment.shipment_no}
-                      copyable
-                    />
-                    <ReadOnlyField
-                      label="Voucher no."
+              <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 items-start">
+                  <div>
+                    <span className="block text-xs font-medium text-text-muted mb-1">
+                      Voucher
+                    </span>
+                    <Reference
                       value={shipment.voucher_no}
-                      copyable
+                      what="voucher no."
+                      singleLine
                     />
-                    <ReadOnlyField
-                      label="Supplier / Factory"
-                      value={shipment.supplier_name}
-                    />
-                  </dl>
-                </div>
-                <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-text-primary">
-                    Shipment details
-                  </h3>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Controller
-                      control={control}
-                      name="shipment.carrier_name"
-                      render={({ field }) => (
-                        <SuggestInput
-                          label="Cargo"
-                          placeholder="Shwe Moe Cargo"
-                          suggestions={CARGO_NAMES}
-                          value={field.value}
-                          onChange={(next) => {
-                            field.onChange(next);
-                            apply({ carrier_name: next });
-                          }}
-                          error={errors.shipment?.carrier_name?.message}
-                        />
-                      )}
-                    />
-                    <Controller
-                      control={control}
-                      name="shipment.final_destination"
-                      render={({ field }) => (
-                        <SuggestInput
-                          label="Receiving gate"
-                          placeholder="Bogyoke Rd, Mawlamyine"
-                          suggestions={RECEIVING_GATES}
-                          value={field.value}
-                          onChange={(next) => {
-                            field.onChange(next);
-                            apply({ final_destination: next });
-                          }}
-                          error={errors.shipment?.final_destination?.message}
-                        />
-                      )}
-                    />
-                    <Controller
-                      control={control}
-                      name="shipment.sent_on"
-                      render={({ field }) => (
-                        <Input
-                          label="Shipment date"
-                          type="date"
-                          className={EDITABLE}
-                          value={field.value}
-                          onChange={field.onChange}
-                          onBlur={field.onBlur}
-                          error={errors.shipment?.sent_on?.message}
-                        />
-                      )}
-                    />
-                    <Controller
-                      control={control}
-                      name="shipment.total_packages"
-                      render={({ field }) => (
-                        <CountField
-                          label="Packages"
-                          value={field.value}
-                          onChange={(next) => {
-                            field.onChange(next);
-                            apply({ total_packages: next });
-                          }}
-                        />
-                      )}
-                    />
-                    <div className="sm:col-span-1">
-                      <Controller
-                        control={control}
-                        name="shipment.total_quantity_pairs"
-                        render={({ field }) => (
-                          <QuantityField
-                            label="Quantity"
-                            value={field.value}
-                            unit={shipment.total_unit}
-                            hint={formatIn(shipmentPairs(shipment), shipment.total_unit)}
-                            error={quantityMismatch}
-                            onChange={(next) => {
-                              field.onChange(next);
-                              apply({ total_quantity_pairs: next });
-                            }}
-                          />
-                        )}
-                      />
-                    </div>
+                    <p className="mt-0.5 text-xs text-text-muted">
+                      {shipment.supplier_name}
+                    </p>
                   </div>
+                  <Controller
+                    control={control}
+                    name="shipment.carrier_name"
+                    render={({ field }) => (
+                      <SuggestInput
+                        label="Cargo"
+                        placeholder="Shwe Moe Cargo"
+                        suggestions={CARGO_NAMES}
+                        value={field.value}
+                        onChange={(next) => {
+                          field.onChange(next);
+                          apply({ carrier_name: next });
+                        }}
+                        error={errors.shipment?.carrier_name?.message}
+                      />
+                    )}
+                  />
+                  <Controller
+                    control={control}
+                    name="shipment.final_destination"
+                    render={({ field }) => (
+                      <SuggestInput
+                        label="Receiving gate"
+                        placeholder="Bogyoke Rd, Mawlamyine"
+                        suggestions={RECEIVING_GATES}
+                        value={field.value}
+                        onChange={(next) => {
+                          field.onChange(next);
+                          apply({ final_destination: next });
+                        }}
+                        error={errors.shipment?.final_destination?.message}
+                      />
+                    )}
+                  />
+                  <Controller
+                    control={control}
+                    name="shipment.sent_on"
+                    render={({ field }) => (
+                      <Input
+                        label="Shipment date"
+                        type="date"
+                        className={EDITABLE}
+                        value={field.value}
+                        onChange={field.onChange}
+                        onBlur={field.onBlur}
+                        error={errors.shipment?.sent_on?.message}
+                      />
+                    )}
+                  />
                 </div>
               </div>
             </section>
 
             <section>
-              <SectionLabel>Shipment journey</SectionLabel>
+              <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+                <SectionLabel>Shipment journey</SectionLabel>
+                <div className="w-full sm:w-80 md:w-96">
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="font-medium text-text-secondary">
+                      Packages received
+                    </span>
+                    <span className="tabular-nums font-semibold text-text-primary">
+                      {formatQty(shipment.final_received_packages)} /{" "}
+                      {formatQty(shipment.total_packages)} ({pct}%)
+                    </span>
+                  </div>
+                  <div
+                    role="progressbar"
+                    aria-valuenow={pct}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label="Packages received progress"
+                    className="h-2 rounded-full bg-bg-raised overflow-hidden"
+                  >
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
+                        pct === 100 ? "bg-success" : "bg-brand",
+                      )}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
               <DeliveryJourney
                 shipment={shipment}
                 receivings={receivings}
@@ -1192,17 +1159,28 @@ function ShipmentDetail({
               />
             </section>
 
-            <section>
+            <section ref={trackingSectionRef}>
               <SectionLabel>Package tracking</SectionLabel>
+              <p className="text-xs text-text-muted -mt-2 mb-3">
+                Click a stop&apos;s name to rename it, or the arrow between stops to add one.
+              </p>
+              {quantityMismatch && (
+                <p className="text-xs text-warning mb-3">
+                  {quantityMismatch}
+                </p>
+              )}
               <TableContainer className="[&>table]:min-w-max">
                 <thead>
                   <Tr>
                     <Th
                       style={{ backgroundColor: JourneyFace("supplier") }}
                       className="text-white text-center"
-                      colSpan={3}
+                      colSpan={2}
                     >
-                      Supplier
+                      <span className="block">Supplier</span>
+                      <span className="block text-[10px] font-normal normal-case text-white/70">
+                        {shipment.supplier_name}
+                      </span>
                     </Th>
                     <ArrowHead />
                     <Th
@@ -1212,56 +1190,124 @@ function ShipmentDetail({
                     >
                       {shipment.carrier_name}
                     </Th>
-                    {shipment.legs.map((leg, index) => (
-                      <Fragment key={leg.leg_id}>
-                        <ArrowHead
-                          insertLabel={`Add a destination before ${leg.stop_name}`}
-                          onInsert={() => setInsertAt(index)}
-                        />
-                        <Th
-                          style={{ backgroundColor: JourneyFace("stop") }}
-                          className="text-white text-center"
-                          colSpan={3}
-                        >
-                          <span className="inline-flex items-center gap-1.5">
-                            {leg.stop_name}
-                            <button
-                              type="button"
-                              aria-label={`Rename ${leg.stop_name}`}
-                              title={`Edit ${leg.stop_name}`}
-                              onClick={() => {
-                                setEditingLeg(index);
-                                setInsertAt(null);
-                              }}
-                              className={cn(
-                                "flex items-center justify-center w-5 h-5 rounded-full shrink-0",
-                                "bg-white/25 text-white",
-                                "transition-colors duration-150",
-                                "hover:bg-white/40",
-                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white",
-                              )}
+                    {shipment.legs.map((leg, index) => {
+                      const finished = isLegFinished(shipment, index);
+                      const isExpanded = !!expandedStops[leg.leg_id];
+                      const collapsed = finished && !isExpanded;
+
+                      return (
+                        <Fragment key={leg.leg_id}>
+                          <ArrowHead
+                            insertLabel={`Add a destination before ${leg.stop_name}`}
+                            onInsert={() => setInsertAt(index)}
+                          />
+                          {collapsed ? (
+                            <Th
+                              style={{ backgroundColor: JourneyFace("stop") }}
+                              className="text-white text-center px-3"
+                              colSpan={1}
                             >
-                              <PencilIcon className="w-3 h-3" />
-                            </button>
-                            <button
-                              type="button"
-                              aria-label={`Remove ${leg.stop_name}`}
-                              title={`Remove ${leg.stop_name}`}
-                              onClick={() => removeLeg(index)}
-                              className={cn(
-                                "flex items-center justify-center w-5 h-5 rounded-full shrink-0",
-                                "bg-white/25 text-white",
-                                "transition-colors duration-150",
-                                "hover:bg-error hover:text-white",
-                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white",
-                              )}
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setExpandedStops((prev) => ({
+                                      ...prev,
+                                      [leg.leg_id]: true,
+                                    }))
+                                  }
+                                  className="inline-flex items-center gap-1 font-medium hover:underline focus-visible:outline-none"
+                                  title="Click to expand stop details"
+                                >
+                                  <span>{leg.stop_name}</span>
+                                  <CheckIcon className="w-3.5 h-3.5 text-white" />
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`Rename ${leg.stop_name}`}
+                                  title={`Edit ${leg.stop_name}`}
+                                  onClick={() => {
+                                    setEditingLeg(index);
+                                    setInsertAt(null);
+                                  }}
+                                  className="flex items-center justify-center w-4 h-4 rounded-full bg-white/25 text-white hover:bg-white/40"
+                                >
+                                  <PencilIcon className="w-2.5 h-2.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`Remove ${leg.stop_name}`}
+                                  title={`Remove ${leg.stop_name}`}
+                                  onClick={() => removeLeg(index)}
+                                  className="flex items-center justify-center w-4 h-4 rounded-full bg-white/25 text-white hover:bg-error"
+                                >
+                                  <CloseIcon className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </Th>
+                          ) : (
+                            <Th
+                              style={{ backgroundColor: JourneyFace("stop") }}
+                              className="text-white text-center"
+                              colSpan={3}
                             >
-                              <CloseIcon className="w-3.5 h-3.5" />
-                            </button>
-                          </span>
-                        </Th>
-                      </Fragment>
-                    ))}
+                              <span className="inline-flex items-center gap-1.5">
+                                {leg.stop_name}
+                                <button
+                                  type="button"
+                                  aria-label={`Rename ${leg.stop_name}`}
+                                  title={`Edit ${leg.stop_name}`}
+                                  onClick={() => {
+                                    setEditingLeg(index);
+                                    setInsertAt(null);
+                                  }}
+                                  className={cn(
+                                    "flex items-center justify-center w-5 h-5 rounded-full shrink-0",
+                                    "bg-white/25 text-white",
+                                    "transition-colors duration-150",
+                                    "hover:bg-white/40",
+                                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white",
+                                  )}
+                                >
+                                  <PencilIcon className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`Remove ${leg.stop_name}`}
+                                  title={`Remove ${leg.stop_name}`}
+                                  onClick={() => removeLeg(index)}
+                                  className={cn(
+                                    "flex items-center justify-center w-5 h-5 rounded-full shrink-0",
+                                    "bg-white/25 text-white",
+                                    "transition-colors duration-150",
+                                    "hover:bg-error hover:text-white",
+                                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white",
+                                  )}
+                                >
+                                  <CloseIcon className="w-3.5 h-3.5" />
+                                </button>
+                                {finished && (
+                                  <button
+                                    type="button"
+                                    aria-label={`Collapse ${leg.stop_name}`}
+                                    title="Collapse stop"
+                                    onClick={() =>
+                                      setExpandedStops((prev) => ({
+                                        ...prev,
+                                        [leg.leg_id]: false,
+                                      }))
+                                    }
+                                    className="flex items-center justify-center w-5 h-5 rounded-full shrink-0 bg-white/25 text-white hover:bg-white/40 text-[10px]"
+                                  >
+                                    <ChevronLeftIcon className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </span>
+                            </Th>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                     <ArrowHead
                       insertLabel="Add a destination before Final received"
                       onInsert={() => setInsertAt(shipment.legs.length)}
@@ -1278,39 +1324,58 @@ function ShipmentDetail({
                     </Th>
                   </Tr>
                   <Tr>
-                    <Th className="text-center">Name</Th>
                     <Th className="text-center">Packages</Th>
                     <Th className="text-center">Quantity</Th>
                     <ArrowCell />
                     <Th className="text-center">Sent</Th>
                     <Th className="text-center">Remaining</Th>
-                    {shipment.legs.map((leg) => (
-                      <Fragment key={`${leg.leg_id}-sub`}>
-                        <ArrowCell />
-                        <Th className="text-center">Received</Th>
-                        <Th className="text-center">Sent</Th>
-                        <Th className="text-center">Remaining</Th>
-                      </Fragment>
-                    ))}
+                    {shipment.legs.map((leg, index) => {
+                      const finished = isLegFinished(shipment, index);
+                      const isExpanded = !!expandedStops[leg.leg_id];
+                      const collapsed = finished && !isExpanded;
+
+                      return (
+                        <Fragment key={`${leg.leg_id}-sub`}>
+                          <ArrowCell />
+                          {collapsed ? (
+                            <Th className="text-center px-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedStops((prev) => ({
+                                    ...prev,
+                                    [leg.leg_id]: true,
+                                  }))
+                                }
+                                className="text-[11px] text-text-muted hover:text-text-primary"
+                              >
+                                Finished
+                              </button>
+                            </Th>
+                          ) : (
+                            <>
+                              <Th className="text-center">Received</Th>
+                              <Th className="text-center">Sent</Th>
+                              <Th className="text-center">Remaining</Th>
+                            </>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                     <ArrowCell />
                     <Th className="text-center">Received</Th>
                     <Th className="text-center">Remaining</Th>
-                    <Th className="text-center">Mismatch</Th>
                   </Tr>
                 </thead>
                 <Tbody>
                   <Tr className="hover:bg-transparent">
-                    <Td className="bg-bg-subtle font-medium whitespace-nowrap">
-                      {shipment.supplier_name}
-                    </Td>
-                    <Td className="bg-bg-subtle text-center">
+                    <Td className="text-center">
                       <BigCount value={shipment.total_packages} />
                     </Td>
-                    <Td className="bg-bg-subtle text-center">
-                      <BigCount
-                        value={shipmentPairs(shipment)}
-                        unit={shipment.total_unit}
-                      />
+                    <Td className="text-center">
+                      <span className="tabular-nums font-semibold text-text-primary text-sm">
+                        {formatSets(shipmentPairs(shipment))}
+                      </span>
                     </Td>
                     <ArrowCell body />
                     <Td className="text-center">
@@ -1329,47 +1394,97 @@ function ShipmentDetail({
                         started={shipment.packages_sent_by_cargo > 0}
                       />
                     </Td>
-                    {shipment.legs.map((leg, index) => (
-                      <Fragment key={`${leg.leg_id}-cells`}>
-                        <ArrowCell body />
-                        <Td className="text-center">
-                          <PackageInput
-                            label={`Packages received at ${leg.stop_name}`}
-                            value={leg.packages_received}
-                            max={maxForLeg(shipment, index)}
-                            onChange={(next) =>
-                              setLeg(index, {
-                                packages_received: next,
-                                packages_sent: Math.min(
-                                  leg.packages_sent,
-                                  next,
-                                ),
-                              })
-                            }
-                          />
-                        </Td>
-                        <Td className="text-center">
-                          <PackageInput
-                            label={`Packages sent on from ${leg.stop_name}`}
-                            value={leg.packages_sent}
-                            max={leg.packages_received}
-                            onChange={(next) =>
-                              setLeg(index, { packages_sent: next })
-                            }
-                          />
-                        </Td>
-                        <Td className="text-center">
-                          <div className="flex flex-col items-center gap-1">
-                            <LeftOver
-                              value={legRemaining(shipment, index)}
-                              started={maxForLeg(shipment, index) > 0}
-                              writtenOff={leg.lost_packages ?? 0}
-                              explanation={latestMismatch(leg.leg_id)}
-                            />
-                          </div>
-                        </Td>
-                      </Fragment>
-                    ))}
+                    {shipment.legs.map((leg, index) => {
+                      const finished = isLegFinished(shipment, index);
+                      const isExpanded = !!expandedStops[leg.leg_id];
+                      const collapsed = finished && !isExpanded;
+
+                      return (
+                        <Fragment key={`${leg.leg_id}-cells`}>
+                          <ArrowCell body />
+                          {collapsed ? (
+                            <Td className="text-center px-3">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedStops((prev) => ({
+                                    ...prev,
+                                    [leg.leg_id]: true,
+                                  }))
+                                }
+                                title="Click to view details"
+                                className="inline-flex items-center gap-1 rounded px-2.5 py-1 bg-success-subtle text-success text-xs font-bold tabular-nums hover:opacity-80 transition-opacity"
+                              >
+                                <span>{formatQty(leg.packages_sent)}</span>
+                                <CheckIcon className="w-3.5 h-3.5" />
+                              </button>
+                            </Td>
+                          ) : (
+                            <>
+                              <Td className="text-center">
+                                <PackageInput
+                                  label={`Packages received at ${leg.stop_name}`}
+                                  value={leg.packages_received}
+                                  max={maxForLeg(shipment, index)}
+                                  onChange={(next) =>
+                                    setLeg(index, {
+                                      packages_received: next,
+                                      packages_sent: Math.min(
+                                        leg.packages_sent,
+                                        next,
+                                      ),
+                                    })
+                                  }
+                                />
+                              </Td>
+                              <Td className="text-center">
+                                <PackageInput
+                                  label={`Packages sent on from ${leg.stop_name}`}
+                                  value={leg.packages_sent}
+                                  max={leg.packages_received}
+                                  onChange={(next) =>
+                                    setLeg(index, { packages_sent: next })
+                                  }
+                                />
+                              </Td>
+                              <Td className="text-center">
+                                <div className="relative inline-flex items-center justify-center">
+                                  <LeftOver
+                                    value={legRemaining(shipment, index)}
+                                    started={maxForLeg(shipment, index) > 0}
+                                    writtenOff={leg.lost_packages ?? 0}
+                                    explanation={latestMismatch(leg.leg_id)}
+                                  />
+                                  {(legRemaining(shipment, index) > 0 ||
+                                    (leg.lost_packages ?? 0) > 0 ||
+                                    latestMismatch(leg.leg_id)) && (
+                                    <div className="absolute -top-1.5 -right-2 z-10">
+                                      <MismatchIconButton
+                                        explained={Boolean(
+                                          latestMismatch(leg.leg_id),
+                                        )}
+                                        onClick={() => {
+                                          setWriteOffTarget({
+                                            subjectId: leg.leg_id,
+                                            legId: leg.leg_id,
+                                            subject: `${shipment.shipment_no} at ${leg.stop_name}`,
+                                            remaining: legRemaining(
+                                              shipment,
+                                              index,
+                                            ),
+                                            currentCount: leg.packages_sent,
+                                          });
+                                        }}
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                              </Td>
+                            </>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                     <ArrowCell body />
                     <Td className="text-center">
                       {hasReceiving ? (
@@ -1391,7 +1506,7 @@ function ShipmentDetail({
                       )}
                     </Td>
                     <Td className="text-center">
-                      <div className="flex flex-col items-center gap-1">
+                      <div className="relative inline-flex items-center justify-center">
                         <LeftOver
                           value={finalRemaining(shipment)}
                           started={
@@ -1401,19 +1516,26 @@ function ShipmentDetail({
                           writtenOff={shipment.lost_packages ?? 0}
                           explanation={latestMismatch(shipment.shipment_id)}
                         />
-                      </div>
-                    </Td>
-                    <Td className="text-center">
-                      <MismatchIconButton
-                        explained={writeOffs.some(
-                          (entry) =>
-                            entry.subject_id === shipment.shipment_id ||
-                            shipment.legs.some(
-                              (leg) => entry.subject_id === leg.leg_id,
-                            ),
+                        {(finalRemaining(shipment) > 0 ||
+                          (shipment.lost_packages ?? 0) > 0 ||
+                          latestMismatch(shipment.shipment_id)) && (
+                          <div className="absolute -top-1.5 -right-2 z-10">
+                            <MismatchIconButton
+                              explained={Boolean(
+                                latestMismatch(shipment.shipment_id),
+                              )}
+                              onClick={() => {
+                                setWriteOffTarget({
+                                  subjectId: shipment.shipment_id,
+                                  subject: `${shipment.shipment_no} at ${shipment.final_destination}`,
+                                  remaining: finalRemaining(shipment),
+                                  currentCount: shipment.total_packages,
+                                });
+                              }}
+                            />
+                          </div>
                         )}
-                        onClick={openMismatchExplanation}
-                      />
+                      </div>
                     </Td>
                   </Tr>
                 </Tbody>
@@ -1463,76 +1585,9 @@ function ShipmentDetail({
                 />
               )}
             </section>
-
-            <section>
-              <SectionLabel>Shipment progress</SectionLabel>
-              <div className="flex items-center justify-between text-sm mb-2">
-                <span className="font-medium text-text-secondary">
-                  Shipment progress
-                </span>
-                <span className="tabular-nums font-semibold text-text-primary">
-                  {formatQty(shipment.final_received_packages)} /{" "}
-                  {formatQty(shipment.total_packages)} packages ({pct}%)
-                </span>
-              </div>
-              <div
-                role="progressbar"
-                aria-valuenow={pct}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-label="Shipment progress"
-                className="h-2 rounded-full bg-bg-raised overflow-hidden"
-              >
-                <div
-                  className={cn(
-                    "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
-                    pct === 100 ? "bg-success" : "bg-brand",
-                  )}
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-            </section>
           </div>
         </Panel>
       </div>
-      {stageChoices && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl border border-border bg-bg-base p-5 shadow-xl">
-            <div className="mb-5">
-              <h2 className="text-lg font-semibold text-text-primary">
-                Which stage?
-              </h2>
-              <p className="mt-1 text-sm text-text-muted">
-                Choose the stage where the package count needs an explanation.
-              </p>
-            </div>
-            <div className="flex flex-col gap-2">
-              {stageChoices.map((choice) => (
-                <button
-                  key={choice.subjectId}
-                  type="button"
-                  className="rounded-lg border border-border px-3 py-2 text-left text-sm text-text-primary hover:border-brand hover:bg-bg-subtle"
-                  onClick={() => {
-                    setStageChoices(null);
-                    setWriteOffTarget(choice);
-                  }}
-                >
-                  <span className="block font-medium">{choice.subject}</span>
-                  <span className="block text-xs text-text-muted">
-                    {formatQty(choice.currentCount)} packages counted ·{" "}
-                    {formatQty(choice.remaining)} outstanding
-                  </span>
-                </button>
-              ))}
-            </div>
-            <div className="mt-5 flex justify-end">
-              <Button variant="ghost" onClick={() => setStageChoices(null)}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
       <WriteOffModal
         open={writeOffTarget !== null}
         subject={writeOffTarget?.subject ?? "this shipment"}

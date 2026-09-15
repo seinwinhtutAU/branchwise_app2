@@ -52,16 +52,17 @@ import {
   ChevronRightIcon,
   ClipboardIcon,
   CloseIcon,
-  EyeIcon,
   MoreIcon,
   PencilIcon,
   PlusIcon,
   SearchIcon,
   TrashIcon,
+  TruckIcon,
   WarehouseIcon,
 } from "@renderer/components/ui/icons";
 import {
   lineRemaining,
+  nextAction,
   orderAmount,
   orderBalance,
   paidAmount,
@@ -90,7 +91,6 @@ import {
   formatIn,
   formatSets,
   PAIRS_PER,
-  priceBasisNote,
   pricedAmount,
 } from "@renderer/components/features/wholesale/units";
 import {
@@ -121,10 +121,12 @@ import {
 } from "@renderer/components/features/wholesale/api";
 import {
   colorPairsForText,
+  serializeColorPairs,
   stockLines,
   type ColorPairs,
   type StockLine,
 } from "@renderer/components/features/wholesale/stock";
+import { ColorQtyPicker } from "@renderer/components/features/wholesale/ColorQtyPicker";
 import {
   GROUP_LABELS,
   type ProductGroup,
@@ -168,7 +170,6 @@ const sets = (qty: number): string => formatSets(qty);
 const ORDERS_QUERY_KEY = ["wholesale", "orders"] as const;
 
 type View = "list" | "detail" | "allocate" | "new";
-type OrderDetailMode = "view" | "edit";
 type StatusFilter = OrderStatus | "all";
 type PayFilter = PaymentStatus | "all";
 
@@ -328,19 +329,12 @@ export default function CustomerOrdersPage({
     lineId: string,
     colorBreakdown: string,
   ): Promise<void> {
-    try {
-      await updateCustomerOrderLineAllocation(session, lineId, colorBreakdown);
-      await queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY });
-      showToast("success", "Customer allocation saved.");
-    } catch (error) {
-      showToast(
-        "error",
-        error instanceof WholesaleApiError
-          ? error.message
-          : "Could not save this customer allocation.",
-      );
-      throw error;
-    }
+    await updateCustomerOrderLineAllocation(session, lineId, colorBreakdown);
+  }
+
+  async function finishAllocationSave(): Promise<void> {
+    await queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY });
+    showToast("success", "Customer allocation saved.");
   }
 
   async function saveDelivery(
@@ -381,7 +375,7 @@ export default function CustomerOrdersPage({
 
   const [view, setView] = useState<View>("list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [openMode, setOpenMode] = useState<OrderDetailMode>("view");
+  const [fulfillTab, setFulfillTab] = useState<"allocate" | "deliver">("allocate");
 
   const selected =
     orders.find((order) => order.order_id === selectedId) ?? null;
@@ -391,19 +385,21 @@ export default function CustomerOrdersPage({
     const target = orders.find((order) => order.order_id === initialOrderId);
     if (!target) return;
     setSelectedId(target.order_id);
-    setOpenMode("edit");
     setView("detail");
     onInitialOrderOpened?.();
   }, [initialOrderId, onInitialOrderOpened, orders]);
 
-  function openOrder(orderId: string, mode: OrderDetailMode = "view"): void {
+  function openOrder(orderId: string): void {
     setSelectedId(orderId);
-    setOpenMode(mode);
     setView("detail");
   }
 
-  function openAllocation(orderId: string): void {
+  function openAllocation(
+    orderId: string,
+    tab: "allocate" | "deliver" = "allocate",
+  ): void {
     setSelectedId(orderId);
+    setFulfillTab(tab);
     setView("allocate");
   }
 
@@ -539,7 +535,6 @@ export default function CustomerOrdersPage({
     return (
       <OrderDetail
         order={selected}
-        initialMode={openMode}
         settings={settings}
         onSave={persistOrder}
         onBack={() => setView("list")}
@@ -556,7 +551,9 @@ export default function CustomerOrdersPage({
         orders={orders}
         inventoryLines={inventoryLines}
         inventoryLoading={isInventoryFetching}
+        initialTab={fulfillTab}
         onSaveAllocation={saveAllocation}
+        onSaveAllocationsComplete={finishAllocationSave}
         onSaveDelivery={saveDelivery}
         onBack={() => setView("list")}
       />
@@ -567,7 +564,6 @@ export default function CustomerOrdersPage({
     <OrderList
       orders={orders}
       onOpen={openOrder}
-      onEdit={(orderId) => openOrder(orderId, "edit")}
       onAllocate={openAllocation}
       onCancel={cancelOrder}
       onNew={() => setView("new")}
@@ -589,7 +585,6 @@ function nextOrderNo(orders: CustomerOrder[]): string {
 function OrderList({
   orders,
   onOpen,
-  onEdit,
   onAllocate,
   onCancel,
   onNew,
@@ -598,8 +593,7 @@ function OrderList({
 }: {
   orders: CustomerOrder[];
   onOpen: (orderId: string) => void;
-  onEdit: (orderId: string) => void;
-  onAllocate: (orderId: string) => void;
+  onAllocate: (orderId: string, tab: "allocate" | "deliver") => void;
   onCancel: (orderId: string) => void;
   onNew: () => void;
   onRefresh: () => void;
@@ -614,12 +608,30 @@ function OrderList({
   // waiting to be done, and counting it overstates what is still owed.
   const live = orders.filter((order) => order.order_status !== "cancelled");
   const openOrders = live.filter((order) => order.order_status !== "fulfilled");
-  const awaitingAllocation = live.filter(
-    (order) =>
-      order.order_status === "new" || order.order_status === "allocating",
+  const readyToDeliverPairs = openOrders.reduce(
+    (sum, order) =>
+      sum +
+      order.lines.reduce(
+        (lineSum, line) =>
+          lineSum +
+          Math.min(lineRemaining(line), line.allocated_quantity_pairs ?? 0),
+        0,
+      ),
+    0,
   );
-  const readyToDeliver = live.filter(
-    (order) => order.order_status === "ready_to_deliver",
+  const awaitingAllocationPairs = openOrders.reduce(
+    (sum, order) =>
+      sum +
+      order.lines.reduce(
+        (lineSum, line) =>
+          lineSum +
+          Math.max(
+            0,
+            lineRemaining(line) - (line.allocated_quantity_pairs ?? 0),
+          ),
+        0,
+      ),
+    0,
   );
   const remainingAll = openOrders.reduce(
     (sum, order) => sum + remainingQty(order),
@@ -674,15 +686,15 @@ function OrderList({
         />
         <FigureCard
           label="Awaiting Allocation"
-          value={formatQty(awaitingAllocation.length)}
-          sub="new or allocating"
-          tone={awaitingAllocation.length > 0 ? "warning" : "success"}
+          value={sets(awaitingAllocationPairs)}
+          sub="across all open orders"
+          tone={awaitingAllocationPairs > 0 ? "warning" : "success"}
         />
         <FigureCard
           label="Ready to Deliver"
-          value={formatQty(readyToDeliver.length)}
-          sub="fully allocated, not sent"
-          tone={readyToDeliver.length > 0 ? "brand" : "success"}
+          value={sets(readyToDeliverPairs)}
+          sub="allocated, ready to send"
+          tone={readyToDeliverPairs > 0 ? "brand" : "success"}
         />
         <FigureCard
           label="Qty Remaining to Deliver"
@@ -818,15 +830,30 @@ function OrderList({
                   </Th>
                   <Th className="whitespace-nowrap">Order status</Th>
                   <Th className="whitespace-nowrap">Payment status</Th>
+                  <Th className="w-28 whitespace-nowrap">Action</Th>
                   <Th className="w-12" aria-label="Actions" />
                 </Tr>
               </Thead>
               <Tbody>
                 {visible.map((order) => {
                   const remaining = remainingQty(order);
+                  const action = nextAction(order);
+                  const rowTint =
+                    action === "allocate"
+                      ? "bg-warning-subtle/30 hover:bg-warning-subtle/50"
+                      : action === "deliver"
+                        ? "bg-brand-subtle/30 hover:bg-brand-subtle/50"
+                        : undefined;
+                  const firstCellBorder =
+                    action === "allocate"
+                      ? "border-l-4 border-l-warning"
+                      : action === "deliver"
+                        ? "border-l-4 border-l-brand"
+                        : undefined;
+
                   return (
-                    <Tr key={order.order_id}>
-                      <Td className="whitespace-nowrap">
+                    <Tr key={order.order_id} className={rowTint}>
+                      <Td className={cn("whitespace-nowrap", firstCellBorder)}>
                         <Reference
                           value={order.order_no}
                           what="order no."
@@ -857,15 +884,19 @@ function OrderList({
                       <Td>
                         <PaymentBadge status={paymentStatus(order)} />
                       </Td>
+                      <Td className="whitespace-nowrap">
+                        {action && (
+                          <Button
+                            size="sm"
+                            onClick={() => onAllocate(order.order_id, action)}
+                          >
+                            {action === "deliver" ? "Deliver" : "Allocate"}
+                          </Button>
+                        )}
+                      </Td>
                       <Td className="text-right">
                         <RowMenu
-                          onView={() => onOpen(order.order_id)}
-                          onEdit={() => onEdit(order.order_id)}
-                          onAllocate={
-                            order.order_status === "cancelled"
-                              ? undefined
-                              : () => onAllocate(order.order_id)
-                          }
+                          onOpen={() => onOpen(order.order_id)}
                           onCancel={
                             order.order_status === "cancelled"
                               ? undefined
@@ -878,6 +909,9 @@ function OrderList({
                 })}
               </Tbody>
             </TableContainer>
+            <div className="border-t border-border px-6 py-2 text-xs text-text-muted">
+              Amber — waiting to be allocated. Blue — allocated, waiting to go out.
+            </div>
             <div className="px-6 py-3 border-t border-border">
               <Pagination
                 page={safePage}
@@ -897,14 +931,10 @@ function OrderList({
 /** The prototype's per-row three-dot menu, carrying only the actions that actually do
  *  something with no backend behind them. */
 function RowMenu({
-  onView,
-  onEdit,
-  onAllocate,
+  onOpen,
   onCancel,
 }: {
-  onView: () => void;
-  onEdit: () => void;
-  onAllocate?: () => void;
+  onOpen: () => void;
   onCancel?: () => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -950,31 +980,13 @@ function RowMenu({
           className="min-w-44 bg-bg-base border border-border rounded-lg shadow-lg py-1 animate-fade-in"
         >
           <MenuItem
-            icon={<EyeIcon className="w-4 h-4" />}
-            label="View details"
-            onClick={() => {
-              setOpen(false);
-              onView();
-            }}
-          />
-          <MenuItem
             icon={<PencilIcon className="w-4 h-4" />}
-            label="Edit order"
+            label="Open order"
             onClick={() => {
               setOpen(false);
-              onEdit();
+              onOpen();
             }}
           />
-          {onAllocate && (
-            <MenuItem
-              icon={<WarehouseIcon className="w-4 h-4" />}
-              label="Allocate stock"
-              onClick={() => {
-                setOpen(false);
-                onAllocate();
-              }}
-            />
-          )}
           {onCancel && (
             <MenuItem
               icon={<CloseIcon className="w-4 h-4" />}
@@ -993,179 +1005,6 @@ function RowMenu({
 }
 
 // ── Detail ───────────────────────────────────────────────────────────────────
-
-function OrderProductsView({
-  order,
-  onWriteOff,
-  writeOffs,
-}: {
-  order: CustomerOrder;
-  onWriteOff: (line: CustomerOrderLine) => void;
-  writeOffs: WriteOffWire[];
-}): React.JSX.Element {
-  return (
-    <TableContainer>
-      <Thead className="top-0">
-        <Tr>
-          <Th className="min-w-[10rem] whitespace-nowrap">
-            Supplier / Factory
-          </Th>
-          <Th className="min-w-[18rem]">Product</Th>
-          <Th className="min-w-[11rem]">Colors</Th>
-          <Th className="text-right whitespace-nowrap">Ordered qty</Th>
-          <Th className="text-right whitespace-nowrap">Received qty</Th>
-          <Th className="text-right whitespace-nowrap">Remaining qty</Th>
-          <Th className="text-right min-w-[7rem]">Selling price<span className="block text-xs font-normal text-text-muted">per set</span></Th>
-          <Th className="text-right">Amount</Th>
-          <Th className="text-center">Mismatch</Th>
-        </Tr>
-      </Thead>
-      <Tbody>
-        {order.lines.map((line) => (
-          <Tr key={line.order_line_id}>
-            {(() => {
-              const explanation = writeOffs.find(
-                (entry) => entry.subject_id === line.order_line_id,
-              );
-              return (
-                <>
-                  <Td className="font-medium">{line.supplier_name || "—"}</Td>
-                  <Td>
-                    <div className="flex min-w-0 flex-col gap-0.5">
-                      <div className="flex min-w-0 items-center gap-1">
-                        <span className="font-semibold text-brand break-words">
-                          {line.stock_code || "No stock code"}
-                        </span>
-                        {line.stock_code && (
-                          <CopyButton
-                            value={line.stock_code}
-                            what="stock code"
-                          />
-                        )}
-                      </div>
-                      <span className="break-words text-text-primary">
-                        {line.description || "—"}
-                      </span>
-                      <span className="text-xs text-text-muted">
-                        {GROUP_LABELS[line.product_group]}
-                      </span>
-                    </div>
-                  </Td>
-                  <Td className="whitespace-normal break-words text-text-secondary">
-                    {line.color_breakdown || "—"}
-                  </Td>
-                  <Td className="text-right tabular-nums">
-                    {formatIn(
-                      line.quantity_pairs,
-                      line.unit,
-                      line.unit_conversions,
-                    )}
-                  </Td>
-                  <Td className="text-right tabular-nums font-medium text-success">
-                    {formatIn(
-                      line.delivered_quantity_pairs,
-                      line.unit,
-                      line.unit_conversions,
-                    )}
-                  </Td>
-                  <Td className="text-right tabular-nums font-semibold text-error">
-                    <div className="flex flex-col items-end gap-1">
-                      <span
-                        className={
-                          (line.lost_quantity_pairs ?? 0) > 0
-                            ? "text-warning"
-                            : undefined
-                        }
-                      >
-                        {formatIn(
-                          lineRemaining(line),
-                          line.unit,
-                          line.unit_conversions,
-                        )}
-                        {(line.lost_quantity_pairs ?? 0) > 0 &&
-                          !explanation && (
-                            <span className="ml-1 text-xs font-medium text-warning">
-                              (
-                              {formatIn(
-                                line.lost_quantity_pairs ?? 0,
-                                line.unit,
-                              )}{" "}
-                              written off)
-                            </span>
-                          )}
-                      </span>
-                      {explanation && (
-                        <span
-                          className="text-[10px] font-medium text-warning"
-                          title={
-                            explanation
-                              ? mismatchDescription(explanation)
-                              : undefined
-                          }
-                        >
-                          {mismatchDescription(explanation)}
-                        </span>
-                      )}
-                    </div>
-                  </Td>
-                  <Td className="text-right tabular-nums">
-                    {formatKyat(line.selling_price)}
-                    {priceBasisNote(line.unit) && (
-                      <div className="text-xs font-normal text-text-muted">
-                        {priceBasisNote(line.unit)}
-                      </div>
-                    )}
-                    <CurrencyNote
-                      currency_code={line.currency_code}
-                      original_amount={line.original_selling_price}
-                      exchange_rate={line.exchange_rate}
-                    />
-                  </Td>
-                  <Td className="text-right tabular-nums font-medium whitespace-nowrap">
-                    {formatKyat(
-                      pricedAmount(
-                        line.quantity_pairs,
-                        line.unit,
-                        line.selling_price,
-                        line.unit_conversions,
-                      ),
-                    )}
-                  </Td>
-                  <Td className="text-center">
-                    <MismatchIconButton
-                      explained={Boolean(explanation)}
-                      disabled={lineRemaining(line) <= 0}
-                      onClick={() => onWriteOff(line)}
-                    />
-                  </Td>
-                </>
-              );
-            })()}
-          </Tr>
-        ))}
-        <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-          <Td className="font-semibold" colSpan={3}>
-            Total
-          </Td>
-          <Td className="text-right tabular-nums font-semibold">
-            {sets(order.total_quantity_pairs)}
-          </Td>
-          <Td className="text-right tabular-nums font-semibold text-success">
-            {sets(order.delivered_quantity_pairs)}
-          </Td>
-          <Td className="text-right tabular-nums font-semibold text-error">
-            {sets(remainingQty(order))}
-          </Td>
-          <Td />
-          <Td className="text-right tabular-nums font-semibold text-brand">
-            {formatKyat(orderAmount(order))}
-          </Td>
-          <Td />
-        </Tr>
-      </Tbody>
-    </TableContainer>
-  );
-}
 
 function mergeColorPairs(target: ColorPairs, source: ColorPairs): ColorPairs {
   for (const [color, pairs] of Object.entries(source)) {
@@ -1242,17 +1081,18 @@ function AllocationLineRow({
   orders,
   inventoryLines,
   inventoryLoading,
-  onSaveAllocation,
+  draftPairs,
+  onDraftChange,
 }: {
   line: CustomerOrderLine;
   order: CustomerOrder;
   orders: CustomerOrder[];
   inventoryLines: StockLine[];
   inventoryLoading: boolean;
-  onSaveAllocation: (lineId: string, colorBreakdown: string) => Promise<void>;
+  draftPairs: ColorPairs;
+  onDraftChange: (next: ColorPairs) => void;
 }): React.JSX.Element {
-  const [draft, setDraft] = useState(line.allocated_color_breakdown ?? "");
-  const [saving, setSaving] = useState(false);
+  const setSize = line.unit_conversions?.set ?? PAIRS_PER.set;
   const stockColors = availableStockColors(line.stock_code, inventoryLines);
   const reservedByOthers = allocationsFromOtherOrders(
     orders,
@@ -1262,6 +1102,7 @@ function AllocationLineRow({
   const ownColors = colorPairsForText(
     line.allocated_color_breakdown ?? "",
     line.unit,
+    line.unit_conversions,
   );
   // Keep the current allocation available for edit validation, but subtract it from
   // the stock amount shown as still available for a new allocation.
@@ -1273,54 +1114,39 @@ function AllocationLineRow({
   );
   const hasAvailableStock = availablePairs > 0;
   const hasCurrentAllocation = (line.allocated_quantity_pairs ?? 0) > 0;
-  const requestedColors = colorPairsForText(draft, line.unit);
-  const requestedPairs = Object.values(requestedColors).reduce(
+  const orderColors = colorPairsForText(
+    line.color_breakdown,
+    line.unit,
+    line.unit_conversions,
+  );
+
+  const availableForPicker: ColorPairs = {};
+  const allColors = new Set([
+    ...Object.keys(orderColors),
+    ...Object.keys(draftPairs),
+  ]);
+  for (const color of allColors) {
+    const maxOrder = orderColors[color] ?? 0;
+    const maxStock = availableForEdit[color] ?? 0;
+    availableForPicker[color] = Math.max(0, Math.min(maxOrder, maxStock));
+  }
+
+  const serialized = serializeColorPairs(draftPairs, setSize);
+  const colorError = colorQtyProblem(serialized);
+  const requestedPairs = Object.values(draftPairs).reduce(
     (sum, pairs) => sum + pairs,
     0,
   );
-  const orderColors = colorPairsForText(line.color_breakdown, line.unit);
-  const colorError = colorQtyProblem(draft);
-  const invalidColor = Object.entries(requestedColors).find(
-    ([color, pairs]) =>
-      pairs > (orderColors[color] ?? 0) ||
-      pairs > (availableForEdit[color] ?? 0),
-  );
   const validationMessage =
     colorError ??
-    (invalidColor
-      ? invalidColor[1] > (orderColors[invalidColor[0]] ?? 0)
-        ? `Only ${formatSets(orderColors[invalidColor[0]] ?? 0)} of ${invalidColor[0]} is on this order.`
-        : `Only ${formatSets(availableForEdit[invalidColor[0]] ?? 0)} of ${invalidColor[0]} is available.`
-      : requestedPairs > lineRemaining(line)
-        ? `Allocation cannot exceed ${formatIn(lineRemaining(line), line.unit, line.unit_conversions)}.`
-        : null);
-  const isChanged =
-    draft.trim() !== (line.allocated_color_breakdown ?? "").trim();
-  const canSave =
-    isChanged &&
-    !saving &&
-    !inventoryLoading &&
-    !validationMessage &&
-    (requestedPairs > 0 || (line.allocated_quantity_pairs ?? 0) > 0);
-
-  useEffect(() => {
-    setDraft(line.allocated_color_breakdown ?? "");
-  }, [line.allocated_color_breakdown]);
-
-  async function save(): Promise<void> {
-    if (!canSave) return;
-    setSaving(true);
-    try {
-      await onSaveAllocation(line.order_line_id, draft.trim());
-    } finally {
-      setSaving(false);
-    }
-  }
+    (requestedPairs > lineRemaining(line)
+      ? `Allocation cannot exceed ${formatIn(lineRemaining(line), line.unit, line.unit_conversions)}.`
+      : null);
 
   return (
     <Tr>
       <Td>
-        <div className="flex min-w-[15rem] flex-col gap-0.5">
+        <div className="flex min-w-[12rem] flex-col gap-0.5">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-bold text-brand">
               {line.stock_code || "No stock code"}
@@ -1384,56 +1210,34 @@ function AllocationLineRow({
             )}
           </div>
           <div className="mt-0.5 text-xs text-text-secondary">
-            {inventoryLoading ? (
-              "Checking stock…"
-            ) : hasAvailableStock ? (
-              <button
-                type="button"
-                className="font-bold text-brand underline decoration-dotted underline-offset-2 hover:no-underline"
-                onClick={() =>
-                  setDraft(
-                    formatColorPairs(
-                      mergeColorPairs(
-                        { ...colorPairsForText(draft, line.unit, line.unit_conversions) },
-                        availableToAllocate,
-                      ),
-                    ),
-                  )
-                }
-              >
-                + Add {formatColorPairs(availableToAllocate)}
-              </button>
-            ) : hasCurrentAllocation ? (
-              "No stock remains for another allocation."
-            ) : (
-              "No stock is available for this item."
-            )}
+            {inventoryLoading
+              ? "Checking stock…"
+              : hasAvailableStock
+                ? `Available to allocate: ${formatColorPairs(availableToAllocate)}`
+                : hasCurrentAllocation
+                  ? "No stock remains for another allocation."
+                  : "No stock is available for this item."}
           </div>
         </div>
       </Td>
-      <Td className="min-w-[17rem]">
-        <Input
-          aria-label={`Allocation for ${order.order_no} ${line.stock_code}`}
-          placeholder="Enter allocation"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          error={validationMessage ?? undefined}
+      <Td className="min-w-[21rem]">
+        <ColorQtyPicker
+          available={availableForPicker}
+          setSize={setSize}
+          value={draftPairs}
+          onChange={onDraftChange}
+          disabled={inventoryLoading}
         />
-        <div className="mt-1 text-xs text-text-muted">
-          {draft.trim() !== "" && !validationMessage
-            ? `${formatSets(requestedPairs)} selected — replaces allocation. Use "+ Add" to top up.`
-            : "Use s, p, or d."}
-        </div>
-      </Td>
-      <Td className="whitespace-nowrap">
-        <Button
-          size="sm"
-          onClick={() => void save()}
-          loading={saving}
-          disabled={!canSave}
-        >
-          {line.allocated_quantity_pairs ? "Update" : "Allocate"}
-        </Button>
+        {validationMessage && (
+          <div className="mt-1 text-xs font-medium text-error">
+            {validationMessage}
+          </div>
+        )}
+        {!validationMessage && serialized !== "" && (
+          <div className="mt-1 text-xs text-text-muted">
+            {formatSets(requestedPairs, { ...PAIRS_PER, set: setSize })} selected
+          </div>
+        )}
       </Td>
     </Tr>
   );
@@ -1445,41 +1249,133 @@ function AllocationTable({
   inventoryLines,
   inventoryLoading,
   onSaveAllocation,
+  onSaveAllocationsComplete,
 }: {
   order: CustomerOrder;
   orders: CustomerOrder[];
   inventoryLines: StockLine[];
   inventoryLoading: boolean;
   onSaveAllocation: (lineId: string, colorBreakdown: string) => Promise<void>;
+  onSaveAllocationsComplete: () => Promise<void>;
 }): React.JSX.Element {
+  const showToast = useToast();
+  const [drafts, setDrafts] = useState<Record<string, ColorPairs>>(() => {
+    const initial: Record<string, ColorPairs> = {};
+    for (const line of order.lines) {
+      initial[line.order_line_id] = colorPairsForText(
+        line.allocated_color_breakdown ?? "",
+        line.unit,
+        line.unit_conversions,
+      );
+    }
+    return initial;
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const initial: Record<string, ColorPairs> = {};
+    for (const line of order.lines) {
+      initial[line.order_line_id] = colorPairsForText(
+        line.allocated_color_breakdown ?? "",
+        line.unit,
+        line.unit_conversions,
+      );
+    }
+    setDrafts(initial);
+  }, [order]);
+
+  const changedLines = order.lines.filter((line) => {
+    const setSize = line.unit_conversions?.set ?? PAIRS_PER.set;
+    const currentDraft = drafts[line.order_line_id] ?? {};
+    const serialized = serializeColorPairs(currentDraft, setSize);
+    return serialized.trim() !== (line.allocated_color_breakdown ?? "").trim();
+  });
+
+  const hasValidationErrors = order.lines.some((line) => {
+    const setSize = line.unit_conversions?.set ?? PAIRS_PER.set;
+    const currentDraft = drafts[line.order_line_id] ?? {};
+    const requestedPairs = Object.values(currentDraft).reduce(
+      (sum, p) => sum + p,
+      0,
+    );
+    const serialized = serializeColorPairs(currentDraft, setSize);
+    const colorError = colorQtyProblem(serialized);
+    return colorError !== null || requestedPairs > lineRemaining(line);
+  });
+
+  const canSave =
+    changedLines.length > 0 &&
+    !hasValidationErrors &&
+    !saving &&
+    !inventoryLoading;
+
+  async function handleSaveAllocations(): Promise<void> {
+    if (!canSave || saving) return;
+    setSaving(true);
+    try {
+      for (const line of changedLines) {
+        const setSize = line.unit_conversions?.set ?? PAIRS_PER.set;
+        const currentDraft = drafts[line.order_line_id] ?? {};
+        const serialized = serializeColorPairs(currentDraft, setSize);
+        try {
+          await onSaveAllocation(line.order_line_id, serialized);
+        } catch {
+          const label = line.description || line.stock_code || "product";
+          showToast("error", `Could not save allocation for ${label}.`);
+          return;
+        }
+      }
+      await onSaveAllocationsComplete();
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <TableContainer>
-      <Thead className="top-0">
-        <Tr>
-          <Th className="min-w-[15rem]">Product</Th>
-          <Th className="text-right whitespace-nowrap">Ordered qty</Th>
-          <Th className="text-right whitespace-nowrap">Delivered qty</Th>
-          <Th className="text-right whitespace-nowrap">Remaining qty</Th>
-          <Th className="min-w-[13rem]">Allocated colors</Th>
-          <Th className="min-w-[12rem]">Available to allocate</Th>
-          <Th className="min-w-[17rem]">Allocate colors</Th>
-          <Th>Action</Th>
-        </Tr>
-      </Thead>
-      <Tbody>
-        {order.lines.map((line) => (
-          <AllocationLineRow
-            key={line.order_line_id}
-            line={line}
-            order={order}
-            orders={orders}
-            inventoryLines={inventoryLines}
-            inventoryLoading={inventoryLoading}
-            onSaveAllocation={onSaveAllocation}
-          />
-        ))}
-      </Tbody>
-    </TableContainer>
+    <div className="flex flex-col gap-4">
+      <TableContainer>
+        <Thead className="top-0">
+          <Tr>
+            <Th className="min-w-[12rem]">Product</Th>
+            <Th className="text-right whitespace-nowrap">Ordered qty</Th>
+            <Th className="text-right whitespace-nowrap">Delivered qty</Th>
+            <Th className="text-right whitespace-nowrap">Remaining qty</Th>
+            <Th className="min-w-[13rem]">Allocated colors</Th>
+            <Th className="min-w-[12rem]">Available to allocate</Th>
+            <Th className="min-w-[21rem]">Allocate colors</Th>
+          </Tr>
+        </Thead>
+        <Tbody>
+          {order.lines.map((line) => (
+            <AllocationLineRow
+              key={line.order_line_id}
+              line={line}
+              order={order}
+              orders={orders}
+              inventoryLines={inventoryLines}
+              inventoryLoading={inventoryLoading}
+              draftPairs={drafts[line.order_line_id] ?? {}}
+              onDraftChange={(next) =>
+                setDrafts((prev) => ({
+                  ...prev,
+                  [line.order_line_id]: next,
+                }))
+              }
+            />
+          ))}
+        </Tbody>
+      </TableContainer>
+
+      <div className="flex justify-end">
+        <Button
+          onClick={() => void handleSaveAllocations()}
+          loading={saving}
+          disabled={!canSave}
+        >
+          Save allocations
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -1557,26 +1453,24 @@ function DeliveryView({
   inventoryLines,
   inventoryLoading,
   onSaveDelivery,
-  onBack,
 }: {
   order: CustomerOrder;
   orders: CustomerOrder[];
   inventoryLines: StockLine[];
   inventoryLoading: boolean;
   onSaveDelivery: (input: CustomerDeliveryBatchInput) => Promise<void>;
-  onBack: () => void;
 }): React.JSX.Element {
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useState<Record<string, ColorPairs>>({});
   const [fromLocation, setFromLocation] = useState("");
   const [deliveryDate, setDeliveryDate] = useState(todayIso());
   const [deliveryAddress, setDeliveryAddress] = useState(
-    order.customer_address,
+    order.customer_address || "",
   );
   const [deliveryNote, setDeliveryNote] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(
-    () => setDeliveryAddress(order.customer_address),
+    () => setDeliveryAddress(order.customer_address || ""),
     [order.customer_address],
   );
 
@@ -1601,19 +1495,20 @@ function DeliveryView({
       inventoryLines,
       selectedLocation,
     );
-    const draft = drafts[line.order_line_id] ?? "";
-    const pairs = Object.values(
-      colorPairsForText(draft, line.unit, line.unit_conversions),
-    ).reduce((sum, value) => sum + value, 0);
+    const draftPairs = drafts[line.order_line_id] ?? {};
+    const setSize = line.unit_conversions?.set ?? PAIRS_PER.set;
+    const pairs = Object.values(draftPairs).reduce((sum, value) => sum + value, 0);
+    const serialized = serializeColorPairs(draftPairs, setSize);
     return {
       line,
-      draft,
+      draftPairs,
       pairs,
+      serialized,
       allocatedColors,
       availableColors,
       problem: deliveryValidationMessage(
         line,
-        draft,
+        serialized,
         allocatedColors,
         availableColors,
         inventoryLoading,
@@ -1640,7 +1535,10 @@ function DeliveryView({
         lines: selectedRows.map((row) => ({
           stock_code: row.line.stock_code,
           location: selectedLocation,
-          color_breakdown: row.draft.trim(),
+          color_breakdown: serializeColorPairs(
+            drafts[row.line.order_line_id] ?? {},
+            row.line.unit_conversions?.set ?? PAIRS_PER.set,
+          ),
           unit: row.line.unit,
         })),
       });
@@ -1648,6 +1546,7 @@ function DeliveryView({
       setDeliveryNote("");
       setDeliveryDate(todayIso());
       setFromLocation("");
+      setDeliveryAddress(order.customer_address || "");
     } finally {
       setSaving(false);
     }
@@ -1709,11 +1608,11 @@ function DeliveryView({
       <TableContainer>
         <Thead className="top-0">
           <Tr>
-            <Th className="min-w-[15rem]">Product</Th>
+            <Th className="min-w-[12rem]">Product</Th>
             <Th className="text-right whitespace-nowrap">Remaining</Th>
             <Th className="min-w-[13rem]">Allocated colors</Th>
             <Th className="min-w-[13rem]">Available to deliver</Th>
-            <Th className="min-w-[17rem]">Deliver colors</Th>
+            <Th className="min-w-[21rem]">Deliver colors</Th>
           </Tr>
         </Thead>
         <Tbody>
@@ -1732,10 +1631,11 @@ function DeliveryView({
               (sum, pairs) => sum + pairs,
               0,
             );
+            const setSize = row.line.unit_conversions?.set ?? PAIRS_PER.set;
             return (
               <Tr key={row.line.order_line_id}>
                 <Td>
-                  <div className="flex min-w-[15rem] flex-col gap-0.5">
+                  <div className="flex min-w-[12rem] flex-col gap-0.5">
                     <span className="font-bold text-brand">
                       {row.line.stock_code || "No stock code"}
                     </span>
@@ -1771,24 +1671,33 @@ function DeliveryView({
                     </div>
                   </div>
                 </Td>
-                <Td>
-                  <Input
-                    aria-label={`Delivery by color for ${order.order_no} ${row.line.stock_code}`}
-                    placeholder="e.g. black2s, white1s"
-                    value={row.draft}
-                    onChange={(event) =>
+                <Td className="min-w-[21rem]">
+                  <ColorQtyPicker
+                    available={deliverableColors}
+                    setSize={setSize}
+                    value={row.draftPairs}
+                    onChange={(next) =>
                       setDrafts((current) => ({
                         ...current,
-                        [row.line.order_line_id]: event.target.value,
+                        [row.line.order_line_id]: next,
                       }))
                     }
-                    error={row.problem ?? undefined}
                     disabled={
                       (row.line.allocated_quantity_pairs ?? 0) <= 0 ||
                       inventoryLoading ||
                       selectedLocation === ""
                     }
                   />
+                  {row.problem && (
+                    <div className="mt-1 text-xs font-medium text-error">
+                      {row.problem}
+                    </div>
+                  )}
+                  {!row.problem && row.serialized !== "" && (
+                    <div className="mt-1 text-xs text-text-muted">
+                      {formatSets(row.pairs, { ...PAIRS_PER, set: setSize })} selected
+                    </div>
+                  )}
                 </Td>
               </Tr>
             );
@@ -1796,10 +1705,7 @@ function DeliveryView({
         </Tbody>
       </TableContainer>
 
-      <div className="flex flex-wrap justify-between gap-2">
-        <Button variant="ghost" onClick={onBack}>
-          Back to allocation
-        </Button>
+      <div className="flex justify-end">
         <Button
           onClick={() => void saveDelivery()}
           loading={saving}
@@ -1817,7 +1723,9 @@ function AllocateAndDeliveryView({
   orders,
   inventoryLines,
   inventoryLoading,
+  initialTab = "allocate",
   onSaveAllocation,
+  onSaveAllocationsComplete,
   onSaveDelivery,
   onBack,
 }: {
@@ -1825,15 +1733,61 @@ function AllocateAndDeliveryView({
   orders: CustomerOrder[];
   inventoryLines: StockLine[];
   inventoryLoading: boolean;
+  initialTab?: "allocate" | "deliver";
   onSaveAllocation: (lineId: string, colorBreakdown: string) => Promise<void>;
+  onSaveAllocationsComplete: () => Promise<void>;
   onSaveDelivery: (input: CustomerDeliveryBatchInput) => Promise<void>;
   onBack: () => void;
 }): React.JSX.Element {
-  const [step, setStep] = useState(0);
+  const [tab, setTab] = useState<"allocate" | "deliver">(initialTab);
   const allocatedPairs = order.lines.reduce(
     (sum, line) => sum + (line.allocated_quantity_pairs ?? 0),
     0,
   );
+  const availableToAllocatePairs = order.lines.reduce((sum, line) => {
+    const stockColors = availableStockColors(line.stock_code, inventoryLines);
+    const reservedByOthers = allocationsFromOtherOrders(
+      orders,
+      line.stock_code,
+      order.order_id,
+    );
+    const ownColors = colorPairsForText(
+      line.allocated_color_breakdown ?? "",
+      line.unit,
+      line.unit_conversions,
+    );
+    const availableForEdit = subtractColorPairs(stockColors, reservedByOthers);
+    const availableToAllocate = subtractColorPairs(availableForEdit, ownColors);
+    const lineAvailablePairs = Object.values(availableToAllocate).reduce(
+      (acc, p) => acc + p,
+      0,
+    );
+    return sum + lineAvailablePairs;
+  }, 0);
+  const availableToDeliverPairs = order.lines.reduce((sum, line) => {
+    const allocatedColors = colorPairsForText(
+      line.allocated_color_breakdown ?? "",
+      line.unit,
+      line.unit_conversions,
+    );
+    const stockColors = availableStockColors(line.stock_code, inventoryLines);
+    const reservedByOthers = allocationsFromOtherOrders(
+      orders,
+      line.stock_code,
+      order.order_id,
+    );
+    const availableStock = subtractColorPairs(stockColors, reservedByOthers);
+    const lineDeliverablePairs = Object.entries(allocatedColors).reduce(
+      (acc, [color, allocated]) =>
+        acc + Math.min(allocated, availableStock[color] ?? 0),
+      0,
+    );
+    return sum + lineDeliverablePairs;
+  }, 0);
+
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -1857,53 +1811,117 @@ function AllocateAndDeliveryView({
               </p>
             </div>
           </div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-4">
+          <div className="mt-3 grid gap-3 grid-cols-1 sm:grid-cols-3">
             <FigureCard
-              label="Ordered"
-              value={sets(order.total_quantity_pairs)}
-              tone="neutral"
-              className="border-border-strong"
-            />
-            <FigureCard
-              label="Allocated"
-              value={sets(allocatedPairs)}
-              tone="brand"
-              className="border-border-strong"
-            />
-            <FigureCard
-              label="Delivered"
+              label="Delivered qty"
               value={sets(order.delivered_quantity_pairs)}
-              tone="success"
+              sub="sent to customer"
+              tone={order.delivered_quantity_pairs > 0 ? "success" : "neutral"}
               className="border-border-strong"
             />
             <FigureCard
-              label="Remaining"
+              label="Allocated qty"
+              value={sets(allocatedPairs)}
+              sub="reserved from stock"
+              tone={allocatedPairs > 0 ? "brand" : "neutral"}
+              className="border-border-strong"
+            />
+            <FigureCard
+              label="Remaining qty"
               value={sets(remainingQty(order))}
-              tone="error"
+              sub="waiting to fulfill"
+              tone={remainingQty(order) > 0 ? "error" : "success"}
               className="border-border-strong"
             />
           </div>
-          <div className="mt-4">
-            <StepBar steps={["Allocate", "Delivery"]} step={step} />
+          <div
+            role="tablist"
+            aria-label="Fulfill order tab"
+            className="mt-4 inline-flex w-full sm:w-auto items-center gap-1.5 rounded-lg bg-bg-subtle p-1 border border-border"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "allocate"}
+              onClick={() => setTab("allocate")}
+              className={cn(
+                "flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-150",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+                tab === "allocate"
+                  ? "bg-brand text-white shadow-sm font-semibold"
+                  : "text-text-muted hover:text-text-primary hover:bg-bg-base/60",
+              )}
+            >
+              <ClipboardIcon className="w-4 h-4 shrink-0" />
+              <span>Allocate stock</span>
+              <span
+                className={cn(
+                  "ml-1 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
+                  tab === "allocate"
+                    ? "bg-success text-white"
+                    : "bg-success-subtle text-success",
+                )}
+              >
+                {inventoryLoading ? "—" : sets(availableToAllocatePairs)}
+              </span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "deliver"}
+              onClick={() => setTab("deliver")}
+              className={cn(
+                "flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-150",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+                tab === "deliver"
+                  ? "bg-brand text-white shadow-sm font-semibold"
+                  : "text-text-muted hover:text-text-primary hover:bg-bg-base/60",
+              )}
+            >
+              <TruckIcon className="w-4 h-4 shrink-0" />
+              <span>Deliver to customer</span>
+              <span
+                className={cn(
+                  "ml-1 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
+                  tab === "deliver"
+                    ? "bg-success text-white"
+                    : "bg-success-subtle text-success",
+                )}
+              >
+                {inventoryLoading ? "—" : sets(availableToDeliverPairs)}
+              </span>
+            </button>
           </div>
         </div>
         <div className="px-5 py-4">
-          {step === 0 ? (
-            <>
-              <AllocationTable
-                order={order}
-                orders={orders}
-                inventoryLines={inventoryLines}
-                inventoryLoading={inventoryLoading}
-                onSaveAllocation={onSaveAllocation}
-              />
-              <div className="mt-4 flex justify-end">
-                <Button onClick={() => setStep(1)}>
-                  Continue to delivery
-                  <ChevronRightIcon className="h-4 w-4" />
-                </Button>
+          {tab === "allocate" ? (
+            <AllocationTable
+              order={order}
+              orders={orders}
+              inventoryLines={inventoryLines}
+              inventoryLoading={inventoryLoading}
+              onSaveAllocation={onSaveAllocation}
+              onSaveAllocationsComplete={onSaveAllocationsComplete}
+            />
+          ) : allocatedPairs <= 0 ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+              <WarehouseIcon className="h-10 w-10 text-text-muted" />
+              <div className="flex flex-col gap-1">
+                <p className="text-base font-semibold text-text-primary">
+                  Nothing is allocated yet
+                </p>
+                <p className="text-sm text-text-muted">
+                  Allocate stock first before recording a delivery.
+                </p>
               </div>
-            </>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setTab("allocate")}
+              >
+                Go to allocation
+              </Button>
+            </div>
           ) : (
             <DeliveryView
               order={order}
@@ -1911,57 +1929,10 @@ function AllocateAndDeliveryView({
               inventoryLines={inventoryLines}
               inventoryLoading={inventoryLoading}
               onSaveDelivery={onSaveDelivery}
-              onBack={() => setStep(0)}
             />
           )}
         </div>
       </Panel>
-    </div>
-  );
-}
-
-function OrderInfoView({ order }: { order: CustomerOrder }): React.JSX.Element {
-  const suppliers = Array.from(
-    new Set(
-      order.lines
-        .map((line) => line.supplier_name.trim())
-        .filter((supplier) => supplier !== ""),
-    ),
-  ).join(", ");
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-        <h3 className="mb-3 text-sm font-semibold text-text-primary">
-          Customer
-        </h3>
-        <dl className="grid gap-3 sm:grid-cols-2">
-          <ReadOnlyField label="Customer name" value={order.customer_name} />
-          <ReadOnlyField label="Phone" value={order.customer_phone || "—"} />
-          <ReadOnlyField
-            label="Address"
-            value={order.customer_address || "—"}
-            wrap
-            className="sm:col-span-2"
-          />
-        </dl>
-      </div>
-      <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-        <h3 className="mb-3 text-sm font-semibold text-text-primary">Order</h3>
-        <dl className="grid gap-3 sm:grid-cols-2">
-          <ReadOnlyField label="Order no." value={order.order_no} copyable />
-          <ReadOnlyField
-            label="Order date"
-            value={formatDate(order.order_date)}
-          />
-          <ReadOnlyField
-            label="Supplier / Factory"
-            value={suppliers || "—"}
-            wrap
-            className="sm:col-span-2"
-          />
-        </dl>
-      </div>
     </div>
   );
 }
@@ -2023,7 +1994,6 @@ interface CustomerOrderDetailFormValues {
 
 function OrderDetail({
   order: initialOrder,
-  initialMode,
   settings,
   onSave,
   onBack,
@@ -2031,7 +2001,6 @@ function OrderDetail({
   writeOffs,
 }: {
   order: CustomerOrder;
-  initialMode: OrderDetailMode;
   settings: AppSettings | null;
   onSave: (order: CustomerOrder, originalOrder: CustomerOrder) => Promise<void>;
   onBack: () => void;
@@ -2043,7 +2012,6 @@ function OrderDetail({
   ) => Promise<void>;
   writeOffs: WriteOffWire[];
 }): React.JSX.Element {
-  const [detailMode, setDetailMode] = useState<OrderDetailMode>(initialMode);
   const [saving, setSaving] = useState(false);
   const [addingLineId, setAddingLineId] = useState<string | null>(null);
   const [writeOffLine, setWriteOffLine] = useState<CustomerOrderLine | null>(
@@ -2257,7 +2225,7 @@ function OrderDetail({
         </div>
 
         <Panel>
-          <div className="grid items-center gap-3 px-6 py-4 border-b border-border lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-lg font-semibold text-text-primary tracking-tight">
@@ -2270,139 +2238,109 @@ function OrderDetail({
                 {order.customer_name} · {formatDate(order.order_date)}
               </p>
             </div>
-            <div
-              role="tablist"
-              aria-label="Order detail mode"
-              className="order-2 flex w-full rounded-md bg-bg-subtle p-0.5 lg:order-none lg:w-auto lg:justify-self-center"
-            >
-              {(["view", "edit"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  role="tab"
-                  aria-selected={detailMode === mode}
-                  onClick={() => setDetailMode(mode)}
-                  className={cn(
-                    "flex-1 rounded-[5px] px-4 py-1.5 text-sm font-medium capitalize transition-colors duration-150 sm:flex-none",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
-                    detailMode === mode
-                      ? "bg-brand text-white shadow-sm"
-                      : "text-text-muted hover:text-text-primary",
-                  )}
-                >
-                  {mode}
-                </button>
-              ))}
-            </div>
-            <div className="order-3 flex items-center gap-2 lg:order-none lg:justify-self-end">
-              {(detailMode === "edit" || hasChanges) && (
-                <Button
-                  size="sm"
-                  onClick={() => void handleSubmit(saveChanges)()}
-                  loading={saving}
-                  disabled={!hasChanges}
-                >
-                  <CheckIcon className="w-4 h-4" />
-                  Save changes
-                </Button>
-              )}
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                onClick={() => void handleSubmit(saveChanges)()}
+                loading={saving}
+                disabled={!hasChanges}
+              >
+                <CheckIcon className="w-4 h-4" />
+                Save changes
+              </Button>
             </div>
           </div>
 
           <div className="px-6 py-6 flex flex-col gap-10">
             <section>
               <SectionLabel>Order information</SectionLabel>
-              {detailMode !== "edit" ? (
-                <OrderInfoView order={order} />
-              ) : (
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                    <h3 className="mb-3 text-sm font-semibold text-text-primary">
-                      Customer
-                    </h3>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <Controller
-                        control={control}
-                        name="order.customer_name"
-                        render={({ field }) => (
-                          <Input
-                            label="Customer name"
-                            className={EDITABLE}
-                            value={field.value}
-                            onChange={field.onChange}
-                            onBlur={field.onBlur}
-                            error={errors.order?.customer_name?.message}
-                          />
-                        )}
-                      />
-                      <Controller
-                        control={control}
-                        name="order.customer_phone"
-                        render={({ field }) => (
-                          <Input
-                            label="Phone"
-                            className={EDITABLE}
-                            value={field.value}
-                            onChange={field.onChange}
-                            onBlur={field.onBlur}
-                          />
-                        )}
-                      />
-                      <div className="sm:col-span-2">
-                        <label className="mb-1.5 block text-sm font-medium text-text-secondary">
-                          Address
-                        </label>
-                        <Controller
-                          control={control}
-                          name="order.customer_address"
-                          render={({ field }) => (
-                            <CellInput
-                              label="Address"
-                              placeholder="Customer address"
-                              multiline
-                              value={field.value}
-                              onChange={field.onChange}
-                            />
-                          )}
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                  <h3 className="mb-3 text-sm font-semibold text-text-primary">
+                    Customer
+                  </h3>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Controller
+                      control={control}
+                      name="order.customer_name"
+                      render={({ field }) => (
+                        <Input
+                          label="Customer name"
+                          className={EDITABLE}
+                          value={field.value}
+                          onChange={field.onChange}
+                          onBlur={field.onBlur}
+                          error={errors.order?.customer_name?.message}
                         />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                    <h3 className="mb-3 text-sm font-semibold text-text-primary">
-                      Order
-                    </h3>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <ReadOnlyField
-                        label="Order no."
-                        value={order.order_no}
-                        copyable
-                      />
+                      )}
+                    />
+                    <Controller
+                      control={control}
+                      name="order.customer_phone"
+                      render={({ field }) => (
+                        <Input
+                          label="Phone"
+                          className={EDITABLE}
+                          value={field.value}
+                          onChange={field.onChange}
+                          onBlur={field.onBlur}
+                        />
+                      )}
+                    />
+                    <div className="sm:col-span-2">
+                      <label className="mb-1.5 block text-sm font-medium text-text-secondary">
+                        Address
+                      </label>
                       <Controller
                         control={control}
-                        name="order.order_date"
+                        name="order.customer_address"
                         render={({ field }) => (
-                          <Input
-                            label="Order date"
-                            type="date"
-                            className={EDITABLE}
+                          <CellInput
+                            label="Address"
+                            placeholder="Customer address"
+                            multiline
                             value={field.value}
                             onChange={field.onChange}
-                            onBlur={field.onBlur}
-                            error={errors.order?.order_date?.message}
                           />
                         )}
                       />
                     </div>
                   </div>
                 </div>
-              )}
+                <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                  <h3 className="mb-3 text-sm font-semibold text-text-primary">
+                    Order
+                  </h3>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <ReadOnlyField
+                      label="Order no."
+                      value={order.order_no}
+                      copyable
+                    />
+                    <Controller
+                      control={control}
+                      name="order.order_date"
+                      render={({ field }) => (
+                        <Input
+                          label="Order date"
+                          type="date"
+                          className={EDITABLE}
+                          value={field.value}
+                          onChange={field.onChange}
+                          onBlur={field.onBlur}
+                          error={errors.order?.order_date?.message}
+                        />
+                      )}
+                    />
+                  </div>
+                </div>
+              </div>
             </section>
 
             <section>
               <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
                 <SectionLabel>Products</SectionLabel>
-                <div className="w-full sm:w-64">
+                <div className="w-full sm:w-80 md:w-96">
                   <div className="flex items-center justify-between text-xs mb-1">
                     <span className="font-medium text-text-secondary">
                       Delivery
@@ -2431,337 +2369,369 @@ function OrderDetail({
                   </div>
                 </div>
               </div>
-              {detailMode === "view" ? (
-                <OrderProductsView
-                  order={order}
-                  onWriteOff={setWriteOffLine}
-                  writeOffs={writeOffs}
-                />
-              ) : (
-                <>
-                  <TableContainer>
-                    <Thead className="top-0">
-                      <Tr>
-                        <Th className="min-w-[10rem] whitespace-nowrap">
-                          Supplier / Factory
-                        </Th>
-                        <Th className="min-w-[18rem]">Product</Th>
-                        <Th className="min-w-[11rem]">Colors</Th>
-                        <Th className="text-right whitespace-nowrap">
-                          Ordered qty
-                        </Th>
-                        <Th className="text-right whitespace-nowrap">
-                          Received qty
-                        </Th>
-                        <Th className="text-right whitespace-nowrap">
-                          Remaining qty
-                        </Th>
-                        <Th className="text-right min-w-[10rem]">
-                          Selling price
-                          <span className="block text-xs font-normal text-text-muted">
-                            per set
-                          </span>
-                        </Th>
-                        <Th className="text-right">Amount</Th>
-                      </Tr>
-                    </Thead>
-                    <Tbody>
-                      {lineFields.map((field, index) => {
-                        const line = order.lines[index];
-                        if (!line) return null;
-                        return (
-                          <Tr key={field.id}>
-                            <Td>
+              <TableContainer>
+                <Thead className="top-0">
+                  <Tr>
+                    <Th className="min-w-[10rem] whitespace-nowrap">
+                      Supplier / Factory
+                    </Th>
+                    <Th className="min-w-[18rem]">Product</Th>
+                    <Th className="min-w-[11rem]">Colors</Th>
+                    <Th className="text-right whitespace-nowrap">
+                      Ordered qty
+                    </Th>
+                    <Th className="text-right whitespace-nowrap">
+                      Delivered qty
+                    </Th>
+                    <Th className="text-right whitespace-nowrap">
+                      Remaining qty
+                    </Th>
+                    <Th className="text-right min-w-[10rem]">
+                      Selling price
+                      <span className="block text-xs font-normal text-text-muted">
+                        per set
+                      </span>
+                    </Th>
+                    <Th className="text-right">Amount</Th>
+                    <Th className="text-center">Mismatch</Th>
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {lineFields.map((field, index) => {
+                    const line = order.lines[index];
+                    if (!line) return null;
+                    const explanation = writeOffs.find(
+                      (entry) => entry.subject_id === line.order_line_id,
+                    );
+                    return (
+                      <Tr key={field.id}>
+                        <Td>
+                          <Controller
+                            control={control}
+                            name={`order.lines.${index}.supplier_name`}
+                            render={({ field: supplierField }) => (
+                              <SuggestInput
+                                bare
+                                label={`Supplier for product ${index + 1}`}
+                                placeholder="Choose…"
+                                suggestions={SUPPLIER_NAMES}
+                                value={supplierField.value}
+                                onChange={supplierField.onChange}
+                              />
+                            )}
+                          />
+                        </Td>
+                        <Td className="min-w-[18rem]">
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex items-center gap-1">
                               <Controller
                                 control={control}
-                                name={`order.lines.${index}.supplier_name`}
-                                render={({ field: supplierField }) => (
+                                name={`order.lines.${index}.stock_code`}
+                                render={({ field: stockField }) => (
                                   <SuggestInput
                                     bare
-                                    label={`Supplier for product ${index + 1}`}
-                                    placeholder="Choose…"
-                                    suggestions={SUPPLIER_NAMES}
-                                    value={supplierField.value}
-                                    onChange={supplierField.onChange}
-                                  />
-                                )}
-                              />
-                            </Td>
-                            <Td className="min-w-[18rem]">
-                              <div className="flex flex-col gap-1.5">
-                                <div className="flex items-center gap-1">
-                                  <Controller
-                                    control={control}
-                                    name={`order.lines.${index}.stock_code`}
-                                    render={({ field: stockField }) => (
-                                      <SuggestInput
-                                        bare
-                                        label={`Stock code for product ${index + 1}`}
-                                        placeholder="A1001"
-                                        suggestions={STOCK_CODES}
-                                        value={stockField.value}
-                                        onChange={(next) => {
-                                          stockField.onChange(next);
-                                          setStockCode(index, next);
-                                        }}
-                                        error={
-                                          duplicateStockCodeProblem(
-                                            order.lines,
-                                            index,
-                                          ) ?? undefined
-                                        }
-                                      />
-                                    )}
-                                  />
-                                  <CopyButton
-                                    value={line.stock_code}
-                                    what="stock code"
-                                  />
-                                </div>
-                                <Controller
-                                  control={control}
-                                  name={`order.lines.${index}.description`}
-                                  render={({ field: descriptionField }) => (
-                                    <CellInput
-                                      label={`Description for product ${index + 1}`}
-                                      placeholder="Men's leather sandal"
-                                      multiline
-                                      value={descriptionField.value}
-                                      onChange={descriptionField.onChange}
-                                    />
-                                  )}
-                                />
-                                <Controller
-                                  control={control}
-                                  name={`order.lines.${index}.product_group`}
-                                  render={({ field: groupField }) => (
-                                    <GroupSelect
-                                      label={`Group for product ${index + 1}`}
-                                      value={groupField.value}
-                                      onChange={groupField.onChange}
-                                    />
-                                  )}
-                                />
-                              </div>
-                            </Td>
-                            <Td>
-                              <Controller
-                                control={control}
-                                name={`order.lines.${index}.color_breakdown`}
-                                render={({ field: colorField }) => (
-                                  <CellInput
-                                    label={`Colors for product ${index + 1}`}
-                                    placeholder="Enter color qty"
-                                    multiline
-                                    value={colorField.value}
+                                    label={`Stock code for product ${index + 1}`}
+                                    placeholder="A1001"
+                                    suggestions={STOCK_CODES}
+                                    value={stockField.value}
                                     onChange={(next) => {
-                                      colorField.onChange(next);
-                                      setColors(index, next);
+                                      stockField.onChange(next);
+                                      setStockCode(index, next);
                                     }}
                                     error={
-                                      colorQtyProblem(line.color_breakdown) ??
-                                      (line.quantity_pairs <
-                                      line.delivered_quantity_pairs
-                                        ? `${sets(line.delivered_quantity_pairs)} have already gone to the customer.`
-                                        : undefined)
+                                      duplicateStockCodeProblem(
+                                        order.lines,
+                                        index,
+                                      ) ?? undefined
                                     }
                                   />
                                 )}
                               />
-                            </Td>
-                            <Td className="text-right tabular-nums">
-                              {sets(line.quantity_pairs)}
-                            </Td>
-                            <Td className="text-right tabular-nums font-medium text-success">
-                              {sets(line.delivered_quantity_pairs)}
-                            </Td>
-                            <Td className="text-right tabular-nums font-semibold text-error">
-                              {sets(lineRemaining(line))}
-                            </Td>
-                            <Td>
-                              <div className="flex flex-col gap-1">
-                                <CurrencySelect
-                                  label={`Currency for product ${index + 1}`}
-                                  value={
-                                    (line.currency_code as CurrencyCode) ||
-                                    DEFAULT_CURRENCY
-                                  }
-                                  onChange={(code) => {
-                                    if (code === DEFAULT_CURRENCY) {
-                                      setLine(index, {
-                                        currency_code: DEFAULT_CURRENCY,
-                                        original_selling_price: null,
-                                        exchange_rate: null,
-                                      });
-                                      return;
-                                    }
-                                    const original =
-                                      line.original_selling_price ?? 0;
-                                    const prefillRate =
-                                      line.exchange_rate ??
-                                      (settings?.today_exchange_rates[code]
-                                        ? Number(
-                                            settings.today_exchange_rates[code],
-                                          )
-                                        : null);
-                                    setLine(index, {
-                                      currency_code: code,
-                                      original_selling_price: original,
-                                      exchange_rate: prefillRate,
-                                      selling_price:
-                                        prefillRate != null
-                                          ? previewKyatAmount(
-                                              original,
-                                              prefillRate,
-                                            )
-                                          : line.selling_price,
-                                    });
-                                  }}
-                                  className="w-full"
+                              <CopyButton
+                                value={line.stock_code}
+                                what="stock code"
+                              />
+                            </div>
+                            <Controller
+                              control={control}
+                              name={`order.lines.${index}.description`}
+                              render={({ field: descriptionField }) => (
+                                <CellInput
+                                  label={`Description for product ${index + 1}`}
+                                  placeholder="Men's leather sandal"
+                                  multiline
+                                  value={descriptionField.value}
+                                  onChange={descriptionField.onChange}
                                 />
-                                {line.currency_code &&
-                                isForeignCurrency(line.currency_code) ? (
-                                  <>
-                                    <CellInput
-                                      label={`Original price for product ${index + 1}`}
-                                      placeholder="Original price"
-                                      className="text-right"
-                                      value={String(
-                                        line.original_selling_price ?? "",
-                                      )}
-                                      onChange={(next) => {
-                                        const original = Number(next) || 0;
-                                        const rate = line.exchange_rate ?? 0;
-                                        setLine(index, {
-                                          original_selling_price: original,
-                                          selling_price: previewKyatAmount(
-                                            original,
-                                            rate,
-                                          ),
-                                        });
-                                      }}
-                                    />
-                                    <CellInput
-                                      label={`Exchange rate for product ${index + 1}`}
-                                      placeholder="Exchange rate"
-                                      className="text-right"
-                                      value={String(line.exchange_rate ?? "")}
-                                      onChange={(next) => {
-                                        const rate = Number(next) || 0;
-                                        const original =
-                                          line.original_selling_price ?? 0;
-                                        setLine(index, {
-                                          exchange_rate: rate,
-                                          selling_price: previewKyatAmount(
-                                            original,
-                                            rate,
-                                          ),
-                                        });
-                                      }}
-                                    />
-                                    <span className="text-right text-[10px] text-text-muted tabular-nums">
-                                      = {formatKyat(line.selling_price)}
-                                    </span>
-                                  </>
-                                ) : (
-                                  <Controller
-                                    control={control}
-                                    name={`order.lines.${index}.selling_price`}
-                                    render={({ field: priceField }) => (
-                                      <CellInput
-                                        label={`Selling price for product ${index + 1}`}
-                                        placeholder="0"
-                                        numeric
-                                        className="text-right"
-                                        value={String(priceField.value)}
-                                        onChange={(next) => {
-                                          priceField.onChange(
-                                            Number(next) || 0,
-                                          );
-                                          setLine(index, {
-                                            selling_price: Number(next) || 0,
-                                          });
-                                        }}
-                                        error={
-                                          errors.order?.lines?.[index]
-                                            ?.selling_price?.message
-                                        }
-                                      />
-                                    )}
-                                  />
-                                )}
-                              </div>
-                            </Td>
-                            <Td className="text-right tabular-nums font-medium whitespace-nowrap">
-                              {formatKyat(
-                                pricedAmount(
-                                  line.quantity_pairs,
-                                  line.unit,
-                                  line.selling_price,
-                                  line.unit_conversions,
-                                ),
                               )}
-                              <button
-                                type="button"
-                                onClick={() => removeLine(index)}
-                                title="Remove this product"
-                                aria-label={`Remove product ${index + 1}`}
-                                className={cn(
-                                  "ml-2 p-1 rounded-md align-middle transition-colors duration-150",
-                                  SOFT_RED,
-                                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
-                                )}
-                              >
-                                <TrashIcon className="w-4 h-4" />
-                              </button>
-                            </Td>
-                          </Tr>
-                        );
-                      })}
-                      <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-                        <Td className="font-semibold" colSpan={3}>
-                          Total
+                            />
+                            <Controller
+                              control={control}
+                              name={`order.lines.${index}.product_group`}
+                              render={({ field: groupField }) => (
+                                <GroupSelect
+                                  label={`Group for product ${index + 1}`}
+                                  value={groupField.value}
+                                  onChange={groupField.onChange}
+                                />
+                              )}
+                            />
+                          </div>
                         </Td>
-                        <Td className="text-right tabular-nums font-semibold">
-                          {sets(order.total_quantity_pairs)}
+                        <Td>
+                          <Controller
+                            control={control}
+                            name={`order.lines.${index}.color_breakdown`}
+                            render={({ field: colorField }) => (
+                              <CellInput
+                                label={`Colors for product ${index + 1}`}
+                                placeholder="Enter color qty"
+                                multiline
+                                value={colorField.value}
+                                onChange={(next) => {
+                                  colorField.onChange(next);
+                                  setColors(index, next);
+                                }}
+                                error={
+                                  colorQtyProblem(line.color_breakdown) ??
+                                  (line.quantity_pairs <
+                                  line.delivered_quantity_pairs
+                                    ? `${sets(line.delivered_quantity_pairs)} have already gone to the customer.`
+                                    : undefined)
+                                }
+                              />
+                            )}
+                          />
                         </Td>
-                        <Td className="text-right tabular-nums font-semibold text-success">
-                          {sets(order.delivered_quantity_pairs)}
+                        <Td className="text-right tabular-nums">
+                          {sets(line.quantity_pairs)}
+                        </Td>
+                        <Td className="text-right tabular-nums font-medium text-success">
+                          {sets(line.delivered_quantity_pairs)}
                         </Td>
                         <Td className="text-right tabular-nums font-semibold text-error">
-                          {sets(remainingQty(order))}
+                          <div className="flex flex-col items-end gap-1">
+                            <span
+                              className={
+                                (line.lost_quantity_pairs ?? 0) > 0
+                                  ? "text-warning"
+                                  : undefined
+                              }
+                            >
+                              {sets(lineRemaining(line))}
+                              {(line.lost_quantity_pairs ?? 0) > 0 &&
+                                !explanation && (
+                                  <span className="ml-1 text-xs font-medium text-warning">
+                                    (
+                                    {sets(line.lost_quantity_pairs ?? 0)}{" "}
+                                    written off)
+                                  </span>
+                                )}
+                            </span>
+                            {explanation && (
+                              <span
+                                className="text-[10px] font-medium text-warning"
+                                title={
+                                  explanation
+                                    ? mismatchDescription(explanation)
+                                    : undefined
+                                }
+                              >
+                                {mismatchDescription(explanation)}
+                              </span>
+                            )}
+                          </div>
                         </Td>
-                        <Td />
-                        <Td className="text-right tabular-nums font-semibold text-brand">
-                          {formatKyat(orderAmount(order))}
+                        <Td>
+                          <div className="flex flex-col gap-1">
+                            <CurrencySelect
+                              label={`Currency for product ${index + 1}`}
+                              value={
+                                (line.currency_code as CurrencyCode) ||
+                                DEFAULT_CURRENCY
+                              }
+                              onChange={(code) => {
+                                if (code === DEFAULT_CURRENCY) {
+                                  setLine(index, {
+                                    currency_code: DEFAULT_CURRENCY,
+                                    original_selling_price: null,
+                                    exchange_rate: null,
+                                  });
+                                  return;
+                                }
+                                const original =
+                                  line.original_selling_price ?? 0;
+                                const prefillRate =
+                                  line.exchange_rate ??
+                                  (settings?.today_exchange_rates[code]
+                                    ? Number(
+                                        settings.today_exchange_rates[code],
+                                      )
+                                    : null);
+                                setLine(index, {
+                                  currency_code: code,
+                                  original_selling_price: original,
+                                  exchange_rate: prefillRate,
+                                  selling_price:
+                                    prefillRate != null
+                                      ? previewKyatAmount(
+                                          original,
+                                          prefillRate,
+                                        )
+                                      : line.selling_price,
+                                });
+                              }}
+                              className="w-full"
+                            />
+                            {line.currency_code &&
+                            isForeignCurrency(line.currency_code) ? (
+                              <>
+                                <CellInput
+                                  label={`Original price for product ${index + 1}`}
+                                  placeholder="Original price"
+                                  className="text-right"
+                                  value={String(
+                                    line.original_selling_price ?? "",
+                                  )}
+                                  onChange={(next) => {
+                                    const original = Number(next) || 0;
+                                    const rate = line.exchange_rate ?? 0;
+                                    setLine(index, {
+                                      original_selling_price: original,
+                                      selling_price: previewKyatAmount(
+                                        original,
+                                        rate,
+                                      ),
+                                    });
+                                  }}
+                                />
+                                <CellInput
+                                  label={`Exchange rate for product ${index + 1}`}
+                                  placeholder="Exchange rate"
+                                  className="text-right"
+                                  value={String(line.exchange_rate ?? "")}
+                                  onChange={(next) => {
+                                    const rate = Number(next) || 0;
+                                    const original =
+                                      line.original_selling_price ?? 0;
+                                    setLine(index, {
+                                      exchange_rate: rate,
+                                      selling_price: previewKyatAmount(
+                                        original,
+                                        rate,
+                                      ),
+                                    });
+                                  }}
+                                />
+                                <span className="text-right text-[10px] text-text-muted tabular-nums">
+                                  = {formatKyat(line.selling_price)}
+                                </span>
+                              </>
+                            ) : (
+                              <Controller
+                                control={control}
+                                name={`order.lines.${index}.selling_price`}
+                                render={({ field: priceField }) => (
+                                  <CellInput
+                                    label={`Selling price for product ${index + 1}`}
+                                    placeholder="0"
+                                    numeric
+                                    className="text-right"
+                                    value={String(priceField.value)}
+                                    onChange={(next) => {
+                                      priceField.onChange(
+                                        Number(next) || 0,
+                                      );
+                                      setLine(index, {
+                                        selling_price: Number(next) || 0,
+                                      });
+                                    }}
+                                    error={
+                                      errors.order?.lines?.[index]
+                                        ?.selling_price?.message
+                                    }
+                                  />
+                                )}
+                              />
+                            )}
+                          </div>
+                        </Td>
+                        <Td className="text-right tabular-nums font-medium whitespace-nowrap">
+                          {formatKyat(
+                            pricedAmount(
+                              line.quantity_pairs,
+                              line.unit,
+                              line.selling_price,
+                              line.unit_conversions,
+                            ),
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => removeLine(index)}
+                            title="Remove this product"
+                            aria-label={`Remove product ${index + 1}`}
+                            className={cn(
+                              "ml-2 p-1 rounded-md align-middle transition-colors duration-150",
+                              SOFT_RED,
+                              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
+                            )}
+                          >
+                            <TrashIcon className="w-4 h-4" />
+                          </button>
+                        </Td>
+                        <Td className="text-center">
+                          <MismatchIconButton
+                            explained={Boolean(explanation)}
+                            disabled={lineRemaining(line) <= 0}
+                            onClick={() => setWriteOffLine(line)}
+                          />
                         </Td>
                       </Tr>
-                    </Tbody>
-                  </TableContainer>
-                  <div className="mt-3">
-                    <Button size="sm" onClick={addLine}>
-                      <PlusIcon className="w-4 h-4" />
-                      Add product
-                    </Button>
-                    {addingLineId && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={cancelAddLine}
-                        className={cn(SOFT_RED, "ml-2")}
-                      >
-                        Cancel
-                      </Button>
-                    )}
-                  </div>
-                </>
-              )}
+                    );
+                  })}
+                  <Tr className="bg-bg-subtle hover:bg-bg-subtle">
+                    <Td className="font-semibold" colSpan={3}>
+                      Total
+                    </Td>
+                    <Td className="text-right tabular-nums font-semibold">
+                      {sets(order.total_quantity_pairs)}
+                    </Td>
+                    <Td className="text-right tabular-nums font-semibold text-success">
+                      {sets(order.delivered_quantity_pairs)}
+                    </Td>
+                    <Td className="text-right tabular-nums font-semibold text-error">
+                      {sets(remainingQty(order))}
+                    </Td>
+                    <Td />
+                    <Td className="text-right tabular-nums font-semibold text-brand">
+                      {formatKyat(orderAmount(order))}
+                    </Td>
+                    <Td />
+                  </Tr>
+                </Tbody>
+              </TableContainer>
+              <div className="mt-3">
+                <Button size="sm" onClick={addLine}>
+                  <PlusIcon className="w-4 h-4" />
+                  Add product
+                </Button>
+                {addingLineId && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={cancelAddLine}
+                    className={cn(SOFT_RED, "ml-2")}
+                  >
+                    Cancel
+                  </Button>
+                )}
+              </div>
             </section>
 
             <section>
               <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
                 <SectionLabel>Payment</SectionLabel>
-                <div className="w-full sm:w-64">
+                <div className="w-full sm:w-80 md:w-96">
                   <div className="flex items-center justify-between text-xs mb-1">
                     <span className="font-medium text-text-secondary">
                       Paid so far
@@ -2795,7 +2765,7 @@ function OrderDetail({
                 onAdd={addPayment}
                 onUpdate={(payment) => setPayment(payment.payment_id, payment)}
                 onRemove={removePayment}
-                readOnly={detailMode !== "edit"}
+                readOnly={false}
               />
             </section>
           </div>
@@ -2982,9 +2952,6 @@ function CustomerPicker({
   const matches = KNOWN_CUSTOMERS.filter((customer) =>
     query === "" ? true : customer.name.toLowerCase().includes(query),
   );
-  const exact = KNOWN_CUSTOMERS.some(
-    (customer) => customer.name.toLowerCase() === query,
-  );
 
   useEffect(() => {
     if (!open) return;
@@ -3082,11 +3049,6 @@ function CustomerPicker({
           </FloatingLayer>
         )}
       </div>
-      <p className="text-xs text-text-muted">
-        {value.trim() !== "" && !exact
-          ? `"${value.trim()}" is new — saving this order adds them as a customer.`
-          : "A name nobody has used before creates a new customer."}
-      </p>
     </div>
   );
 }
@@ -3407,7 +3369,7 @@ function NewOrderForm({
               <SectionLabel>Step 2 — products</SectionLabel>
               <p className="text-sm text-text-muted -mt-1">
                 One row per stock code. Write the colors together with their
-                counts and unit — black10s,pink2p — and the quantity works
+                counts and unit — black10s,pink2p — and the qty works
                 itself out.
               </p>
             </div>
@@ -3415,9 +3377,6 @@ function NewOrderForm({
             <TableContainer>
               <Thead className="top-0">
                 <Tr>
-                  <Th className="min-w-[10rem] whitespace-nowrap">
-                    Supplier / Factory
-                  </Th>
                   <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[13rem]">Colors</Th>
                   <Th className="text-right whitespace-nowrap">Ordered qty</Th>
@@ -3437,26 +3396,6 @@ function NewOrderForm({
                   );
                   return (
                     <Tr key={field.id}>
-                      <Td>
-                        <Controller
-                          control={control}
-                          name={`lines.${index}.supplier_name`}
-                          render={({ field: supplierField }) => (
-                            <Select
-                              aria-label={`Supplier for product ${index + 1}`}
-                              className={EDITABLE}
-                              {...supplierField}
-                            >
-                              <option value="">Choose…</option>
-                              {SUPPLIER_NAMES.map((name) => (
-                                <option key={name} value={name}>
-                                  {name}
-                                </option>
-                              ))}
-                            </Select>
-                          )}
-                        />
-                      </Td>
                       <Td className="min-w-[18rem]">
                         <div className="flex min-w-0 flex-col gap-1.5">
                           <div className="flex min-w-0 items-start gap-1">
@@ -3655,7 +3594,7 @@ function NewOrderForm({
                   );
                 })}
                 <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-                  <Td className="font-semibold" colSpan={3}>
+                  <Td className="font-semibold" colSpan={2}>
                     Total
                   </Td>
                   <Td className="text-right tabular-nums font-semibold">

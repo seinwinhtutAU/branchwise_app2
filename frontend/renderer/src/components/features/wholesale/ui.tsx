@@ -161,18 +161,22 @@ export function Reference({
   value,
   what = "reference",
   onClick,
+  singleLine = false,
 }: {
   value: string;
   /** What this reference is, for the copy button's screen-reader label. */
   what?: string;
   onClick?: () => void;
+  singleLine?: boolean;
 }): React.JSX.Element {
   const cut = value.lastIndexOf("-");
   const head = cut > 0 ? value.slice(0, cut) : value;
   const tail = cut > 0 ? value.slice(cut) : "";
   // Each half stays on its own line — never broken again by a narrow column, which is
   // how "SHP-260827" became three lines once the copy button took part of the width.
-  const body = (
+  const body = singleLine ? (
+    <span className="whitespace-nowrap">{value}</span>
+  ) : (
     <>
       <span className="block whitespace-nowrap">{head}</span>
       {tail && <span className="block whitespace-nowrap">{tail}</span>}
@@ -180,7 +184,7 @@ export function Reference({
   );
 
   return (
-    <span className="inline-flex items-start gap-1">
+    <span className={cn("inline-flex gap-1", singleLine ? "items-center" : "items-start")}>
       {onClick ? (
         <button
           type="button"
@@ -297,10 +301,12 @@ export function FigureCard({
 export function MismatchIconButton({
   explained = false,
   disabled = false,
+  className,
   onClick,
 }: {
   explained?: boolean;
   disabled?: boolean;
+  className?: string;
   onClick: () => void;
 }): React.JSX.Element {
   return (
@@ -313,11 +319,12 @@ export function MismatchIconButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "inline-flex h-7 w-7 items-center justify-center rounded-md border text-sm font-bold leading-none transition-colors",
+        "inline-flex h-5 w-5 items-center justify-center rounded-full border text-xs font-bold leading-none transition-colors shadow-sm",
         explained
-          ? "border-warning bg-warning-subtle text-warning"
-          : "border-border-strong bg-bg-base text-text-muted hover:border-warning hover:text-warning",
+          ? "border-warning bg-warning text-white"
+          : "border-warning/70 bg-bg-base text-warning hover:bg-warning hover:text-white",
         disabled && "cursor-not-allowed opacity-40",
+        className,
       )}
     >
       !
@@ -593,7 +600,7 @@ export function StepBar({
             {index < steps.length - 1 && (
               <span
                 className={cn(
-                  "w-10 sm:w-16 h-0.5 mx-4",
+                  "w-12 sm:w-24 md:w-32 h-0.5 mx-3 sm:mx-4",
                   done ? "bg-success" : "bg-border",
                 )}
               />

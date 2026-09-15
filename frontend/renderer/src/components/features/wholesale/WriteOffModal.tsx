@@ -63,9 +63,9 @@ export function WriteOffModal({
     quantity.trim() === "" ||
     !Number.isInteger(parsedQuantity) ||
     parsedQuantity < 0
-      ? "Enter a whole quantity of zero or more."
+      ? "Enter a whole qty of zero or more."
       : !isRepackaged && parsedQuantity === 0
-        ? "Enter a whole quantity greater than zero."
+        ? "Enter a whole qty greater than zero."
         : !isRepackaged && parsedQuantity > remaining
           ? `You can write off at most ${unit === "package" ? `${remaining} packages` : formatIn(remaining, unit)}.`
           : undefined;
@@ -107,7 +107,7 @@ export function WriteOffModal({
             Explain mismatch
           </h2>
           <p className="mt-1 text-sm text-text-muted">
-            Explain why the quantity for {subject} does not match. This stays
+            Explain why the qty for {subject} does not match. This stays
             visible in the audit trail.
           </p>
         </div>
@@ -134,7 +134,7 @@ export function WriteOffModal({
             label={
               isRepackaged
                 ? `Current count (${unit === "package" ? "packages" : formatIn(1, unit)})`
-                : `Quantity (${unit === "package" ? "packages" : formatIn(1, unit)})`
+                : `Qty (${unit === "package" ? "packages" : formatIn(1, unit)})`
             }
             type="number"
             min={isRepackaged ? 0 : 1}
