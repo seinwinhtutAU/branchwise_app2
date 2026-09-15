@@ -13,6 +13,7 @@ import {
   formatDate,
   formatKyat,
   formatQty,
+  formatSets,
   Td,
   Th,
 } from "./shared";
@@ -53,8 +54,8 @@ function Bars({
                 style={{ width: `${max ? (value / max) * 100 : 0}%` }}
               />
             </div>
-            <span className="w-24 shrink-0 text-right text-sm tabular-nums">
-              {formatQty(value)}
+            <span className="w-36 shrink-0 text-right text-sm tabular-nums">
+              {formatSets(value)}
             </span>
           </div>
         );
@@ -86,10 +87,10 @@ export function InventoryTab(props: ReportTabProps): React.JSX.Element {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <ReportSection
           title="On hand"
-          description="Pairs currently at a receiving location."
+          description="Stock currently at a receiving location."
         >
           <div className="text-2xl font-semibold tabular-nums">
-            {formatQty(data.on_hand.value)}
+            {formatSets(data.on_hand.value)}
           </div>
         </ReportSection>
         <ReportSection
@@ -97,7 +98,7 @@ export function InventoryTab(props: ReportTabProps): React.JSX.Element {
           description="On hand less customer allocations."
         >
           <div className="text-2xl font-semibold tabular-nums">
-            {formatQty(data.available.value)}
+            {formatSets(data.available.value)}
           </div>
         </ReportSection>
         <ReportSection
@@ -105,7 +106,7 @@ export function InventoryTab(props: ReportTabProps): React.JSX.Element {
           description="At supplier plus in transit."
         >
           <div className="text-2xl font-semibold tabular-nums">
-            {formatQty(data.incoming.value)}
+            {formatSets(data.incoming.value)}
           </div>
         </ReportSection>
         <ReportSection
@@ -120,7 +121,7 @@ export function InventoryTab(props: ReportTabProps): React.JSX.Element {
       <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
         <ReportSection
           title="Stock by location"
-          description="Current on-hand pairs by gate."
+          description="Current on-hand stock by gate."
         >
           <Bars rows={data.locations} label="location" />
         </ReportSection>
@@ -139,13 +140,13 @@ export function InventoryTab(props: ReportTabProps): React.JSX.Element {
           <div>
             <div className="text-sm text-text-muted">Received</div>
             <div className="text-xl font-semibold tabular-nums">
-              {formatQty(data.received_in_period)} pairs
+              {formatSets(data.received_in_period)}
             </div>
           </div>
           <div>
             <div className="text-sm text-text-muted">Delivered</div>
             <div className="text-xl font-semibold tabular-nums">
-              {formatQty(data.delivered_in_period)} pairs
+              {formatSets(data.delivered_in_period)}
             </div>
           </div>
         </div>
@@ -176,16 +177,16 @@ export function InventoryTab(props: ReportTabProps): React.JSX.Element {
                       </Td>
                       <Td>{location.location}</Td>
                       <Td className="text-right tabular-nums">
-                        {formatQty(location.on_hand_pairs)}
+                        {formatSets(location.on_hand_pairs)}
                       </Td>
                       <Td className="text-right tabular-nums">
-                        {formatQty(product.available_pairs)}
+                        {formatSets(product.available_pairs)}
                       </Td>
                       <Td className="text-right tabular-nums">
-                        {formatQty(product.allocated_pairs)}
+                        {formatSets(product.allocated_pairs)}
                       </Td>
                       <Td className="text-right tabular-nums">
-                        {formatQty(product.incoming_pairs)}
+                        {formatSets(product.incoming_pairs)}
                       </Td>
                     </tr>
                   ))
@@ -199,16 +200,16 @@ export function InventoryTab(props: ReportTabProps): React.JSX.Element {
                       </Td>
                       <Td>—</Td>
                       <Td className="text-right tabular-nums">
-                        {formatQty(product.on_hand_pairs)}
+                        {formatSets(product.on_hand_pairs)}
                       </Td>
                       <Td className="text-right tabular-nums">
-                        {formatQty(product.available_pairs)}
+                        {formatSets(product.available_pairs)}
                       </Td>
                       <Td className="text-right tabular-nums">
-                        {formatQty(product.allocated_pairs)}
+                        {formatSets(product.allocated_pairs)}
                       </Td>
                       <Td className="text-right tabular-nums">
-                        {formatQty(product.incoming_pairs)}
+                        {formatSets(product.incoming_pairs)}
                       </Td>
                     </tr>,
                   ],
@@ -234,7 +235,7 @@ export function InventoryTab(props: ReportTabProps): React.JSX.Element {
                       {row.stock_code} {row.description}
                     </Td>
                     <Td className="text-right tabular-nums">
-                      {formatQty(row.owed_to_customers_pairs)}
+                      {formatSets(row.owed_to_customers_pairs)}
                     </Td>
                   </tr>
                 ))

@@ -69,7 +69,7 @@ import {
   formatDate,
   formatQty,
 } from "@renderer/components/features/wholesale/shared";
-import { formatIn } from "@renderer/components/features/wholesale/units";
+import { formatSets } from "@renderer/components/features/wholesale/units";
 import { GROUP_LABELS } from "@renderer/components/features/wholesale/products";
 import {
   remainingQty,
@@ -650,7 +650,7 @@ function StockList({
                         <Td>
                           <div className="text-xs text-text-muted">Available</div>
                           <div className="font-semibold tabular-nums text-success">
-                            {formatQty(record.available_pairs)} pairs
+                            {formatSets(record.available_pairs)}
                           </div>
                         </Td>
                         <Td className="font-mono text-xs text-text-secondary whitespace-nowrap">
@@ -860,7 +860,7 @@ function InventoryMovementTable({
                   </Td>
                   <Td className="text-right font-semibold tabular-nums whitespace-nowrap">
                     <span className={movement.movement_type === "in" ? "text-success" : "text-error"}>
-                      {movement.movement_type === "in" ? "+" : "−"}{formatQty(movement.quantity_pairs)} pairs
+                      {movement.movement_type === "in" ? "+" : "−"}{formatSets(movement.quantity_pairs)}
                     </span>
                   </Td>
                   <Td className="text-text-secondary whitespace-nowrap">{movement.location}</Td>
@@ -1181,7 +1181,7 @@ function InventoryInsights({
               <div className={cn("text-lg font-extrabold", String(color))}>
                 {fmtValue(Number(pairs) * ESTIMATED_PAIR_PRICE)}
               </div>
-              <div className="text-xs text-text-muted">{formatQty(Number(pairs))} pairs × 19.5K est.</div>
+              <div className="text-xs text-text-muted">{formatSets(Number(pairs))} × 19.5K per pair est.</div>
             </div>
           ))}
         </div>
@@ -1221,9 +1221,9 @@ function InventoryInsights({
               <div key={String(label)} className="rounded-xl border border-border bg-bg-subtle p-4 text-center">
                 <div className={cn("text-xs font-semibold uppercase tracking-wide", String(color))}>{label}</div>
                 <div className={cn("mt-1 text-2xl font-extrabold", String(color))}>
-                  {sign}{formatQty(Math.abs(Number(amount)))}
+                  {sign}{formatSets(Math.abs(Number(amount)))}
                 </div>
-                <div className="text-xs text-text-muted">pairs {label === "Net Change" ? "net today" : String(label).toLowerCase()}</div>
+                <div className="text-xs text-text-muted">{label === "Net Change" ? "net today" : String(label).toLowerCase()}</div>
               </div>
             ))}
           </div>
@@ -1251,6 +1251,7 @@ function InventorySummaryCards({
   const emptyLocations = records.filter((record) => record.locations.length === 0).length;
   const atSupplierPairs = records.reduce((sum, record) => sum + record.at_supplier_pairs, 0);
   const inTransitPairs = records.reduce((sum, record) => sum + record.in_transit_pairs, 0);
+  const atReceivingPairs = records.reduce((sum, record) => sum + Math.max(0, record.on_hand_pairs), 0);
   const committedPairs = records.reduce((sum, record) => sum + record.allocated_pairs, 0);
   const incomingRows: InventorySummaryRow[] = [
     {
@@ -1265,6 +1266,12 @@ function InventorySummaryCards({
       pairs: inTransitPairs,
       tone: "orange",
     },
+    {
+      label: "At Receiving",
+      detail: "Counted at receiving gates",
+      pairs: atReceivingPairs,
+      tone: "blue",
+    },
   ];
   const committedRow: InventorySummaryRow = {
     label: "Customer Allocated",
@@ -1273,6 +1280,7 @@ function InventorySummaryCards({
     tone: "purple",
   };
   const incomingCommittedPairs = incomingRows.reduce((sum, row) => sum + row.pairs, committedRow.pairs);
+  const onTheWayPairs = atSupplierPairs + inTransitPairs;
 
   return (
     <div className="grid gap-4 xl:grid-cols-2">
@@ -1295,22 +1303,38 @@ function InventorySummaryCards({
               On hand
             </span>
               <span className="shrink-0 text-right text-sm font-bold tabular-nums text-text-primary sm:text-base">
-                {formatQty(row.pairs)} pairs
+                {formatSets(row.pairs)}
               </span>
             </div>
           ))}
+          {/* An empty shelf is almost never an empty business — it usually means the
+              goods are still on the road, or the boxes that arrived have not been
+              opened yet. Saying which one stops this card reading as broken. */}
+          {physicalRows.length === 0 && (
+            <div className="px-4 py-5 text-sm text-text-muted sm:px-5">
+              {onTheWayPairs > 0 ? (
+                <>
+                  Nothing on the shelf yet. {formatSets(onTheWayPairs)} on the
+                  way — stock only counts here once its packages are opened in
+                  Receiving.
+                </>
+              ) : (
+                <>No stock at any location yet.</>
+              )}
+            </div>
+          )}
           {emptyLocations > 0 && (
-            <div className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-text-muted sm:px-5">
-              <span className="text-lg leading-none">⌄</span>
-              Show all locations ({formatQty(emptyLocations)} empty)
+            <div className="px-4 py-3 text-sm text-text-muted sm:px-5">
+              {formatQty(emptyLocations)} product
+              {emptyLocations === 1 ? " has" : "s have"} not arrived anywhere yet.
             </div>
           )}
         </div>
       </SummaryCard>
 
       <SummaryCard
-        title="Incoming & Committed Stock"
-        description="Stock not yet in warehouse or reserved for customers."
+        title="Pipeline & Committed Stock"
+        description="Stock at each shipment stage and amounts reserved for customers."
         total={incomingCommittedPairs}
         icon={<TruckIcon className="h-6 w-6" />}
         iconClassName="bg-brand-subtle text-brand"
@@ -1362,9 +1386,9 @@ function SummaryCard({
         </div>
         <div className="shrink-0 text-right">
           <div className={cn("text-xl font-bold leading-none tabular-nums sm:text-2xl", totalClassName)}>
-            {formatQty(total)}
+            {formatSets(total)}
           </div>
-          <div className="mt-1 text-sm text-text-muted">total pairs</div>
+          <div className="mt-1 text-sm text-text-muted">total quantity</div>
         </div>
       </div>
       {children}
@@ -1386,7 +1410,7 @@ function SummaryRow({ row }: { row: InventorySummaryRow }): React.JSX.Element {
       <span className="min-w-0 flex-1 text-sm font-semibold text-text-primary">{row.label}</span>
       <span className="hidden text-xs italic text-text-muted md:block">{row.detail}</span>
       <span className="shrink-0 text-sm font-bold tabular-nums text-text-primary">
-        {formatQty(row.pairs)} pairs
+        {formatSets(row.pairs)}
       </span>
     </div>
   );
@@ -1645,19 +1669,19 @@ function StockDetail({
                   />
                   <ReadOnlyField
                     label="On hand"
-                    value={formatIn(record.on_hand_pairs, "pair")}
+                    value={formatSets(record.on_hand_pairs)}
                   />
                   <ReadOnlyField
                     label="Allocated"
-                    value={formatIn(allocated, "pair")}
+                    value={formatSets(allocated)}
                   />
                   <ReadOnlyField
                     label="Available"
-                    value={formatIn(available, "pair")}
+                    value={formatSets(available)}
                   />
                   <ReadOnlyField
                     label="Incoming"
-                    value={formatIn(incoming, "pair")}
+                    value={formatSets(incoming)}
                   />
                   <ReadOnlyField
                     label="Last moved"
@@ -1676,7 +1700,7 @@ function StockDetail({
                       <div className="text-xs text-text-muted">{stage.detail}</div>
                     </div>
                     <div className="shrink-0 font-semibold tabular-nums text-text-primary">
-                      {formatIn(stage.pairs, "pair")}
+                      {formatSets(stage.pairs)}
                     </div>
                   </div>
                 ))}
@@ -1688,7 +1712,7 @@ function StockDetail({
                         <div key={location.location} className="flex items-center justify-between gap-4 text-xs">
                           <span className="truncate text-text-muted">{location.location}</span>
                           <span className="shrink-0 font-semibold tabular-nums text-text-secondary">
-                            {formatIn(location.on_hand_pairs, "pair")}
+                            {formatSets(location.on_hand_pairs)}
                           </span>
                         </div>
                       ))}
@@ -1782,10 +1806,10 @@ function StockDetail({
                             {line.colors || "—"}
                           </Td>
                           <Td className="text-right tabular-nums font-medium">
-                            {formatIn(ordered, "pair")}
+                            {formatSets(ordered)}
                           </Td>
                           <Td className="text-right tabular-nums font-medium">
-                            {formatIn(received, "pair")}
+                            {formatSets(received)}
                           </Td>
                           <Td
                             className={cn(
@@ -1793,7 +1817,7 @@ function StockDetail({
                               remaining > 0 ? "text-error" : "text-success",
                             )}
                           >
-                            {formatIn(remaining, "pair")}
+                            {formatSets(remaining)}
                           </Td>
                           <Td>
                             <StatusPill
@@ -1814,13 +1838,13 @@ function StockDetail({
                         Total
                       </Td>
                       <Td className="text-right font-bold tabular-nums">
-                        {formatIn(relatedOrderTotals.ordered, "pair")}
+                        {formatSets(relatedOrderTotals.ordered)}
                       </Td>
                       <Td className="text-right font-bold tabular-nums">
-                        {formatIn(relatedOrderTotals.received, "pair")}
+                        {formatSets(relatedOrderTotals.received)}
                       </Td>
                       <Td className="text-right font-bold tabular-nums whitespace-nowrap">
-                        {formatIn(relatedOrderTotals.remaining, "pair")}
+                        {formatSets(relatedOrderTotals.remaining)}
                       </Td>
                       <Td />
                     </Tr>
@@ -1879,7 +1903,7 @@ function StockDetail({
                       )}
                     >
                       {movement.movement_type === "in" ? "+" : "−"}
-                      {formatQty(movement.quantity_pairs)} pairs
+                      {formatSets(movement.quantity_pairs)}
                     </Td>
                     <Td className="text-text-secondary whitespace-nowrap">{movement.location}</Td>
                     <Td className="text-text-muted whitespace-nowrap">{movement.reference || "—"}</Td>
@@ -1902,10 +1926,10 @@ function StockDetail({
                     Total stock now
                   </Td>
                   <Td className="text-right tabular-nums font-semibold whitespace-nowrap">
-                    {formatQty(line.quantity_available_pairs)} pairs
+                    {formatSets(line.quantity_available_pairs)}
                   </Td>
                   <Td colSpan={4} className="text-text-muted">
-                    {formatQty(line.quantity_in_pairs)} pairs received, {formatQty(line.quantity_out_pairs)} pairs sent out
+                    {formatSets(line.quantity_in_pairs)} received, {formatSets(line.quantity_out_pairs)} sent out
                   </Td>
                 </Tr>
               </Tbody>

@@ -21,7 +21,7 @@ import {
   type ReportTabProps,
   useWholesaleReport,
   formatKyat,
-  formatQty,
+  formatSets,
   Td,
   Th,
 } from "./shared";
@@ -94,8 +94,8 @@ export function RevenueTab(props: ReportTabProps): React.JSX.Element {
           previousLabel={note}
         />
         <StatTile
-          label="Pairs delivered"
-          value={formatQty(data.pairs_delivered.value)}
+          label="Quantity delivered"
+          value={formatSets(data.pairs_delivered.value)}
           deltaPct={data.pairs_delivered.delta_pct}
           previousLabel={note}
         />
@@ -142,12 +142,12 @@ export function RevenueTab(props: ReportTabProps): React.JSX.Element {
         </ReportSection>
         <ReportSection
           title="Top products"
-          description="Delivered revenue, pairs, and quantity-weighted selling price."
+          description="Delivered revenue, quantity, and quantity-weighted selling price."
         >
           <ReportTable>
             <ReportTableHeader>
               <Th>Product</Th>
-              <Th className="text-right">Pairs</Th>
+              <Th className="text-right">Quantity</Th>
               <Th className="text-right">Ks</Th>
               <Th className="text-right">Avg price</Th>
             </ReportTableHeader>
@@ -162,7 +162,7 @@ export function RevenueTab(props: ReportTabProps): React.JSX.Element {
                       <span className="ml-2">{row.description}</span>
                     </Td>
                     <Td className="text-right tabular-nums">
-                      {formatQty(row.pairs_delivered)}
+                      {formatSets(row.pairs_delivered)}
                     </Td>
                     <Td className="text-right tabular-nums">
                       {formatKyat(row.delivered_revenue)}
@@ -191,7 +191,7 @@ export function RevenueTab(props: ReportTabProps): React.JSX.Element {
           <ReportTableHeader>
             <Th>Order</Th>
             <Th>Customer</Th>
-            <Th className="text-right">Pairs</Th>
+            <Th className="text-right">Quantity</Th>
             <Th className="text-right">Value</Th>
             <Th className="text-right">Delivered</Th>
             <Th className="text-right">Balance</Th>
@@ -203,7 +203,7 @@ export function RevenueTab(props: ReportTabProps): React.JSX.Element {
                   <Td className="font-semibold text-brand">{row.order_no}</Td>
                   <Td>{row.customer_name}</Td>
                   <Td className="text-right tabular-nums">
-                    {formatQty(row.pairs_ordered)}
+                    {formatSets(row.pairs_ordered)}
                   </Td>
                   <Td className="text-right tabular-nums">
                     {formatKyat(row.ordered_value)}

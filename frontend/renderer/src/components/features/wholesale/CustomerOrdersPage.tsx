@@ -88,10 +88,10 @@ import {
 } from "@renderer/components/features/wholesale/shared";
 import {
   formatIn,
+  formatSets,
   PAIRS_PER,
+  priceBasisNote,
   pricedAmount,
-  UNIT_LABELS,
-  UNITS,
 } from "@renderer/components/features/wholesale/units";
 import {
   hydrateOrders,
@@ -104,6 +104,7 @@ import {
   WholesaleApiError,
   addCustomerOrderPayment,
   cancelCustomerOrder,
+  createCustomerDeliveryBatch,
   createCustomerOrder,
   ordersFromWire,
   removeCustomerOrderPayment,
@@ -113,6 +114,7 @@ import {
   writeOffCustomerOrderLine,
   type WriteOffReason,
   type WriteOffWire,
+  type CustomerDeliveryBatchInput,
   inventoryMovementsFromWire,
   type InventoryMovementWire,
   type NewCustomerOrderInput,
@@ -144,9 +146,10 @@ import {
   type CurrencyCode,
 } from "@renderer/components/features/wholesale/currency";
 
-/** An aggregate may combine products with different units, so pairs are its only
- * unambiguous display unit. Individual lines use their own unit below. */
-const sets = (qty: number): string => formatIn(qty, "pair");
+/** An aggregate may combine products quoted in different units, so it is stored in pairs
+ * and shown the way the business reads a quantity: sets, with any leftover pairs.
+ * Individual lines use their own unit below. */
+const sets = (qty: number): string => formatSets(qty);
 
 // The wholesale Customer Orders screen. Its shape follows wholesale_prototype's own
 // Customer Orders page — figure cards across the top, then one panel holding the header,
@@ -238,7 +241,8 @@ function CurrencyNote({
     return null;
   return (
     <span className="block text-[10px] font-normal text-text-muted whitespace-nowrap">
-      {formatOriginalAmount(currency_code, original_amount)} × {formatRate(exchange_rate)}
+      {formatOriginalAmount(currency_code, original_amount)} ×{" "}
+      {formatRate(exchange_rate)}
     </span>
   );
 }
@@ -334,6 +338,27 @@ export default function CustomerOrdersPage({
         error instanceof WholesaleApiError
           ? error.message
           : "Could not save this customer allocation.",
+      );
+      throw error;
+    }
+  }
+
+  async function saveDelivery(
+    input: CustomerDeliveryBatchInput,
+  ): Promise<void> {
+    try {
+      await createCustomerDeliveryBatch(session, input);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: ["wholesale", "inventory"] }),
+      ]);
+      showToast("success", "Customer delivery recorded.");
+    } catch (error) {
+      showToast(
+        "error",
+        error instanceof WholesaleApiError
+          ? error.message
+          : "Could not record this customer delivery.",
       );
       throw error;
     }
@@ -526,12 +551,13 @@ export default function CustomerOrdersPage({
 
   if (view === "allocate" && selected) {
     return (
-      <AllocationView
+      <AllocateAndDeliveryView
         order={selected}
         orders={orders}
         inventoryLines={inventoryLines}
         inventoryLoading={isInventoryFetching}
         onSaveAllocation={saveAllocation}
+        onSaveDelivery={saveDelivery}
         onBack={() => setView("list")}
       />
     );
@@ -599,6 +625,10 @@ function OrderList({
     (sum, order) => sum + remainingQty(order),
     0,
   );
+  // orderBalance already returns 0 for a cancelled order, so this is what customers
+  // still owe on work that actually stands.
+  const unpaid = live.reduce((sum, order) => sum + orderBalance(order), 0);
+  const unpaidCount = live.filter((order) => orderBalance(order) > 0).length;
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -636,7 +666,7 @@ function OrderList({
   return (
     <div className="flex flex-col gap-6">
       {/* Each figure is a way into the list below it, not just a number to read. */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <FigureCard
           label="Open Orders"
           value={formatQty(openOrders.length)}
@@ -659,6 +689,12 @@ function OrderList({
           value={sets(remainingAll)}
           sub="across all open orders"
           tone={remainingAll > 0 ? "error" : "success"}
+        />
+        <FigureCard
+          label="Unpaid amount"
+          value={formatKyat(unpaid)}
+          sub={`${unpaidCount} order${unpaidCount === 1 ? "" : "s"} not fully paid`}
+          tone={unpaid > 0 ? "error" : "success"}
         />
       </div>
 
@@ -979,7 +1015,7 @@ function OrderProductsView({
           <Th className="text-right whitespace-nowrap">Ordered qty</Th>
           <Th className="text-right whitespace-nowrap">Received qty</Th>
           <Th className="text-right whitespace-nowrap">Remaining qty</Th>
-          <Th className="text-right min-w-[7rem]">Selling price</Th>
+          <Th className="text-right min-w-[7rem]">Selling price<span className="block text-xs font-normal text-text-muted">per set</span></Th>
           <Th className="text-right">Amount</Th>
           <Th className="text-center">Mismatch</Th>
         </Tr>
@@ -1019,10 +1055,18 @@ function OrderProductsView({
                     {line.color_breakdown || "—"}
                   </Td>
                   <Td className="text-right tabular-nums">
-                    {formatIn(line.quantity_pairs, line.unit, line.unit_conversions)}
+                    {formatIn(
+                      line.quantity_pairs,
+                      line.unit,
+                      line.unit_conversions,
+                    )}
                   </Td>
                   <Td className="text-right tabular-nums font-medium text-success">
-                    {formatIn(line.delivered_quantity_pairs, line.unit, line.unit_conversions)}
+                    {formatIn(
+                      line.delivered_quantity_pairs,
+                      line.unit,
+                      line.unit_conversions,
+                    )}
                   </Td>
                   <Td className="text-right tabular-nums font-semibold text-error">
                     <div className="flex flex-col items-end gap-1">
@@ -1033,7 +1077,11 @@ function OrderProductsView({
                             : undefined
                         }
                       >
-                        {formatIn(lineRemaining(line), line.unit, line.unit_conversions)}
+                        {formatIn(
+                          lineRemaining(line),
+                          line.unit,
+                          line.unit_conversions,
+                        )}
                         {(line.lost_quantity_pairs ?? 0) > 0 &&
                           !explanation && (
                             <span className="ml-1 text-xs font-medium text-warning">
@@ -1062,6 +1110,11 @@ function OrderProductsView({
                   </Td>
                   <Td className="text-right tabular-nums">
                     {formatKyat(line.selling_price)}
+                    {priceBasisNote(line.unit) && (
+                      <div className="text-xs font-normal text-text-muted">
+                        {priceBasisNote(line.unit)}
+                      </div>
+                    )}
                     <CurrencyNote
                       currency_code={line.currency_code}
                       original_amount={line.original_selling_price}
@@ -1069,7 +1122,14 @@ function OrderProductsView({
                     />
                   </Td>
                   <Td className="text-right tabular-nums font-medium whitespace-nowrap">
-                    {formatKyat(pricedAmount(line.quantity_pairs, line.unit, line.selling_price, line.unit_conversions))}
+                    {formatKyat(
+                      pricedAmount(
+                        line.quantity_pairs,
+                        line.unit,
+                        line.selling_price,
+                        line.unit_conversions,
+                      ),
+                    )}
                   </Td>
                   <Td className="text-center">
                     <MismatchIconButton
@@ -1229,8 +1289,8 @@ function AllocationLineRow({
     colorError ??
     (invalidColor
       ? invalidColor[1] > (orderColors[invalidColor[0]] ?? 0)
-        ? `Only ${formatIn(orderColors[invalidColor[0]] ?? 0, "pair")} of ${invalidColor[0]} is on this order.`
-        : `Only ${formatIn(availableForEdit[invalidColor[0]] ?? 0, "pair")} of ${invalidColor[0]} is available.`
+        ? `Only ${formatSets(orderColors[invalidColor[0]] ?? 0)} of ${invalidColor[0]} is on this order.`
+        : `Only ${formatSets(availableForEdit[invalidColor[0]] ?? 0)} of ${invalidColor[0]} is available.`
       : requestedPairs > lineRemaining(line)
         ? `Allocation cannot exceed ${formatIn(lineRemaining(line), line.unit, line.unit_conversions)}.`
         : null);
@@ -1284,7 +1344,11 @@ function AllocationLineRow({
         {formatIn(line.quantity_pairs, line.unit, line.unit_conversions)}
       </Td>
       <Td className="whitespace-nowrap text-right tabular-nums text-success">
-        {formatIn(line.delivered_quantity_pairs, line.unit, line.unit_conversions)}
+        {formatIn(
+          line.delivered_quantity_pairs,
+          line.unit,
+          line.unit_conversions,
+        )}
       </Td>
       <Td className="whitespace-nowrap text-right tabular-nums font-semibold text-error">
         {formatIn(lineRemaining(line), line.unit, line.unit_conversions)}
@@ -1298,7 +1362,7 @@ function AllocationLineRow({
         <div className="min-w-[12rem]">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-sm font-semibold text-brand tabular-nums">
-              {inventoryLoading ? "—" : formatIn(availablePairs, "pair")}
+              {inventoryLoading ? "—" : formatSets(availablePairs)}
             </span>
             {!inventoryLoading && (
               <span
@@ -1323,9 +1387,22 @@ function AllocationLineRow({
             {inventoryLoading ? (
               "Checking stock…"
             ) : hasAvailableStock ? (
-              <span className="font-bold text-brand">
-                {formatColorPairs(availableToAllocate)}
-              </span>
+              <button
+                type="button"
+                className="font-bold text-brand underline decoration-dotted underline-offset-2 hover:no-underline"
+                onClick={() =>
+                  setDraft(
+                    formatColorPairs(
+                      mergeColorPairs(
+                        { ...colorPairsForText(draft, line.unit, line.unit_conversions) },
+                        availableToAllocate,
+                      ),
+                    ),
+                  )
+                }
+              >
+                + Add {formatColorPairs(availableToAllocate)}
+              </button>
             ) : hasCurrentAllocation ? (
               "No stock remains for another allocation."
             ) : (
@@ -1344,7 +1421,7 @@ function AllocationLineRow({
         />
         <div className="mt-1 text-xs text-text-muted">
           {draft.trim() !== "" && !validationMessage
-            ? `${formatIn(requestedPairs, "pair")} selected`
+            ? `${formatSets(requestedPairs)} selected — replaces allocation. Use "+ Add" to top up.`
             : "Use s, p, or d."}
         </div>
       </Td>
@@ -1406,12 +1483,342 @@ function AllocationTable({
   );
 }
 
-function AllocationView({
+function deliveryLocationsForLine(
+  line: CustomerOrderLine,
+  inventoryLines: StockLine[],
+): string[] {
+  return [
+    ...new Set(
+      inventoryLines
+        .filter((stockLine) => stockLine.stock_code === line.stock_code)
+        .map((stockLine) => stockLine.location)
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function availableDeliveryColors(
+  line: CustomerOrderLine,
+  order: CustomerOrder,
+  orders: CustomerOrder[],
+  inventoryLines: StockLine[],
+  location: string,
+): ColorPairs {
+  const stockColors = inventoryLines
+    .filter(
+      (stockLine) =>
+        stockLine.stock_code === line.stock_code &&
+        stockLine.location === location,
+    )
+    .reduce(
+      (colors, stockLine) =>
+        mergeColorPairs(colors, stockLine.color_quantities_pairs),
+      {},
+    );
+  return subtractColorPairs(
+    stockColors,
+    allocationsFromOtherOrders(orders, line.stock_code, order.order_id),
+  );
+}
+
+function deliveryValidationMessage(
+  line: CustomerOrderLine,
+  draft: string,
+  allocatedColors: ColorPairs,
+  availableColors: ColorPairs,
+  inventoryLoading: boolean,
+): string | null {
+  if (draft.trim() === "" || inventoryLoading) return null;
+  const parseError = colorQtyProblem(draft);
+  if (parseError) return parseError;
+  const requestedColors = colorPairsForText(
+    draft,
+    line.unit,
+    line.unit_conversions,
+  );
+  const requestedPairs = Object.values(requestedColors).reduce(
+    (sum, pairs) => sum + pairs,
+    0,
+  );
+  if (requestedPairs > lineRemaining(line))
+    return `Delivery cannot exceed ${formatIn(lineRemaining(line), line.unit, line.unit_conversions)}.`;
+  for (const [color, pairs] of Object.entries(requestedColors)) {
+    if (pairs > (allocatedColors[color] ?? 0))
+      return `Only ${formatSets(allocatedColors[color] ?? 0)} of ${color} is allocated for delivery.`;
+    if (pairs > (availableColors[color] ?? 0))
+      return `Only ${formatSets(availableColors[color] ?? 0)} of ${color} is available at this location.`;
+  }
+  return null;
+}
+
+function DeliveryView({
+  order,
+  orders,
+  inventoryLines,
+  inventoryLoading,
+  onSaveDelivery,
+  onBack,
+}: {
+  order: CustomerOrder;
+  orders: CustomerOrder[];
+  inventoryLines: StockLine[];
+  inventoryLoading: boolean;
+  onSaveDelivery: (input: CustomerDeliveryBatchInput) => Promise<void>;
+  onBack: () => void;
+}): React.JSX.Element {
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [fromLocation, setFromLocation] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState(todayIso());
+  const [deliveryAddress, setDeliveryAddress] = useState(
+    order.customer_address,
+  );
+  const [deliveryNote, setDeliveryNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(
+    () => setDeliveryAddress(order.customer_address),
+    [order.customer_address],
+  );
+
+  const locationOptions = [
+    ...new Set(
+      order.lines.flatMap((line) =>
+        deliveryLocationsForLine(line, inventoryLines),
+      ),
+    ),
+  ];
+  const selectedLocation = fromLocation || locationOptions[0] || "";
+  const rows = order.lines.map((line) => {
+    const allocatedColors = colorPairsForText(
+      line.allocated_color_breakdown ?? "",
+      line.unit,
+      line.unit_conversions,
+    );
+    const availableColors = availableDeliveryColors(
+      line,
+      order,
+      orders,
+      inventoryLines,
+      selectedLocation,
+    );
+    const draft = drafts[line.order_line_id] ?? "";
+    const pairs = Object.values(
+      colorPairsForText(draft, line.unit, line.unit_conversions),
+    ).reduce((sum, value) => sum + value, 0);
+    return {
+      line,
+      draft,
+      pairs,
+      allocatedColors,
+      availableColors,
+      problem: deliveryValidationMessage(
+        line,
+        draft,
+        allocatedColors,
+        availableColors,
+        inventoryLoading,
+      ),
+    };
+  });
+  const selectedRows = rows.filter((row) => row.pairs > 0);
+  const canSave =
+    !inventoryLoading &&
+    deliveryDate.trim() !== "" &&
+    selectedLocation !== "" &&
+    selectedRows.length > 0 &&
+    selectedRows.every((row) => row.problem === null);
+
+  async function saveDelivery(): Promise<void> {
+    if (!canSave || saving) return;
+    setSaving(true);
+    try {
+      await onSaveDelivery({
+        order_id: order.order_id,
+        delivered_on: deliveryDate,
+        delivery_address: deliveryAddress.trim(),
+        note: deliveryNote.trim(),
+        lines: selectedRows.map((row) => ({
+          stock_code: row.line.stock_code,
+          location: selectedLocation,
+          color_breakdown: row.draft.trim(),
+          unit: row.line.unit,
+        })),
+      });
+      setDrafts({});
+      setDeliveryNote("");
+      setDeliveryDate(todayIso());
+      setFromLocation("");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border-strong pb-4">
+        <div>
+          <h3 className="text-base font-semibold text-text-primary">
+            Delivery details
+          </h3>
+          <p className="mt-1 text-sm text-text-secondary">
+            Record the stock handed to this customer.
+          </p>
+        </div>
+        <span className="text-sm font-semibold tabular-nums text-brand">
+          {formatSets(selectedRows.reduce((sum, row) => sum + row.pairs, 0))}{" "}
+          selected
+        </span>
+        <div className="grid w-full gap-3 sm:grid-cols-4">
+          <Select
+            label="From location"
+            value={selectedLocation}
+            onChange={(event) => setFromLocation(event.target.value)}
+            disabled={inventoryLoading || locationOptions.length === 0}
+          >
+            {locationOptions.length === 0 ? (
+              <option value="">No stock location</option>
+            ) : (
+              locationOptions.map((location) => (
+                <option key={location} value={location}>
+                  {location}
+                </option>
+              ))
+            )}
+          </Select>
+          <Input
+            label="Delivery date"
+            type="date"
+            value={deliveryDate}
+            onChange={(event) => setDeliveryDate(event.target.value)}
+          />
+          <Input
+            label="Delivery address"
+            value={deliveryAddress}
+            onChange={(event) => setDeliveryAddress(event.target.value)}
+            placeholder="Customer address"
+          />
+          <Input
+            label="Delivery note"
+            value={deliveryNote}
+            onChange={(event) => setDeliveryNote(event.target.value)}
+            placeholder="Optional note"
+          />
+        </div>
+      </div>
+
+      <TableContainer>
+        <Thead className="top-0">
+          <Tr>
+            <Th className="min-w-[15rem]">Product</Th>
+            <Th className="text-right whitespace-nowrap">Remaining</Th>
+            <Th className="min-w-[13rem]">Allocated colors</Th>
+            <Th className="min-w-[13rem]">Available to deliver</Th>
+            <Th className="min-w-[17rem]">Deliver colors</Th>
+          </Tr>
+        </Thead>
+        <Tbody>
+          {rows.map((row) => {
+            const deliverableColors = Object.entries(
+              row.allocatedColors,
+            ).reduce<ColorPairs>((colors, [color, pairs]) => {
+              const deliverablePairs = Math.min(
+                pairs,
+                row.availableColors[color] ?? 0,
+              );
+              if (deliverablePairs > 0) colors[color] = deliverablePairs;
+              return colors;
+            }, {});
+            const availablePairs = Object.values(deliverableColors).reduce(
+              (sum, pairs) => sum + pairs,
+              0,
+            );
+            return (
+              <Tr key={row.line.order_line_id}>
+                <Td>
+                  <div className="flex min-w-[15rem] flex-col gap-0.5">
+                    <span className="font-bold text-brand">
+                      {row.line.stock_code || "No stock code"}
+                    </span>
+                    <span className="font-semibold text-text-primary">
+                      {row.line.description || "Unnamed product"}
+                    </span>
+                  </div>
+                </Td>
+                <Td className="whitespace-nowrap text-right font-semibold tabular-nums text-error">
+                  {formatIn(
+                    lineRemaining(row.line),
+                    row.line.unit,
+                    row.line.unit_conversions,
+                  )}
+                </Td>
+                <Td>
+                  <span className="font-bold text-brand">
+                    {formatColorPairs(row.allocatedColors) || "No allocation"}
+                  </span>
+                </Td>
+                <Td>
+                  <div className="min-w-[13rem]">
+                    <div className="font-semibold tabular-nums text-brand">
+                      {inventoryLoading
+                        ? "—"
+                        : formatSets(availablePairs)}
+                    </div>
+                    <div className="mt-0.5 text-xs text-text-secondary">
+                      {inventoryLoading
+                        ? "Checking stock…"
+                        : formatColorPairs(deliverableColors) ||
+                          "No allocated colors available."}
+                    </div>
+                  </div>
+                </Td>
+                <Td>
+                  <Input
+                    aria-label={`Delivery by color for ${order.order_no} ${row.line.stock_code}`}
+                    placeholder="e.g. black2s, white1s"
+                    value={row.draft}
+                    onChange={(event) =>
+                      setDrafts((current) => ({
+                        ...current,
+                        [row.line.order_line_id]: event.target.value,
+                      }))
+                    }
+                    error={row.problem ?? undefined}
+                    disabled={
+                      (row.line.allocated_quantity_pairs ?? 0) <= 0 ||
+                      inventoryLoading ||
+                      selectedLocation === ""
+                    }
+                  />
+                </Td>
+              </Tr>
+            );
+          })}
+        </Tbody>
+      </TableContainer>
+
+      <div className="flex flex-wrap justify-between gap-2">
+        <Button variant="ghost" onClick={onBack}>
+          Back to allocation
+        </Button>
+        <Button
+          onClick={() => void saveDelivery()}
+          loading={saving}
+          disabled={!canSave}
+        >
+          Record delivery
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AllocateAndDeliveryView({
   order,
   orders,
   inventoryLines,
   inventoryLoading,
   onSaveAllocation,
+  onSaveDelivery,
   onBack,
 }: {
   order: CustomerOrder;
@@ -1419,8 +1826,10 @@ function AllocationView({
   inventoryLines: StockLine[];
   inventoryLoading: boolean;
   onSaveAllocation: (lineId: string, colorBreakdown: string) => Promise<void>;
+  onSaveDelivery: (input: CustomerDeliveryBatchInput) => Promise<void>;
   onBack: () => void;
 }): React.JSX.Element {
+  const [step, setStep] = useState(0);
   const allocatedPairs = order.lines.reduce(
     (sum, line) => sum + (line.allocated_quantity_pairs ?? 0),
     0,
@@ -1462,21 +1871,49 @@ function AllocationView({
               className="border-border-strong"
             />
             <FigureCard
+              label="Delivered"
+              value={sets(order.delivered_quantity_pairs)}
+              tone="success"
+              className="border-border-strong"
+            />
+            <FigureCard
               label="Remaining"
               value={sets(remainingQty(order))}
               tone="error"
               className="border-border-strong"
             />
           </div>
+          <div className="mt-4">
+            <StepBar steps={["Allocate", "Delivery"]} step={step} />
+          </div>
         </div>
         <div className="px-5 py-4">
-          <AllocationTable
-            order={order}
-            orders={orders}
-            inventoryLines={inventoryLines}
-            inventoryLoading={inventoryLoading}
-            onSaveAllocation={onSaveAllocation}
-          />
+          {step === 0 ? (
+            <>
+              <AllocationTable
+                order={order}
+                orders={orders}
+                inventoryLines={inventoryLines}
+                inventoryLoading={inventoryLoading}
+                onSaveAllocation={onSaveAllocation}
+              />
+              <div className="mt-4 flex justify-end">
+                <Button onClick={() => setStep(1)}>
+                  Continue to delivery
+                  <ChevronRightIcon className="h-4 w-4" />
+                </Button>
+              </div>
+            </>
+          ) : (
+            <DeliveryView
+              order={order}
+              orders={orders}
+              inventoryLines={inventoryLines}
+              inventoryLoading={inventoryLoading}
+              onSaveDelivery={onSaveDelivery}
+              onBack={() => setStep(0)}
+            />
+          )}
         </div>
       </Panel>
     </div>
@@ -1714,7 +2151,7 @@ function OrderDetail({
             stock_code: code,
             description: known.description,
             product_group: known.product_group,
-            unit: known.default_unit,
+            unit: "set",
             unit_conversions: known.default_unit_conversions ?? PAIRS_PER,
           }
         : { stock_code: code },
@@ -2021,6 +2458,9 @@ function OrderDetail({
                         </Th>
                         <Th className="text-right min-w-[10rem]">
                           Selling price
+                          <span className="block text-xs font-normal text-text-muted">
+                            per set
+                          </span>
                         </Th>
                         <Th className="text-right">Amount</Th>
                       </Tr>
@@ -2143,8 +2583,8 @@ function OrderDetail({
                                 <CurrencySelect
                                   label={`Currency for product ${index + 1}`}
                                   value={
-                                    ((line.currency_code as CurrencyCode) ||
-                                      DEFAULT_CURRENCY)
+                                    (line.currency_code as CurrencyCode) ||
+                                    DEFAULT_CURRENCY
                                   }
                                   onChange={(code) => {
                                     if (code === DEFAULT_CURRENCY) {
@@ -2161,9 +2601,7 @@ function OrderDetail({
                                       line.exchange_rate ??
                                       (settings?.today_exchange_rates[code]
                                         ? Number(
-                                            settings.today_exchange_rates[
-                                              code
-                                            ],
+                                            settings.today_exchange_rates[code],
                                           )
                                         : null);
                                     setLine(index, {
@@ -2207,9 +2645,7 @@ function OrderDetail({
                                       label={`Exchange rate for product ${index + 1}`}
                                       placeholder="Exchange rate"
                                       className="text-right"
-                                      value={String(
-                                        line.exchange_rate ?? "",
-                                      )}
+                                      value={String(line.exchange_rate ?? "")}
                                       onChange={(next) => {
                                         const rate = Number(next) || 0;
                                         const original =
@@ -2258,7 +2694,12 @@ function OrderDetail({
                             </Td>
                             <Td className="text-right tabular-nums font-medium whitespace-nowrap">
                               {formatKyat(
-                                pricedAmount(line.quantity_pairs, line.unit, line.selling_price, line.unit_conversions),
+                                pricedAmount(
+                                  line.quantity_pairs,
+                                  line.unit,
+                                  line.selling_price,
+                                  line.unit_conversions,
+                                ),
                               )}
                               <button
                                 type="button"
@@ -2460,10 +2901,7 @@ const draftLineSchema = z
           message: "Enter the original price.",
         });
       }
-      if (
-        line.exchange_rate.trim() === "" ||
-        Number(line.exchange_rate) <= 0
-      ) {
+      if (line.exchange_rate.trim() === "" || Number(line.exchange_rate) <= 0) {
         context.addIssue({
           code: "custom",
           path: ["exchange_rate"],
@@ -2699,7 +3137,14 @@ function NewOrderForm({
   const filledLines = lines.filter((line) => line.stock_code.trim() !== "");
   const totalQty = filledLines.reduce((sum, line) => sum + draftPairs(line), 0);
   const totalAmount = filledLines.reduce(
-    (sum, line) => sum + pricedAmount(draftPairs(line), line.unit, Number(line.selling_price) || 0, line.unit_conversions),
+    (sum, line) =>
+      sum +
+      pricedAmount(
+        draftPairs(line),
+        line.unit,
+        Number(line.selling_price) || 0,
+        line.unit_conversions,
+      ),
     0,
   );
   // Picking a customer already known fills in their phone and address rather than making
@@ -2733,14 +3178,18 @@ function NewOrderForm({
       setValue(`lines.${index}.product_group`, known.product_group, {
         shouldDirty: true,
       });
-      setValue(`lines.${index}.unit`, known.default_unit, {
+      setValue(`lines.${index}.unit`, "set", {
         shouldDirty: true,
         shouldValidate: true,
       });
-      setValue(`lines.${index}.unit_conversions`, known.default_unit_conversions ?? PAIRS_PER, {
-        shouldDirty: true,
-        shouldValidate: true,
-      });
+      setValue(
+        `lines.${index}.unit_conversions`,
+        known.default_unit_conversions ?? PAIRS_PER,
+        {
+          shouldDirty: true,
+          shouldValidate: true,
+        },
+      );
     }
   }
 
@@ -2771,9 +3220,7 @@ function NewOrderForm({
     }
     const current = lines[index];
     const rate =
-      current?.exchange_rate ||
-      settings?.today_exchange_rates[code] ||
-      "";
+      current?.exchange_rate || settings?.today_exchange_rates[code] || "";
     setValue(`lines.${index}.exchange_rate`, rate, { shouldDirty: true });
     recomputeForeignPrice(index, current?.original_selling_price ?? "", rate);
   }
@@ -2974,7 +3421,7 @@ function NewOrderForm({
                   <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[13rem]">Colors</Th>
                   <Th className="text-right whitespace-nowrap">Ordered qty</Th>
-                  <Th className="text-right min-w-[8rem]">Selling price</Th>
+                  <Th className="text-right min-w-[8rem]">Selling price<span className="block text-xs font-normal text-text-muted">per set</span></Th>
                   <Th className="text-right min-w-[8rem]">Amount</Th>
                 </Tr>
               </Thead>
@@ -2991,23 +3438,6 @@ function NewOrderForm({
                   return (
                     <Tr key={field.id}>
                       <Td>
-                        <Controller
-                          control={control}
-                          name={`lines.${index}.unit`}
-                          render={({ field: unitField }) => (
-                            <Select
-                              aria-label={`Default unit for product ${index + 1}`}
-                              className={EDITABLE}
-                              {...unitField}
-                            >
-                              {UNITS.map((unit) => (
-                                <option key={unit} value={unit}>
-                                  {UNIT_LABELS[unit]}
-                                </option>
-                              ))}
-                            </Select>
-                          )}
-                        />
                         <Controller
                           control={control}
                           name={`lines.${index}.supplier_name`}
@@ -3106,7 +3536,11 @@ function NewOrderForm({
                         />
                         <span className="mt-1 block text-xs text-text-muted">
                           {lineQty > 0
-                            ? formatIn(lineQty, line.unit, line.unit_conversions)
+                            ? formatIn(
+                                lineQty,
+                                line.unit,
+                                line.unit_conversions,
+                              )
                             : "Every color needs a unit — s sets, p pairs, d dozens"}
                         </span>
                       </Td>
@@ -3288,7 +3722,7 @@ function NewOrderForm({
                   <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[13rem]">Colors</Th>
                   <Th className="text-right whitespace-nowrap">Ordered qty</Th>
-                  <Th className="text-right min-w-[8rem]">Selling price</Th>
+                  <Th className="text-right min-w-[8rem]">Selling price<span className="block text-xs font-normal text-text-muted">per set</span></Th>
                   <Th className="text-right min-w-[8rem]">Amount</Th>
                 </Tr>
               </Thead>
@@ -3327,12 +3761,21 @@ function NewOrderForm({
                         {formatKyat(Number(line.selling_price) || 0)}
                         <CurrencyNote
                           currency_code={line.currency_code}
-                          original_amount={Number(line.original_selling_price) || 0}
+                          original_amount={
+                            Number(line.original_selling_price) || 0
+                          }
                           exchange_rate={Number(line.exchange_rate) || 0}
                         />
                       </Td>
                       <Td className="text-right tabular-nums font-medium">
-                        {formatKyat(pricedAmount(qty, line.unit, Number(line.selling_price) || 0, line.unit_conversions))}
+                        {formatKyat(
+                          pricedAmount(
+                            qty,
+                            line.unit,
+                            Number(line.selling_price) || 0,
+                            line.unit_conversions,
+                          ),
+                        )}
                       </Td>
                     </Tr>
                   );

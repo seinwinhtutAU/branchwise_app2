@@ -18,6 +18,7 @@ import {
   formatDate,
   formatKyat,
   formatQty,
+  formatSets,
   Td,
   Th,
 } from "./shared";
@@ -123,13 +124,13 @@ export function CostTab(props: ReportTabProps): React.JSX.Element {
         </ReportSection>
         <ReportSection
           title="Spend by supplier"
-          description="Voucher spend, pairs, paid amount, and current balance."
+          description="Voucher spend, quantity, paid amount, and current balance."
         >
           <ReportTable>
             <ReportTableHeader>
               <Th>Supplier</Th>
               <Th className="text-right">Vouchers</Th>
-              <Th className="text-right">Pairs</Th>
+              <Th className="text-right">Quantity</Th>
               <Th className="text-right">Spend</Th>
               <Th className="text-right">Paid</Th>
               <Th className="text-right">Balance</Th>
@@ -143,7 +144,7 @@ export function CostTab(props: ReportTabProps): React.JSX.Element {
                       {formatQty(row.vouchers)}
                     </Td>
                     <Td className="text-right tabular-nums">
-                      {formatQty(row.pairs)}
+                      {formatSets(row.pairs)}
                     </Td>
                     <Td className="text-right tabular-nums">
                       {formatKyat(row.value)}
@@ -210,7 +211,7 @@ export function CostTab(props: ReportTabProps): React.JSX.Element {
               <Th>Reference</Th>
               <Th>Product</Th>
               <Th>Reason</Th>
-              <Th className="text-right">Pairs</Th>
+              <Th className="text-right">Quantity</Th>
               <Th className="text-right">Value</Th>
             </ReportTableHeader>
             <ReportTableBody>
@@ -226,7 +227,7 @@ export function CostTab(props: ReportTabProps): React.JSX.Element {
                     </Td>
                     <Td>{(row.reason ?? "").replaceAll("_", " ") || "—"}</Td>
                     <Td className="text-right tabular-nums">
-                      {formatQty(row.quantity_pairs)}
+                      {formatSets(row.quantity_pairs)}
                     </Td>
                     <Td className="text-right tabular-nums">
                       {formatKyat(row.value)}

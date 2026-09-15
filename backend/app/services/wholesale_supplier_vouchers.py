@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.wholesale import Receiving, ReceivingItem, ReceivingPackage, SupplierVoucher, SupplierVoucherLine, WholesalePayment
 from app.services.wholesale.colors import color_qty_pairs, color_qty_problem, colors_as_json
 from app.services.wholesale.currency import resolve_money
+from app.services.wholesale.master_data import get_or_create_product
 from app.services.wholesale.money import voucher_totals
 from app.services.wholesale.references import allocate_reference, retry_on_reference_collision
 
@@ -31,13 +32,16 @@ def get_voucher(db: Session, voucher_id: str, branch_id: str | None) -> Supplier
     return _load(db, voucher_id, branch_id)
 
 
-def _line(line_in) -> SupplierVoucherLine:
+def _line(db: Session, line_in) -> SupplierVoucherLine:
     color_breakdown = line_in.color_breakdown.strip()
     problem = color_qty_problem(color_breakdown)
     if problem:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, problem)
     currency_code, buying_price, original_buying_price, exchange_rate = resolve_money(
         line_in.currency_code, line_in.buying_price, line_in.original_buying_price, line_in.exchange_rate,
+    )
+    get_or_create_product(
+        db, line_in.stock_code, line_in.description, line_in.product_group, line_in.unit, line_in.unit_conversions,
     )
     return SupplierVoucherLine(
         stock_code=line_in.stock_code.strip(), description=line_in.description.strip(),
@@ -67,7 +71,7 @@ def create_voucher(db: Session, branch_id: str | None, payload) -> SupplierVouch
             branch_id=branch_id, voucher_no=allocate_reference(db, SupplierVoucher.voucher_no, branch_id, "VCH", date.today()),
             supplier_name=payload.supplier_name.strip(), voucher_date=payload.voucher_date,
             carrier_name=payload.carrier_name.strip(), total_packages=payload.total_packages,
-            lines=[_line(line) for line in payload.lines],
+            lines=[_line(db, line) for line in payload.lines],
         )
         db.add(voucher)
         db.commit()
@@ -84,7 +88,7 @@ def update_voucher(db: Session, voucher_id: str, branch_id: str | None, payload)
     voucher.voucher_date = payload.voucher_date
     voucher.carrier_name = payload.carrier_name.strip()
     voucher.total_packages = payload.total_packages
-    replacement_lines = [_line(line) for line in payload.lines]
+    replacement_lines = [_line(db, line) for line in payload.lines]
     for line in replacement_lines:
         line.lost_quantity_pairs = min(existing_losses.get(line.stock_code, 0), line.quantity_pairs)
     voucher.lines = replacement_lines

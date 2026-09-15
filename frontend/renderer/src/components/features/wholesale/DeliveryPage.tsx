@@ -112,6 +112,7 @@ import {
 import {
   PAIRS_PER,
   formatIn,
+  formatSets,
   toPairs,
   type Unit,
 } from "@renderer/components/features/wholesale/units";
@@ -875,7 +876,7 @@ function ShipmentDetail({
   // — a real short-shipment happens, and this should not block saving it.
   const quantityMismatch =
     voucher && shipmentPairs(shipment) !== voucher.total_quantity_pairs
-      ? `The voucher says ${formatIn(voucher.total_quantity_pairs, "pair")}.`
+      ? `The voucher says ${formatSets(voucher.total_quantity_pairs)}.`
       : undefined;
   const hasChanges = isDirty;
 
@@ -1165,7 +1166,6 @@ function ShipmentDetail({
                         render={({ field }) => (
                           <QuantityField
                             label="Quantity"
-                            unitLabel="Unit the products are counted in"
                             value={field.value}
                             unit={shipment.total_unit}
                             hint={formatIn(shipmentPairs(shipment), shipment.total_unit)}
@@ -1174,12 +1174,6 @@ function ShipmentDetail({
                               field.onChange(next);
                               apply({ total_quantity_pairs: next });
                             }}
-                            onUnitChange={(total_unit) =>
-                              setValue("shipment.total_unit", total_unit, {
-                                shouldDirty: true,
-                                shouldValidate: true,
-                              })
-                            }
                           />
                         )}
                       />
@@ -1697,7 +1691,7 @@ function BigCount({
   unit?: Unit;
 }): React.JSX.Element {
   return (
-    <span className="text-lg font-bold tabular-nums text-text-primary">
+    <span className="text-sm font-bold tabular-nums text-text-primary">
       {unit ? formatIn(value, unit) : formatQty(value)}
     </span>
   );
@@ -1786,7 +1780,7 @@ function PackageInput({
       }}
       onBlur={() => setDraft(String(value))}
       className={cn(
-        "w-20 h-10 rounded-md border border-border text-center px-2 text-base font-bold tabular-nums",
+        "w-20 h-10 rounded-md border border-border text-center px-2 text-sm font-bold tabular-nums",
         "text-text-primary",
         EDITABLE,
         "transition-all duration-150",
@@ -1895,7 +1889,7 @@ function NewShipmentForm({
     voucher &&
     totalSets.trim() !== "" &&
     toPairs(Number(totalSets) || 0, totalUnit) !== voucher.total_quantity_pairs
-      ? `The voucher says ${formatIn(voucher.total_quantity_pairs, "pair")}.`
+      ? `The voucher says ${formatSets(voucher.total_quantity_pairs)}.`
       : undefined;
 
   function selectVoucher(nextVoucherNo: string): void {
@@ -2105,20 +2099,13 @@ function NewShipmentForm({
                   render={({ field }) => (
                     <QuantityInput
                       label="Quantity"
-                      unitLabel="Unit the products are counted in"
                       value={field.value}
                       unit={totalUnit}
                       onChange={field.onChange}
-                      onUnitChange={(unit) =>
-                        setValue("total_unit", unit, {
-                          shouldDirty: true,
-                          shouldValidate: true,
-                        })
-                      }
                       error={errors.total_sets?.message ?? quantityMismatch}
                       hint={
                         voucher
-                          ? `${formatIn(voucher.total_quantity_pairs, "pair")} on the voucher.`
+                          ? `${formatSets(voucher.total_quantity_pairs)} on the voucher.`
                           : "Pick a voucher and this fills itself in."
                       }
                     />

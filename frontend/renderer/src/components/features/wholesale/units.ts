@@ -76,3 +76,21 @@ export function formatWithPairs(
 ): string {
   return formatIn(pairs, unit, conversions);
 }
+
+/** The way this business reads a quantity: whole sets with any leftover pairs, e.g.
+ *  "1 Set 3 Pairs". Use this for every figure that isn't tied to one document's own
+ *  unit — stock on hand, availability, report totals — instead of writing raw pairs. */
+export function formatSets(pairs: number, conversions: UnitConversions = PAIRS_PER): string {
+  const safePairs = Number.isFinite(pairs) ? pairs : 0;
+  // Nothing in stock still belongs in the column's own unit, so it reads "0 Sets" beside
+  // "3 Sets" rather than switching to pairs the way formatIn does for an empty figure.
+  if (safePairs === 0) return `0 ${unitName("set", 0)}`;
+  return formatIn(safePairs, "set", conversions);
+}
+
+/** What a price is quoted per, for a line that was not saved in sets. Prices are per set
+ *  now, so the common case needs no note; a record written before that rule keeps its own
+ *  basis and has to say so, or its amount cannot be checked by eye. */
+export function priceBasisNote(unit: Unit): string | null {
+  return unit === "set" ? null : `per ${unitName(unit, 1)}`;
+}

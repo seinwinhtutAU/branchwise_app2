@@ -21,6 +21,7 @@ import {
   formatDate,
   formatKyat,
   formatQty,
+  formatSets,
   Td,
   Th,
 } from "./shared";
@@ -127,14 +128,14 @@ export function CustomerTab(props: ReportTabProps): React.JSX.Element {
       </ReportSection>
       <ReportSection
         title="Customer ranking"
-        description="Orders, ordered pairs, delivered pairs, delivered value, paid, and balance."
+        description="Orders, quantity ordered, quantity delivered, delivered value, paid, and balance."
       >
         <ReportTable>
           <ReportTableHeader>
             <Th>Customer</Th>
             <Th className="text-right">Orders</Th>
-            <Th className="text-right">Pairs ordered</Th>
-            <Th className="text-right">Pairs delivered</Th>
+            <Th className="text-right">Ordered</Th>
+            <Th className="text-right">Delivered</Th>
             <Th className="text-right">Ks delivered</Th>
             <Th className="text-right">Paid</Th>
             <Th className="text-right">Balance</Th>
@@ -148,10 +149,10 @@ export function CustomerTab(props: ReportTabProps): React.JSX.Element {
                     {formatQty(row.orders)}
                   </Td>
                   <Td className="text-right tabular-nums">
-                    {formatQty(row.pairs_ordered)}
+                    {formatSets(row.pairs_ordered)}
                   </Td>
                   <Td className="text-right tabular-nums">
-                    {formatQty(row.pairs_delivered)}
+                    {formatSets(row.pairs_delivered)}
                   </Td>
                   <Td className="text-right tabular-nums">
                     {formatKyat(row.delivered_revenue)}
@@ -175,7 +176,7 @@ export function CustomerTab(props: ReportTabProps): React.JSX.Element {
       <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
         <ReportSection
           title="Orders still open"
-          description="Orders with undelivered pairs or an outstanding balance."
+          description="Orders with undelivered stock or an outstanding balance."
         >
           <ReportTable>
             <ReportTableHeader>

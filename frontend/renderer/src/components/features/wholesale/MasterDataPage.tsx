@@ -46,7 +46,9 @@ import {
   type WholesaleProductWire,
 } from "./api";
 import { GROUP_LABELS, PRODUCT_GROUPS, type ProductGroup } from "./products";
-import { UNIT_LABELS, UNITS, type Unit } from "./units";
+// Quantities are entered in sets everywhere, so a product no longer carries a unit of
+// its own — only how many pairs make up one of its sets or dozens.
+import { type Unit } from "./units";
 
 type MasterDataTab =
   | "products"
@@ -471,7 +473,6 @@ export default function MasterDataPage({
                     <>
                       <Th>Description</Th>
                       <Th>Group</Th>
-                      <Th>Default unit</Th>
                     </>
                   )}
                   {hasDetails && tab !== "products" && (
@@ -503,9 +504,6 @@ export default function MasterDataPage({
                             {product
                               ? GROUP_LABELS[product.product_group]
                               : "—"}
-                          </Td>
-                          <Td>
-                            {product ? UNIT_LABELS[product.default_unit] : "—"}
                           </Td>
                         </>
                       )}
@@ -627,22 +625,6 @@ export default function MasterDataPage({
                       {PRODUCT_GROUPS.map((group) => (
                         <option key={group} value={group}>
                           {GROUP_LABELS[group]}
-                        </option>
-                      ))}
-                    </Select>
-                    <Select
-                      label="Default unit"
-                      value={productForm.default_unit}
-                      onChange={(event) =>
-                        setProductForm({
-                          ...productForm,
-                          default_unit: event.target.value as Unit,
-                        })
-                      }
-                    >
-                      {UNITS.map((unit) => (
-                        <option key={unit} value={unit}>
-                          {UNIT_LABELS[unit]}
                         </option>
                       ))}
                     </Select>

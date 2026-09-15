@@ -106,10 +106,10 @@ import {
 } from "@renderer/components/features/wholesale/shared";
 import {
   formatIn,
+  formatSets,
   PAIRS_PER,
+  priceBasisNote,
   pricedAmount,
-  UNIT_LABELS,
-  UNITS,
 } from "@renderer/components/features/wholesale/units";
 import {
   colorPairsForText,
@@ -154,9 +154,10 @@ import {
 } from "@renderer/components/features/wholesale/masterData";
 import { WriteOffModal } from "@renderer/components/features/wholesale/WriteOffModal";
 
-/** An aggregate may combine products with different units, so pairs are its only
- * unambiguous display unit. Individual lines use their own unit below. */
-const sets = (qty: number): string => formatIn(qty, "pair");
+/** An aggregate may combine products quoted in different units, so it is stored in pairs
+ * and shown the way the business reads a quantity: sets, with any leftover pairs.
+ * Individual lines use their own unit below. */
+const sets = (qty: number): string => formatSets(qty);
 
 function lineReceivedQty(line: SupplierVoucherLine): number {
   return line.received_quantity_pairs ?? 0;
@@ -1757,7 +1758,7 @@ function VoucherProductsView({
           <Th className="text-right whitespace-nowrap">Ordered quantity</Th>
           <Th className="text-right whitespace-nowrap">Received quantity</Th>
           <Th className="text-right whitespace-nowrap">Qty to receive</Th>
-          <Th className="text-right min-w-[7rem]">Buying price</Th>
+          <Th className="text-right min-w-[7rem]">Buying price<span className="block text-xs font-normal text-text-muted">per set</span></Th>
           <Th className="text-right">Amount</Th>
           <Th>Customers</Th>
           <Th className="text-center">Mismatch</Th>
@@ -1828,6 +1829,11 @@ function VoucherProductsView({
               </Td>
               <Td className="text-right tabular-nums">
                 {formatKyat(line.buying_price)}
+                {priceBasisNote(line.unit) && (
+                  <div className="text-xs font-normal text-text-muted">
+                    {priceBasisNote(line.unit)}
+                  </div>
+                )}
                 {isForeignCurrency(line.currency_code ?? DEFAULT_CURRENCY) &&
                   line.original_buying_price != null &&
                   line.exchange_rate != null && (
@@ -2084,7 +2090,7 @@ function VoucherDetail({
             stock_code: code,
             description: known.description,
             product_group: known.product_group,
-            unit: known.default_unit,
+            unit: "set",
             unit_conversions: known.default_unit_conversions ?? PAIRS_PER,
           }
         : { stock_code: code },
@@ -2350,6 +2356,9 @@ function VoucherDetail({
                         </Th>
                         <Th className="text-right min-w-[7rem]">
                           Buying price
+                          <span className="block text-xs font-normal text-text-muted">
+                            per set
+                          </span>
                         </Th>
                         <Th className="text-right">Amount</Th>
                         <Th>Customers</Th>
@@ -3013,7 +3022,7 @@ function NewVoucherForm({
       setValue(`lines.${index}.product_group`, known.product_group, {
         shouldDirty: true,
       });
-      setValue(`lines.${index}.unit`, known.default_unit, {
+      setValue(`lines.${index}.unit`, "set", {
         shouldDirty: true,
         shouldValidate: true,
       });
@@ -3400,7 +3409,7 @@ function NewVoucherForm({
                   <Th className="text-right whitespace-nowrap">
                     Ordered quantity
                   </Th>
-                  <Th className="text-right min-w-[8rem]">Buying price</Th>
+                  <Th className="text-right min-w-[8rem]">Buying price<span className="block text-xs font-normal text-text-muted">per set</span></Th>
                   <Th className="text-right min-w-[8rem]">Amount</Th>
                 </Tr>
               </Thead>
@@ -3474,23 +3483,6 @@ function NewVoucherForm({
                         </div>
                       </Td>
                       <Td>
-                        <Controller
-                          control={control}
-                          name={`lines.${index}.unit`}
-                          render={({ field: unitField }) => (
-                            <Select
-                              aria-label={`Default unit for product ${index + 1}`}
-                              className={EDITABLE}
-                              {...unitField}
-                            >
-                              {UNITS.map((unit) => (
-                                <option key={unit} value={unit}>
-                                  {UNIT_LABELS[unit]}
-                                </option>
-                              ))}
-                            </Select>
-                          )}
-                        />
                         <Controller
                           control={control}
                           name={`lines.${index}.color_breakdown`}
@@ -3674,6 +3666,9 @@ function NewVoucherForm({
                   </Th>
                   <Th className="text-right min-w-[8rem] whitespace-nowrap">
                     Buying price
+                    <span className="block text-xs font-normal text-text-muted">
+                      per set
+                    </span>
                   </Th>
                   <Th className="text-right min-w-[8rem]">Amount</Th>
                 </Tr>

@@ -20,7 +20,13 @@ import {
 import { type SupplierVoucher } from "./supplierVouchers";
 import { type AllocationEvent, type CustomerOrder } from "./customerOrders";
 import { type StockMovement, type StockRecord } from "./stock";
-import { fromPairs, PAIRS_PER, type Unit, type UnitConversions } from "./units";
+import {
+  fromPairs,
+  PAIRS_PER,
+  toPairs,
+  type Unit,
+  type UnitConversions,
+} from "./units";
 import { type Product } from "./products";
 
 export class WholesaleApiError extends Error {}
@@ -227,6 +233,7 @@ export interface NewShipmentInput {
   final_destination: string;
   sent_on: string;
   total_packages: number;
+  /** Quantity in `total_unit`; converted to the API's canonical pairs on write. */
   total_quantity_pairs: number;
   total_unit: Shipment["total_unit"];
   packages_sent_by_cargo: number;
@@ -254,7 +261,12 @@ export async function createShipment(
         final_destination: input.final_destination,
         sent_on: input.sent_on,
         total_packages: input.total_packages,
-        total_quantity_pairs: input.total_quantity_pairs,
+        // Shipment form values are kept in the unit the user selected. The API stores
+        // this field in pairs, just as the receiving endpoints do below.
+        total_quantity_pairs: toPairs(
+          input.total_quantity_pairs,
+          input.total_unit,
+        ),
         total_unit: input.total_unit,
         packages_sent_by_cargo: input.packages_sent_by_cargo,
         final_received_packages: input.final_received_packages,
@@ -268,7 +280,7 @@ export async function createShipment(
 export async function updateShipment(
   session: Session,
   shipmentId: string,
-  patch: Partial<Shipment>,
+  patch: Partial<Shipment> & Pick<Shipment, "total_unit">,
 ): Promise<Shipment> {
   const body: Record<string, unknown> = {};
   if (patch.voucher_no !== undefined) body.voucher_no = patch.voucher_no;
@@ -281,7 +293,10 @@ export async function updateShipment(
   if (patch.total_packages !== undefined)
     body.total_packages = patch.total_packages;
   if (patch.total_quantity_pairs !== undefined)
-    body.total_quantity_pairs = patch.total_quantity_pairs;
+    body.total_quantity_pairs = toPairs(
+      patch.total_quantity_pairs,
+      patch.total_unit,
+    );
   if (patch.total_unit !== undefined) body.total_unit = patch.total_unit;
   if (patch.packages_sent_by_cargo !== undefined)
     body.packages_sent_by_cargo = patch.packages_sent_by_cargo;
@@ -415,13 +430,21 @@ export const RECEIVING_GATES_URL = `${apiBaseUrl}/api/wholesale/receiving-gates`
 export function productsFromWire(wires: WholesaleProductWire[]): Product[] {
   return wires
     .filter((wire) => wire.active)
-    .map(({ stock_code, description, product_group, default_unit, default_unit_conversions }) => ({
-      stock_code,
-      description,
-      product_group,
-      default_unit,
-      default_unit_conversions,
-    }));
+    .map(
+      ({
+        stock_code,
+        description,
+        product_group,
+        default_unit,
+        default_unit_conversions,
+      }) => ({
+        stock_code,
+        description,
+        product_group,
+        default_unit,
+        default_unit_conversions,
+      }),
+    );
 }
 
 export function customersFromWire(
@@ -729,7 +752,17 @@ function costsToWire(costs: ReceivingCost[]): {
   note: string;
 }[] {
   return costs.map(
-    ({ cost_date, stage, carrier, kind, currency_code, amount, original_amount, exchange_rate, note }) => ({
+    ({
+      cost_date,
+      stage,
+      carrier,
+      kind,
+      currency_code,
+      amount,
+      original_amount,
+      exchange_rate,
+      note,
+    }) => ({
       cost_date,
       stage,
       carrier,
@@ -1115,6 +1148,30 @@ export async function removeCustomerOrderPayment(
 
 export const WHOLESALE_INVENTORY_URL = `${apiBaseUrl}/api/wholesale/inventory`;
 export const WHOLESALE_STOCK_URL = `${apiBaseUrl}/api/wholesale/inventory/stock`;
+
+export interface CustomerDeliveryBatchInput {
+  order_id: string;
+  delivered_on: string;
+  delivery_address: string;
+  note: string;
+  lines: {
+    stock_code: string;
+    location: string;
+    color_breakdown: string;
+    unit: Unit;
+  }[];
+}
+
+export async function createCustomerDeliveryBatch(
+  session: Session,
+  input: CustomerDeliveryBatchInput,
+): Promise<StockMovement[]> {
+  return request<StockMovement[]>(
+    session,
+    "/api/wholesale/inventory/deliveries/batch",
+    { method: "POST", body: input },
+  );
+}
 
 export interface StockRecordWire extends Omit<StockRecord, "product_group"> {
   product_group: string;

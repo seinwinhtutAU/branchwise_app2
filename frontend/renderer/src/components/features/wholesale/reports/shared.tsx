@@ -20,6 +20,7 @@ import {
   formatKyat,
   formatQty,
 } from "@renderer/components/features/wholesale/shared";
+import { formatSets } from "@renderer/components/features/wholesale/units";
 import { WHOLESALE_REPORTS_URL } from "@renderer/components/features/wholesale/api";
 import {
   periodQueryParams,
@@ -199,6 +200,7 @@ export {
   formatDate,
   formatKyat,
   formatQty,
+  formatSets,
   TableContainer,
   Tbody,
   Td,

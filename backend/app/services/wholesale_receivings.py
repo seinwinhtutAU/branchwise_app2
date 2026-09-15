@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.wholesale import Receiving, ReceivingCost, ReceivingItem, ReceivingPackage
 from app.services.wholesale.colors import color_qty_problem, colors_as_json, conversion_rates
 from app.services.wholesale.currency import resolve_money
+from app.services.wholesale.master_data import get_or_create_product
 from app.services.wholesale.references import allocate_reference, retry_on_reference_collision
 from app.services.wholesale.units import from_pairs, to_pairs
 from app.services.wholesale_shipments import get_shipment
@@ -124,12 +125,15 @@ def delete_receiving(db: Session, receiving_id: str, branch_id: str | None) -> N
     db.commit()
 
 
-def _item_from_payload(item_in) -> ReceivingItem:
+def _item_from_payload(db: Session, item_in) -> ReceivingItem:
     color_breakdown = item_in.color_breakdown.strip()
     problem = color_qty_problem(color_breakdown)
     if problem:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, problem)
     rates = conversion_rates(item_in.unit_conversions)
+    get_or_create_product(
+        db, item_in.stock_code, item_in.description, item_in.product_group, item_in.unit, rates,
+    )
     return ReceivingItem(
         stock_code=item_in.stock_code.strip(),
         description=item_in.description.strip(),
@@ -161,7 +165,7 @@ def update_package(
     for field, value in data.items():
         setattr(package, field, value)
     if items_in is not None:
-        package.items = [_item_from_payload(item) for item in items_in]
+        package.items = [_item_from_payload(db, item) for item in items_in]
 
     db.commit()
     db.refresh(receiving)

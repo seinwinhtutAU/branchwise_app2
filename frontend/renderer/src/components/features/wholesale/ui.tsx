@@ -45,7 +45,6 @@ import {
 } from "@renderer/components/features/wholesale/products";
 import {
   UNIT_LABELS,
-  UNITS,
   type Unit,
 } from "@renderer/components/features/wholesale/units";
 
@@ -743,7 +742,6 @@ export function CountField({
  *  carried a hint underneath and the unit did not, which pushed one below the other. */
 export function QuantityInput({
   label,
-  unitLabel,
   value,
   unit,
   placeholder = "0",
@@ -752,11 +750,8 @@ export function QuantityInput({
   compact = false,
   readOnly = false,
   onChange,
-  onUnitChange,
 }: {
   label: string;
-  /** What the unit picker is called to a screen reader. */
-  unitLabel: string;
   value: string;
   unit: Unit;
   placeholder?: string;
@@ -767,7 +762,6 @@ export function QuantityInput({
   /** When true, the quantity is derived from another field and cannot be typed directly. */
   readOnly?: boolean;
   onChange: (digits: string) => void;
-  onUnitChange: (unit: Unit) => void;
 }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-1.5">
@@ -801,22 +795,13 @@ export function QuantityInput({
           )}
           readOnly={readOnly}
         />
-        <select
-          aria-label={unitLabel}
-          value={unit}
-          onChange={(event) => onUnitChange(event.target.value as Unit)}
-          disabled={readOnly}
-          className={cn(
-            "shrink-0 border-l border-border bg-transparent pl-2 pr-1 text-sm text-text-secondary",
-            "cursor-pointer focus:outline-none disabled:cursor-default disabled:opacity-100",
-          )}
-        >
-          {UNITS.map((entry) => (
-            <option key={entry} value={entry}>
-              {UNIT_LABELS[entry]}
-            </option>
-          ))}
-        </select>
+        {/* The unit is shown, not chosen. Offering pair/set/dozen beside the number is
+            how "10" meaning pairs becomes sixty pairs, and nothing downstream catches
+            it. New figures are counted in sets; a record saved in another unit keeps
+            reading in the unit it was written in. */}
+        <span className="flex shrink-0 items-center border-l border-border pl-2 pr-3 text-sm text-text-secondary">
+          {UNIT_LABELS[unit]}
+        </span>
       </div>
       {error && <p className="text-xs text-error">{error}</p>}
       {hint && !error && <p className="text-xs text-text-muted">{hint}</p>}
@@ -828,22 +813,18 @@ export function QuantityInput({
  *  box reads as a figure half-typed rather than as a zero. */
 export function QuantityField({
   label,
-  unitLabel,
   value,
   unit,
   hint,
   error,
   onChange,
-  onUnitChange,
 }: {
   label: string;
-  unitLabel: string;
   value: number;
   unit: Unit;
   hint?: string;
   error?: string;
   onChange: (value: number) => void;
-  onUnitChange: (unit: Unit) => void;
 }): React.JSX.Element {
   const [draft, setDraft] = useState(String(value));
   useEffect(() => {
@@ -853,7 +834,6 @@ export function QuantityField({
   return (
     <QuantityInput
       label={label}
-      unitLabel={unitLabel}
       value={draft}
       unit={unit}
       hint={hint}
@@ -863,7 +843,6 @@ export function QuantityField({
         if (digits === "") return;
         onChange(Number(digits));
       }}
-      onUnitChange={onUnitChange}
     />
   );
 }

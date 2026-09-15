@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
 from app.models.user import User, UserRole
+from app.models.wholesale_master_data import WholesaleProduct
 
 
 def _user(db: Session, role: UserRole, branch_id: str | None) -> None:
@@ -90,3 +91,18 @@ def test_voucher_line_foreign_currency_requires_original_amount_and_rate(
     payload["lines"][0] |= {"currency_code": "USD"}
     response = authed_client.post("/api/wholesale/supplier-vouchers", json=payload)
     assert response.status_code == 422
+
+
+def test_new_stock_code_on_a_voucher_line_creates_a_master_data_product(
+    authed_client: TestClient, db_session: Session
+) -> None:
+    branch = _branch(db_session)
+    _user(db_session, UserRole.WHOLESALE, branch.id)
+    assert db_session.query(WholesaleProduct).count() == 0
+
+    created = authed_client.post("/api/wholesale/supplier-vouchers", json=_payload())
+    assert created.status_code == 201
+
+    product = db_session.query(WholesaleProduct).filter(WholesaleProduct.stock_code == "A1001").first()
+    assert product is not None
+    assert product.description == "Sandal"

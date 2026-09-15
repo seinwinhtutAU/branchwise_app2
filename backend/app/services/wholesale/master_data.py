@@ -59,6 +59,43 @@ def get_product(db: Session, entity_id: str) -> WholesaleProduct:
     return product
 
 
+def get_or_create_product(
+    db: Session,
+    stock_code: str,
+    description: str,
+    product_group,
+    unit,
+    unit_conversions: dict,
+) -> None:
+    """Ensure Master Data has a catalog row for `stock_code`, creating one from these
+    fields if it doesn't already have one — called from the customer-order, supplier-
+    voucher, and receiving-item line builders so a stock code typed anywhere in the
+    wholesale workflow ends up in the shared product catalog instead of only ever
+    existing as free text on that one line.
+
+    Master Data is the source of truth once a product exists: an existing row is left
+    untouched here even if this line's description/group disagree with it, so one typo
+    on an order can't quietly rewrite the catalog — only a stock code nobody has ever
+    recorded before gets a new row. Not committed here; the caller's own commit covers
+    it, the same as every other object added during line construction.
+    """
+    code = stock_code.strip()
+    if not code:
+        return
+    exists = db.query(WholesaleProduct.id).filter(WholesaleProduct.stock_code == code).first()
+    if exists is not None:
+        return
+    db.add(
+        WholesaleProduct(
+            stock_code=code,
+            description=description.strip(),
+            product_group=product_group,
+            default_unit=unit,
+            default_unit_conversions=unit_conversions,
+        )
+    )
+
+
 def create_product(db: Session, payload) -> WholesaleProduct:
     product = WholesaleProduct(
         stock_code=payload.stock_code.strip(),

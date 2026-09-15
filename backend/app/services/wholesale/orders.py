@@ -19,6 +19,7 @@ from app.services.wholesale.colors import (
     colors_as_json,
 )
 from app.services.wholesale.currency import resolve_money
+from app.services.wholesale.master_data import get_or_create_product
 from app.services.wholesale.inventory import (
     allocated_color_pairs_for_stock_code,
     available_color_pairs_for_stock_code,
@@ -62,13 +63,16 @@ def get_order(db: Session, order_id: str, branch_id: str | None) -> CustomerOrde
     return _load(db, order_id, branch_id)
 
 
-def _line(line_in) -> CustomerOrderLine:
+def _line(db: Session, line_in) -> CustomerOrderLine:
     color_breakdown = line_in.color_breakdown.strip()
     problem = color_qty_problem(color_breakdown)
     if problem:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, problem)
     currency_code, selling_price, original_selling_price, exchange_rate = resolve_money(
         line_in.currency_code, line_in.selling_price, line_in.original_selling_price, line_in.exchange_rate,
+    )
+    get_or_create_product(
+        db, line_in.stock_code, line_in.description, line_in.product_group, line_in.unit, line_in.unit_conversions,
     )
     return CustomerOrderLine(
         stock_code=line_in.stock_code.strip(), description=line_in.description.strip(),
@@ -100,7 +104,7 @@ def create_order(db: Session, branch_id: str | None, payload) -> CustomerOrder:
             order_no=allocate_reference(db, CustomerOrder.order_no, branch_id, "ORD", date.today()),
             customer_name=payload.customer_name.strip(), customer_phone=payload.customer_phone.strip(),
             customer_address=payload.customer_address.strip(), order_date=payload.order_date,
-            lines=[_line(line) for line in payload.lines],
+            lines=[_line(db, line) for line in payload.lines],
         )
         db.add(order)
         db.commit()
@@ -125,7 +129,7 @@ def update_order(db: Session, order_id: str, branch_id: str | None, payload) -> 
     order.customer_phone = payload.customer_phone.strip()
     order.customer_address = payload.customer_address.strip()
     order.order_date = payload.order_date
-    replacement_lines = [_line(line) for line in payload.lines]
+    replacement_lines = [_line(db, line) for line in payload.lines]
     for line in replacement_lines:
         line.lost_quantity_pairs = min(existing_losses.get(line.stock_code, 0), line.quantity_pairs)
         allocated = existing_allocations.get(line.stock_code)

@@ -201,17 +201,20 @@ const RETAIL_NAV_ITEMS: NavItem[] = [
 // The wholesale workflow is being rebuilt from scratch (see diagram/wholesale/erd.mmd),
 // so its old screens are gone. The workspace and this one nav item stay so a wholesale
 // account still has somewhere to land and the tab doesn't disappear from admin's view.
+// Ordered the way the work actually runs: an order comes in, a voucher goes to the
+// factory, the goods ship, arrive at the gate, land on the shelf, and are paid for.
+// Reports sits with Finance at the end because it is a screen you read, not one you
+// work in, and Master Data last because it is set up once and rarely touched.
 const WHOLESALE_NAV_ITEMS: NavItem[] = [
   { id: "monitoring", label: "Dashboard", icon: <DashboardIcon /> },
-  { id: "reports", label: "Reports", icon: <OverviewIcon /> },
   { id: "orders", label: "Customer Orders", icon: <ClipboardIcon /> },
   { id: "vouchers", label: "Supplier Vouchers", icon: <VoucherIcon /> },
   { id: "delivery", label: "Shipment", icon: <TruckIcon /> },
   { id: "receiving", label: "Receiving", icon: <ReceivingIcon /> },
   { id: "stock", label: "Inventory", icon: <InventoryIcon /> },
   { id: "finance", label: "Finance", icon: <DollarIcon /> },
+  { id: "reports", label: "Reports", icon: <OverviewIcon /> },
   { id: "masterData", label: "Master Data", icon: <WarehouseIcon /> },
-  { id: "wholesale", label: "Wholesale", icon: <WarehouseIcon /> },
 ];
 
 const WORKSPACE_NAV_ITEMS: Record<Workspace, NavItem[]> = {
@@ -1075,6 +1078,7 @@ function App(): React.JSX.Element {
                   settings={settings}
                   initialReceivingNo={receivingTarget}
                   onInitialReceivingOpened={() => setReceivingTarget(null)}
+                  onOpenOrders={() => handleSectionChange("orders")}
                 />
               )}
               {section === "stock" && (

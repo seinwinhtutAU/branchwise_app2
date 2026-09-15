@@ -95,6 +95,7 @@ import {
 } from "@renderer/components/features/wholesale/shared";
 import {
   formatIn,
+  formatSets,
   PAIRS_PER,
   toPairs,
   type Unit,
@@ -108,6 +109,7 @@ import {
 import {
   RECEIVINGS_URL,
   SHIPMENTS_URL,
+  WHOLESALE_STOCK_URL,
   WholesaleApiError,
   createReceiving as apiCreateReceiving,
   deleteReceiving as apiDeleteReceiving,
@@ -117,8 +119,10 @@ import {
   updateReceiving as apiUpdateReceiving,
   updateReceivingPackage,
   type NewReceivingInput,
+  stockRecordsFromWire,
   type ReceivingWire,
   type ShipmentWire,
+  type StockRecordWire,
 } from "@renderer/components/features/wholesale/api";
 import {
   RECEIVING_GATES,
@@ -147,6 +151,7 @@ import { type SupplierVoucher } from "@renderer/components/features/wholesale/su
 
 const RECEIVINGS_QUERY_KEY = ["wholesale", "receivings"] as const;
 const SHIPMENTS_QUERY_KEY = ["wholesale", "shipments"] as const;
+const STOCK_QUERY_KEY = ["wholesale", "stock"] as const;
 
 type View = "list" | "detail" | "new";
 type ReceivingDetailMode = "view" | "edit";
@@ -293,11 +298,15 @@ export default function ReceivingGatePage({
   settings,
   initialReceivingNo,
   onInitialReceivingOpened,
+  onOpenOrders,
 }: {
   session: Session;
   settings: AppSettings | null;
   initialReceivingNo?: string | null;
   onInitialReceivingOpened?: () => void;
+  /** Sends the user on to Customer Orders — receiving goods is only half the job; the
+   *  stock still has to be shared out, and nothing else on this screen says so. */
+  onOpenOrders?: () => void;
 }): React.JSX.Element {
   const showToast = useToast();
   useHydrateMasterData(session);
@@ -320,6 +329,24 @@ export default function ReceivingGatePage({
     queryFn: () => fetchJson<ShipmentWire[]>(SHIPMENTS_URL, session),
   });
   useLoadErrorToast(shipmentsFailed, "shipments for receivings");
+  // What the gate has already put on the shelf. Read here only to answer the question
+  // this screen leaves hanging: the boxes are counted, so what happens next?
+  const { data: stockWire } = useQuery({
+    queryKey: STOCK_QUERY_KEY,
+    queryFn: () => fetchJson<StockRecordWire[]>(WHOLESALE_STOCK_URL, session),
+  });
+  const stockRecords = useMemo(
+    () => (stockWire ? stockRecordsFromWire(stockWire) : []),
+    [stockWire],
+  );
+  const readyToAllocatePairs = stockRecords.reduce(
+    (sum, record) => sum + Math.max(0, record.available_pairs),
+    0,
+  );
+  const owedToCustomersPairs = stockRecords.reduce(
+    (sum, record) => sum + Math.max(0, record.owed_to_customers_pairs),
+    0,
+  );
   useEffect(() => {
     if (wire) hydrateReceivings(receivingsFromWire(wire));
   }, [wire]);
@@ -484,6 +511,9 @@ export default function ReceivingGatePage({
       onNew={() => setView("new")}
       onRefresh={refreshPage}
       refreshing={isRefreshing || shipmentsRefreshing}
+      readyToAllocatePairs={readyToAllocatePairs}
+      owedToCustomersPairs={owedToCustomersPairs}
+      onOpenOrders={onOpenOrders}
     />
   );
 }
@@ -505,6 +535,9 @@ function ReceivingList({
   onNew,
   onRefresh,
   refreshing,
+  readyToAllocatePairs,
+  owedToCustomersPairs,
+  onOpenOrders,
 }: {
   receivings: Receiving[];
   onOpen: (receivingId: string) => void;
@@ -513,6 +546,9 @@ function ReceivingList({
   onNew: () => void;
   onRefresh: () => void;
   refreshing: boolean;
+  readyToAllocatePairs: number;
+  owedToCustomersPairs: number;
+  onOpenOrders?: () => void;
 }): React.JSX.Element {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -581,11 +617,29 @@ function ReceivingList({
 
   return (
     <div className="flex flex-col gap-6">
+      {readyToAllocatePairs > 0 && onOpenOrders && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-success/40 bg-success-subtle px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-text-primary">
+              {formatSets(readyToAllocatePairs)} on the shelf with no customer
+              allocated yet.
+            </p>
+            <p className="mt-0.5 text-sm text-text-secondary">
+              {owedToCustomersPairs > 0
+                ? `Customers are still waiting for ${formatSets(owedToCustomersPairs)}.`
+                : "Counting the boxes is only half the job — the stock still has to be shared out."}
+            </p>
+          </div>
+          <Button size="sm" onClick={onOpenOrders}>
+            Allocate to customers
+          </Button>
+        </div>
+      )}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
         <FigureCard
           label="Receivings"
           value={formatQty(receivings.length)}
-          sub="deliveries at the gate"
+          sub="arrivals at the gate"
         />
         <FigureCard
           label="Packages received"
@@ -1479,7 +1533,7 @@ function ReceivingDetail({
             stock_code: code,
             description: known.description,
             product_group: known.product_group,
-            unit: known.default_unit,
+            unit: "set",
             unit_conversions: known.default_unit_conversions ?? PAIRS_PER,
           }
         : { stock_code: code },
@@ -1697,17 +1751,10 @@ function ReceivingDetail({
                       render={({ field }) => (
                         <QuantityField
                           label="Quantity"
-                          unitLabel="Unit the voucher is written in"
                           value={field.value}
                           unit={receiving.total_unit}
                           hint={formatIn(expectedPairs(receiving), receiving.total_unit)}
                           onChange={field.onChange}
-                          onUnitChange={(total_unit) =>
-                            setValue("receiving.total_unit", total_unit, {
-                              shouldDirty: true,
-                              shouldValidate: true,
-                            })
-                          }
                         />
                       )}
                     />
@@ -1981,7 +2028,7 @@ function ReceivingDetail({
                               </Td>
                               <Td />
                               <Td className="text-right font-semibold tabular-nums text-success">
-                                {formatIn(packagePairs(entry), "pair")}
+                                {formatSets(packagePairs(entry))}
                               </Td>
                               <Td className="text-right">
                                 {entry.opened ? (
@@ -2499,16 +2546,9 @@ function NewReceivingForm({
                 render={({ field }) => (
                   <QuantityInput
                     label="Quantity"
-                    unitLabel="Unit the voucher is written in"
                     value={field.value}
                     unit={setsUnit}
                     onChange={field.onChange}
-                    onUnitChange={(unit) =>
-                      setValue("sets_unit", unit, {
-                        shouldDirty: true,
-                        shouldValidate: true,
-                      })
-                    }
                     error={errors.sets?.message}
                     hint={
                       shipment

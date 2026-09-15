@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
 from app.models.user import User, UserRole
+from app.models.wholesale_master_data import WholesaleProduct
 
 
 def _make_branch(db_session: Session, name: str = "Wholesale") -> Branch:
@@ -215,3 +216,35 @@ def test_receiving_cost_foreign_currency_requires_original_amount_and_rate(
         json=[{"cost_date": "2026-09-12", "stage": "Gate", "kind": "Porter fee", "currency_code": "THB"}],
     )
     assert response.status_code == 422
+
+
+def test_opening_a_package_with_a_new_stock_code_creates_a_master_data_product(
+    authed_client: TestClient, db_session: Session
+) -> None:
+    branch = _make_branch(db_session)
+    _make_user(db_session, UserRole.WHOLESALE, branch.id)
+    receiving = _create_receiving(authed_client)
+    package_id = receiving["packages"][0]["package_id"]
+    assert db_session.query(WholesaleProduct).count() == 0
+
+    updated = authed_client.patch(
+        f"/api/wholesale/receivings/{receiving['receiving_id']}/packages/{package_id}",
+        json={
+            "opened": True,
+            "items": [
+                {
+                    "stock_code": "A1001",
+                    "description": "Men's sandal",
+                    "product_group": "man",
+                    "color_breakdown": "black1s",
+                    "quantity": 1,
+                    "unit": "set",
+                }
+            ],
+        },
+    )
+    assert updated.status_code == 200
+
+    product = db_session.query(WholesaleProduct).filter(WholesaleProduct.stock_code == "A1001").first()
+    assert product is not None
+    assert product.description == "Men's sandal"

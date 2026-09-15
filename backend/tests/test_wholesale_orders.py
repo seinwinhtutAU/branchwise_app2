@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
 from app.models.user import User, UserRole
+from app.models.wholesale_master_data import WholesaleProduct
 
 
 def _branch(db: Session, name: str = "Wholesale") -> Branch:
@@ -260,3 +261,39 @@ def test_editing_order_does_not_reprice_its_foreign_currency_line_from_a_new_rat
     updated = authed_client.put(f"/api/wholesale/orders/{created.json()['order_id']}", json=payload)
     assert updated.json()["lines"][0]["selling_price"] == 60000
     assert updated.json()["lines"][0]["exchange_rate"] == 120
+
+
+def test_new_stock_code_on_an_order_line_creates_a_master_data_product(
+    authed_client: TestClient, db_session: Session
+) -> None:
+    branch = _branch(db_session)
+    _user(db_session, UserRole.WHOLESALE, branch.id)
+    assert db_session.query(WholesaleProduct).count() == 0
+
+    created = authed_client.post("/api/wholesale/orders", json=_payload())
+    assert created.status_code == 201
+
+    product = db_session.query(WholesaleProduct).filter(WholesaleProduct.stock_code == "A1001").first()
+    assert product is not None
+    assert product.description == "Sandal"
+    assert product.product_group.value == "man"
+
+
+def test_order_line_reuses_an_existing_master_data_product_without_overwriting_it(
+    authed_client: TestClient, db_session: Session
+) -> None:
+    branch = _branch(db_session)
+    _user(db_session, UserRole.WHOLESALE, branch.id)
+    db_session.add(
+        WholesaleProduct(stock_code="A1001", description="Original name", product_group="lady")
+    )
+    db_session.commit()
+
+    created = authed_client.post("/api/wholesale/orders", json=_payload())
+    assert created.status_code == 201
+
+    assert db_session.query(WholesaleProduct).filter(WholesaleProduct.stock_code == "A1001").count() == 1
+    product = db_session.query(WholesaleProduct).filter(WholesaleProduct.stock_code == "A1001").first()
+    # The order line said "Sandal"/"man", but the existing Master Data row is untouched.
+    assert product.description == "Original name"
+    assert product.product_group.value == "lady"
