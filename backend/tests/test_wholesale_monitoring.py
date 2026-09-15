@@ -72,6 +72,12 @@ def test_monitoring_surfaces_only_needs_attention_rows_and_admin_sees_all_branch
         quantity_pairs=6, location="Gate", delivered_on=date.today(), recorded_by_user_id="test-user-id",
         created_at=datetime.now() - timedelta(minutes=2),
     ))
+    db_session.add(WholesaleStockMovement(
+        branch_id=branch_one.id, order_id=fulfilled.id, stock_code="DEPLETED", description="Depleted shoe",
+        product_group=ProductGroup.MAN, color_breakdown="black2s", colors=[{"color": "black", "qty": 2}],
+        quantity_pairs=12, location="Gate", delivered_on=date.today(), recorded_by_user_id="test-user-id",
+        created_at=datetime.now() - timedelta(minutes=3),
+    ))
 
     unpaid = SupplierVoucher(
         branch_id=branch_one.id, voucher_no="VCH-UNPAID", supplier_name="Factory A", voucher_date=date.today(),
@@ -97,18 +103,24 @@ def test_monitoring_surfaces_only_needs_attention_rows_and_admin_sees_all_branch
     receiving = Receiving(
         branch_id=branch_one.id, receiving_no="RCV-STOCK", shipment_id=in_transit.id, shipment_no=in_transit.shipment_no,
         voucher_no=in_transit.voucher_no, supplier_name=in_transit.supplier_name, gate="Gate", received_on=date.today(),
-        total_packages=1, total_quantity_pairs=12, total_unit=WholesaleUnit.SET,
+        total_packages=1, total_quantity_pairs=24, total_unit=WholesaleUnit.SET,
     )
     package = ReceivingPackage(package_no=1, opened=True, received_on=date.today(), receiving=receiving)
-    package.items = [ReceivingItem(stock_code="FULFILLED", description="Delivered shoe", product_group=ProductGroup.MAN,
-                                   color_breakdown="black2s", colors=[{"color": "black", "qty": 2}],
-                                   unit=WholesaleUnit.SET, quantity_pairs=12)]
+    package.items = [
+        ReceivingItem(stock_code="FULFILLED", description="Delivered shoe", product_group=ProductGroup.MAN,
+                      color_breakdown="black2s", colors=[{"color": "black", "qty": 2}],
+                      unit=WholesaleUnit.SET, quantity_pairs=12),
+        ReceivingItem(stock_code="DEPLETED", description="Depleted shoe", product_group=ProductGroup.MAN,
+                      color_breakdown="black2s", colors=[{"color": "black", "qty": 2}],
+                      unit=WholesaleUnit.SET, quantity_pairs=12),
+    ]
     db_session.add(receiving)
     db_session.commit()
     db_session.query(WholesaleProduct).delete()
     db_session.add_all([
         WholesaleProduct(stock_code="ZERO", description="Zero shoe", product_group=ProductGroup.MAN, active=True),
         WholesaleProduct(stock_code="FULFILLED", description="Delivered shoe", product_group=ProductGroup.MAN, active=True),
+        WholesaleProduct(stock_code="DEPLETED", description="Depleted shoe", product_group=ProductGroup.MAN, active=True),
     ])
     db_session.commit()
 
@@ -123,6 +135,10 @@ def test_monitoring_surfaces_only_needs_attention_rows_and_admin_sees_all_branch
     assert body["unpaid_vouchers"]["rows"][0]["voucher_no"] == "VCH-UNPAID"
     assert body["unpaid_orders"]["count"] == 2
     assert {row["order_no"] for row in body["unpaid_orders"]["rows"]} == {"ORD-PENDING", "ORD-DONE"}
-    assert body["zero_stock_products"]["count"] == 1
-    assert body["zero_stock_products"]["rows"][0]["stock_code"] == "ZERO"
+    assert body["zero_stock_products"]["count"] == 2
+    zero_stock_rows = {
+        row["stock_code"]: row["stock_status"]
+        for row in body["zero_stock_products"]["rows"]
+    }
+    assert zero_stock_rows == {"ZERO": "not_arrived", "DEPLETED": "out_of_stock"}
     assert {row["type"] for row in body["recent_activity"]} >= {"receiving", "delivery", "payment"}

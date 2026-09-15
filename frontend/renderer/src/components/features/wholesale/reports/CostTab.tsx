@@ -224,7 +224,7 @@ export function CostTab(props: ReportTabProps): React.JSX.Element {
                       </span>{" "}
                       {row.description}
                     </Td>
-                    <Td>{row.reason.replaceAll("_", " ")}</Td>
+                    <Td>{(row.reason ?? "").replaceAll("_", " ") || "—"}</Td>
                     <Td className="text-right tabular-nums">
                       {formatQty(row.quantity_pairs)}
                     </Td>

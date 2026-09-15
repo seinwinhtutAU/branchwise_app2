@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { type Session } from "@renderer/lib/auth";
 import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
 import { Badge } from "@renderer/components/ui/Badge";
+import { Button } from "@renderer/components/ui/Button";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Spinner } from "@renderer/components/ui/Spinner";
 import {
@@ -15,10 +16,7 @@ import {
   formatKyat,
   formatQty,
 } from "@renderer/components/features/wholesale/shared";
-import {
-  FigureCard,
-  Panel,
-} from "@renderer/components/features/wholesale/ui";
+import { FigureCard, Panel } from "@renderer/components/features/wholesale/ui";
 import {
   WHOLESALE_MONITORING_URL,
   type MonitoringActivityRow,
@@ -43,10 +41,17 @@ function relativeTime(value: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function statusLabel(value: string): string {
+// `value` is typed as a required string everywhere it's read from, but a row restored
+// from the persisted localStorage cache (see main.tsx's persister `buster`) can predate
+// a field that's since become required — guard against undefined rather than crash the
+// whole Dashboard over one stale cached row.
+function statusLabel(value: string | undefined): string {
+  if (!value) return "—";
   const labels: Record<string, string> = {
     allocating: "Allocating",
     in_transit: "In transit",
+    not_arrived: "Not arrived yet",
+    out_of_stock: "Out of stock",
     partly_delivered: "Partly delivered",
     ready_to_deliver: "Ready to deliver",
     waiting_at_cargo: "Waiting at cargo",
@@ -89,13 +94,14 @@ function PanelHeader({
   tone?: "warning" | "error" | "success";
   summary: string;
 }): React.JSX.Element {
-  const color = count > 0
-    ? tone === "error"
-      ? "text-error"
-      : tone === "success"
-        ? "text-success"
-        : "text-warning"
-    : "text-success";
+  const color =
+    count > 0
+      ? tone === "error"
+        ? "text-error"
+        : tone === "success"
+          ? "text-success"
+          : "text-warning"
+      : "text-success";
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-4 border-b border-border">
       <div className="min-w-0">
@@ -104,7 +110,9 @@ function PanelHeader({
         </h2>
         <p className="mt-1 text-xs text-text-muted">{summary}</p>
       </div>
-      <div className={`shrink-0 text-xl font-bold leading-none tabular-nums ${color}`}>
+      <div
+        className={`shrink-0 text-xl font-bold leading-none tabular-nums ${color}`}
+      >
         {formatQty(count)}
       </div>
     </div>
@@ -229,11 +237,12 @@ export default function MonitoringDashboardPage({
   onOpenReceiving: (receivingNo: string) => void;
   onOpenStock: (stockCode: string) => void;
 }): React.JSX.Element {
-  const { data, isLoading, isFetching, isError } = useQuery({
+  const query = useQuery({
     queryKey: MONITORING_QUERY_KEY,
     queryFn: () =>
       fetchJson<MonitoringSnapshot>(WHOLESALE_MONITORING_URL, session),
   });
+  const { data, isLoading, isFetching, isError } = query;
   useLoadErrorToast(isError, "wholesale dashboard");
 
   if (isLoading && !data)
@@ -263,6 +272,21 @@ export default function MonitoringDashboardPage({
     (sum, row) => sum + row.balance_due,
     0,
   );
+  const notArrivedCount = data.zero_stock_products.rows.filter(
+    (row) => row.stock_status === "not_arrived",
+  ).length;
+  const outOfStockCount = data.zero_stock_products.rows.filter(
+    (row) => row.stock_status === "out_of_stock",
+  ).length;
+  const notArrivedLabel = `${notArrivedCount} product${notArrivedCount === 1 ? "" : "s"} not arrived yet`;
+  const outOfStockLabel = `${outOfStockCount} product${outOfStockCount === 1 ? "" : "s"} out of stock`;
+  const inventorySummary =
+    outOfStockCount > 0
+      ? `${outOfStockLabel}${notArrivedCount > 0 ? ` · ${notArrivedLabel}` : ""}`
+      : data.zero_stock_products.count > 0
+        ? notArrivedLabel
+        : "all active products stocked";
+  const inventoryTone = outOfStockCount > 0 ? "error" : "success";
 
   return (
     <div className="flex flex-col gap-6">
@@ -275,9 +299,22 @@ export default function MonitoringDashboardPage({
             Monitor fulfillment, finance, and inventory at a glance.
           </p>
         </div>
-        <div className="flex items-center gap-2 pt-1 text-[11px] text-text-muted whitespace-nowrap">
-          <span className="w-2 h-2 rounded-full bg-success" aria-hidden="true" />
-          {isFetching ? "Refreshing…" : "Updates when wholesale data changes"}
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <div className="flex items-center gap-2 text-[11px] text-text-muted whitespace-nowrap">
+            <span
+              className="w-2 h-2 rounded-full bg-success"
+              aria-hidden="true"
+            />
+            {isFetching ? "Refreshing…" : "Updates when wholesale data changes"}
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void query.refetch()}
+            loading={isFetching}
+          >
+            Refresh
+          </Button>
         </div>
       </header>
 
@@ -306,8 +343,8 @@ export default function MonitoringDashboardPage({
         <FigureCard
           label="Inventory"
           value={formatQty(data.zero_stock_products.count)}
-          sub="products at zero stock"
-          tone={data.zero_stock_products.count > 0 ? "error" : "success"}
+          sub={inventorySummary}
+          tone={inventoryTone}
           className="border-border-strong"
         />
       </section>
@@ -316,9 +353,7 @@ export default function MonitoringDashboardPage({
         <Panel className="border-border-strong">
           <PanelHeader
             title="Fulfillment"
-            count={
-              data.shipments_in_transit.count + data.orders_pending.count
-            }
+            count={data.shipments_in_transit.count + data.orders_pending.count}
             summary="total shipments and orders needing attention"
           />
           <div className="grid items-start gap-3 p-3 lg:grid-cols-2">
@@ -381,7 +416,8 @@ export default function MonitoringDashboardPage({
                       </span>
                     </div>
                     <p className="mt-0.5 text-xs text-text-muted truncate">
-                      {row.customer_name} · {statusLabel(row.order_status ?? "pending")}
+                      {row.customer_name} ·{" "}
+                      {statusLabel(row.order_status ?? "pending")}
                     </p>
                   </SignalButton>
                 )}
@@ -472,8 +508,8 @@ export default function MonitoringDashboardPage({
           <PanelHeader
             title="Inventory"
             count={data.zero_stock_products.count}
-            tone="error"
-            summary="total products at zero stock"
+            tone={inventoryTone}
+            summary={`total products at zero stock · ${inventorySummary}`}
           />
           <CompactList
             rows={data.zero_stock_products.rows}
@@ -489,8 +525,13 @@ export default function MonitoringDashboardPage({
                   <span className="text-sm font-medium text-brand truncate">
                     {row.stock_code}
                   </span>
-                  <Badge variant="error" className="px-1.5 py-0 text-[10px]">
-                    zero
+                  <Badge
+                    variant={
+                      row.stock_status === "out_of_stock" ? "error" : "info"
+                    }
+                    className="px-1.5 py-0 text-[10px]"
+                  >
+                    {statusLabel(row.stock_status)}
                   </Badge>
                 </div>
                 <p className="mt-0.5 text-xs text-text-muted truncate">

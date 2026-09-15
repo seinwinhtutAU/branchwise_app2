@@ -118,6 +118,9 @@ const FinancePage = lazy(
 const WholesaleReportsPage = lazy(
   () => import("@renderer/components/features/wholesale/ReportsPage"),
 );
+const WholesaleMasterDataPage = lazy(
+  () => import("@renderer/components/features/wholesale/MasterDataPage"),
+);
 const WarningsPage = lazy(
   () => import("@renderer/components/features/WarningsPage"),
 );
@@ -150,6 +153,7 @@ type Section =
   | "monitoring"
   | "finance"
   | "reports"
+  | "masterData"
   | "wholesale"
   | "settings";
 
@@ -206,6 +210,7 @@ const WHOLESALE_NAV_ITEMS: NavItem[] = [
   { id: "receiving", label: "Receiving", icon: <ReceivingIcon /> },
   { id: "stock", label: "Inventory", icon: <InventoryIcon /> },
   { id: "finance", label: "Finance", icon: <DollarIcon /> },
+  { id: "masterData", label: "Master Data", icon: <WarehouseIcon /> },
   { id: "wholesale", label: "Wholesale", icon: <WarehouseIcon /> },
 ];
 
@@ -268,6 +273,7 @@ const SECTION_TITLES: Record<Section, string> = {
   monitoring: "Dashboard",
   finance: "Finance",
   reports: "Reports",
+  masterData: "Master data",
   wholesale: "Wholesale",
   settings: "Settings",
 };
@@ -1121,6 +1127,9 @@ function App(): React.JSX.Element {
                 />
               )}
               {section === "reports" && <WholesaleReportsPage session={session} />}
+              {section === "masterData" && (
+                <WholesaleMasterDataPage session={session} />
+              )}
               {section === "wholesale" && <WholesalePlaceholder />}
               {section === "settings" && (
                 <SettingsPage

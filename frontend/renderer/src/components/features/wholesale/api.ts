@@ -139,6 +139,7 @@ export interface MonitoringProductRow {
   stock_code: string;
   description: string;
   product_group: string;
+  stock_status: "not_arrived" | "out_of_stock";
 }
 
 export interface MonitoringActivityRow {

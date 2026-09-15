@@ -15,6 +15,7 @@ from app.services.wholesale.inventory import (
     delivered_color_pairs_by_order,
     delivered_pairs_by_order,
     effective_allocated_color_pairs,
+    incoming_movements,
     net_pairs_by_stock_code,
 )
 from app.services.wholesale.money import order_totals, voucher_totals
@@ -125,6 +126,10 @@ def unpaid_orders(db: Session, branch_id: str | None) -> dict:
 
 def zero_stock_products(db: Session, branch_id: str | None) -> dict:
     stock = net_pairs_by_stock_code(db, branch_id)
+    received_codes = {
+        row["stock_code"]
+        for row in incoming_movements(db, branch_id)
+    }
     products = db.query(WholesaleProduct).filter(WholesaleProduct.active.is_(True)).order_by(WholesaleProduct.stock_code).all()
     rows = [
         {
@@ -132,6 +137,11 @@ def zero_stock_products(db: Session, branch_id: str | None) -> dict:
             "stock_code": product.stock_code,
             "description": product.description,
             "product_group": product.product_group.value,
+            "stock_status": (
+                "out_of_stock"
+                if product.stock_code in received_codes
+                else "not_arrived"
+            ),
         }
         for product in products
         if stock.get(product.stock_code, 0) <= 0

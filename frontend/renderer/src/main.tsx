@@ -30,7 +30,12 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       persistOptions={{
         persister,
         maxAge: 7 * 24 * 60 * 60 * 1000,
-        buster: "v1",
+        // v2: several wholesale API response shapes changed (monitoring, master data,
+        // write-offs, reports, multi-currency order/voucher/receiving lines) since v1 was
+        // cached — a stale v1 cache was missing fields the current code reads
+        // unconditionally (e.g. MonitoringDashboardPage's statusLabel crashing on
+        // undefined). Bump this again the next time a cached page's API shape changes.
+        buster: "v2",
       }}
     >
       <ToastProvider>
