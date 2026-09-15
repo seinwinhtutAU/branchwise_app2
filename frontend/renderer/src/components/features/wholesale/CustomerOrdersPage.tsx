@@ -6,13 +6,16 @@ import { z } from "zod";
 import { type Session } from "@renderer/lib/auth";
 import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
+import { type AppSettings } from "@renderer/lib/appSettings";
 import {
   CellInput,
+  CurrencySelect,
   EDITABLE,
   GroupSelect,
   FigureCard,
   FloatingLayer,
   MenuItem,
+  MismatchIconButton,
   PAGE_SIZE,
   Panel,
   PaymentsTable,
@@ -78,11 +81,18 @@ import {
   formatDate,
   formatKyat,
   formatQty,
+  mismatchDescription,
   nextReference,
   todayIso,
   type PaymentStatus,
 } from "@renderer/components/features/wholesale/shared";
-import { formatIn } from "@renderer/components/features/wholesale/units";
+import {
+  formatIn,
+  PAIRS_PER,
+  pricedAmount,
+  UNIT_LABELS,
+  UNITS,
+} from "@renderer/components/features/wholesale/units";
 import {
   hydrateOrders,
   saveOrders,
@@ -99,6 +109,10 @@ import {
   removeCustomerOrderPayment,
   updateCustomerOrder,
   updateCustomerOrderLineAllocation,
+  WHOLESALE_WRITE_OFFS_URL,
+  writeOffCustomerOrderLine,
+  type WriteOffReason,
+  type WriteOffWire,
   inventoryMovementsFromWire,
   type InventoryMovementWire,
   type NewCustomerOrderInput,
@@ -109,7 +123,10 @@ import {
   type ColorPairs,
   type StockLine,
 } from "@renderer/components/features/wholesale/stock";
-import { GROUP_LABELS, type ProductGroup } from "@renderer/components/features/wholesale/products";
+import {
+  GROUP_LABELS,
+  type ProductGroup,
+} from "@renderer/components/features/wholesale/products";
 import {
   KNOWN_CUSTOMERS,
   STOCK_CODES,
@@ -117,10 +134,19 @@ import {
   productOf,
   useHydrateMasterData,
 } from "@renderer/components/features/wholesale/masterData";
+import { WriteOffModal } from "@renderer/components/features/wholesale/WriteOffModal";
+import {
+  DEFAULT_CURRENCY,
+  formatOriginalAmount,
+  formatRate,
+  isForeignCurrency,
+  previewKyatAmount,
+  type CurrencyCode,
+} from "@renderer/components/features/wholesale/currency";
 
-/** A quantity of goods, written in sets — the unit the business trades in. Pairs stay
- *  the figure underneath, so nothing is ever converted twice. */
-const sets = (qty: number): string => formatIn(qty, "set");
+/** An aggregate may combine products with different units, so pairs are its only
+ * unambiguous display unit. Individual lines use their own unit below. */
+const sets = (qty: number): string => formatIn(qty, "pair");
 
 // The wholesale Customer Orders screen. Its shape follows wholesale_prototype's own
 // Customer Orders page — figure cards across the top, then one panel holding the header,
@@ -191,6 +217,32 @@ function StatusBadge({ status }: { status: OrderStatus }): React.JSX.Element {
   );
 }
 
+/** The original amount and exchange rate a line was priced at, shown under its Kyat
+ *  figure only when the line was actually saved in a foreign currency — an MMK line
+ *  (the default) shows nothing extra. */
+function CurrencyNote({
+  currency_code,
+  original_amount,
+  exchange_rate,
+}: {
+  currency_code?: string;
+  original_amount?: number | null;
+  exchange_rate?: number | null;
+}): React.JSX.Element | null {
+  if (
+    !currency_code ||
+    !isForeignCurrency(currency_code) ||
+    original_amount == null ||
+    exchange_rate == null
+  )
+    return null;
+  return (
+    <span className="block text-[10px] font-normal text-text-muted whitespace-nowrap">
+      {formatOriginalAmount(currency_code, original_amount)} × {formatRate(exchange_rate)}
+    </span>
+  );
+}
+
 function PaymentBadge({
   status,
 }: {
@@ -210,10 +262,12 @@ function PaymentBadge({
 
 export default function CustomerOrdersPage({
   session,
+  settings,
   initialOrderId,
   onInitialOrderOpened,
 }: {
   session: Session;
+  settings: AppSettings | null;
   initialOrderId?: string | null;
   onInitialOrderOpened?: () => void;
 }): React.JSX.Element {
@@ -229,17 +283,26 @@ export default function CustomerOrdersPage({
     queryFn: () => fetchJson<CustomerOrder[]>(CUSTOMER_ORDERS_URL, session),
   });
   useLoadErrorToast(isError, "customer orders");
+  const { data: writeOffs = [], isError: writeOffsFailed } = useQuery({
+    queryKey: ["wholesale", "write-offs"],
+    queryFn: () => fetchJson<WriteOffWire[]>(WHOLESALE_WRITE_OFFS_URL, session),
+  });
+  useLoadErrorToast(writeOffsFailed, "mismatch explanations");
   const {
     data: inventoryWire,
     isFetching: isInventoryFetching,
     isError: inventoryFailed,
   } = useQuery({
     queryKey: ["wholesale", "inventory"],
-    queryFn: () => fetchJson<InventoryMovementWire[]>(WHOLESALE_INVENTORY_URL, session),
+    queryFn: () =>
+      fetchJson<InventoryMovementWire[]>(WHOLESALE_INVENTORY_URL, session),
   });
   useLoadErrorToast(inventoryFailed, "wholesale inventory for allocations");
   const inventoryLines = useMemo<StockLine[]>(
-    () => (inventoryWire ? stockLines(inventoryMovementsFromWire(inventoryWire)) : []),
+    () =>
+      inventoryWire
+        ? stockLines(inventoryMovementsFromWire(inventoryWire))
+        : [],
     [inventoryWire],
   );
   // The shared store still holds orders — other screens (Supplier Vouchers' waiting
@@ -252,9 +315,15 @@ export default function CustomerOrdersPage({
 
   async function reload(): Promise<void> {
     await queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY });
+    await queryClient.invalidateQueries({
+      queryKey: ["wholesale", "write-offs"],
+    });
   }
 
-  async function saveAllocation(lineId: string, colorBreakdown: string): Promise<void> {
+  async function saveAllocation(
+    lineId: string,
+    colorBreakdown: string,
+  ): Promise<void> {
     try {
       await updateCustomerOrderLineAllocation(session, lineId, colorBreakdown);
       await queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY });
@@ -268,6 +337,21 @@ export default function CustomerOrdersPage({
       );
       throw error;
     }
+  }
+
+  async function writeOffOrderLine(
+    lineId: string,
+    quantity: number,
+    reason: WriteOffReason,
+    note: string,
+  ): Promise<void> {
+    await writeOffCustomerOrderLine(session, lineId, {
+      quantity,
+      reason,
+      note,
+    });
+    await reload();
+    showToast("success", "Write-off recorded.");
   }
 
   const [view, setView] = useState<View>("list");
@@ -419,6 +503,7 @@ export default function CustomerOrdersPage({
     return (
       <NewOrderForm
         nextOrderNo={nextOrderNo(orders)}
+        settings={settings}
         onCancel={() => setView("list")}
         onCreate={addOrder}
       />
@@ -430,8 +515,11 @@ export default function CustomerOrdersPage({
       <OrderDetail
         order={selected}
         initialMode={openMode}
+        settings={settings}
         onSave={persistOrder}
         onBack={() => setView("list")}
+        onWriteOff={writeOffOrderLine}
+        writeOffs={writeOffs}
       />
     );
   }
@@ -499,14 +587,18 @@ function OrderList({
   // Cancelled orders are excluded from every figure: a cancelled order is not work
   // waiting to be done, and counting it overstates what is still owed.
   const live = orders.filter((order) => order.order_status !== "cancelled");
-  const totalQty = live.reduce((sum, order) => sum + order.total_quantity_pairs, 0);
-  const remainingAll = live.reduce(
+  const openOrders = live.filter((order) => order.order_status !== "fulfilled");
+  const awaitingAllocation = live.filter(
+    (order) =>
+      order.order_status === "new" || order.order_status === "allocating",
+  );
+  const readyToDeliver = live.filter(
+    (order) => order.order_status === "ready_to_deliver",
+  );
+  const remainingAll = openOrders.reduce(
     (sum, order) => sum + remainingQty(order),
     0,
   );
-  const unfinished = live.filter((order) => remainingQty(order) > 0).length;
-  const outstanding = live.reduce((sum, order) => sum + orderBalance(order), 0);
-  const owingCount = live.filter((order) => orderBalance(order) > 0).length;
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -544,35 +636,29 @@ function OrderList({
   return (
     <div className="flex flex-col gap-6">
       {/* Each figure is a way into the list below it, not just a number to read. */}
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <FigureCard
-          label="Total orders"
-          value={formatQty(live.length)}
-          sub="orders in the system"
+          label="Open Orders"
+          value={formatQty(openOrders.length)}
+          sub="not fulfilled or cancelled"
         />
         <FigureCard
-          label="Total Ordered Qty"
-          value={sets(totalQty)}
-          sub="across all orders"
-          tone="neutral"
+          label="Awaiting Allocation"
+          value={formatQty(awaitingAllocation.length)}
+          sub="new or allocating"
+          tone={awaitingAllocation.length > 0 ? "warning" : "success"}
         />
         <FigureCard
-          label="Remaining"
+          label="Ready to Deliver"
+          value={formatQty(readyToDeliver.length)}
+          sub="fully allocated, not sent"
+          tone={readyToDeliver.length > 0 ? "brand" : "success"}
+        />
+        <FigureCard
+          label="Qty Remaining to Deliver"
           value={sets(remainingAll)}
-          sub={`of ${sets(totalQty)} not yet delivered`}
+          sub="across all open orders"
           tone={remainingAll > 0 ? "error" : "success"}
-        />
-        <FigureCard
-          label="Orders not finished"
-          value={formatQty(unfinished)}
-          sub={`of ${formatQty(live.length)} orders still in progress`}
-          tone={unfinished > 0 ? "warning" : "success"}
-        />
-        <FigureCard
-          label="Unpaid amount"
-          value={formatKyat(outstanding)}
-          sub={`${owingCount} order${owingCount === 1 ? "" : "s"} not fully paid`}
-          tone={outstanding > 0 ? "error" : "success"}
         />
       </div>
 
@@ -846,7 +932,7 @@ function RowMenu({
           {onAllocate && (
             <MenuItem
               icon={<WarehouseIcon className="w-4 h-4" />}
-            label="Allocate stock"
+              label="Allocate stock"
               onClick={() => {
                 setOpen(false);
                 onAllocate();
@@ -872,12 +958,22 @@ function RowMenu({
 
 // ── Detail ───────────────────────────────────────────────────────────────────
 
-function OrderProductsView({ order }: { order: CustomerOrder }): React.JSX.Element {
+function OrderProductsView({
+  order,
+  onWriteOff,
+  writeOffs,
+}: {
+  order: CustomerOrder;
+  onWriteOff: (line: CustomerOrderLine) => void;
+  writeOffs: WriteOffWire[];
+}): React.JSX.Element {
   return (
     <TableContainer>
       <Thead className="top-0">
         <Tr>
-          <Th className="min-w-[10rem] whitespace-nowrap">Supplier / Factory</Th>
+          <Th className="min-w-[10rem] whitespace-nowrap">
+            Supplier / Factory
+          </Th>
           <Th className="min-w-[18rem]">Product</Th>
           <Th className="min-w-[11rem]">Colors</Th>
           <Th className="text-right whitespace-nowrap">Ordered qty</Th>
@@ -885,37 +981,126 @@ function OrderProductsView({ order }: { order: CustomerOrder }): React.JSX.Eleme
           <Th className="text-right whitespace-nowrap">Remaining qty</Th>
           <Th className="text-right min-w-[7rem]">Selling price</Th>
           <Th className="text-right">Amount</Th>
+          <Th className="text-center">Mismatch</Th>
         </Tr>
       </Thead>
       <Tbody>
         {order.lines.map((line) => (
           <Tr key={line.order_line_id}>
-            <Td className="font-medium">{line.supplier_name || "—"}</Td>
-            <Td>
-              <div className="flex min-w-0 flex-col gap-0.5">
-                <div className="flex min-w-0 items-center gap-1">
-                  <span className="font-semibold text-brand break-words">{line.stock_code || "No stock code"}</span>
-                  {line.stock_code && <CopyButton value={line.stock_code} what="stock code" />}
-                </div>
-                <span className="break-words text-text-primary">{line.description || "—"}</span>
-                <span className="text-xs text-text-muted">{GROUP_LABELS[line.product_group]}</span>
-              </div>
-            </Td>
-            <Td className="whitespace-normal break-words text-text-secondary">{line.color_breakdown || "—"}</Td>
-            <Td className="text-right tabular-nums">{sets(line.quantity_pairs)}</Td>
-            <Td className="text-right tabular-nums font-medium text-success">{sets(line.delivered_quantity_pairs)}</Td>
-            <Td className="text-right tabular-nums font-semibold text-error">{sets(lineRemaining(line))}</Td>
-            <Td className="text-right tabular-nums">{formatKyat(line.selling_price)}</Td>
-            <Td className="text-right tabular-nums font-medium whitespace-nowrap">{formatKyat(line.quantity_pairs * line.selling_price)}</Td>
+            {(() => {
+              const explanation = writeOffs.find(
+                (entry) => entry.subject_id === line.order_line_id,
+              );
+              return (
+                <>
+                  <Td className="font-medium">{line.supplier_name || "—"}</Td>
+                  <Td>
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <div className="flex min-w-0 items-center gap-1">
+                        <span className="font-semibold text-brand break-words">
+                          {line.stock_code || "No stock code"}
+                        </span>
+                        {line.stock_code && (
+                          <CopyButton
+                            value={line.stock_code}
+                            what="stock code"
+                          />
+                        )}
+                      </div>
+                      <span className="break-words text-text-primary">
+                        {line.description || "—"}
+                      </span>
+                      <span className="text-xs text-text-muted">
+                        {GROUP_LABELS[line.product_group]}
+                      </span>
+                    </div>
+                  </Td>
+                  <Td className="whitespace-normal break-words text-text-secondary">
+                    {line.color_breakdown || "—"}
+                  </Td>
+                  <Td className="text-right tabular-nums">
+                    {formatIn(line.quantity_pairs, line.unit, line.unit_conversions)}
+                  </Td>
+                  <Td className="text-right tabular-nums font-medium text-success">
+                    {formatIn(line.delivered_quantity_pairs, line.unit, line.unit_conversions)}
+                  </Td>
+                  <Td className="text-right tabular-nums font-semibold text-error">
+                    <div className="flex flex-col items-end gap-1">
+                      <span
+                        className={
+                          (line.lost_quantity_pairs ?? 0) > 0
+                            ? "text-warning"
+                            : undefined
+                        }
+                      >
+                        {formatIn(lineRemaining(line), line.unit, line.unit_conversions)}
+                        {(line.lost_quantity_pairs ?? 0) > 0 &&
+                          !explanation && (
+                            <span className="ml-1 text-xs font-medium text-warning">
+                              (
+                              {formatIn(
+                                line.lost_quantity_pairs ?? 0,
+                                line.unit,
+                              )}{" "}
+                              written off)
+                            </span>
+                          )}
+                      </span>
+                      {explanation && (
+                        <span
+                          className="text-[10px] font-medium text-warning"
+                          title={
+                            explanation
+                              ? mismatchDescription(explanation)
+                              : undefined
+                          }
+                        >
+                          {mismatchDescription(explanation)}
+                        </span>
+                      )}
+                    </div>
+                  </Td>
+                  <Td className="text-right tabular-nums">
+                    {formatKyat(line.selling_price)}
+                    <CurrencyNote
+                      currency_code={line.currency_code}
+                      original_amount={line.original_selling_price}
+                      exchange_rate={line.exchange_rate}
+                    />
+                  </Td>
+                  <Td className="text-right tabular-nums font-medium whitespace-nowrap">
+                    {formatKyat(pricedAmount(line.quantity_pairs, line.unit, line.selling_price, line.unit_conversions))}
+                  </Td>
+                  <Td className="text-center">
+                    <MismatchIconButton
+                      explained={Boolean(explanation)}
+                      disabled={lineRemaining(line) <= 0}
+                      onClick={() => onWriteOff(line)}
+                    />
+                  </Td>
+                </>
+              );
+            })()}
           </Tr>
         ))}
         <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-          <Td className="font-semibold" colSpan={3}>Total</Td>
-          <Td className="text-right tabular-nums font-semibold">{sets(order.total_quantity_pairs)}</Td>
-          <Td className="text-right tabular-nums font-semibold text-success">{sets(order.delivered_quantity_pairs)}</Td>
-          <Td className="text-right tabular-nums font-semibold text-error">{sets(remainingQty(order))}</Td>
+          <Td className="font-semibold" colSpan={3}>
+            Total
+          </Td>
+          <Td className="text-right tabular-nums font-semibold">
+            {sets(order.total_quantity_pairs)}
+          </Td>
+          <Td className="text-right tabular-nums font-semibold text-success">
+            {sets(order.delivered_quantity_pairs)}
+          </Td>
+          <Td className="text-right tabular-nums font-semibold text-error">
+            {sets(remainingQty(order))}
+          </Td>
           <Td />
-          <Td className="text-right tabular-nums font-semibold text-brand">{formatKyat(orderAmount(order))}</Td>
+          <Td className="text-right tabular-nums font-semibold text-brand">
+            {formatKyat(orderAmount(order))}
+          </Td>
+          <Td />
         </Tr>
       </Tbody>
     </TableContainer>
@@ -929,7 +1114,10 @@ function mergeColorPairs(target: ColorPairs, source: ColorPairs): ColorPairs {
   return target;
 }
 
-function subtractColorPairs(colors: ColorPairs, reserved: ColorPairs): ColorPairs {
+function subtractColorPairs(
+  colors: ColorPairs,
+  reserved: ColorPairs,
+): ColorPairs {
   return Object.fromEntries(
     Object.entries(colors).map(([color, pairs]) => [
       color,
@@ -938,7 +1126,10 @@ function subtractColorPairs(colors: ColorPairs, reserved: ColorPairs): ColorPair
   );
 }
 
-function availableStockColors(stockCode: string, inventoryLines: StockLine[]): ColorPairs {
+function availableStockColors(
+  stockCode: string,
+  inventoryLines: StockLine[],
+): ColorPairs {
   return inventoryLines
     .filter((line) => line.stock_code === stockCode)
     .reduce(
@@ -953,7 +1144,10 @@ function allocationsFromOtherOrders(
   orderId: string,
 ): ColorPairs {
   return orders
-    .filter((order) => order.order_id !== orderId && order.order_status !== "cancelled")
+    .filter(
+      (order) =>
+        order.order_id !== orderId && order.order_status !== "cancelled",
+    )
     .reduce(
       (colors, order) =>
         order.lines
@@ -962,7 +1156,10 @@ function allocationsFromOtherOrders(
             (result, line) =>
               mergeColorPairs(
                 result,
-                colorPairsForText(line.allocated_color_breakdown ?? "", line.unit),
+                colorPairsForText(
+                  line.allocated_color_breakdown ?? "",
+                  line.unit,
+                ),
               ),
             colors,
           ),
@@ -973,7 +1170,9 @@ function allocationsFromOtherOrders(
 function formatColorPairs(colorPairs: ColorPairs): string {
   return Object.entries(colorPairs)
     .filter(([, pairs]) => pairs > 0)
-    .map(([color, pairs]) => (pairs % 6 === 0 ? `${color}${pairs / 6}s` : `${color}${pairs}p`))
+    .map(([color, pairs]) =>
+      pairs % 6 === 0 ? `${color}${pairs / 6}s` : `${color}${pairs}p`,
+    )
     .join(", ");
 }
 
@@ -995,33 +1194,54 @@ function AllocationLineRow({
   const [draft, setDraft] = useState(line.allocated_color_breakdown ?? "");
   const [saving, setSaving] = useState(false);
   const stockColors = availableStockColors(line.stock_code, inventoryLines);
-  const reservedByOthers = allocationsFromOtherOrders(orders, line.stock_code, order.order_id);
-  const ownColors = colorPairsForText(line.allocated_color_breakdown ?? "", line.unit);
+  const reservedByOthers = allocationsFromOtherOrders(
+    orders,
+    line.stock_code,
+    order.order_id,
+  );
+  const ownColors = colorPairsForText(
+    line.allocated_color_breakdown ?? "",
+    line.unit,
+  );
   // Keep the current allocation available for edit validation, but subtract it from
   // the stock amount shown as still available for a new allocation.
   const availableForEdit = subtractColorPairs(stockColors, reservedByOthers);
   const availableToAllocate = subtractColorPairs(availableForEdit, ownColors);
-  const availablePairs = Object.values(availableToAllocate).reduce((sum, pairs) => sum + pairs, 0);
+  const availablePairs = Object.values(availableToAllocate).reduce(
+    (sum, pairs) => sum + pairs,
+    0,
+  );
   const hasAvailableStock = availablePairs > 0;
   const hasCurrentAllocation = (line.allocated_quantity_pairs ?? 0) > 0;
   const requestedColors = colorPairsForText(draft, line.unit);
-  const requestedPairs = Object.values(requestedColors).reduce((sum, pairs) => sum + pairs, 0);
+  const requestedPairs = Object.values(requestedColors).reduce(
+    (sum, pairs) => sum + pairs,
+    0,
+  );
   const orderColors = colorPairsForText(line.color_breakdown, line.unit);
   const colorError = colorQtyProblem(draft);
   const invalidColor = Object.entries(requestedColors).find(
-    ([color, pairs]) => pairs > (orderColors[color] ?? 0) || pairs > (availableForEdit[color] ?? 0),
+    ([color, pairs]) =>
+      pairs > (orderColors[color] ?? 0) ||
+      pairs > (availableForEdit[color] ?? 0),
   );
-  const validationMessage = colorError
-    ?? (invalidColor
-      ? (invalidColor[1] > (orderColors[invalidColor[0]] ?? 0)
+  const validationMessage =
+    colorError ??
+    (invalidColor
+      ? invalidColor[1] > (orderColors[invalidColor[0]] ?? 0)
         ? `Only ${formatIn(orderColors[invalidColor[0]] ?? 0, "pair")} of ${invalidColor[0]} is on this order.`
-        : `Only ${formatIn(availableForEdit[invalidColor[0]] ?? 0, "pair")} of ${invalidColor[0]} is available.`)
+        : `Only ${formatIn(availableForEdit[invalidColor[0]] ?? 0, "pair")} of ${invalidColor[0]} is available.`
       : requestedPairs > lineRemaining(line)
-        ? `Allocation cannot exceed ${sets(lineRemaining(line))}.`
+        ? `Allocation cannot exceed ${formatIn(lineRemaining(line), line.unit, line.unit_conversions)}.`
         : null);
-  const isChanged = draft.trim() !== (line.allocated_color_breakdown ?? "").trim();
-  const canSave = isChanged && !saving && !inventoryLoading && !validationMessage
-    && (requestedPairs > 0 || (line.allocated_quantity_pairs ?? 0) > 0);
+  const isChanged =
+    draft.trim() !== (line.allocated_color_breakdown ?? "").trim();
+  const canSave =
+    isChanged &&
+    !saving &&
+    !inventoryLoading &&
+    !validationMessage &&
+    (requestedPairs > 0 || (line.allocated_quantity_pairs ?? 0) > 0);
 
   useEffect(() => {
     setDraft(line.allocated_color_breakdown ?? "");
@@ -1042,19 +1262,33 @@ function AllocationLineRow({
       <Td>
         <div className="flex min-w-[15rem] flex-col gap-0.5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-bold text-brand">{line.stock_code || "No stock code"}</span>
-            <span className="text-xs text-text-muted">{GROUP_LABELS[line.product_group]}</span>
+            <span className="font-bold text-brand">
+              {line.stock_code || "No stock code"}
+            </span>
+            <span className="text-xs text-text-muted">
+              {GROUP_LABELS[line.product_group]}
+            </span>
           </div>
-          <span className="font-semibold text-text-primary">{line.description || "Unnamed product"}</span>
+          <span className="font-semibold text-text-primary">
+            {line.description || "Unnamed product"}
+          </span>
           <span className="text-xs text-text-secondary">
             <span className="font-semibold text-text-primary">Colors:</span>{" "}
-            <span className="font-bold text-brand">{line.color_breakdown || "—"}</span>
+            <span className="font-bold text-brand">
+              {line.color_breakdown || "—"}
+            </span>
           </span>
         </div>
       </Td>
-      <Td className="whitespace-nowrap text-right tabular-nums">{sets(line.quantity_pairs)}</Td>
-      <Td className="whitespace-nowrap text-right tabular-nums text-success">{sets(line.delivered_quantity_pairs)}</Td>
-      <Td className="whitespace-nowrap text-right tabular-nums font-semibold text-error">{sets(lineRemaining(line))}</Td>
+      <Td className="whitespace-nowrap text-right tabular-nums">
+        {formatIn(line.quantity_pairs, line.unit, line.unit_conversions)}
+      </Td>
+      <Td className="whitespace-nowrap text-right tabular-nums text-success">
+        {formatIn(line.delivered_quantity_pairs, line.unit, line.unit_conversions)}
+      </Td>
+      <Td className="whitespace-nowrap text-right tabular-nums font-semibold text-error">
+        {formatIn(lineRemaining(line), line.unit, line.unit_conversions)}
+      </Td>
       <Td>
         <span className="font-bold text-brand">
           {line.allocated_color_breakdown || "Not allocated"}
@@ -1064,7 +1298,7 @@ function AllocationLineRow({
         <div className="min-w-[12rem]">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-sm font-semibold text-brand tabular-nums">
-              {inventoryLoading ? "—" : `${formatQty(availablePairs)} pairs`}
+              {inventoryLoading ? "—" : formatIn(availablePairs, "pair")}
             </span>
             {!inventoryLoading && (
               <span
@@ -1077,18 +1311,26 @@ function AllocationLineRow({
                       : "bg-error-subtle text-error",
                 )}
               >
-                {hasAvailableStock ? "Available" : hasCurrentAllocation ? "Fully allocated" : "Not available"}
+                {hasAvailableStock
+                  ? "Available"
+                  : hasCurrentAllocation
+                    ? "Fully allocated"
+                    : "Not available"}
               </span>
             )}
           </div>
           <div className="mt-0.5 text-xs text-text-secondary">
-            {inventoryLoading
-              ? "Checking stock…"
-              : hasAvailableStock
-                ? <span className="font-bold text-brand">{formatColorPairs(availableToAllocate)}</span>
-                : hasCurrentAllocation
-                  ? "No stock remains for another allocation."
-                  : "No stock is available for this item."}
+            {inventoryLoading ? (
+              "Checking stock…"
+            ) : hasAvailableStock ? (
+              <span className="font-bold text-brand">
+                {formatColorPairs(availableToAllocate)}
+              </span>
+            ) : hasCurrentAllocation ? (
+              "No stock remains for another allocation."
+            ) : (
+              "No stock is available for this item."
+            )}
           </div>
         </div>
       </Td>
@@ -1102,12 +1344,17 @@ function AllocationLineRow({
         />
         <div className="mt-1 text-xs text-text-muted">
           {draft.trim() !== "" && !validationMessage
-            ? `${formatQty(requestedPairs)} pairs selected`
+            ? `${formatIn(requestedPairs, "pair")} selected`
             : "Use s, p, or d."}
         </div>
       </Td>
       <Td className="whitespace-nowrap">
-        <Button size="sm" onClick={() => void save()} loading={saving} disabled={!canSave}>
+        <Button
+          size="sm"
+          onClick={() => void save()}
+          loading={saving}
+          disabled={!canSave}
+        >
           {line.allocated_quantity_pairs ? "Update" : "Allocate"}
         </Button>
       </Td>
@@ -1174,7 +1421,10 @@ function AllocationView({
   onSaveAllocation: (lineId: string, colorBreakdown: string) => Promise<void>;
   onBack: () => void;
 }): React.JSX.Element {
-  const allocatedPairs = order.lines.reduce((sum, line) => sum + (line.allocated_quantity_pairs ?? 0), 0);
+  const allocatedPairs = order.lines.reduce(
+    (sum, line) => sum + (line.allocated_quantity_pairs ?? 0),
+    0,
+  );
 
   return (
     <div className="flex flex-col gap-3">
@@ -1187,15 +1437,30 @@ function AllocationView({
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-semibold tracking-tight text-text-primary">Fulfill order</h2>
+                <h2 className="text-xl font-semibold tracking-tight text-text-primary">
+                  Fulfill order
+                </h2>
                 <StatusBadge status={order.order_status} />
               </div>
-              <p className="mt-1 text-sm text-text-muted">{order.order_no} · {order.customer_name} · {formatDate(order.order_date)}</p>
+              <p className="mt-1 text-sm text-text-muted">
+                {order.order_no} · {order.customer_name} ·{" "}
+                {formatDate(order.order_date)}
+              </p>
             </div>
           </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-4">
-            <FigureCard label="Ordered" value={sets(order.total_quantity_pairs)} tone="neutral" className="border-border-strong" />
-            <FigureCard label="Allocated" value={sets(allocatedPairs)} tone="brand" className="border-border-strong" />
+            <FigureCard
+              label="Ordered"
+              value={sets(order.total_quantity_pairs)}
+              tone="neutral"
+              className="border-border-strong"
+            />
+            <FigureCard
+              label="Allocated"
+              value={sets(allocatedPairs)}
+              tone="brand"
+              className="border-border-strong"
+            />
             <FigureCard
               label="Remaining"
               value={sets(remainingQty(order))}
@@ -1277,6 +1542,9 @@ const customerOrderDetailLineSchema = z.object({
   allocated_quantity_pairs: z.number().finite().min(0).optional(),
   allocated_color_breakdown: z.string().optional(),
   selling_price: z.number().finite().min(0),
+  currency_code: z.string().optional(),
+  original_selling_price: z.number().finite().min(0).nullable().optional(),
+  exchange_rate: z.number().finite().min(0).nullable().optional(),
 });
 
 const customerOrderDetailSchema = z.object({
@@ -1319,17 +1587,31 @@ interface CustomerOrderDetailFormValues {
 function OrderDetail({
   order: initialOrder,
   initialMode,
+  settings,
   onSave,
   onBack,
+  onWriteOff,
+  writeOffs,
 }: {
   order: CustomerOrder;
   initialMode: OrderDetailMode;
+  settings: AppSettings | null;
   onSave: (order: CustomerOrder, originalOrder: CustomerOrder) => Promise<void>;
   onBack: () => void;
+  onWriteOff: (
+    lineId: string,
+    quantity: number,
+    reason: WriteOffReason,
+    note: string,
+  ) => Promise<void>;
+  writeOffs: WriteOffWire[];
 }): React.JSX.Element {
   const [detailMode, setDetailMode] = useState<OrderDetailMode>(initialMode);
   const [saving, setSaving] = useState(false);
   const [addingLineId, setAddingLineId] = useState<string | null>(null);
+  const [writeOffLine, setWriteOffLine] = useState<CustomerOrderLine | null>(
+    null,
+  );
   const {
     control,
     getValues,
@@ -1385,7 +1667,10 @@ function OrderDetail({
       );
       setValue(
         "order.delivered_quantity_pairs",
-        patch.lines.reduce((sum, line) => sum + line.delivered_quantity_pairs, 0),
+        patch.lines.reduce(
+          (sum, line) => sum + line.delivered_quantity_pairs,
+          0,
+        ),
         { shouldDirty: true, shouldValidate: true },
       );
     }
@@ -1429,6 +1714,8 @@ function OrderDetail({
             stock_code: code,
             description: known.description,
             product_group: known.product_group,
+            unit: known.default_unit,
+            unit_conversions: known.default_unit_conversions ?? PAIRS_PER,
           }
         : { stock_code: code },
     );
@@ -1448,6 +1735,9 @@ function OrderDetail({
       quantity_pairs: 0,
       delivered_quantity_pairs: 0,
       selling_price: 0,
+      currency_code: DEFAULT_CURRENCY,
+      original_selling_price: null,
+      exchange_rate: null,
     });
   }
 
@@ -1520,452 +1810,571 @@ function OrderDetail({
   const hasChanges = isDirty;
 
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          <ChevronLeftIcon className="w-4 h-4" />
-          Back to orders
-        </Button>
-      </div>
-
-      <Panel>
-        <div className="grid items-center gap-3 px-6 py-4 border-b border-border lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-semibold text-text-primary tracking-tight">
-                {order.order_no}
-              </h2>
-              <StatusBadge status={order.order_status} />
-              <PaymentBadge status={paymentStatus(order)} />
-            </div>
-            <p className="mt-0.5 truncate text-sm text-text-muted">
-              {order.customer_name} · {formatDate(order.order_date)}
-            </p>
-          </div>
-          <div
-            role="tablist"
-            aria-label="Order detail mode"
-            className="order-2 flex w-full rounded-md bg-bg-subtle p-0.5 lg:order-none lg:w-auto lg:justify-self-center"
-          >
-            {(["view", "edit"] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                role="tab"
-                aria-selected={detailMode === mode}
-                onClick={() => setDetailMode(mode)}
-                className={cn(
-                  "flex-1 rounded-[5px] px-4 py-1.5 text-sm font-medium capitalize transition-colors duration-150 sm:flex-none",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
-                  detailMode === mode
-                    ? "bg-brand text-white shadow-sm"
-                    : "text-text-muted hover:text-text-primary",
-                )}
-              >
-                {mode}
-              </button>
-            ))}
-          </div>
-          <div className="order-3 flex items-center gap-2 lg:order-none lg:justify-self-end">
-            {(detailMode === "edit" || hasChanges) && (
-              <Button
-                size="sm"
-                onClick={() => void handleSubmit(saveChanges)()}
-                loading={saving}
-                disabled={!hasChanges}
-              >
-                <CheckIcon className="w-4 h-4" />
-                Save changes
-              </Button>
-            )}
-          </div>
+    <>
+      <div className="flex flex-col gap-5">
+        <div>
+          <Button variant="ghost" size="sm" onClick={onBack}>
+            <ChevronLeftIcon className="w-4 h-4" />
+            Back to orders
+          </Button>
         </div>
 
-        <div className="px-6 py-6 flex flex-col gap-10">
-          <section>
-            <SectionLabel>Order information</SectionLabel>
-            {detailMode !== "edit" ? (
-              <OrderInfoView order={order} />
-            ) : (
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-text-primary">
-                    Customer
-                  </h3>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Controller
-                      control={control}
-                      name="order.customer_name"
-                      render={({ field }) => (
-                        <Input
-                          label="Customer name"
-                          className={EDITABLE}
-                          value={field.value}
-                          onChange={field.onChange}
-                          onBlur={field.onBlur}
-                          error={errors.order?.customer_name?.message}
-                        />
-                      )}
-                    />
-                    <Controller
-                      control={control}
-                      name="order.customer_phone"
-                      render={({ field }) => (
-                        <Input
-                          label="Phone"
-                          className={EDITABLE}
-                          value={field.value}
-                          onChange={field.onChange}
-                          onBlur={field.onBlur}
-                        />
-                      )}
-                    />
-                    <div className="sm:col-span-2">
-                      <label className="mb-1.5 block text-sm font-medium text-text-secondary">
-                        Address
-                      </label>
+        <Panel>
+          <div className="grid items-center gap-3 px-6 py-4 border-b border-border lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-semibold text-text-primary tracking-tight">
+                  {order.order_no}
+                </h2>
+                <StatusBadge status={order.order_status} />
+                <PaymentBadge status={paymentStatus(order)} />
+              </div>
+              <p className="mt-0.5 truncate text-sm text-text-muted">
+                {order.customer_name} · {formatDate(order.order_date)}
+              </p>
+            </div>
+            <div
+              role="tablist"
+              aria-label="Order detail mode"
+              className="order-2 flex w-full rounded-md bg-bg-subtle p-0.5 lg:order-none lg:w-auto lg:justify-self-center"
+            >
+              {(["view", "edit"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="tab"
+                  aria-selected={detailMode === mode}
+                  onClick={() => setDetailMode(mode)}
+                  className={cn(
+                    "flex-1 rounded-[5px] px-4 py-1.5 text-sm font-medium capitalize transition-colors duration-150 sm:flex-none",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+                    detailMode === mode
+                      ? "bg-brand text-white shadow-sm"
+                      : "text-text-muted hover:text-text-primary",
+                  )}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+            <div className="order-3 flex items-center gap-2 lg:order-none lg:justify-self-end">
+              {(detailMode === "edit" || hasChanges) && (
+                <Button
+                  size="sm"
+                  onClick={() => void handleSubmit(saveChanges)()}
+                  loading={saving}
+                  disabled={!hasChanges}
+                >
+                  <CheckIcon className="w-4 h-4" />
+                  Save changes
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="px-6 py-6 flex flex-col gap-10">
+            <section>
+              <SectionLabel>Order information</SectionLabel>
+              {detailMode !== "edit" ? (
+                <OrderInfoView order={order} />
+              ) : (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                    <h3 className="mb-3 text-sm font-semibold text-text-primary">
+                      Customer
+                    </h3>
+                    <div className="grid gap-3 sm:grid-cols-2">
                       <Controller
                         control={control}
-                        name="order.customer_address"
+                        name="order.customer_name"
                         render={({ field }) => (
-                          <CellInput
-                            label="Address"
-                            placeholder="Customer address"
-                            multiline
+                          <Input
+                            label="Customer name"
+                            className={EDITABLE}
                             value={field.value}
                             onChange={field.onChange}
+                            onBlur={field.onBlur}
+                            error={errors.order?.customer_name?.message}
+                          />
+                        )}
+                      />
+                      <Controller
+                        control={control}
+                        name="order.customer_phone"
+                        render={({ field }) => (
+                          <Input
+                            label="Phone"
+                            className={EDITABLE}
+                            value={field.value}
+                            onChange={field.onChange}
+                            onBlur={field.onBlur}
+                          />
+                        )}
+                      />
+                      <div className="sm:col-span-2">
+                        <label className="mb-1.5 block text-sm font-medium text-text-secondary">
+                          Address
+                        </label>
+                        <Controller
+                          control={control}
+                          name="order.customer_address"
+                          render={({ field }) => (
+                            <CellInput
+                              label="Address"
+                              placeholder="Customer address"
+                              multiline
+                              value={field.value}
+                              onChange={field.onChange}
+                            />
+                          )}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                    <h3 className="mb-3 text-sm font-semibold text-text-primary">
+                      Order
+                    </h3>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <ReadOnlyField
+                        label="Order no."
+                        value={order.order_no}
+                        copyable
+                      />
+                      <Controller
+                        control={control}
+                        name="order.order_date"
+                        render={({ field }) => (
+                          <Input
+                            label="Order date"
+                            type="date"
+                            className={EDITABLE}
+                            value={field.value}
+                            onChange={field.onChange}
+                            onBlur={field.onBlur}
+                            error={errors.order?.order_date?.message}
                           />
                         )}
                       />
                     </div>
                   </div>
                 </div>
-                <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-text-primary">
-                    Order
-                  </h3>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <ReadOnlyField
-                      label="Order no."
-                      value={order.order_no}
-                      copyable
-                    />
-                    <Controller
-                      control={control}
-                      name="order.order_date"
-                      render={({ field }) => (
-                        <Input
-                          label="Order date"
-                          type="date"
-                          className={EDITABLE}
-                          value={field.value}
-                          onChange={field.onChange}
-                          onBlur={field.onBlur}
-                          error={errors.order?.order_date?.message}
-                        />
+              )}
+            </section>
+
+            <section>
+              <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+                <SectionLabel>Products</SectionLabel>
+                <div className="w-full sm:w-64">
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="font-medium text-text-secondary">
+                      Delivery
+                    </span>
+                    <span className="tabular-nums font-semibold text-text-primary">
+                      {sets(order.delivered_quantity_pairs)} /{" "}
+                      {sets(order.total_quantity_pairs)} ({pct}
+                      %)
+                    </span>
+                  </div>
+                  <div
+                    role="progressbar"
+                    aria-valuenow={pct}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label="Fulfillment progress"
+                    className="h-2 rounded-full bg-bg-raised overflow-hidden"
+                  >
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
+                        pct === 100 ? "bg-success" : "bg-brand",
                       )}
+                      style={{ width: String(pct) + "%" }}
                     />
                   </div>
                 </div>
               </div>
-            )}
-          </section>
-
-          <section>
-            <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-              <SectionLabel>Products</SectionLabel>
-              <div className="w-full sm:w-64">
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-medium text-text-secondary">
-                    Delivery
-                  </span>
-                  <span className="tabular-nums font-semibold text-text-primary">
-                    {sets(order.delivered_quantity_pairs)} / {sets(order.total_quantity_pairs)} ({pct}
-                    %)
-                  </span>
-                </div>
-                <div
-                  role="progressbar"
-                  aria-valuenow={pct}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-label="Fulfillment progress"
-                  className="h-2 rounded-full bg-bg-raised overflow-hidden"
-                >
-                  <div
-                    className={cn(
-                      "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
-                      pct === 100 ? "bg-success" : "bg-brand",
-                    )}
-                    style={{ width: String(pct) + "%" }}
-                  />
-                </div>
-              </div>
-            </div>
-            {detailMode === "view" ? (
-              <OrderProductsView order={order} />
-            ) : (
-              <>
-                <TableContainer>
-                  <Thead className="top-0">
-                    <Tr>
-                      <Th className="min-w-[10rem] whitespace-nowrap">
-                        Supplier / Factory
-                      </Th>
-                      <Th className="min-w-[18rem]">Product</Th>
-                      <Th className="min-w-[11rem]">Colors</Th>
-                      <Th className="text-right whitespace-nowrap">
-                        Ordered qty
-                      </Th>
-                      <Th className="text-right whitespace-nowrap">
-                        Received qty
-                      </Th>
-                      <Th className="text-right whitespace-nowrap">
-                        Remaining qty
-                      </Th>
-                      <Th className="text-right min-w-[7rem]">Selling price</Th>
-                      <Th className="text-right">Amount</Th>
-                    </Tr>
-                  </Thead>
-                  <Tbody>
-                    {lineFields.map((field, index) => {
-                      const line = order.lines[index];
-                      if (!line) return null;
-                      return (
-                        <Tr key={field.id}>
-                          <Td>
-                            <Controller
-                              control={control}
-                              name={`order.lines.${index}.supplier_name`}
-                              render={({ field: supplierField }) => (
-                                <SuggestInput
-                                  bare
-                                  label={`Supplier for product ${index + 1}`}
-                                  placeholder="Choose…"
-                                  suggestions={SUPPLIER_NAMES}
-                                  value={supplierField.value}
-                                  onChange={supplierField.onChange}
-                                />
-                              )}
-                            />
-                          </Td>
-                          <Td className="min-w-[18rem]">
-                            <div className="flex flex-col gap-1.5">
-                              <div className="flex items-center gap-1">
+              {detailMode === "view" ? (
+                <OrderProductsView
+                  order={order}
+                  onWriteOff={setWriteOffLine}
+                  writeOffs={writeOffs}
+                />
+              ) : (
+                <>
+                  <TableContainer>
+                    <Thead className="top-0">
+                      <Tr>
+                        <Th className="min-w-[10rem] whitespace-nowrap">
+                          Supplier / Factory
+                        </Th>
+                        <Th className="min-w-[18rem]">Product</Th>
+                        <Th className="min-w-[11rem]">Colors</Th>
+                        <Th className="text-right whitespace-nowrap">
+                          Ordered qty
+                        </Th>
+                        <Th className="text-right whitespace-nowrap">
+                          Received qty
+                        </Th>
+                        <Th className="text-right whitespace-nowrap">
+                          Remaining qty
+                        </Th>
+                        <Th className="text-right min-w-[10rem]">
+                          Selling price
+                        </Th>
+                        <Th className="text-right">Amount</Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {lineFields.map((field, index) => {
+                        const line = order.lines[index];
+                        if (!line) return null;
+                        return (
+                          <Tr key={field.id}>
+                            <Td>
+                              <Controller
+                                control={control}
+                                name={`order.lines.${index}.supplier_name`}
+                                render={({ field: supplierField }) => (
+                                  <SuggestInput
+                                    bare
+                                    label={`Supplier for product ${index + 1}`}
+                                    placeholder="Choose…"
+                                    suggestions={SUPPLIER_NAMES}
+                                    value={supplierField.value}
+                                    onChange={supplierField.onChange}
+                                  />
+                                )}
+                              />
+                            </Td>
+                            <Td className="min-w-[18rem]">
+                              <div className="flex flex-col gap-1.5">
+                                <div className="flex items-center gap-1">
+                                  <Controller
+                                    control={control}
+                                    name={`order.lines.${index}.stock_code`}
+                                    render={({ field: stockField }) => (
+                                      <SuggestInput
+                                        bare
+                                        label={`Stock code for product ${index + 1}`}
+                                        placeholder="A1001"
+                                        suggestions={STOCK_CODES}
+                                        value={stockField.value}
+                                        onChange={(next) => {
+                                          stockField.onChange(next);
+                                          setStockCode(index, next);
+                                        }}
+                                        error={
+                                          duplicateStockCodeProblem(
+                                            order.lines,
+                                            index,
+                                          ) ?? undefined
+                                        }
+                                      />
+                                    )}
+                                  />
+                                  <CopyButton
+                                    value={line.stock_code}
+                                    what="stock code"
+                                  />
+                                </div>
                                 <Controller
                                   control={control}
-                                  name={`order.lines.${index}.stock_code`}
-                                  render={({ field: stockField }) => (
-                                    <SuggestInput
-                                      bare
-                                      label={`Stock code for product ${index + 1}`}
-                                      placeholder="A1001"
-                                      suggestions={STOCK_CODES}
-                                      value={stockField.value}
-                                      onChange={(next) => {
-                                        stockField.onChange(next);
-                                        setStockCode(index, next);
-                                      }}
-                                      error={
-                                        duplicateStockCodeProblem(
-                                          order.lines,
-                                          index,
-                                        ) ?? undefined
-                                      }
+                                  name={`order.lines.${index}.description`}
+                                  render={({ field: descriptionField }) => (
+                                    <CellInput
+                                      label={`Description for product ${index + 1}`}
+                                      placeholder="Men's leather sandal"
+                                      multiline
+                                      value={descriptionField.value}
+                                      onChange={descriptionField.onChange}
                                     />
                                   )}
                                 />
-                                <CopyButton
-                                  value={line.stock_code}
-                                  what="stock code"
+                                <Controller
+                                  control={control}
+                                  name={`order.lines.${index}.product_group`}
+                                  render={({ field: groupField }) => (
+                                    <GroupSelect
+                                      label={`Group for product ${index + 1}`}
+                                      value={groupField.value}
+                                      onChange={groupField.onChange}
+                                    />
+                                  )}
                                 />
                               </div>
+                            </Td>
+                            <Td>
                               <Controller
                                 control={control}
-                                name={`order.lines.${index}.description`}
-                                render={({ field: descriptionField }) => (
+                                name={`order.lines.${index}.color_breakdown`}
+                                render={({ field: colorField }) => (
                                   <CellInput
-                                    label={`Description for product ${index + 1}`}
-                                    placeholder="Men's leather sandal"
+                                    label={`Colors for product ${index + 1}`}
+                                    placeholder="Enter color qty"
                                     multiline
-                                    value={descriptionField.value}
-                                    onChange={descriptionField.onChange}
+                                    value={colorField.value}
+                                    onChange={(next) => {
+                                      colorField.onChange(next);
+                                      setColors(index, next);
+                                    }}
+                                    error={
+                                      colorQtyProblem(line.color_breakdown) ??
+                                      (line.quantity_pairs <
+                                      line.delivered_quantity_pairs
+                                        ? `${sets(line.delivered_quantity_pairs)} have already gone to the customer.`
+                                        : undefined)
+                                    }
                                   />
                                 )}
                               />
-                              <Controller
-                                control={control}
-                                name={`order.lines.${index}.product_group`}
-                                render={({ field: groupField }) => (
-                                  <GroupSelect
-                                    label={`Group for product ${index + 1}`}
-                                    value={groupField.value}
-                                    onChange={groupField.onChange}
-                                  />
-                                )}
-                              />
-                            </div>
-                          </Td>
-                          <Td>
-                            <Controller
-                              control={control}
-                              name={`order.lines.${index}.color_breakdown`}
-                              render={({ field: colorField }) => (
-                                <CellInput
-                                  label={`Colors for product ${index + 1}`}
-                                  placeholder="Enter color qty"
-                                  multiline
-                                  value={colorField.value}
-                                  onChange={(next) => {
-                                    colorField.onChange(next);
-                                    setColors(index, next);
-                                  }}
-                                  error={
-                                    colorQtyProblem(line.color_breakdown) ??
-                                    (line.quantity_pairs < line.delivered_quantity_pairs
-                                      ? `${sets(line.delivered_quantity_pairs)} have already gone to the customer.`
-                                      : undefined)
+                            </Td>
+                            <Td className="text-right tabular-nums">
+                              {sets(line.quantity_pairs)}
+                            </Td>
+                            <Td className="text-right tabular-nums font-medium text-success">
+                              {sets(line.delivered_quantity_pairs)}
+                            </Td>
+                            <Td className="text-right tabular-nums font-semibold text-error">
+                              {sets(lineRemaining(line))}
+                            </Td>
+                            <Td>
+                              <div className="flex flex-col gap-1">
+                                <CurrencySelect
+                                  label={`Currency for product ${index + 1}`}
+                                  value={
+                                    ((line.currency_code as CurrencyCode) ||
+                                      DEFAULT_CURRENCY)
                                   }
-                                />
-                              )}
-                            />
-                          </Td>
-                          <Td className="text-right tabular-nums">
-                            {sets(line.quantity_pairs)}
-                          </Td>
-                          <Td className="text-right tabular-nums font-medium text-success">
-                            {sets(line.delivered_quantity_pairs)}
-                          </Td>
-                          <Td className="text-right tabular-nums font-semibold text-error">
-                            {sets(lineRemaining(line))}
-                          </Td>
-                          <Td>
-                            <Controller
-                              control={control}
-                              name={`order.lines.${index}.selling_price`}
-                              render={({ field: priceField }) => (
-                                <CellInput
-                                  label={`Selling price for product ${index + 1}`}
-                                  placeholder="0"
-                                  numeric
-                                  className="text-right"
-                                  value={String(priceField.value)}
-                                  onChange={(next) => {
-                                    priceField.onChange(Number(next) || 0);
+                                  onChange={(code) => {
+                                    if (code === DEFAULT_CURRENCY) {
+                                      setLine(index, {
+                                        currency_code: DEFAULT_CURRENCY,
+                                        original_selling_price: null,
+                                        exchange_rate: null,
+                                      });
+                                      return;
+                                    }
+                                    const original =
+                                      line.original_selling_price ?? 0;
+                                    const prefillRate =
+                                      line.exchange_rate ??
+                                      (settings?.today_exchange_rates[code]
+                                        ? Number(
+                                            settings.today_exchange_rates[
+                                              code
+                                            ],
+                                          )
+                                        : null);
                                     setLine(index, {
-                                      selling_price: Number(next) || 0,
+                                      currency_code: code,
+                                      original_selling_price: original,
+                                      exchange_rate: prefillRate,
+                                      selling_price:
+                                        prefillRate != null
+                                          ? previewKyatAmount(
+                                              original,
+                                              prefillRate,
+                                            )
+                                          : line.selling_price,
                                     });
                                   }}
-                                  error={
-                                    errors.order?.lines?.[index]?.selling_price
-                                      ?.message
-                                  }
+                                  className="w-full"
                                 />
+                                {line.currency_code &&
+                                isForeignCurrency(line.currency_code) ? (
+                                  <>
+                                    <CellInput
+                                      label={`Original price for product ${index + 1}`}
+                                      placeholder="Original price"
+                                      className="text-right"
+                                      value={String(
+                                        line.original_selling_price ?? "",
+                                      )}
+                                      onChange={(next) => {
+                                        const original = Number(next) || 0;
+                                        const rate = line.exchange_rate ?? 0;
+                                        setLine(index, {
+                                          original_selling_price: original,
+                                          selling_price: previewKyatAmount(
+                                            original,
+                                            rate,
+                                          ),
+                                        });
+                                      }}
+                                    />
+                                    <CellInput
+                                      label={`Exchange rate for product ${index + 1}`}
+                                      placeholder="Exchange rate"
+                                      className="text-right"
+                                      value={String(
+                                        line.exchange_rate ?? "",
+                                      )}
+                                      onChange={(next) => {
+                                        const rate = Number(next) || 0;
+                                        const original =
+                                          line.original_selling_price ?? 0;
+                                        setLine(index, {
+                                          exchange_rate: rate,
+                                          selling_price: previewKyatAmount(
+                                            original,
+                                            rate,
+                                          ),
+                                        });
+                                      }}
+                                    />
+                                    <span className="text-right text-[10px] text-text-muted tabular-nums">
+                                      = {formatKyat(line.selling_price)}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <Controller
+                                    control={control}
+                                    name={`order.lines.${index}.selling_price`}
+                                    render={({ field: priceField }) => (
+                                      <CellInput
+                                        label={`Selling price for product ${index + 1}`}
+                                        placeholder="0"
+                                        numeric
+                                        className="text-right"
+                                        value={String(priceField.value)}
+                                        onChange={(next) => {
+                                          priceField.onChange(
+                                            Number(next) || 0,
+                                          );
+                                          setLine(index, {
+                                            selling_price: Number(next) || 0,
+                                          });
+                                        }}
+                                        error={
+                                          errors.order?.lines?.[index]
+                                            ?.selling_price?.message
+                                        }
+                                      />
+                                    )}
+                                  />
+                                )}
+                              </div>
+                            </Td>
+                            <Td className="text-right tabular-nums font-medium whitespace-nowrap">
+                              {formatKyat(
+                                pricedAmount(line.quantity_pairs, line.unit, line.selling_price, line.unit_conversions),
                               )}
-                            />
-                          </Td>
-                          <Td className="text-right tabular-nums font-medium whitespace-nowrap">
-                            {formatKyat(line.quantity_pairs * line.selling_price)}
-                            <button
-                              type="button"
-                              onClick={() => removeLine(index)}
-                              title="Remove this product"
-                              aria-label={`Remove product ${index + 1}`}
-                              className={cn(
-                                "ml-2 p-1 rounded-md align-middle transition-colors duration-150",
-                                SOFT_RED,
-                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
-                              )}
-                            >
-                              <TrashIcon className="w-4 h-4" />
-                            </button>
-                          </Td>
-                        </Tr>
-                      );
-                    })}
-                    <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-                      <Td className="font-semibold" colSpan={3}>
-                        Total
-                      </Td>
-                      <Td className="text-right tabular-nums font-semibold">
-                        {sets(order.total_quantity_pairs)}
-                      </Td>
-                      <Td className="text-right tabular-nums font-semibold text-success">
-                        {sets(order.delivered_quantity_pairs)}
-                      </Td>
-                      <Td className="text-right tabular-nums font-semibold text-error">
-                        {sets(remainingQty(order))}
-                      </Td>
-                      <Td />
-                      <Td className="text-right tabular-nums font-semibold text-brand">
-                        {formatKyat(orderAmount(order))}
-                      </Td>
-                    </Tr>
-                  </Tbody>
-                </TableContainer>
-                <div className="mt-3">
-                  <Button size="sm" onClick={addLine}>
-                    <PlusIcon className="w-4 h-4" />
-                    Add product
-                  </Button>
-                  {addingLineId && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={cancelAddLine}
-                      className={cn(SOFT_RED, "ml-2")}
-                    >
-                      Cancel
+                              <button
+                                type="button"
+                                onClick={() => removeLine(index)}
+                                title="Remove this product"
+                                aria-label={`Remove product ${index + 1}`}
+                                className={cn(
+                                  "ml-2 p-1 rounded-md align-middle transition-colors duration-150",
+                                  SOFT_RED,
+                                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
+                                )}
+                              >
+                                <TrashIcon className="w-4 h-4" />
+                              </button>
+                            </Td>
+                          </Tr>
+                        );
+                      })}
+                      <Tr className="bg-bg-subtle hover:bg-bg-subtle">
+                        <Td className="font-semibold" colSpan={3}>
+                          Total
+                        </Td>
+                        <Td className="text-right tabular-nums font-semibold">
+                          {sets(order.total_quantity_pairs)}
+                        </Td>
+                        <Td className="text-right tabular-nums font-semibold text-success">
+                          {sets(order.delivered_quantity_pairs)}
+                        </Td>
+                        <Td className="text-right tabular-nums font-semibold text-error">
+                          {sets(remainingQty(order))}
+                        </Td>
+                        <Td />
+                        <Td className="text-right tabular-nums font-semibold text-brand">
+                          {formatKyat(orderAmount(order))}
+                        </Td>
+                      </Tr>
+                    </Tbody>
+                  </TableContainer>
+                  <div className="mt-3">
+                    <Button size="sm" onClick={addLine}>
+                      <PlusIcon className="w-4 h-4" />
+                      Add product
                     </Button>
-                  )}
-                </div>
-              </>
-            )}
-          </section>
-
-          <section>
-            <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-              <SectionLabel>Payment</SectionLabel>
-              <div className="w-full sm:w-64">
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-medium text-text-secondary">
-                    Paid so far
-                  </span>
-                  <span className="tabular-nums font-semibold text-text-primary">
-                    {formatKyat(paid)} / {formatKyat(amount)} ({paidShare}%)
-                  </span>
-                </div>
-                <div
-                  role="progressbar"
-                  aria-valuenow={paidShare}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-label="Paid so far"
-                  className="h-2 rounded-full bg-bg-raised overflow-hidden"
-                >
-                  <div
-                    className={cn(
-                      "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
-                      paidShare === 100 ? "bg-success" : "bg-warning",
+                    {addingLineId && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={cancelAddLine}
+                        className={cn(SOFT_RED, "ml-2")}
+                      >
+                        Cancel
+                      </Button>
                     )}
-                    style={{ width: String(paidShare) + "%" }}
-                  />
+                  </div>
+                </>
+              )}
+            </section>
+
+            <section>
+              <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+                <SectionLabel>Payment</SectionLabel>
+                <div className="w-full sm:w-64">
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="font-medium text-text-secondary">
+                      Paid so far
+                    </span>
+                    <span className="tabular-nums font-semibold text-text-primary">
+                      {formatKyat(paid)} / {formatKyat(amount)} ({paidShare}%)
+                    </span>
+                  </div>
+                  <div
+                    role="progressbar"
+                    aria-valuenow={paidShare}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label="Paid so far"
+                    className="h-2 rounded-full bg-bg-raised overflow-hidden"
+                  >
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
+                        paidShare === 100 ? "bg-success" : "bg-warning",
+                      )}
+                      style={{ width: String(paidShare) + "%" }}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
-            <PaymentsTable
-              payments={order.payment.payments}
-              balance={balance}
-              who="customer"
-              onAdd={addPayment}
-              onUpdate={(payment) => setPayment(payment.payment_id, payment)}
-              onRemove={removePayment}
-              readOnly={detailMode !== "edit"}
-            />
-          </section>
-        </div>
-      </Panel>
-    </div>
+              <PaymentsTable
+                payments={order.payment.payments}
+                balance={balance}
+                who="customer"
+                onAdd={addPayment}
+                onUpdate={(payment) => setPayment(payment.payment_id, payment)}
+                onRemove={removePayment}
+                readOnly={detailMode !== "edit"}
+              />
+            </section>
+          </div>
+        </Panel>
+      </div>
+      <WriteOffModal
+        open={writeOffLine !== null}
+        subject={
+          writeOffLine
+            ? `${order.order_no} · ${writeOffLine.stock_code}`
+            : "this order line"
+        }
+        remaining={writeOffLine ? lineRemaining(writeOffLine) : 0}
+        unit={writeOffLine?.unit ?? "pair"}
+        onClose={() => setWriteOffLine(null)}
+        onSubmit={(quantity, reason, note) =>
+          onWriteOff(writeOffLine!.order_line_id, quantity, reason, note)
+        }
+      />
+    </>
   );
 }
 
@@ -1977,7 +2386,12 @@ interface DraftLine {
   product_group: ProductGroup;
   supplier_name: string;
   color_breakdown: string;
+  unit: "pair" | "set" | "dozen";
+  unit_conversions: { pair: number; set: number; dozen: number };
   selling_price: string;
+  currency_code: CurrencyCode;
+  original_selling_price: string;
+  exchange_rate: string;
 }
 
 const draftLineSchema = z
@@ -1987,9 +2401,22 @@ const draftLineSchema = z
     product_group: z.enum(["man", "lady", "child"]),
     supplier_name: z.string(),
     color_breakdown: z.string(),
+    unit: z.enum(["pair", "set", "dozen"]),
+    unit_conversions: z.object({
+      pair: z.number().int().positive(),
+      set: z.number().int().positive(),
+      dozen: z.number().int().positive(),
+    }),
     selling_price: z
       .string()
       .regex(/^\d*$/, "Selling price can only contain numbers."),
+    currency_code: z.enum(["MMK", "THB", "USD"]),
+    original_selling_price: z
+      .string()
+      .regex(/^\d*\.?\d*$/, "Original price can only contain numbers."),
+    exchange_rate: z
+      .string()
+      .regex(/^\d*\.?\d*$/, "Exchange rate can only contain numbers."),
   })
   .superRefine((line, context) => {
     const hasProductDetails =
@@ -2025,6 +2452,25 @@ const draftLineSchema = z
         message: "Enter colors and quantities.",
       });
     }
+    if (line.currency_code !== "MMK") {
+      if (line.original_selling_price.trim() === "") {
+        context.addIssue({
+          code: "custom",
+          path: ["original_selling_price"],
+          message: "Enter the original price.",
+        });
+      }
+      if (
+        line.exchange_rate.trim() === "" ||
+        Number(line.exchange_rate) <= 0
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["exchange_rate"],
+          message: "Enter an exchange rate greater than zero.",
+        });
+      }
+    }
   });
 
 const customerOrderFormSchema = z
@@ -2055,8 +2501,7 @@ interface CustomerOrderFormValues {
 
 /** The pairs one drafted row comes to: its colors read in its own unit. */
 function draftPairs(line: DraftLine): number {
-  // A colour with no letter of its own is counted in sets.
-  return colorQtyPairs(line.color_breakdown, "set");
+  return colorQtyPairs(line.color_breakdown, line.unit, line.unit_conversions);
 }
 
 const EMPTY_LINE: DraftLine = {
@@ -2065,7 +2510,12 @@ const EMPTY_LINE: DraftLine = {
   product_group: "man",
   supplier_name: "",
   color_breakdown: "",
+  unit: "set",
+  unit_conversions: PAIRS_PER,
   selling_price: "",
+  currency_code: DEFAULT_CURRENCY,
+  original_selling_price: "",
+  exchange_rate: "",
 };
 
 const STEPS = ["Customer", "Products", "Review"] as const;
@@ -2205,10 +2655,12 @@ function CustomerPicker({
 
 function NewOrderForm({
   nextOrderNo: orderNo,
+  settings,
   onCancel,
   onCreate,
 }: {
   nextOrderNo: string;
+  settings: AppSettings | null;
   onCancel: () => void;
   onCreate: (order: CustomerOrder) => void;
 }): React.JSX.Element {
@@ -2247,7 +2699,7 @@ function NewOrderForm({
   const filledLines = lines.filter((line) => line.stock_code.trim() !== "");
   const totalQty = filledLines.reduce((sum, line) => sum + draftPairs(line), 0);
   const totalAmount = filledLines.reduce(
-    (sum, line) => sum + draftPairs(line) * (Number(line.selling_price) || 0),
+    (sum, line) => sum + pricedAmount(draftPairs(line), line.unit, Number(line.selling_price) || 0, line.unit_conversions),
     0,
   );
   // Picking a customer already known fills in their phone and address rather than making
@@ -2281,6 +2733,14 @@ function NewOrderForm({
       setValue(`lines.${index}.product_group`, known.product_group, {
         shouldDirty: true,
       });
+      setValue(`lines.${index}.unit`, known.default_unit, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+      setValue(`lines.${index}.unit_conversions`, known.default_unit_conversions ?? PAIRS_PER, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
     }
   }
 
@@ -2290,6 +2750,44 @@ function NewOrderForm({
       return;
     }
     remove(index);
+  }
+
+  // Picking a currency for a draft line: MMK clears the foreign-currency fields back
+  // to nothing; any other currency prefills the exchange rate from Settings' current
+  // rate (only ever a prefill — the field stays editable) and, once both an original
+  // price and a rate exist, keeps selling_price (the Kyat figure everything else on
+  // this form reads) in step with their product.
+  function setLineCurrency(index: number, code: CurrencyCode): void {
+    setValue(`lines.${index}.currency_code`, code, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    if (code === "MMK") {
+      setValue(`lines.${index}.original_selling_price`, "", {
+        shouldDirty: true,
+      });
+      setValue(`lines.${index}.exchange_rate`, "", { shouldDirty: true });
+      return;
+    }
+    const current = lines[index];
+    const rate =
+      current?.exchange_rate ||
+      settings?.today_exchange_rates[code] ||
+      "";
+    setValue(`lines.${index}.exchange_rate`, rate, { shouldDirty: true });
+    recomputeForeignPrice(index, current?.original_selling_price ?? "", rate);
+  }
+
+  function recomputeForeignPrice(
+    index: number,
+    original: string,
+    rate: string,
+  ): void {
+    const preview = previewKyatAmount(Number(original) || 0, Number(rate) || 0);
+    setValue(`lines.${index}.selling_price`, String(preview), {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
   }
 
   async function moveToProducts(): Promise<void> {
@@ -2311,7 +2809,8 @@ function NewOrderForm({
     if (colorProblem >= 0) {
       setError(`lines.${colorProblem}.color_breakdown`, {
         type: "validate",
-        message: colorQtyProblem(lines[colorProblem].color_breakdown) ?? undefined,
+        message:
+          colorQtyProblem(lines[colorProblem].color_breakdown) ?? undefined,
       });
     }
     const duplicateStockCode = lines.findIndex(
@@ -2352,11 +2851,19 @@ function NewOrderForm({
         product_group: line.product_group,
         supplier_name: line.supplier_name.trim() || "—",
         color_breakdown: line.color_breakdown.trim(),
-        unit: "set",
+        unit: line.unit,
+        unit_conversions: line.unit_conversions,
         quantity_pairs: draftPairs(line),
         // Nothing has been given to the customer at the moment an order is written down.
         delivered_quantity_pairs: 0,
         selling_price: Number(line.selling_price) || 0,
+        currency_code: line.currency_code,
+        original_selling_price: isForeignCurrency(line.currency_code)
+          ? Number(line.original_selling_price) || 0
+          : null,
+        exchange_rate: isForeignCurrency(line.currency_code)
+          ? Number(line.exchange_rate) || 0
+          : null,
       }));
     onCreate({
       order_id: `co-${now}`,
@@ -2365,7 +2872,10 @@ function NewOrderForm({
       customer_phone: values.customer_phone.trim(),
       customer_address: values.customer_address.trim(),
       order_date: values.order_date,
-      total_quantity_pairs: orderLines.reduce((sum, line) => sum + line.quantity_pairs, 0),
+      total_quantity_pairs: orderLines.reduce(
+        (sum, line) => sum + line.quantity_pairs,
+        0,
+      ),
       delivered_quantity_pairs: 0,
       order_status: "new",
       // Nothing has been paid at the moment an order is written down, so the account
@@ -2472,11 +2982,32 @@ function NewOrderForm({
                 {fields.map((field, index) => {
                   const line = lines[index] ?? EMPTY_LINE;
                   const lineQty = draftPairs(line);
-                  const lineAmount =
-                    lineQty * (Number(line.selling_price) || 0);
+                  const lineAmount = pricedAmount(
+                    lineQty,
+                    line.unit,
+                    Number(line.selling_price) || 0,
+                    line.unit_conversions,
+                  );
                   return (
                     <Tr key={field.id}>
                       <Td>
+                        <Controller
+                          control={control}
+                          name={`lines.${index}.unit`}
+                          render={({ field: unitField }) => (
+                            <Select
+                              aria-label={`Default unit for product ${index + 1}`}
+                              className={EDITABLE}
+                              {...unitField}
+                            >
+                              {UNITS.map((unit) => (
+                                <option key={unit} value={unit}>
+                                  {UNIT_LABELS[unit]}
+                                </option>
+                              ))}
+                            </Select>
+                          )}
+                        />
                         <Controller
                           control={control}
                           name={`lines.${index}.supplier_name`}
@@ -2565,7 +3096,8 @@ function NewOrderForm({
                               value={colorField.value}
                               onChange={colorField.onChange}
                               error={
-                                errors.lines?.[index]?.color_breakdown?.message ??
+                                errors.lines?.[index]?.color_breakdown
+                                  ?.message ??
                                 colorQtyProblem(line.color_breakdown) ??
                                 undefined
                               }
@@ -2574,31 +3106,104 @@ function NewOrderForm({
                         />
                         <span className="mt-1 block text-xs text-text-muted">
                           {lineQty > 0
-                            ? sets(lineQty)
+                            ? formatIn(lineQty, line.unit, line.unit_conversions)
                             : "Every color needs a unit — s sets, p pairs, d dozens"}
                         </span>
                       </Td>
                       <Td className="text-right tabular-nums font-medium whitespace-nowrap">
-                        {sets(lineQty)}
+                        {formatIn(lineQty, line.unit, line.unit_conversions)}
                       </Td>
                       <Td>
-                        <Controller
-                          control={control}
-                          name={`lines.${index}.selling_price`}
-                          render={({ field: priceField }) => (
-                            <CellInput
-                              label={`Selling price for product ${index + 1}`}
-                              placeholder="0"
-                              numeric
-                              className="text-right"
-                              value={priceField.value}
-                              onChange={priceField.onChange}
-                              error={
-                                errors.lines?.[index]?.selling_price?.message
-                              }
+                        <div className="flex flex-col gap-1">
+                          <CurrencySelect
+                            label={`Currency for product ${index + 1}`}
+                            value={line.currency_code || DEFAULT_CURRENCY}
+                            onChange={(code) => setLineCurrency(index, code)}
+                            className="w-full"
+                          />
+                          {isForeignCurrency(line.currency_code) ? (
+                            <>
+                              <Controller
+                                control={control}
+                                name={`lines.${index}.original_selling_price`}
+                                render={({ field: originalField }) => (
+                                  <CellInput
+                                    label={`Original price for product ${index + 1}`}
+                                    placeholder="Original price"
+                                    className="text-right"
+                                    value={originalField.value}
+                                    onChange={(next) => {
+                                      const filtered = next.replace(
+                                        /[^0-9.]/g,
+                                        "",
+                                      );
+                                      originalField.onChange(filtered);
+                                      recomputeForeignPrice(
+                                        index,
+                                        filtered,
+                                        line.exchange_rate,
+                                      );
+                                    }}
+                                    error={
+                                      errors.lines?.[index]
+                                        ?.original_selling_price?.message
+                                    }
+                                  />
+                                )}
+                              />
+                              <Controller
+                                control={control}
+                                name={`lines.${index}.exchange_rate`}
+                                render={({ field: rateField }) => (
+                                  <CellInput
+                                    label={`Exchange rate for product ${index + 1}`}
+                                    placeholder="Exchange rate"
+                                    className="text-right"
+                                    value={rateField.value}
+                                    onChange={(next) => {
+                                      const filtered = next.replace(
+                                        /[^0-9.]/g,
+                                        "",
+                                      );
+                                      rateField.onChange(filtered);
+                                      recomputeForeignPrice(
+                                        index,
+                                        line.original_selling_price,
+                                        filtered,
+                                      );
+                                    }}
+                                    error={
+                                      errors.lines?.[index]?.exchange_rate
+                                        ?.message
+                                    }
+                                  />
+                                )}
+                              />
+                              <span className="text-right text-[10px] text-text-muted tabular-nums">
+                                = {formatKyat(Number(line.selling_price) || 0)}
+                              </span>
+                            </>
+                          ) : (
+                            <Controller
+                              control={control}
+                              name={`lines.${index}.selling_price`}
+                              render={({ field: priceField }) => (
+                                <CellInput
+                                  label={`Selling price for product ${index + 1}`}
+                                  placeholder="0"
+                                  numeric
+                                  className="text-right"
+                                  value={priceField.value}
+                                  onChange={priceField.onChange}
+                                  error={
+                                    errors.lines?.[index]?.selling_price
+                                      ?.message
+                                  }
+                                />
+                              )}
                             />
                           )}
-                        />
+                        </div>
                       </Td>
                       <Td className="text-right tabular-nums font-medium whitespace-nowrap">
                         {formatKyat(lineAmount)}
@@ -2720,9 +3325,14 @@ function NewOrderForm({
                       <Td className="text-right tabular-nums">{sets(qty)}</Td>
                       <Td className="text-right tabular-nums text-text-secondary">
                         {formatKyat(Number(line.selling_price) || 0)}
+                        <CurrencyNote
+                          currency_code={line.currency_code}
+                          original_amount={Number(line.original_selling_price) || 0}
+                          exchange_rate={Number(line.exchange_rate) || 0}
+                        />
                       </Td>
                       <Td className="text-right tabular-nums font-medium">
-                        {formatKyat(qty * (Number(line.selling_price) || 0))}
+                        {formatKyat(pricedAmount(qty, line.unit, Number(line.selling_price) || 0, line.unit_conversions))}
                       </Td>
                     </Tr>
                   );

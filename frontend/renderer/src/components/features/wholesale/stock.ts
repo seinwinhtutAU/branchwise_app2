@@ -11,8 +11,8 @@
 // the unit the gate counts in. One storage unit is what lets a customer's order in pairs
 // and a package counted in sets be compared at all.
 //
-// Front-end only: no backend, so the outgoing movements below are seed data and anything
-// recorded lives until the window reloads.
+// The movement helpers remain as the Movement tab's compatibility layer and as the
+// weak-connection fallback while the server-computed Stock Records response loads.
 
 import { parseColorQty } from "./shared";
 import {
@@ -21,7 +21,7 @@ import {
   type CustomerOrderLine,
 } from "./customerOrders";
 import { type Receiving } from "./receivings";
-import { PAIRS_PER, toPairs, type Unit } from "./units";
+import { PAIRS_PER, toPairs, type Unit, type UnitConversions } from "./units";
 import { type ProductGroup } from "./products";
 
 export type MovementKind = "in" | "out";
@@ -41,6 +41,8 @@ export interface StockMovement {
   /** Always in pairs, whatever unit it was typed in — the one figure every screen
    *  agrees on. */
   quantity_pairs: number;
+  /** Rate map captured by the source receiving or delivery transaction. */
+  unit_conversions?: UnitConversions;
   location: string;
   moved_on: string;
   /** Where it came from or went to — a receiving no. or a customer order no. */
@@ -69,16 +71,60 @@ export interface StockLine {
   color_quantities_pairs: ColorPairs;
 }
 
+export interface StockRecordLocation {
+  location: string;
+  on_hand_pairs: number;
+  colors: string;
+  last_moved_on: string | null;
+}
+
+/** One product across the whole wholesale pipeline. The backend is the source of
+ * truth for these figures; the legacy StockLine model remains for the Movement tab
+ * and the offline fallback. */
+export interface StockRecord {
+  stock_code: string;
+  description: string;
+  product_group: ProductGroup;
+  on_hand_pairs: number;
+  allocated_pairs: number;
+  available_pairs: number;
+  at_supplier_pairs: number;
+  in_transit_pairs: number;
+  incoming_pairs: number;
+  customer_ordered_pairs: number;
+  owed_to_customers_pairs: number;
+  delivered_pairs: number;
+  lost_pairs: number;
+  received_today_pairs?: number;
+  delivered_today_pairs?: number;
+  lost_today_pairs?: number;
+  colors: string;
+  color_quantities_pairs: ColorPairs;
+  locations: StockRecordLocation[];
+  sources: string[];
+  voucher_nos: string[];
+  shipment_nos: string[];
+  order_nos: string[];
+  receiving_nos: string[];
+  status: string;
+  last_activity_on: string | null;
+  has_receiving_history: boolean;
+}
+
 function colorKey(color: string): string {
   return color.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-export function colorPairsForText(text: string, rowUnit: Unit): ColorPairs {
+export function colorPairsForText(
+  text: string,
+  rowUnit: Unit,
+  conversions: UnitConversions = PAIRS_PER,
+): ColorPairs {
   const pairs: ColorPairs = {};
   for (const entry of parseColorQty(text)) {
     const color = colorKey(entry.color);
     if (!color || entry.qty <= 0) continue;
-    pairs[color] = (pairs[color] ?? 0) + toPairs(entry.qty, entry.unit ?? rowUnit);
+    pairs[color] = (pairs[color] ?? 0) + toPairs(entry.qty, entry.unit ?? rowUnit, conversions);
   }
   return pairs;
 }
@@ -96,7 +142,7 @@ export function colorPairsForOrder(
 }
 
 function colorPairsForLine(line: CustomerOrderLine): ColorPairs {
-  return colorPairsForText(line.color_breakdown, line.unit);
+  return colorPairsForText(line.color_breakdown, line.unit, line.unit_conversions);
 }
 
 export function colorPairsForMovements(
@@ -107,7 +153,7 @@ export function colorPairsForMovements(
     .filter(predicate)
     .reduce(
       (pairs, movement) =>
-        mergeColorPairs(pairs, colorPairsForText(movement.color_breakdown, "set")),
+        mergeColorPairs(pairs, colorPairsForText(movement.color_breakdown, "set", movement.unit_conversions)),
       {},
     );
 }
@@ -136,7 +182,8 @@ export function incomingMovements(receivings: Receiving[]): StockMovement[] {
           description: item.description,
           product_group: item.product_group,
           color_breakdown: item.color_breakdown,
-          quantity_pairs: toPairs(item.quantity, item.unit),
+          quantity_pairs: toPairs(item.quantity, item.unit, item.unit_conversions ?? PAIRS_PER),
+          unit_conversions: item.unit_conversions ?? PAIRS_PER,
           location: receiving.gate,
           moved_on: entry.received_on || receiving.received_on,
           reference: receiving.receiving_no,

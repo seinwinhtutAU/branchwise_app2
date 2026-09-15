@@ -31,6 +31,7 @@ import {
   type ReceivingWire,
 } from "@renderer/components/features/wholesale/api";
 import {
+  formatDate,
   formatKyat,
   todayIso,
 } from "@renderer/components/features/wholesale/shared";
@@ -40,6 +41,7 @@ import {
   voucherBalance,
   type SupplierVoucher,
 } from "@renderer/components/features/wholesale/supplierVouchers";
+import { pricedAmount } from "@renderer/components/features/wholesale/units";
 
 interface FinanceCustomerRow {
   order_id: string;
@@ -83,6 +85,7 @@ interface PaymentTarget {
 
 interface ShipmentCostRow {
   id: string;
+  costDate: string;
   receivingNo: string;
   shipmentNo: string;
   supplierName: string;
@@ -152,7 +155,8 @@ export default function FinancePage({
     () =>
       (supplierQuery.data ?? []).map((voucher) => {
         const totalAmount = voucher.lines.reduce(
-          (sum, line) => sum + line.quantity_pairs * line.buying_price,
+          (sum, line) =>
+            sum + pricedAmount(line.quantity_pairs, line.unit, line.buying_price, line.unit_conversions),
           0,
         );
         return {
@@ -170,6 +174,7 @@ export default function FinancePage({
       (receivingQuery.data ?? []).flatMap((receiving) =>
         receiving.costs.map((cost) => ({
           id: `${receiving.receiving_id}-${cost.cost_id}`,
+          costDate: cost.cost_date,
           receivingNo: receiving.receiving_no,
           shipmentNo: receiving.shipment_no,
           supplierName: receiving.supplier_name,
@@ -188,6 +193,10 @@ export default function FinancePage({
   );
   const totalSupplierPayable = suppliers.reduce(
     (sum, row) => sum + row.balance,
+    0,
+  );
+  const totalShipmentCost = shipmentCosts.reduce(
+    (sum, row) => sum + row.amount,
     0,
   );
   const queryText = search.trim().toLowerCase();
@@ -256,7 +265,7 @@ export default function FinancePage({
           Refresh
         </Button>
       </div>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <MoneyCard
           label="Total Customer Receivable"
           value={formatKyat(totalCustomerReceivable)}
@@ -264,6 +273,10 @@ export default function FinancePage({
         <MoneyCard
           label="Total Supplier Payable"
           value={formatKyat(totalSupplierPayable)}
+        />
+        <MoneyCard
+          label="Total Shipment Cost"
+          value={formatKyat(totalShipmentCost)}
         />
       </div>
       <div className="flex border-b border-border">
@@ -672,6 +685,7 @@ function ShipmentCostTable({
           <Thead>
             <Tr>
               <Th>Receiving</Th>
+              <Th>Date</Th>
               <Th>Shipment</Th>
               <Th>Supplier</Th>
               <Th>Stage</Th>
@@ -685,6 +699,9 @@ function ShipmentCostTable({
             {rows.map((row) => (
               <Tr key={row.id}>
                 <Td className="font-semibold text-brand">{row.receivingNo}</Td>
+                <Td className="whitespace-nowrap">
+                  {row.costDate ? formatDate(row.costDate) : "—"}
+                </Td>
                 <Td>{row.shipmentNo}</Td>
                 <Td className="font-medium">{row.supplierName}</Td>
                 <Td>{row.stage}</Td>
@@ -699,7 +716,7 @@ function ShipmentCostTable({
           </Tbody>
           <tfoot>
             <Tr className="bg-bg-subtle">
-              <Td colSpan={6} className="text-right font-semibold">
+              <Td colSpan={7} className="text-right font-semibold">
                 Total
               </Td>
               <Td className="text-right font-bold tabular-nums whitespace-nowrap">

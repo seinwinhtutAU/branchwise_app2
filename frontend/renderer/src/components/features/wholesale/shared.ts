@@ -4,9 +4,28 @@
 
 /** The ERD's payment_account.payment_status. Worked out from what has actually been
  *  paid rather than stored, so a badge can never disagree with the figures beside it. */
-import { fromPairs, toPairs, type Unit } from "./units";
+import { fromPairs, PAIRS_PER, toPairs, type Unit, type UnitConversions } from "./units";
 
 export type PaymentStatus = "unpaid" | "partial" | "paid";
+
+export const WRITE_OFF_REASON_LABELS: Record<string, string> = {
+  lost_in_transit: "lost in transit",
+  damaged: "damaged",
+  short_shipped: "short-shipped",
+  other: "other",
+  repackaged: "repackaged",
+};
+
+export function mismatchDescription(entry: {
+  reason: string;
+  quantity: number;
+  note: string;
+}): string {
+  if (entry.reason === "repackaged") {
+    return entry.note || `Recounted to ${formatQty(entry.quantity)} packages`;
+  }
+  return `${formatQty(entry.quantity)} written off — ${WRITE_OFF_REASON_LABELS[entry.reason] ?? entry.reason}`;
+}
 
 export function paymentStatusOf(total: number, paid: number): PaymentStatus {
   if (paid <= 0) return "unpaid";
@@ -95,9 +114,13 @@ export function colorQtyProblem(text: string): string | null {
 /** What a colour line comes to in pairs. Every saved colour carries its own letter; a
  *  colour halfway through being typed falls back to the row's unit so the running total
  *  still shows something. */
-export function colorQtyPairs(text: string, rowUnit: Unit): number {
+export function colorQtyPairs(
+  text: string,
+  rowUnit: Unit,
+  conversions: UnitConversions = PAIRS_PER,
+): number {
   return parseColorQty(text).reduce(
-    (sum, entry) => sum + toPairs(entry.qty, entry.unit ?? rowUnit),
+    (sum, entry) => sum + toPairs(entry.qty, entry.unit ?? rowUnit, conversions),
     0,
   );
 }

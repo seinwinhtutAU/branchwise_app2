@@ -12,7 +12,7 @@
 // only as a fallback for the wholesale screens that have not yet moved off the store.
 
 import { sharePct } from "./shared";
-import { toPairs, type Unit } from "./units";
+import { PAIRS_PER, toPairs, type Unit, type UnitConversions } from "./units";
 import { type ProductGroup } from "./products";
 
 export type ReceivingStatus = "recorded" | "checking" | "checked" | "issue";
@@ -40,6 +40,7 @@ export interface ReceivingItem {
   /** Normalized quantity used for stock calculations when this came from the API. */
   quantity_pairs?: number;
   unit: Unit;
+  unit_conversions?: UnitConversions;
 }
 
 /** One physical box. A package nobody has opened yet has no contents recorded at all,
@@ -60,7 +61,7 @@ export interface ReceivingPackage {
  *  in. Pairs are the one thing every screen agrees on. */
 export function packagePairs(entry: ReceivingPackage): number {
   return entry.items.reduce(
-    (sum, item) => sum + toPairs(item.quantity, item.unit),
+    (sum, item) => sum + toPairs(item.quantity, item.unit, item.unit_conversions ?? PAIRS_PER),
     0,
   );
 }
@@ -74,6 +75,7 @@ export function emptyItem(seed: string, unit: Unit = "set"): ReceivingItem {
     color_breakdown: "",
     quantity: 0,
     unit,
+    unit_conversions: PAIRS_PER,
   };
 }
 
@@ -87,6 +89,8 @@ export function emptyItem(seed: string, unit: Unit = "set"): ReceivingItem {
  *  business never agreed. */
 export interface ReceivingCost {
   cost_id: string;
+  /** The day this charge was paid or incurred. */
+  cost_date: string;
   /** Where it was spent — the cargo company, one of the destinations, or the gate. */
   stage: string;
   /** Who was paid — the cargo company, the driver on that leg, the porters at the gate.
@@ -94,7 +98,15 @@ export interface ReceivingCost {
   carrier: string;
   /** What the money was for — carrier fee, porters, handling, a second trip. */
   kind: string;
+  /** Always the Kyat amount, whatever currency this charge was actually paid in. */
   amount: number;
+  /** "MMK" unless this charge was paid in a foreign currency — see ./currency.ts. */
+  currency_code?: string;
+  /** The amount before conversion, only present for a non-MMK currency_code. */
+  original_amount?: number | null;
+  /** The exchange rate this charge was saved at — a fixed snapshot, only present for a
+   *  non-MMK currency_code. Never re-derived from "today's" rate after saving. */
+  exchange_rate?: number | null;
   note: string;
 }
 
@@ -135,9 +147,14 @@ export function totalCost(receiving: Receiving): number {
   return receiving.costs.reduce((sum, cost) => sum + cost.amount, 0);
 }
 
-export function emptyCost(seed: string, stage = ""): ReceivingCost {
+export function emptyCost(
+  seed: string,
+  stage = "",
+  cost_date = "",
+): ReceivingCost {
   return {
     cost_id: `ac-${seed}-${Math.random().toString(36).slice(2, 8)}`,
+    cost_date,
     stage,
     carrier: "",
     kind: "",
@@ -261,6 +278,7 @@ export const SEED_RECEIVINGS: Receiving[] = [
     costs: [
       {
         cost_id: "ac-1-1",
+        cost_date: "2026-09-08",
         stage: "Shwe Moe Cargo",
         carrier: "Shwe Moe Cargo",
         kind: "Cargo fee",
@@ -269,6 +287,7 @@ export const SEED_RECEIVINGS: Receiving[] = [
       },
       {
         cost_id: "ac-1-2",
+        cost_date: "2026-09-08",
         stage: "Yangon",
         carrier: "U Hla Myint",
         kind: "Carrier fee",
@@ -277,6 +296,7 @@ export const SEED_RECEIVINGS: Receiving[] = [
       },
       {
         cost_id: "ac-1-3",
+        cost_date: "2026-09-08",
         stage: "Bogyoke Rd, Mawlamyine",
         carrier: "Gate porters",
         kind: "Porters",
@@ -415,6 +435,7 @@ export const SEED_RECEIVINGS: Receiving[] = [
     costs: [
       {
         cost_id: "ac-2-1",
+        cost_date: "2026-09-04",
         stage: "Ayar Cargo",
         carrier: "Ayar Cargo",
         kind: "Cargo fee",
@@ -458,6 +479,7 @@ export const SEED_RECEIVINGS: Receiving[] = [
     costs: [
       {
         cost_id: "ac-3-1",
+        cost_date: "2026-09-09",
         stage: "Shwe Moe Cargo",
         carrier: "Shwe Moe Cargo",
         kind: "Cargo fee",

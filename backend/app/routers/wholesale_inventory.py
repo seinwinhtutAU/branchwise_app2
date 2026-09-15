@@ -7,6 +7,7 @@ from app.core.security import get_current_app_user
 from app.db.session import get_db
 from app.models.user import User, UserRole
 from app.schemas.wholesale_inventory import DeliveryBatchIn, DeliveryIn, DeliveryUpdate
+from app.schemas.wholesale_stock_records import StockRecord
 from app.services.wholesale.inventory import (
     create_delivery_batch,
     create_delivery,
@@ -15,6 +16,7 @@ from app.services.wholesale.inventory import (
     outgoing_movements,
     update_delivery,
 )
+from app.services.wholesale.stock_records import stock_records
 
 router = APIRouter(prefix="/api/wholesale/inventory", tags=["wholesale"])
 
@@ -53,12 +55,54 @@ def list_inventory(
     return rows[start : start + page_size]
 
 
+@router.get("/stock", response_model=list[StockRecord])
+def list_stock_records(
+    search: Annotated[str, Query(max_length=100)] = "",
+    location: Annotated[str | None, Query(max_length=255)] = None,
+    status: Annotated[str | None, Query()] = None,
+    source: Annotated[str | None, Query()] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 100,
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+    response: Response = None,
+) -> list[dict]:
+    _require_wholesale(user)
+    rows = stock_records(db, user.branch_id)
+    query = search.strip().casefold()
+    if query:
+        rows = [
+            row for row in rows
+            if query in row["stock_code"].casefold()
+            or query in row["description"].casefold()
+            or query in row["colors"].casefold()
+            or any(query in entry["location"].casefold() for entry in row["locations"])
+            or any(query in reference.casefold() for key in ("voucher_nos", "shipment_nos", "order_nos", "receiving_nos") for reference in row[key])
+        ]
+    if location:
+        rows = [row for row in rows if any(entry["location"] == location for entry in row["locations"])]
+    if status:
+        rows = [row for row in rows if row["status"] == status]
+    if source:
+        rows = [row for row in rows if source in row["sources"]]
+    rows.sort(key=lambda row: row["stock_code"].casefold())
+    response.headers["X-Total-Count"] = str(len(rows))
+    start = (page - 1) * page_size
+    return rows[start : start + page_size]
+
+
 @router.get("/movements/{stock_code}")
-def list_product_movements(stock_code: str, location: str, user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> list[dict]:
+def list_product_movements(
+    stock_code: str,
+    location: Annotated[str | None, Query(max_length=255)] = None,
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
     _require_wholesale(user)
     return [
         movement for movement in movements(db, user.branch_id)
-        if movement["stock_code"] == stock_code and movement["location"] == location
+        if movement["stock_code"] == stock_code
+        and (location is None or movement["location"] == location)
     ]
 
 

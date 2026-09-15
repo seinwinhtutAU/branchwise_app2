@@ -14,8 +14,8 @@ the two copies.
 import re
 from dataclasses import dataclass
 
+from fastapi import HTTPException, status
 from app.models.wholesale import WholesaleUnit
-from app.services.wholesale.units import to_pairs
 
 UNIT_LETTERS: dict[str, WholesaleUnit] = {
     "p": WholesaleUnit.PAIR,
@@ -93,21 +93,43 @@ def color_qty_problem(text: str) -> str | None:
     return None
 
 
-def color_qty_pairs(text: str, row_unit: WholesaleUnit) -> int:
+def conversion_rates(conversions: dict[str, int] | None) -> dict[str, int]:
+    """Validate the immutable conversion snapshot carried by a saved line."""
+    rates = conversions or {"pair": 1, "set": 6, "dozen": 12}
+    required = {unit.value for unit in WholesaleUnit}
+    if (
+        set(rates) != required
+        or rates.get("pair") != 1
+        or any(not isinstance(value, int) or value <= 0 for value in rates.values())
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Unit conversions must define positive whole-pair rates for pair, set and dozen, with pair equal to 1",
+        )
+    return rates
+
+
+def color_qty_pairs(text: str, row_unit: WholesaleUnit, conversions: dict[str, int] | None = None) -> int:
     """What a colour line comes to in pairs. Every saved colour carries its own letter;
     a colour halfway through being typed falls back to the row's unit so a running total
     still shows something."""
-    return sum(to_pairs(entry.qty, entry.unit or row_unit) for entry in parse_color_qty(text))
+    rates = conversion_rates(conversions)
+    return sum(entry.qty * rates[(entry.unit or row_unit).value] for entry in parse_color_qty(text))
 
 
-def color_qty_pairs_by_color(text: str, row_unit: WholesaleUnit) -> dict[str, int]:
+def color_qty_pairs_by_color(
+    text: str,
+    row_unit: WholesaleUnit,
+    conversions: dict[str, int] | None = None,
+) -> dict[str, int]:
     """Returns the pair count for each normalized colour in a shorthand value."""
+    rates = conversion_rates(conversions)
     pairs: dict[str, int] = {}
     for entry in parse_color_qty(text):
         color = " ".join(entry.color.split()).casefold()
         if not color or entry.qty <= 0:
             continue
-        pairs[color] = pairs.get(color, 0) + to_pairs(entry.qty, entry.unit or row_unit)
+        pairs[color] = pairs.get(color, 0) + entry.qty * rates[(entry.unit or row_unit).value]
     return pairs
 
 

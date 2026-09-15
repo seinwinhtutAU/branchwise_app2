@@ -40,6 +40,7 @@ class ReceivingItemIn(BaseModel):
     color_breakdown: str = ""
     quantity: int = Field(ge=0, default=0)
     unit: WholesaleUnit = WholesaleUnit.SET
+    unit_conversions: dict[str, int] = Field(default_factory=lambda: {"pair": 1, "set": 6, "dozen": 12})
 
 
 class PackageUpdate(BaseModel):
@@ -54,8 +55,16 @@ class PackageUpdate(BaseModel):
 
 
 class ReceivingCostIn(BaseModel):
+    cost_date: date
     stage: str = ""
     carrier: str = ""
     kind: str = ""
-    amount: float = Field(ge=0, default=0)
+    # MMK (the default): amount is the Kyat charge, typed directly. Any other
+    # currency_code: original_amount/exchange_rate are required instead, and amount (if
+    # sent at all) is ignored — the server computes the Kyat amount from them. See
+    # app/services/wholesale/currency.py::resolve_money.
+    currency_code: str = Field(default="MMK", min_length=3, max_length=3)
+    amount: float | None = Field(default=None, ge=0)
+    original_amount: float | None = Field(default=None, ge=0)
+    exchange_rate: float | None = Field(default=None, gt=0)
     note: str = ""

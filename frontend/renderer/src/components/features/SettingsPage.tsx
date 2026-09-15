@@ -23,6 +23,7 @@ import {
 } from "@renderer/components/ui/Table";
 import { ThemeSwitcher } from "@renderer/components/ui/ThemeSwitcher";
 import type { Profile } from "@renderer/components/features/types";
+import { FOREIGN_CURRENCIES } from "@renderer/components/features/wholesale/currency";
 
 interface Props {
   session: Session;
@@ -161,6 +162,53 @@ function NumberField({
   );
 }
 
+// An exchange rate is typed and stored as a decimal string, never rounded through
+// Number the way NumberField's other settings are — a wholesale order/voucher line
+// keeps whatever precision was saved here, and re-parsing it through a float would
+// silently lose digits off a rate like "120.123456789012".
+function RateField({
+  label,
+  value,
+  disabled,
+  onCommit,
+}: {
+  label: string;
+  value: string | undefined;
+  disabled: boolean;
+  onCommit: (value: string) => void;
+}): React.JSX.Element {
+  const [draft, setDraft] = useState(value ?? "");
+  useEffect(() => {
+    setDraft(value ?? "");
+  }, [value]);
+
+  function commit(): void {
+    const trimmed = draft.trim();
+    const parsed = Number(trimmed);
+    if (trimmed !== "" && Number.isFinite(parsed) && parsed > 0) {
+      if (trimmed !== value) onCommit(trimmed);
+    } else {
+      setDraft(value ?? "");
+    }
+  }
+
+  return (
+    <Input
+      type="text"
+      inputMode="decimal"
+      label={label}
+      hint="MMK per 1 unit"
+      value={draft}
+      disabled={disabled}
+      onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ""))}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+      }}
+    />
+  );
+}
+
 const HEALTH_WEIGHT_FIELDS: {
   key: keyof BranchHealthWeights;
   label: string;
@@ -240,7 +288,13 @@ const WARNING_THRESHOLD_FIELDS: {
   },
 ];
 
-type SettingsTab = "general" | "checks" | "pricing" | "health" | "branches";
+type SettingsTab =
+  | "general"
+  | "checks"
+  | "pricing"
+  | "health"
+  | "branches"
+  | "wholesale";
 
 // Ten stacked cards was one long scroll with no shape to it, so related settings are
 // grouped and the groups are tabs — same pill control the Dashboard and Import Overview
@@ -255,6 +309,7 @@ const SETTINGS_TABS: {
   { id: "pricing", label: "Buying price" },
   { id: "health", label: "Branch health", retailOnly: true },
   { id: "branches", label: "Branches" },
+  { id: "wholesale", label: "Wholesale" },
 ];
 
 function SettingsTabBar({
@@ -837,6 +892,38 @@ export function SettingsPage({
               </Tbody>
             </TableContainer>
           )}
+        </Card>
+      )}
+
+      {isAdmin && tab === "wholesale" && (
+        <Card>
+          <CardHeader
+            title="Exchange rates"
+            description="Today's MMK rate for each foreign currency, used only to prefill a new customer-order line, supplier-voucher line, or receiving cost — a line already saved keeps its own rate forever, so changing this never rewrites a past order or voucher."
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {FOREIGN_CURRENCIES.map((code) => (
+              <div key={code}>
+                {!settings ? (
+                  <Skeleton className="h-10 w-full" />
+                ) : (
+                  <RateField
+                    label={code}
+                    value={settings.today_exchange_rates[code]}
+                    disabled={savingKeys.has("today_exchange_rates")}
+                    onCommit={(rate) =>
+                      handleSettingChange(
+                        "today_exchange_rates",
+                        { ...settings.today_exchange_rates, [code]: rate },
+                        `${code} rate updated`,
+                        `Couldn't update the ${code} rate`,
+                      )
+                    }
+                  />
+                )}
+              </div>
+            ))}
+          </div>
         </Card>
       )}
     </div>

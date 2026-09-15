@@ -200,3 +200,121 @@ def test_admin_can_create_for_a_named_branch(authed_client: TestClient, db_sessi
     )
     assert response.status_code == 201
     assert response.json()["branch_id"] == branch.id
+
+
+def test_splitting_a_shipment_moves_the_undispatched_remainder_into_a_new_shipment(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_user(db_session, role=UserRole.WHOLESALE, branch_id=branch.id)
+
+    created = authed_client.post(
+        "/api/wholesale/shipments",
+        json=_shipment_payload(
+            total_packages=10, total_quantity_pairs=300, packages_sent_by_cargo=6, legs=[]
+        ),
+    )
+    assert created.status_code == 201
+    shipment_id = created.json()["shipment_id"]
+
+    split = authed_client.post(
+        f"/api/wholesale/shipments/{shipment_id}/split",
+        json={
+            "packages": 4,
+            "quantity_pairs": 120,
+            "final_destination": "Anawrahta Rd, Yangon",
+            "carrier_name": "Ko Zaw Lin",
+        },
+    )
+    assert split.status_code == 201
+    body = split.json()
+
+    original = body["original"]
+    assert original["shipment_id"] == shipment_id
+    assert original["total_packages"] == 6
+    assert original["total_quantity_pairs"] == 180
+
+    new_shipment = body["new_shipment"]
+    assert new_shipment["shipment_id"] != shipment_id
+    assert new_shipment["split_from_shipment_id"] == shipment_id
+    assert new_shipment["voucher_no"] == original["voucher_no"]
+    assert new_shipment["supplier_name"] == original["supplier_name"]
+    assert new_shipment["total_packages"] == 4
+    assert new_shipment["total_quantity_pairs"] == 120
+    assert new_shipment["final_destination"] == "Anawrahta Rd, Yangon"
+    assert new_shipment["carrier_name"] == "Ko Zaw Lin"
+    today = date.today().strftime("%y%m%d")
+    assert new_shipment["shipment_no"] == f"SHP-{today}-0002"
+
+
+def test_split_cannot_exceed_the_undispatched_remainder(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_user(db_session, role=UserRole.WHOLESALE, branch_id=branch.id)
+
+    created = authed_client.post(
+        "/api/wholesale/shipments",
+        json=_shipment_payload(
+            total_packages=10, total_quantity_pairs=300, packages_sent_by_cargo=8, legs=[]
+        ),
+    )
+    shipment_id = created.json()["shipment_id"]
+
+    response = authed_client.post(
+        f"/api/wholesale/shipments/{shipment_id}/split",
+        json={
+            "packages": 3,
+            "quantity_pairs": 90,
+            "final_destination": "Zay Gyi St, Magway",
+            "carrier_name": "",
+        },
+    )
+    assert response.status_code == 422
+    assert "2" in response.json()["detail"]
+
+    reread = authed_client.get(f"/api/wholesale/shipments/{shipment_id}")
+    assert reread.json()["total_packages"] == 10
+
+
+def test_split_quantity_pairs_cannot_exceed_the_shipments_total(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_user(db_session, role=UserRole.WHOLESALE, branch_id=branch.id)
+
+    created = authed_client.post(
+        "/api/wholesale/shipments",
+        json=_shipment_payload(
+            total_packages=10, total_quantity_pairs=300, packages_sent_by_cargo=0, legs=[]
+        ),
+    )
+    shipment_id = created.json()["shipment_id"]
+
+    response = authed_client.post(
+        f"/api/wholesale/shipments/{shipment_id}/split",
+        json={
+            "packages": 2,
+            "quantity_pairs": 400,
+            "final_destination": "Zay Gyi St, Magway",
+            "carrier_name": "",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_a_retail_account_cannot_split_a_shipment(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_user(db_session, role=UserRole.WHOLESALE, branch_id=branch.id)
+    created = authed_client.post("/api/wholesale/shipments", json=_shipment_payload(legs=[]))
+    shipment_id = created.json()["shipment_id"]
+
+    db_session.query(User).filter(User.id == "test-user-id").delete()
+    db_session.add(User(id="test-user-id", name="Retail", email="retail@example.com", role=UserRole.RETAIL, branch_id=branch.id))
+    db_session.commit()
+
+    response = authed_client.post(
+        f"/api/wholesale/shipments/{shipment_id}/split",
+        json={"packages": 1, "quantity_pairs": 10, "final_destination": "Somewhere", "carrier_name": ""},
+    )
+    assert response.status_code == 403

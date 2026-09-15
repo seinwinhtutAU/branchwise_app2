@@ -95,10 +95,11 @@ def test_receiving_crud_packages_costs_and_shipment_figure(
 
     costs = authed_client.put(
         f"/api/wholesale/receivings/{body['receiving_id']}/costs",
-        json=[{"stage": "Shwe Moe Cargo", "carrier": "Shwe Moe", "kind": "Cargo fee", "amount": 15000, "note": "Paid"}],
+        json=[{"cost_date": "2026-09-12", "stage": "Shwe Moe Cargo", "carrier": "Shwe Moe", "kind": "Cargo fee", "amount": 15000, "note": "Paid"}],
     )
     assert costs.status_code == 200
     assert costs.json()["total_cost"] == 15000
+    assert costs.json()["costs"][0]["cost_date"] == "2026-09-12"
 
     shipment = authed_client.get(f"/api/wholesale/shipments/{shipment_id}")
     assert shipment.status_code == 200
@@ -135,3 +136,82 @@ def test_receiving_rejects_other_branch_and_retail_account(
     db_session.query(User).filter(User.id == "test-user-id").update({"role": UserRole.RETAIL})
     db_session.commit()
     assert authed_client.get("/api/wholesale/receivings").status_code == 403
+
+
+def _create_receiving(authed_client: TestClient) -> dict:
+    shipment_id = _create_shipment(authed_client)
+    created = authed_client.post(
+        "/api/wholesale/receivings",
+        json={
+            "shipment_id": shipment_id,
+            "gate": "Bogyoke Rd, Mawlamyine",
+            "received_on": "2026-09-12",
+            "total_packages": 2,
+            "total_quantity_pairs": 12,
+            "total_unit": "set",
+        },
+    )
+    assert created.status_code == 201
+    return created.json()
+
+
+def test_receiving_cost_in_mmk_stores_no_original_amount_or_rate(
+    authed_client: TestClient, db_session: Session
+) -> None:
+    branch = _make_branch(db_session)
+    _make_user(db_session, UserRole.WHOLESALE, branch.id)
+    receiving = _create_receiving(authed_client)
+
+    costs = authed_client.put(
+        f"/api/wholesale/receivings/{receiving['receiving_id']}/costs",
+        json=[{"cost_date": "2026-09-12", "stage": "Gate", "kind": "Porter fee", "amount": 5000}],
+    )
+    assert costs.status_code == 200
+    cost = costs.json()["costs"][0]
+    assert cost["currency_code"] == "MMK"
+    assert cost["amount"] == 5000
+    assert cost["original_amount"] is None
+    assert cost["exchange_rate"] is None
+
+
+def test_receiving_cost_in_foreign_currency_computes_kyat_amount(
+    authed_client: TestClient, db_session: Session
+) -> None:
+    branch = _make_branch(db_session)
+    _make_user(db_session, UserRole.WHOLESALE, branch.id)
+    receiving = _create_receiving(authed_client)
+
+    costs = authed_client.put(
+        f"/api/wholesale/receivings/{receiving['receiving_id']}/costs",
+        json=[
+            {
+                "cost_date": "2026-09-12",
+                "stage": "Shwe Moe Cargo",
+                "kind": "Cargo fee",
+                "currency_code": "thb",
+                "original_amount": 500,
+                "exchange_rate": 120,
+            }
+        ],
+    )
+    assert costs.status_code == 200
+    cost = costs.json()["costs"][0]
+    assert cost["currency_code"] == "THB"
+    assert cost["amount"] == 60000
+    assert cost["original_amount"] == 500
+    assert cost["exchange_rate"] == 120
+    assert costs.json()["total_cost"] == 60000
+
+
+def test_receiving_cost_foreign_currency_requires_original_amount_and_rate(
+    authed_client: TestClient, db_session: Session
+) -> None:
+    branch = _make_branch(db_session)
+    _make_user(db_session, UserRole.WHOLESALE, branch.id)
+    receiving = _create_receiving(authed_client)
+
+    response = authed_client.put(
+        f"/api/wholesale/receivings/{receiving['receiving_id']}/costs",
+        json=[{"cost_date": "2026-09-12", "stage": "Gate", "kind": "Porter fee", "currency_code": "THB"}],
+    )
+    assert response.status_code == 422

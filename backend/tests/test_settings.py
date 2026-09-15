@@ -44,6 +44,7 @@ DEFAULT_SETTINGS_RESPONSE = {
         "dead_stock_critical_share_pct": 25.0,
         "traffic_decline_warning_pct": -10.0,
     },
+    "today_exchange_rates": {},
 }
 
 
@@ -199,3 +200,41 @@ def test_get_settings_backfills_a_row_for_every_key(
     response = authed_client.get("/api/settings")
     assert response.status_code == 200
     assert db_session.query(AppSetting).count() == len(DEFAULT_SETTINGS)
+
+
+def test_admin_can_set_today_exchange_rates(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, role=UserRole.ADMIN)
+
+    put_response = authed_client.put(
+        "/api/settings",
+        json={"today_exchange_rates": {"thb": "120.5", "USD": "3500"}},
+    )
+    assert put_response.status_code == 200
+    assert put_response.json()["today_exchange_rates"] == {"THB": "120.5", "USD": "3500"}
+
+    get_response = authed_client.get("/api/settings")
+    assert get_response.json()["today_exchange_rates"] == {"THB": "120.5", "USD": "3500"}
+
+
+def test_today_exchange_rates_rejects_mmk_and_unsupported_currencies(
+    authed_client: TestClient, db_session: Session
+):
+    _make_user(db_session, role=UserRole.ADMIN)
+
+    response = authed_client.put("/api/settings", json={"today_exchange_rates": {"MMK": "1"}})
+    assert response.status_code == 422
+
+    response = authed_client.put("/api/settings", json={"today_exchange_rates": {"EUR": "1"}})
+    assert response.status_code == 422
+
+
+def test_today_exchange_rates_rejects_non_positive_rate(
+    authed_client: TestClient, db_session: Session
+):
+    _make_user(db_session, role=UserRole.ADMIN)
+
+    response = authed_client.put("/api/settings", json={"today_exchange_rates": {"THB": "0"}})
+    assert response.status_code == 422
+
+    response = authed_client.put("/api/settings", json={"today_exchange_rates": {"THB": "-5"}})
+    assert response.status_code == 422

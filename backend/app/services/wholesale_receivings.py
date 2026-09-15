@@ -12,7 +12,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.wholesale import Receiving, ReceivingCost, ReceivingItem, ReceivingPackage
-from app.services.wholesale.colors import color_qty_problem, colors_as_json
+from app.services.wholesale.colors import color_qty_problem, colors_as_json, conversion_rates
+from app.services.wholesale.currency import resolve_money
 from app.services.wholesale.references import allocate_reference, retry_on_reference_collision
 from app.services.wholesale.units import from_pairs, to_pairs
 from app.services.wholesale_shipments import get_shipment
@@ -128,6 +129,7 @@ def _item_from_payload(item_in) -> ReceivingItem:
     problem = color_qty_problem(color_breakdown)
     if problem:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, problem)
+    rates = conversion_rates(item_in.unit_conversions)
     return ReceivingItem(
         stock_code=item_in.stock_code.strip(),
         description=item_in.description.strip(),
@@ -135,7 +137,8 @@ def _item_from_payload(item_in) -> ReceivingItem:
         color_breakdown=color_breakdown,
         colors=colors_as_json(color_breakdown),
         unit=item_in.unit,
-        quantity_pairs=to_pairs(item_in.quantity, item_in.unit),
+        unit_conversions=rates,
+        quantity_pairs=item_in.quantity * rates[item_in.unit.value],
     )
 
 
@@ -165,18 +168,26 @@ def update_package(
     return receiving
 
 
+def _cost(cost_in) -> ReceivingCost:
+    currency_code, amount, original_amount, exchange_rate = resolve_money(
+        cost_in.currency_code, cost_in.amount, cost_in.original_amount, cost_in.exchange_rate,
+    )
+    return ReceivingCost(
+        cost_date=cost_in.cost_date,
+        stage=cost_in.stage.strip(),
+        carrier=cost_in.carrier.strip(),
+        kind=cost_in.kind.strip(),
+        amount=amount,
+        currency_code=currency_code,
+        original_amount=original_amount,
+        exchange_rate=exchange_rate,
+        note=cost_in.note.strip(),
+    )
+
+
 def replace_costs(db: Session, receiving_id: str, branch_id: str | None, costs_in) -> Receiving:
     receiving = _load(db, receiving_id, branch_id)
-    receiving.costs = [
-        ReceivingCost(
-            stage=cost.stage.strip(),
-            carrier=cost.carrier.strip(),
-            kind=cost.kind.strip(),
-            amount=cost.amount,
-            note=cost.note.strip(),
-        )
-        for cost in costs_in
-    ]
+    receiving.costs = [_cost(cost) for cost in costs_in]
     db.commit()
     db.refresh(receiving)
     return receiving

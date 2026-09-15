@@ -12,15 +12,17 @@ from app.core.security import get_current_app_user
 from app.db.session import get_db
 from app.models.user import User, UserRole
 from app.models.wholesale import Shipment
-from app.schemas.wholesale_shipments import ShipmentCreate, ShipmentUpdate
+from app.schemas.wholesale_shipments import ShipmentCreate, ShipmentSplitIn, ShipmentUpdate, ShipmentWriteOffIn
 from app.services.branches import resolve_wholesale_branch_id
 from app.services.wholesale.shipments import shipment_derived
+from app.services.wholesale.write_offs import write_off_shipment, write_off_to_dict
 from app.services.wholesale_receivings import final_received_by_shipment
 from app.services.wholesale_shipments import (
     create_shipment,
     delete_shipment,
     get_shipment,
     list_shipments,
+    split_shipment,
     update_shipment,
 )
 
@@ -40,6 +42,7 @@ def _leg_out(leg, index: int, derived_legs: list[dict]) -> dict:
         "carrier_name": leg.carrier_name,
         "packages_received": leg.packages_received,
         "packages_sent": leg.packages_sent,
+        "lost_packages": leg.lost_packages,
         **derived_legs[index],
     }
 
@@ -62,6 +65,9 @@ def _shipment_out(shipment: Shipment, final_received_override: int | None = None
         # Overridden by whatever the gate has actually recorded, once a receiving
         # exists for this shipment — see shipment_derived's docstring.
         "final_received_packages": derived["final_received_packages"],
+        "lost_packages": derived["lost_packages"],
+        "final_lost_packages": derived["final_lost_packages"],
+        "split_from_shipment_id": shipment.split_from_shipment_id,
         "cargo_remaining": derived["cargo_remaining"],
         "final_remaining": derived["final_remaining"],
         "shipment_status": derived["shipment_status"],
@@ -137,6 +143,45 @@ def update_shipment_endpoint(
     shipment = update_shipment(db, shipment_id, user.branch_id, payload)
     override = final_received_by_shipment(db, [shipment.id]).get(shipment.id)
     return _shipment_out(shipment, override)
+
+
+@router.post("/{shipment_id}/write-off", status_code=status.HTTP_201_CREATED)
+def write_off_shipment_endpoint(
+    shipment_id: str,
+    payload: ShipmentWriteOffIn,
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_wholesale(user)
+    entry = write_off_shipment(
+        db, shipment_id, payload.leg_id, payload.quantity, payload.reason, payload.note, user.id,
+        branch_id=user.branch_id,
+    )
+    return write_off_to_dict(entry)
+
+
+@router.post("/{shipment_id}/split", status_code=status.HTTP_201_CREATED)
+def split_shipment_endpoint(
+    shipment_id: str,
+    payload: ShipmentSplitIn,
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_wholesale(user)
+    original, new_shipment = split_shipment(
+        db,
+        shipment_id,
+        user.branch_id,
+        payload.packages,
+        payload.quantity_pairs,
+        payload.final_destination,
+        payload.carrier_name,
+    )
+    original_override = final_received_by_shipment(db, [original.id]).get(original.id)
+    return {
+        "original": _shipment_out(original, original_override),
+        "new_shipment": _shipment_out(new_shipment),
+    }
 
 
 @router.delete("/{shipment_id}", status_code=status.HTTP_204_NO_CONTENT)

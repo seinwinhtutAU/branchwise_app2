@@ -233,7 +233,6 @@ export default function MonitoringDashboardPage({
     queryKey: MONITORING_QUERY_KEY,
     queryFn: () =>
       fetchJson<MonitoringSnapshot>(WHOLESALE_MONITORING_URL, session),
-    refetchInterval: 45_000,
   });
   useLoadErrorToast(isError, "wholesale dashboard");
 
@@ -278,7 +277,7 @@ export default function MonitoringDashboardPage({
         </div>
         <div className="flex items-center gap-2 pt-1 text-[11px] text-text-muted whitespace-nowrap">
           <span className="w-2 h-2 rounded-full bg-success" aria-hidden="true" />
-          {isFetching ? "Refreshing…" : "Live · 45s refresh"}
+          {isFetching ? "Refreshing…" : "Updates when wholesale data changes"}
         </div>
       </header>
 

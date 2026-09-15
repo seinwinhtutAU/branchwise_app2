@@ -51,6 +51,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "dead_stock_critical_share_pct": 25.0,
         "traffic_decline_warning_pct": -10.0,
     },
+    # Today's MMK rate for each non-MMK currency the wholesale screens deal in — MMK
+    # per 1 unit of that currency, e.g. {"THB": "120.000000000000"}. Only prefills a
+    # new foreign-currency order/voucher line or receiving cost (see
+    # app/services/wholesale/currency.py); a saved line keeps its own rate forever, so
+    # changing this later never rewrites a historical amount. Empty by default — there
+    # is no safe placeholder rate, so a currency has no prefill until an admin sets one.
+    "today_exchange_rates": {},
 }
 
 

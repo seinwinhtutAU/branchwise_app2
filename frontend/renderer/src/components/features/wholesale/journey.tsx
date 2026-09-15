@@ -86,7 +86,7 @@ export function DeliveryJourney({
       <JourneyRow label="Packages" value={formatQty(shipment.total_packages)} />
       <JourneyRow
         label="Quantity"
-        value={formatIn(shipmentPairs(shipment), "set")}
+        value={formatIn(shipmentPairs(shipment), shipment.total_unit)}
       />
     </JourneyCard>,
     <JourneyCard

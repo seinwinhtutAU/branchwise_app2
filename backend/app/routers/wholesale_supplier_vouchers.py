@@ -7,9 +7,11 @@ from app.core.security import get_current_app_user
 from app.db.session import get_db
 from app.models.user import User, UserRole
 from app.schemas.wholesale_supplier_vouchers import SupplierVoucherIn, VoucherPaymentIn
+from app.schemas.wholesale_write_offs import WriteOffIn
 from app.services.branches import resolve_wholesale_branch_id
 from app.services.wholesale_supplier_vouchers import add_payment, create_voucher, delete_payment, delete_voucher, get_voucher, list_vouchers, received_pairs_by_voucher_no, received_pairs_by_voucher_stock, update_voucher
 from app.services.wholesale.money import voucher_totals
+from app.services.wholesale.write_offs import write_off_to_dict, write_off_voucher_line
 
 router = APIRouter(prefix="/api/wholesale/supplier-vouchers", tags=["wholesale"])
 
@@ -29,8 +31,14 @@ def _out(voucher, received_pairs: int, received_by_stock: dict[str, int] | None 
         )
         lines.append({"voucher_line_id": line.id, "stock_code": line.stock_code, "description": line.description,
                       "product_group": line.product_group.value, "color_breakdown": line.color_breakdown, "unit": line.unit.value,
+                      "unit_conversions": line.unit_conversions,
                       "quantity_pairs": line.quantity_pairs, "received_quantity_pairs": received,
-                      "buying_price": float(line.buying_price)})
+                      "lost_quantity_pairs": line.lost_quantity_pairs,
+                      "remaining_quantity_pairs": max(0, line.quantity_pairs - received - line.lost_quantity_pairs),
+                      "buying_price": float(line.buying_price),
+                      "currency_code": line.currency_code,
+                      "original_buying_price": float(line.original_buying_price) if line.original_buying_price is not None else None,
+                      "exchange_rate": float(line.exchange_rate) if line.exchange_rate is not None else None})
     payments = [{"payment_id": payment.id, "paid_on": payment.paid_on, "amount": float(payment.amount), "note": payment.note} for payment in voucher.payments]
     totals = voucher_totals(voucher)
     return {"voucher_id": voucher.id, "branch_id": voucher.branch_id, "voucher_no": voucher.voucher_no,
@@ -38,6 +46,8 @@ def _out(voucher, received_pairs: int, received_by_stock: dict[str, int] | None 
             "carrier_name": voucher.carrier_name, "total_packages": voucher.total_packages,
             "total_quantity_pairs": sum(line["quantity_pairs"] for line in lines),
             "received_quantity_pairs": sum(line["received_quantity_pairs"] for line in lines),
+            "lost_quantity_pairs": sum(line["lost_quantity_pairs"] for line in lines),
+            "remaining_quantity_pairs": sum(line["remaining_quantity_pairs"] for line in lines),
             "lines": lines, "payment": {"account_id": voucher.id, "payments": payments},
             "total_amount": totals["total"], "paid_amount": totals["paid"], "balance_due": totals["balance_due"]}
 
@@ -99,7 +109,7 @@ def list_supplier_vouchers(
     if payment_status:
         rows = [
             row for row in rows
-            if ("paid" if row["balance_due"] == 0 else "partial" if row["paid_amount"] > 0 else "unpaid") == payment_status
+            if ("paid" if row["balance_due"] <= 0 else "partial" if row["paid_amount"] > 0 else "unpaid") == payment_status
         ]
     response.headers["X-Total-Count"] = str(len(rows))
     start = (page - 1) * page_size
@@ -129,6 +139,21 @@ def create_payment(voucher_id: str, payload: VoucherPaymentIn, user: User = Depe
     _require_wholesale(user)
     payment = add_payment(db, voucher_id, user.branch_id, user.id, payload)
     return {"payment_id": payment.id, "paid_on": payment.paid_on, "amount": float(payment.amount), "note": payment.note}
+
+
+@router.post("/lines/{line_id}/write-off", status_code=status.HTTP_201_CREATED)
+def write_off_supplier_voucher_line(
+    line_id: str,
+    payload: WriteOffIn,
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_wholesale(user)
+    entry = write_off_voucher_line(
+        db, line_id, payload.quantity, payload.reason, payload.note, user.id,
+        branch_id=user.branch_id,
+    )
+    return write_off_to_dict(entry)
 
 
 @router.delete("/{voucher_id}/payments/{payment_id}", status_code=status.HTTP_204_NO_CONTENT)

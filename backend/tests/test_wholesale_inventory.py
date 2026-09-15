@@ -6,11 +6,17 @@ from sqlalchemy.orm import Session
 from app.models.branch import Branch
 from app.models.user import User, UserRole
 from app.models.wholesale import (
+    CustomerOrder,
+    CustomerOrderLine,
     ProductGroup,
     Receiving,
     ReceivingItem,
     ReceivingPackage,
     Shipment,
+    ShipmentLeg,
+    SupplierVoucher,
+    SupplierVoucherLine,
+    WholesaleStockMovement,
     WholesaleUnit,
 )
 
@@ -310,3 +316,143 @@ def test_customer_delivery_batch_does_not_partially_save_invalid_lines(
     assert delivery.status_code == 422
     order_after = authed_client.get(f"/api/wholesale/orders/{order['order_id']}").json()
     assert order_after["delivered_quantity_pairs"] == 0
+
+
+def test_stock_records_include_supplier_voucher_lines_before_receiving(
+    authed_client: TestClient, db_session: Session,
+) -> None:
+    branch = _branch(db_session)
+    _user(db_session, branch.id)
+    db_session.add(SupplierVoucher(
+        branch_id=branch.id,
+        voucher_no="VCH-1",
+        supplier_name="Factory",
+        voucher_date=date(2026, 9, 13),
+        carrier_name="Cargo",
+        total_packages=1,
+        lines=[SupplierVoucherLine(
+            stock_code="A1003", description="Boot", product_group=ProductGroup.MAN,
+            color_breakdown="black2s", colors=[{"color": "black", "qty": 2, "unit": "set"}],
+            unit=WholesaleUnit.SET, quantity_pairs=12, buying_price=100,
+        )],
+    ))
+    db_session.commit()
+
+    response = authed_client.get("/api/wholesale/inventory/stock")
+    assert response.status_code == 200
+    row = response.json()[0]
+    assert row["stock_code"] == "A1003"
+    assert row["at_supplier_pairs"] == 12
+    assert row["on_hand_pairs"] == 0
+    assert row["colors"] == "black2s"
+    assert row["status"] == "At Supplier"
+    assert row["locations"] == []
+    assert response.headers["X-Total-Count"] == "1"
+    assert authed_client.get("/api/wholesale/inventory/stock?source=voucher").json()[0]["stock_code"] == "A1003"
+    assert authed_client.get("/api/wholesale/inventory/stock?status=In%20Transit").json() == []
+    assert authed_client.get("/api/wholesale/inventory/stock?search=VCH-1").json()[0]["stock_code"] == "A1003"
+
+
+def test_stock_records_include_open_orders_but_ignore_cancelled_orders(
+    authed_client: TestClient, db_session: Session,
+) -> None:
+    branch = _branch(db_session)
+    _user(db_session, branch.id)
+    open_order = CustomerOrder(
+        branch_id=branch.id, order_no="ORD-OPEN", customer_name="Customer",
+        customer_phone="0", customer_address="Here", order_date=date(2026, 9, 13),
+        lines=[CustomerOrderLine(
+            stock_code="A1004", description="Bag", product_group=ProductGroup.LADY,
+            supplier_name="Factory", color_breakdown="red1s", colors=[{"color": "red", "qty": 1, "unit": "set"}],
+            unit=WholesaleUnit.SET, quantity_pairs=6, selling_price=100,
+        )],
+    )
+    cancelled_order = CustomerOrder(
+        branch_id=branch.id, order_no="ORD-CANCELLED", customer_name="Customer",
+        customer_phone="0", customer_address="Here", order_date=date(2026, 9, 13), cancelled=True,
+        lines=[CustomerOrderLine(
+            stock_code="A1005", description="Hat", product_group=ProductGroup.LADY,
+            supplier_name="Factory", color_breakdown="blue1s", colors=[{"color": "blue", "qty": 1, "unit": "set"}],
+            unit=WholesaleUnit.SET, quantity_pairs=6, selling_price=100,
+        )],
+    )
+    db_session.add_all([open_order, cancelled_order])
+    db_session.commit()
+
+    rows = authed_client.get("/api/wholesale/inventory/stock").json()
+    by_code = {row["stock_code"]: row for row in rows}
+    assert by_code["A1004"]["status"] == "Customer Ordered"
+    assert by_code["A1004"]["owed_to_customers_pairs"] == 6
+    assert by_code["A1004"]["colors"] == "red1s"
+    assert "A1005" not in by_code
+
+
+def test_product_movements_can_be_read_across_all_locations(
+    authed_client: TestClient, db_session: Session,
+) -> None:
+    branch = _branch(db_session)
+    _user(db_session, branch.id)
+    _incoming_stock(db_session, branch)
+    order = authed_client.post("/api/wholesale/orders", json=_order_payload()).json()
+    db_session.add(WholesaleStockMovement(
+        branch_id=branch.id, order_id=order["order_id"], stock_code="A1001", description="Sandal",
+        product_group=ProductGroup.MAN, color_breakdown="black1s", colors=[{"color": "black", "qty": 1, "unit": "set"}],
+        quantity_pairs=6, location="Other Gate", delivered_on=date(2026, 9, 13), recorded_by_user_id="test-user-id",
+    ))
+    db_session.commit()
+
+    rows = authed_client.get("/api/wholesale/inventory/movements/A1001")
+    assert rows.status_code == 200
+    assert {row["location"] for row in rows.json()} == {"Gate", "Other Gate"}
+
+
+def test_stock_records_split_shipment_stage_and_received_stock(
+    authed_client: TestClient, db_session: Session,
+) -> None:
+    branch = _branch(db_session)
+    _user(db_session, branch.id)
+    voucher = SupplierVoucher(
+        branch_id=branch.id, voucher_no="VCH-STAGE", supplier_name="Factory",
+        voucher_date=date(2026, 9, 10), carrier_name="Cargo", total_packages=2,
+        lines=[SupplierVoucherLine(
+            stock_code="A1006", description="Shoe", product_group=ProductGroup.MAN,
+            color_breakdown="black4s", colors=[{"color": "black", "qty": 4, "unit": "set"}],
+            unit=WholesaleUnit.SET, quantity_pairs=24, buying_price=100,
+        )],
+    )
+    shipment = Shipment(
+        branch_id=branch.id, shipment_no="SHP-STAGE", voucher_no="VCH-STAGE",
+        supplier_name="Factory", carrier_name="Cargo", final_destination="Gate",
+        sent_on=date(2026, 9, 11), total_packages=2, total_quantity_pairs=24,
+        total_unit=WholesaleUnit.SET, packages_sent_by_cargo=2, final_received_packages=0,
+        legs=[ShipmentLeg(leg_order=1, stop_name="Yangon", carrier_name="Truck", packages_received=2, packages_sent=2)],
+    )
+    db_session.add_all([voucher, shipment])
+    db_session.commit()
+
+    transit = authed_client.get("/api/wholesale/inventory/stock").json()[0]
+    assert transit["in_transit_pairs"] == 24
+    assert transit["at_supplier_pairs"] == 0
+    assert transit["status"] == "In Transit"
+
+    receiving = Receiving(
+        branch_id=branch.id, receiving_no="RCV-STAGE", shipment_id=shipment.id,
+        shipment_no=shipment.shipment_no, voucher_no=shipment.voucher_no,
+        supplier_name="Factory", gate="Gate", received_on=date(2026, 9, 12),
+        total_packages=2, total_quantity_pairs=24, total_unit=WholesaleUnit.SET,
+        packages=[ReceivingPackage(
+            package_no=1, opened=True, received_on=date(2026, 9, 12),
+            items=[ReceivingItem(
+                stock_code="A1006", description="Shoe", product_group=ProductGroup.MAN,
+                color_breakdown="black2s", colors=[{"color": "black", "qty": 2, "unit": "set"}],
+                unit=WholesaleUnit.SET, quantity_pairs=12,
+            )],
+        )],
+    )
+    db_session.add(receiving)
+    db_session.commit()
+
+    partial = authed_client.get("/api/wholesale/inventory/stock").json()[0]
+    assert partial["on_hand_pairs"] == 12
+    assert partial["incoming_pairs"] == 12
+    assert partial["at_supplier_pairs"] + partial["in_transit_pairs"] == 12

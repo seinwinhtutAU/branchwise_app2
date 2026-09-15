@@ -18,20 +18,22 @@ from app.services.wholesale.colors import (
     color_qty_problem,
     colors_as_json,
 )
+from app.services.wholesale.currency import resolve_money
 from app.services.wholesale.inventory import (
     allocated_color_pairs_for_stock_code,
     available_color_pairs_for_stock_code,
     delivered_pairs_by_order,
 )
+from app.services.wholesale.money import order_totals
 from app.services.wholesale.references import allocate_reference, retry_on_reference_collision
 
 _LOAD_OPTIONS = (selectinload(CustomerOrder.lines), selectinload(CustomerOrder.payments))
 
 
-def order_status(total_wanted: int, received: int, allocated: int, cancelled: bool) -> str:
+def order_status(total_wanted: int, received: int, allocated: int, cancelled: bool, lost: int = 0) -> str:
     if cancelled:
         return "cancelled"
-    if total_wanted > 0 and received >= total_wanted:
+    if total_wanted > 0 and received + lost >= total_wanted:
         return "fulfilled"
     if received > 0:
         return "partly_delivered"
@@ -65,11 +67,17 @@ def _line(line_in) -> CustomerOrderLine:
     problem = color_qty_problem(color_breakdown)
     if problem:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, problem)
+    currency_code, selling_price, original_selling_price, exchange_rate = resolve_money(
+        line_in.currency_code, line_in.selling_price, line_in.original_selling_price, line_in.exchange_rate,
+    )
     return CustomerOrderLine(
         stock_code=line_in.stock_code.strip(), description=line_in.description.strip(),
         product_group=line_in.product_group, supplier_name=line_in.supplier_name.strip(),
         color_breakdown=color_breakdown, colors=colors_as_json(color_breakdown), unit=line_in.unit,
-        quantity_pairs=color_qty_pairs(color_breakdown, line_in.unit), selling_price=line_in.selling_price,
+        unit_conversions=line_in.unit_conversions,
+        quantity_pairs=color_qty_pairs(color_breakdown, line_in.unit, line_in.unit_conversions),
+        selling_price=selling_price, currency_code=currency_code,
+        original_selling_price=original_selling_price, exchange_rate=exchange_rate,
     )
 
 
@@ -112,18 +120,20 @@ def update_order(db: Session, order_id: str, branch_id: str | None, payload) -> 
         )
         for line in order.lines
     }
+    existing_losses = {line.stock_code: line.lost_quantity_pairs for line in order.lines}
     order.customer_name = payload.customer_name.strip()
     order.customer_phone = payload.customer_phone.strip()
     order.customer_address = payload.customer_address.strip()
     order.order_date = payload.order_date
     replacement_lines = [_line(line) for line in payload.lines]
     for line in replacement_lines:
+        line.lost_quantity_pairs = min(existing_losses.get(line.stock_code, 0), line.quantity_pairs)
         allocated = existing_allocations.get(line.stock_code)
         if allocated is None or allocated[0] > line.quantity_pairs:
             continue
         allocated_pairs, allocated_colors, allocated_unit = allocated
-        order_colors = color_qty_pairs_by_color(line.color_breakdown, line.unit)
-        allocation_colors = color_qty_pairs_by_color(allocated_colors, allocated_unit)
+        order_colors = color_qty_pairs_by_color(line.color_breakdown, line.unit, line.unit_conversions)
+        allocation_colors = color_qty_pairs_by_color(allocated_colors, allocated_unit, line.unit_conversions)
         if any(pairs > order_colors.get(color, 0) for color, pairs in allocation_colors.items()):
             continue
         line.allocated_quantity_pairs = allocated_pairs
@@ -148,7 +158,7 @@ def delete_order(db: Session, order_id: str, branch_id: str | None) -> None:
 
 def add_payment(db: Session, order_id: str, branch_id: str | None, user_id: str, payload) -> WholesalePayment:
     order = _load(db, order_id, branch_id)
-    total = sum(float(line.quantity_pairs) * float(line.selling_price) for line in order.lines)
+    total = order_totals(order)["total"]
     paid = sum(float(payment.amount) for payment in order.payments)
     if paid + payload.amount > total:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Payment cannot exceed the order balance")
@@ -213,13 +223,13 @@ def allocate_order_line(
         if problem:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, problem)
 
-    requested_pairs = color_qty_pairs(value, line.unit) if value else 0
+    requested_pairs = color_qty_pairs(value, line.unit, line.unit_conversions) if value else 0
     delivered = delivered_pairs_by_order(db, [line.order_id], branch_id).get(line.order_id, {}).get(line.stock_code, 0)
-    remaining = max(0, line.quantity_pairs - delivered)
+    remaining = max(0, line.quantity_pairs - delivered - line.lost_quantity_pairs)
     if requested_pairs > remaining:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Allocation cannot exceed what the customer is still owed")
 
-    requested_colors = color_qty_pairs_by_color(value, line.unit)
+    requested_colors = color_qty_pairs_by_color(value, line.unit, line.unit_conversions)
     available_colors = available_color_pairs_for_stock_code(db, branch_id, line.stock_code)
     reserved_colors = allocated_color_pairs_for_stock_code(
         db, branch_id, line.stock_code, excluding_line_id=line.id,
@@ -250,6 +260,7 @@ def allocate_order_line(
                 description=line.description,
                 product_group=line.product_group,
                 unit=line.unit,
+                unit_conversions=line.unit_conversions,
                 previous_color_breakdown=previous_colors,
                 previous_quantity_pairs=previous_pairs,
                 color_breakdown=value,

@@ -9,7 +9,15 @@ class OrderLineIn(BaseModel):
     supplier_name: str = Field(default="", max_length=255)
     color_breakdown: str = Field(min_length=1, max_length=1000)
     unit: WholesaleUnit = WholesaleUnit.SET
-    selling_price: float = Field(ge=0)
+    unit_conversions: dict[str, int] = Field(default_factory=lambda: {"pair": 1, "set": 6, "dozen": 12})
+    # MMK (the default): selling_price is the Kyat unit price, typed directly.
+    # Any other currency_code: original_selling_price/exchange_rate are required
+    # instead, and selling_price (if sent at all) is ignored — the server computes the
+    # Kyat unit price from them. See app/services/wholesale/currency.py::resolve_money.
+    currency_code: str = Field(default="MMK", min_length=3, max_length=3)
+    selling_price: float | None = Field(default=None, ge=0)
+    original_selling_price: float | None = Field(default=None, ge=0)
+    exchange_rate: float | None = Field(default=None, gt=0)
 
 class OrderIn(BaseModel):
     branch_id: str | None = None

@@ -7,7 +7,7 @@
 
 import { paymentStatusOf, sharePct, type PaymentStatus } from "./shared";
 import { type Payment } from "./customerOrders";
-import { type Unit } from "./units";
+import { pricedAmount, type Unit, type UnitConversions } from "./units";
 import { type ProductGroup } from "./products";
 
 /** The ERD's supplier_voucher.receiving_status. Worked out from the quantities rather
@@ -31,11 +31,21 @@ export interface SupplierVoucherLine {
   color_breakdown: string;
   /** The unit the colors were written in. */
   unit: Unit;
+  unit_conversions?: UnitConversions;
   /** Total pairs across those colors — derived from color_breakdown and the unit. */
   quantity_pairs: number;
   /** Total pairs received for this stock code from opened receiving packages. */
   received_quantity_pairs?: number;
+  lost_quantity_pairs?: number;
+  /** Always the Kyat unit price, whatever currency this line was actually priced in. */
   buying_price: number;
+  /** "MMK" unless this line was priced in a foreign currency — see ./currency.ts. */
+  currency_code?: string;
+  /** The unit price before conversion, only present for a non-MMK currency_code. */
+  original_buying_price?: number | null;
+  /** The exchange rate this line was saved at — a fixed snapshot, only present for a
+   *  non-MMK currency_code. Never re-derived from "today's" rate after saving. */
+  exchange_rate?: number | null;
 }
 
 /** The ERD's payment_account for this voucher — what we owe the supplier for it. What
@@ -67,33 +77,36 @@ export interface SupplierVoucher {
   carrier_name: string;
   total_quantity_pairs: number;
   received_quantity_pairs: number;
+  lost_quantity_pairs?: number;
   payment: VoucherPayment;
   lines: SupplierVoucherLine[];
 }
 
 export function voucherAmount(voucher: SupplierVoucher): number {
   return voucher.lines.reduce(
-    (sum, line) => sum + line.quantity_pairs * line.buying_price,
+    (sum, line) =>
+      sum + pricedAmount(line.quantity_pairs, line.unit, line.buying_price, line.unit_conversions),
     0,
   );
 }
 
 export function remainingQty(voucher: SupplierVoucher): number {
-  return Math.max(0, voucher.total_quantity_pairs - voucher.received_quantity_pairs);
+  return Math.max(0, voucher.total_quantity_pairs - voucher.received_quantity_pairs - (voucher.lost_quantity_pairs ?? 0));
 }
 
 export function receivedPct(voucher: SupplierVoucher): number {
-  return sharePct(voucher.received_quantity_pairs, voucher.total_quantity_pairs);
+  return sharePct(voucher.received_quantity_pairs + (voucher.lost_quantity_pairs ?? 0), voucher.total_quantity_pairs);
 }
 
 export function receivingStatus(voucher: SupplierVoucher): ReceivingStatus {
-  if (voucher.received_quantity_pairs <= 0) return "waiting";
-  if (voucher.received_quantity_pairs >= voucher.total_quantity_pairs) return "fully_received";
+  const accounted = voucher.received_quantity_pairs + (voucher.lost_quantity_pairs ?? 0);
+  if (accounted <= 0) return "waiting";
+  if (accounted >= voucher.total_quantity_pairs) return "fully_received";
   return "partly_received";
 }
 
 export function voucherBalance(voucher: SupplierVoucher): number {
-  return Math.max(0, voucherAmount(voucher) - paidAmount(voucher));
+  return voucherAmount(voucher) - paidAmount(voucher);
 }
 
 export function paymentStatus(voucher: SupplierVoucher): PaymentStatus {

@@ -46,7 +46,7 @@ def test_customer_order_persists_updates_and_caps_payments(authed_client: TestCl
     order = created.json()
     assert order["order_no"].startswith("ORD-")
     assert order["total_quantity_pairs"] == 12
-    assert order["total_amount"] == 216000
+    assert order["total_amount"] == 36000
     assert order["order_status"] == "new"
 
     changed = _payload() | {"customer_address": "Mandalay"}
@@ -56,19 +56,19 @@ def test_customer_order_persists_updates_and_caps_payments(authed_client: TestCl
 
     payment = authed_client.post(
         f"/api/wholesale/orders/{order['order_id']}/payments",
-        json={"paid_on": "2026-09-13", "amount": 100000, "note": "Deposit"},
+        json={"paid_on": "2026-09-13", "amount": 20000, "note": "Deposit"},
     )
     assert payment.status_code == 201
     too_much = authed_client.post(
         f"/api/wholesale/orders/{order['order_id']}/payments",
-        json={"paid_on": "2026-09-13", "amount": 116001, "note": "Too much"},
+        json={"paid_on": "2026-09-13", "amount": 16001, "note": "Too much"},
     )
     assert too_much.status_code == 422
 
     reread = authed_client.get("/api/wholesale/orders")
     assert reread.status_code == 200
-    assert reread.json()[0]["payment"]["payments"][0]["amount"] == 100000
-    assert reread.json()[0]["paid_amount"] == 100000
+    assert reread.json()[0]["payment"]["payments"][0]["amount"] == 20000
+    assert reread.json()[0]["paid_amount"] == 20000
 
 
 def test_customer_order_rejects_empty_colours_and_other_branch(authed_client: TestClient, db_session: Session) -> None:
@@ -82,6 +82,21 @@ def test_customer_order_rejects_empty_colours_and_other_branch(authed_client: Te
     db_session.query(User).filter(User.id == "test-user-id").update({"branch_id": _branch(db_session, "Other").id})
     db_session.commit()
     assert authed_client.get(f"/api/wholesale/orders/{created['order_id']}").status_code == 404
+
+
+def test_customer_order_keeps_its_own_conversion_snapshot(authed_client: TestClient, db_session: Session) -> None:
+    branch = _branch(db_session)
+    _user(db_session, UserRole.WHOLESALE, branch.id)
+    payload = _payload()
+    payload["lines"][0]["unit_conversions"] = {"pair": 1, "set": 5, "dozen": 10}
+
+    created = authed_client.post("/api/wholesale/orders", json=payload)
+
+    assert created.status_code == 201
+    line = created.json()["lines"][0]
+    assert line["quantity_pairs"] == 10
+    assert line["unit_conversions"] == {"pair": 1, "set": 5, "dozen": 10}
+    assert created.json()["total_amount"] == 36_000
 
 
 def test_retail_account_cannot_read_customer_orders(authed_client: TestClient, db_session: Session) -> None:
@@ -154,3 +169,94 @@ def test_admin_can_list_and_create_orders_without_naming_a_branch(
 
     allocations = authed_client.get("/api/wholesale/orders/allocations")
     assert allocations.status_code == 200
+
+
+def test_order_line_in_mmk_stores_no_original_amount_or_rate(
+    authed_client: TestClient, db_session: Session
+) -> None:
+    branch = _branch(db_session)
+    _user(db_session, UserRole.WHOLESALE, branch.id)
+
+    created = authed_client.post("/api/wholesale/orders", json=_payload())
+    assert created.status_code == 201
+    line = created.json()["lines"][0]
+    assert line["currency_code"] == "MMK"
+    assert line["selling_price"] == 18000
+    assert line["original_selling_price"] is None
+    assert line["exchange_rate"] is None
+
+
+def test_order_line_in_foreign_currency_stores_decimal_snapshot_and_computed_kyat(
+    authed_client: TestClient, db_session: Session
+) -> None:
+    branch = _branch(db_session)
+    _user(db_session, UserRole.WHOLESALE, branch.id)
+
+    payload = _payload()
+    payload["lines"][0] |= {
+        "currency_code": "thb",
+        "selling_price": None,
+        "original_selling_price": 500,
+        "exchange_rate": "120.123456789012",
+    }
+    created = authed_client.post("/api/wholesale/orders", json=payload)
+    assert created.status_code == 201
+    line = created.json()["lines"][0]
+    assert line["currency_code"] == "THB"
+    assert line["original_selling_price"] == 500
+    assert line["exchange_rate"] == 120.123456789012
+    # 500 x 120.123456789012 = 60061.728394506 -> rounds to the nearest Kyat cent.
+    assert line["selling_price"] == 60061.73
+    # "black2s" is 2 sets (12 pairs); selling_price is per set.
+    assert created.json()["total_amount"] == 60061.73 * 2
+
+
+def test_order_line_foreign_currency_requires_original_amount_and_rate(
+    authed_client: TestClient, db_session: Session
+) -> None:
+    branch = _branch(db_session)
+    _user(db_session, UserRole.WHOLESALE, branch.id)
+
+    payload = _payload()
+    payload["lines"][0] |= {"currency_code": "THB"}
+    response = authed_client.post("/api/wholesale/orders", json=payload)
+    assert response.status_code == 422
+
+
+def test_order_line_rejects_unsupported_currency(authed_client: TestClient, db_session: Session) -> None:
+    branch = _branch(db_session)
+    _user(db_session, UserRole.WHOLESALE, branch.id)
+
+    payload = _payload()
+    payload["lines"][0] |= {
+        "currency_code": "EUR",
+        "original_selling_price": 500,
+        "exchange_rate": 120,
+    }
+    response = authed_client.post("/api/wholesale/orders", json=payload)
+    assert response.status_code == 422
+
+
+def test_editing_order_does_not_reprice_its_foreign_currency_line_from_a_new_rate(
+    authed_client: TestClient, db_session: Session
+) -> None:
+    """A saved foreign-currency line keeps its own snapshot rate; editing the order with
+    the same original amount but a different rate re-saves the line with the new rate —
+    it never gets silently rewritten by "today's" rate on its own."""
+    branch = _branch(db_session)
+    _user(db_session, UserRole.WHOLESALE, branch.id)
+
+    payload = _payload()
+    payload["lines"][0] |= {
+        "currency_code": "THB",
+        "selling_price": None,
+        "original_selling_price": 500,
+        "exchange_rate": 120,
+    }
+    created = authed_client.post("/api/wholesale/orders", json=payload)
+    assert created.json()["lines"][0]["selling_price"] == 60000
+
+    # Editing the order without touching the line leaves its saved rate untouched.
+    updated = authed_client.put(f"/api/wholesale/orders/{created.json()['order_id']}", json=payload)
+    assert updated.json()["lines"][0]["selling_price"] == 60000
+    assert updated.json()["lines"][0]["exchange_rate"] == 120

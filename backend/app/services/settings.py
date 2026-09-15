@@ -104,6 +104,15 @@ def get_branch_health_weights(db: Session) -> dict[str, float]:
     return {name: float(value) for name, value in _merged_over_default(db, "branch_health_weights").items()}
 
 
+def get_today_exchange_rates(db: Session) -> dict[str, str]:
+    """Today's MMK rate for each non-MMK currency, as saved (see DEFAULT_SETTINGS'
+    today_exchange_rates comment) — only used to prefill a new wholesale order/voucher
+    line or receiving cost; not merged over a fixed key set the way
+    _merged_over_default's callers are, since the set of currencies is open-ended."""
+    saved = get_setting(db, "today_exchange_rates")
+    return dict(saved) if isinstance(saved, dict) else {}
+
+
 def get_early_warning_thresholds(db: Session) -> dict[str, float]:
     """The firing points for every Early Warning rule, as a plain dict — the caller
     turns it into an early_warning.Thresholds. Returning the dataclass from here would

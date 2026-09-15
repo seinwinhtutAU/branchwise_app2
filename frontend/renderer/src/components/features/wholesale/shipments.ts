@@ -34,6 +34,7 @@ export interface ShipmentLeg {
   carrier_name: string;
   packages_received: number;
   packages_sent: number;
+  lost_packages?: number;
 }
 
 export interface Shipment {
@@ -57,6 +58,11 @@ export interface Shipment {
   total_unit: Unit;
   packages_sent_by_cargo: number;
   final_received_packages: number;
+  lost_packages?: number;
+  final_lost_packages?: number;
+  /** Set when this shipment was carved out of another one's still-undispatched
+   *  remainder (see the Split shipment action) — null for an ordinary shipment. */
+  split_from_shipment_id?: string | null;
   legs: ShipmentLeg[];
 }
 
@@ -88,7 +94,7 @@ export function maxForLeg(shipment: Shipment, index: number): number {
 export function legRemaining(shipment: Shipment, index: number): number {
   return Math.max(
     0,
-    maxForLeg(shipment, index) - shipment.legs[index].packages_sent,
+    maxForLeg(shipment, index) - shipment.legs[index].packages_sent - (shipment.legs[index].lost_packages ?? 0),
   );
 }
 
@@ -109,7 +115,7 @@ export function intoFinal(shipment: Shipment): number {
 export function finalRemaining(shipment: Shipment): number {
   return Math.max(
     0,
-    shipment.total_packages - shipment.final_received_packages,
+    shipment.total_packages - shipment.final_received_packages - (shipment.lost_packages ?? 0),
   );
 }
 
@@ -117,7 +123,7 @@ export function shipmentStatus(shipment: Shipment): ShipmentStatus {
   if (shipment.packages_sent_by_cargo <= 0) return "waiting_at_cargo";
   if (
     shipment.total_packages > 0 &&
-    shipment.final_received_packages >= shipment.total_packages
+    shipment.final_received_packages + (shipment.lost_packages ?? 0) >= shipment.total_packages
   ) {
     return "completed";
   }
@@ -167,7 +173,10 @@ export function destinationCount(shipment: Shipment): number {
 }
 
 export function arrivedPct(shipment: Shipment): number {
-  return sharePct(shipment.final_received_packages, shipment.total_packages);
+  return sharePct(
+    shipment.final_received_packages + (shipment.lost_packages ?? 0),
+    shipment.total_packages,
+  );
 }
 
 // ── Seed rows ────────────────────────────────────────────────────────────────

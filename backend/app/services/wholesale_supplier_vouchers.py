@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.wholesale import Receiving, ReceivingItem, ReceivingPackage, SupplierVoucher, SupplierVoucherLine, WholesalePayment
 from app.services.wholesale.colors import color_qty_pairs, color_qty_problem, colors_as_json
+from app.services.wholesale.currency import resolve_money
+from app.services.wholesale.money import voucher_totals
 from app.services.wholesale.references import allocate_reference, retry_on_reference_collision
 
 _LOAD_OPTIONS = (selectinload(SupplierVoucher.lines), selectinload(SupplierVoucher.payments))
@@ -34,10 +36,16 @@ def _line(line_in) -> SupplierVoucherLine:
     problem = color_qty_problem(color_breakdown)
     if problem:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, problem)
+    currency_code, buying_price, original_buying_price, exchange_rate = resolve_money(
+        line_in.currency_code, line_in.buying_price, line_in.original_buying_price, line_in.exchange_rate,
+    )
     return SupplierVoucherLine(
         stock_code=line_in.stock_code.strip(), description=line_in.description.strip(),
         product_group=line_in.product_group, color_breakdown=color_breakdown, colors=colors_as_json(color_breakdown),
-        unit=line_in.unit, quantity_pairs=color_qty_pairs(color_breakdown, line_in.unit), buying_price=line_in.buying_price,
+        unit=line_in.unit, unit_conversions=line_in.unit_conversions,
+        quantity_pairs=color_qty_pairs(color_breakdown, line_in.unit, line_in.unit_conversions),
+        buying_price=buying_price, currency_code=currency_code,
+        original_buying_price=original_buying_price, exchange_rate=exchange_rate,
     )
 
 
@@ -71,11 +79,15 @@ def create_voucher(db: Session, branch_id: str | None, payload) -> SupplierVouch
 def update_voucher(db: Session, voucher_id: str, branch_id: str | None, payload) -> SupplierVoucher:
     _check_no_duplicate_stock_codes(payload.lines)
     voucher = _load(db, voucher_id, branch_id)
+    existing_losses = {line.stock_code: line.lost_quantity_pairs for line in voucher.lines}
     voucher.supplier_name = payload.supplier_name.strip()
     voucher.voucher_date = payload.voucher_date
     voucher.carrier_name = payload.carrier_name.strip()
     voucher.total_packages = payload.total_packages
-    voucher.lines = [_line(line) for line in payload.lines]
+    replacement_lines = [_line(line) for line in payload.lines]
+    for line in replacement_lines:
+        line.lost_quantity_pairs = min(existing_losses.get(line.stock_code, 0), line.quantity_pairs)
+    voucher.lines = replacement_lines
     db.commit()
     db.refresh(voucher)
     return voucher
@@ -89,7 +101,7 @@ def delete_voucher(db: Session, voucher_id: str, branch_id: str | None) -> None:
 
 def add_payment(db: Session, voucher_id: str, branch_id: str | None, user_id: str, payload) -> WholesalePayment:
     voucher = _load(db, voucher_id, branch_id)
-    total = sum(float(line.quantity_pairs) * float(line.buying_price) for line in voucher.lines)
+    total = voucher_totals(voucher)["total"]
     paid = sum(float(payment.amount) for payment in voucher.payments)
     if paid + payload.amount > total:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Payment cannot exceed the voucher balance")

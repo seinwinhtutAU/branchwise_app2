@@ -19,6 +19,7 @@ import {
   JourneyArrow,
   JourneyFace,
   JourneySoft,
+  MismatchIconButton,
   ReadOnlyField,
   Required,
   Reference,
@@ -84,6 +85,7 @@ import {
 } from "@renderer/components/features/wholesale/masterData";
 import {
   formatDate,
+  mismatchDescription,
   formatQty,
   onlyDigits,
   todayIso,
@@ -94,13 +96,18 @@ import {
 } from "@renderer/components/features/wholesale/store";
 import {
   SHIPMENTS_URL,
+  WHOLESALE_WRITE_OFFS_URL,
   WholesaleApiError,
   createShipment as apiCreateShipment,
   deleteShipment as apiDeleteShipment,
   shipmentsFromWire,
+  splitShipment as apiSplitShipment,
   updateShipment as apiUpdateShipment,
+  writeOffShipment as apiWriteOffShipment,
+  type WriteOffReason,
   type NewShipmentInput,
   type ShipmentWire,
+  type WriteOffWire,
 } from "@renderer/components/features/wholesale/api";
 import {
   PAIRS_PER,
@@ -108,6 +115,8 @@ import {
   toPairs,
   type Unit,
 } from "@renderer/components/features/wholesale/units";
+import { WriteOffModal } from "@renderer/components/features/wholesale/WriteOffModal";
+import { SplitShipmentModal } from "@renderer/components/features/wholesale/SplitShipmentModal";
 
 // The wholesale Delivery screen — where a supplier voucher's packages are while they are
 // on the road. Same shape as the other two wholesale screens (figure cards, one panel
@@ -179,9 +188,17 @@ export default function DeliveryPage({
     queryFn: () => fetchJson<ShipmentWire[]>(SHIPMENTS_URL, session),
   });
   useLoadErrorToast(failed, "shipments");
+  const { data: writeOffs = [], isError: writeOffsFailed } = useQuery({
+    queryKey: ["wholesale", "write-offs"],
+    queryFn: () => fetchJson<WriteOffWire[]>(WHOLESALE_WRITE_OFFS_URL, session),
+  });
+  useLoadErrorToast(writeOffsFailed, "mismatch explanations");
 
   async function reload(): Promise<void> {
     await queryClient.invalidateQueries({ queryKey: SHIPMENTS_QUERY_KEY });
+    await queryClient.invalidateQueries({
+      queryKey: ["wholesale", "write-offs"],
+    });
   }
 
   const shipments = useMemo(
@@ -227,6 +244,23 @@ export default function DeliveryPage({
     }
   }
 
+  async function writeOffShipment(
+    shipmentId: string,
+    legId: string | undefined,
+    quantity: number,
+    reason: WriteOffReason,
+    note: string,
+  ): Promise<void> {
+    await apiWriteOffShipment(session, shipmentId, {
+      quantity,
+      reason,
+      note,
+      ...(legId ? { leg_id: legId } : {}),
+    });
+    await reload();
+    showToast("success", "Write-off recorded.");
+  }
+
   function deleteShipment(shipmentId: string): void {
     apiDeleteShipment(session, shipmentId)
       .then(async () => {
@@ -237,6 +271,25 @@ export default function DeliveryPage({
       .catch((error) =>
         reportSaveFailure(error, "Could not delete the shipment."),
       );
+  }
+
+  async function splitShipment(
+    shipmentId: string,
+    packages: number,
+    quantityPairs: number,
+    finalDestination: string,
+    carrierName: string,
+  ): Promise<void> {
+    const { newShipment } = await apiSplitShipment(session, shipmentId, {
+      packages,
+      quantity_pairs: quantityPairs,
+      final_destination: finalDestination,
+      carrier_name: carrierName,
+    });
+    await reload();
+    setSelectedId(newShipment.shipment_id);
+    setView("detail");
+    showToast("success", `Split into ${newShipment.shipment_no}.`);
   }
 
   function addShipment(input: NewShipmentInput): void {
@@ -285,6 +338,9 @@ export default function DeliveryPage({
         onBack={() => setView("list")}
         onSave={persistShipment}
         onDelete={() => deleteShipment(selected.shipment_id)}
+        onWriteOff={writeOffShipment}
+        onSplit={splitShipment}
+        writeOffs={writeOffs}
       />
     );
   }
@@ -328,6 +384,15 @@ function ShipmentList({
   const countBy = (status: ShipmentStatus): number =>
     shipments.filter((shipment) => shipmentStatus(shipment) === status).length;
 
+  // Looked up against the full list (not just the current page/filter), so "Split from
+  // SHP-xxxx" still resolves to a name even if a search or status filter is hiding the
+  // parent shipment right now.
+  const shipmentById = useMemo(() => {
+    const map = new Map<string, Shipment>();
+    for (const shipment of shipments) map.set(shipment.shipment_id, shipment);
+    return map;
+  }, [shipments]);
+
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     return shipments.filter((shipment) => {
@@ -352,6 +417,28 @@ function ShipmentList({
     (safePage - 1) * PAGE_SIZE,
     safePage * PAGE_SIZE,
   );
+  // Consecutive shipments sharing a voucher number is the split case — the cargo
+  // company only sent part of that voucher one way and the rest went (or is going)
+  // somewhere else. Merged into one spreadsheet-style merged cell for the Voucher no.
+  // column rather than repeating it: 0 here means "this row's voucher cell is covered
+  // by the merged cell above it," any other number is the rowSpan for a cell that
+  // starts a group (1 for an ordinary, ungrouped shipment).
+  const voucherRowSpans = useMemo(() => {
+    const spans = new Array<number>(visible.length).fill(1);
+    let groupStart = 0;
+    for (let index = 1; index <= visible.length; index += 1) {
+      const sameAsGroup =
+        index < visible.length &&
+        visible[index].voucher_no === visible[groupStart].voucher_no;
+      if (sameAsGroup) continue;
+      spans[groupStart] = index - groupStart;
+      for (let covered = groupStart + 1; covered < index; covered += 1) {
+        spans[covered] = 0;
+      }
+      groupStart = index;
+    }
+    return spans;
+  }, [visible]);
   const isFiltered = search.trim() !== "" || status !== "all";
 
   function resetFilters(): void {
@@ -496,7 +583,12 @@ function ShipmentList({
                 </Tr>
               </Thead>
               <Tbody>
-                {visible.map((shipment) => (
+                {visible.map((shipment, index) => {
+                  const voucherRowSpan = voucherRowSpans[index];
+                  const splitParent = shipment.split_from_shipment_id
+                    ? shipmentById.get(shipment.split_from_shipment_id)
+                    : undefined;
+                  return (
                   <Tr key={shipment.shipment_id}>
                     <Td className="whitespace-nowrap">
                       <Reference
@@ -504,13 +596,27 @@ function ShipmentList({
                         what="shipment no."
                         onClick={() => onOpen(shipment.shipment_id)}
                       />
+                      {splitParent && (
+                        <button
+                          type="button"
+                          onClick={() => onOpen(splitParent.shipment_id)}
+                          className="mt-0.5 block text-[11px] text-text-muted hover:text-brand hover:underline"
+                        >
+                          Split from {splitParent.shipment_no}
+                        </button>
+                      )}
                     </Td>
-                    <Td className="text-text-secondary">
-                      <Reference
-                        value={shipment.voucher_no}
-                        what="voucher no."
-                      />
-                    </Td>
+                    {voucherRowSpan > 0 && (
+                      <Td
+                        className="text-text-secondary align-middle"
+                        rowSpan={voucherRowSpan > 1 ? voucherRowSpan : undefined}
+                      >
+                        <Reference
+                          value={shipment.voucher_no}
+                          what="voucher no."
+                        />
+                      </Td>
+                    )}
                     <Td className="font-medium whitespace-nowrap">
                       {shipment.supplier_name}
                     </Td>
@@ -539,7 +645,8 @@ function ShipmentList({
                       />
                     </Td>
                   </Tr>
-                ))}
+                  );
+                })}
               </Tbody>
             </TableContainer>
             <div className="px-6 py-3 border-t border-border">
@@ -692,16 +799,42 @@ interface ShipmentDetailFormValues {
   shipment: Shipment;
 }
 
+interface ShipmentMismatchTarget {
+  subjectId: string;
+  legId?: string;
+  subject: string;
+  remaining: number;
+  currentCount: number;
+}
+
 function ShipmentDetail({
   shipment: serverShipment,
+  writeOffs,
   onBack,
   onSave,
   onDelete,
+  onWriteOff,
+  onSplit,
 }: {
   shipment: Shipment;
+  writeOffs: WriteOffWire[];
   onBack: () => void;
   onSave: (shipment: Shipment) => Promise<void>;
   onDelete: () => void;
+  onWriteOff: (
+    shipmentId: string,
+    legId: string | undefined,
+    quantity: number,
+    reason: WriteOffReason,
+    note: string,
+  ) => Promise<void>;
+  onSplit: (
+    shipmentId: string,
+    packages: number,
+    quantityPairs: number,
+    finalDestination: string,
+    carrierName: string,
+  ) => Promise<void>;
 }): React.JSX.Element {
   // Edits stay in this local draft until the user explicitly presses Save changes.
   const [saving, setSaving] = useState(false);
@@ -742,7 +875,7 @@ function ShipmentDetail({
   // — a real short-shipment happens, and this should not block saving it.
   const quantityMismatch =
     voucher && shipmentPairs(shipment) !== voucher.total_quantity_pairs
-      ? `The voucher says ${formatIn(voucher.total_quantity_pairs, "set")}.`
+      ? `The voucher says ${formatIn(voucher.total_quantity_pairs, "pair")}.`
       : undefined;
   const hasChanges = isDirty;
 
@@ -754,6 +887,41 @@ function ShipmentDetail({
   // Which destination is being renamed, and whether the delete button has been armed.
   const [editingLeg, setEditingLeg] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [writeOffTarget, setWriteOffTarget] =
+    useState<ShipmentMismatchTarget | null>(null);
+  const [stageChoices, setStageChoices] = useState<
+    ShipmentMismatchTarget[] | null
+  >(null);
+  const [splitOpen, setSplitOpen] = useState(false);
+
+  function latestMismatch(subjectId: string): WriteOffWire | undefined {
+    return writeOffs.find((entry) => entry.subject_id === subjectId);
+  }
+
+  function openMismatchExplanation(): void {
+    const stages: ShipmentMismatchTarget[] = [
+      ...shipment.legs.map((leg, index) => ({
+        subjectId: leg.leg_id,
+        legId: leg.leg_id,
+        subject: `${shipment.shipment_no} at ${leg.stop_name}`,
+        remaining: legRemaining(shipment, index),
+        currentCount: leg.packages_sent,
+      })),
+      {
+        subjectId: shipment.shipment_id,
+        subject: `${shipment.shipment_no} at ${shipment.final_destination}`,
+        remaining: finalRemaining(shipment),
+        currentCount: shipment.total_packages,
+      },
+    ];
+    const outstanding = stages.filter((stage) => stage.remaining > 0);
+    const choices = outstanding.length > 0 ? outstanding : stages;
+    if (choices.length === 1) {
+      setWriteOffTarget(choices[0]);
+      return;
+    }
+    setStageChoices(choices);
+  }
 
   async function saveChanges(values: ShipmentDetailFormValues): Promise<void> {
     setSaving(true);
@@ -767,9 +935,25 @@ function ShipmentDetail({
   /** The one way anything on this shipment changes: settle the route and stage it locally. */
   function apply(patch: Partial<Shipment>): void {
     const settled = normaliseFlow({ ...shipment, ...patch });
+    const repackagedByLeg = new Map<string, number>();
+    for (const entry of writeOffs) {
+      if (
+        entry.subject_type === "shipment_leg" &&
+        entry.reason === "repackaged" &&
+        !repackagedByLeg.has(entry.subject_id)
+      ) {
+        repackagedByLeg.set(entry.subject_id, entry.quantity);
+      }
+    }
+    const correctedLegs = settled.legs.map((leg) => {
+      const corrected = repackagedByLeg.get(leg.leg_id);
+      return corrected === undefined
+        ? leg
+        : { ...leg, packages_received: corrected, packages_sent: corrected };
+    });
     const merged = {
       ...patch,
-      legs: settled.legs,
+      legs: correctedLegs,
       packages_sent_by_cargo: settled.packages_sent_by_cargo,
       final_received_packages: settled.final_received_packages,
     };
@@ -813,474 +997,586 @@ function ShipmentDetail({
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          <ChevronLeftIcon className="w-4 h-4" />
-          Back to shipments
-        </Button>
-      </div>
-
-      <Panel>
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-semibold text-text-primary tracking-tight">
-                {shipment.shipment_no}
-              </h2>
-              <StatusBadge status={shipmentStatus(shipment)} />
-            </div>
-            <p className="mt-0.5 truncate text-sm text-text-muted">
-              {shipment.supplier_name} · {formatDate(shipment.sent_on)}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              onClick={() => void handleSubmit(saveChanges)()}
-              loading={saving}
-              disabled={!hasChanges}
-            >
-              <CheckIcon className="w-4 h-4" />
-              Save changes
-            </Button>
-            {/* Two presses rather than one, since there is no undo behind it. */}
-            {confirmDelete ? (
-              <>
-                <Button variant="destructive" size="sm" onClick={onDelete}>
-                  <TrashIcon className="w-4 h-4" />
-                  Delete for good
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setConfirmDelete(false)}
-                >
-                  Keep
-                </Button>
-              </>
-            ) : (
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => setConfirmDelete(true)}
-              >
-                <TrashIcon className="w-4 h-4" />
-                Delete shipment
-              </Button>
-            )}
-          </div>
+    <>
+      <div className="flex flex-col gap-5">
+        <div>
+          <Button variant="ghost" size="sm" onClick={onBack}>
+            <ChevronLeftIcon className="w-4 h-4" />
+            Back to shipments
+          </Button>
         </div>
 
-        <div className="px-6 py-6 flex flex-col gap-10">
-          <section>
-            <SectionLabel>Shipment information</SectionLabel>
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                <h3 className="mb-3 text-sm font-semibold text-text-primary">
-                  Shipment
-                </h3>
-                <dl className="grid gap-3 sm:grid-cols-2">
-                  <ReadOnlyField
-                    label="Shipment no."
-                    value={shipment.shipment_no}
-                    copyable
-                  />
-                  <ReadOnlyField
-                    label="Voucher no."
-                    value={shipment.voucher_no}
-                    copyable
-                  />
-                  <ReadOnlyField
-                    label="Supplier / Factory"
-                    value={shipment.supplier_name}
-                  />
-                </dl>
+        <Panel>
+          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-semibold text-text-primary tracking-tight">
+                  {shipment.shipment_no}
+                </h2>
+                <StatusBadge status={shipmentStatus(shipment)} />
               </div>
-              <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                <h3 className="mb-3 text-sm font-semibold text-text-primary">
-                  Shipment details
-                </h3>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Controller
-                    control={control}
-                    name="shipment.carrier_name"
-                    render={({ field }) => (
-                      <SuggestInput
-                        label="Cargo"
-                        placeholder="Shwe Moe Cargo"
-                        suggestions={CARGO_NAMES}
-                        value={field.value}
-                        onChange={(next) => {
-                          field.onChange(next);
-                          apply({ carrier_name: next });
-                        }}
-                        error={errors.shipment?.carrier_name?.message}
-                      />
-                    )}
-                  />
-                  <Controller
-                    control={control}
-                    name="shipment.final_destination"
-                    render={({ field }) => (
-                      <SuggestInput
-                        label="Receiving gate"
-                        placeholder="Bogyoke Rd, Mawlamyine"
-                        suggestions={RECEIVING_GATES}
-                        value={field.value}
-                        onChange={(next) => {
-                          field.onChange(next);
-                          apply({ final_destination: next });
-                        }}
-                        error={errors.shipment?.final_destination?.message}
-                      />
-                    )}
-                  />
-                  <Controller
-                    control={control}
-                    name="shipment.sent_on"
-                    render={({ field }) => (
-                      <Input
-                        label="Shipment date"
-                        type="date"
-                        className={EDITABLE}
-                        value={field.value}
-                        onChange={field.onChange}
-                        onBlur={field.onBlur}
-                        error={errors.shipment?.sent_on?.message}
-                      />
-                    )}
-                  />
-                  <Controller
-                    control={control}
-                    name="shipment.total_packages"
-                    render={({ field }) => (
-                      <CountField
-                        label="Packages"
-                        value={field.value}
-                        onChange={(next) => {
-                          field.onChange(next);
-                          apply({ total_packages: next });
-                        }}
-                      />
-                    )}
-                  />
-                  <div className="sm:col-span-1">
+              <p className="mt-0.5 truncate text-sm text-text-muted">
+                {shipment.supplier_name} · {formatDate(shipment.sent_on)}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setSplitOpen(true)}
+              >
+                <TruckIcon className="w-4 h-4" />
+                Split shipment
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => void handleSubmit(saveChanges)()}
+                loading={saving}
+                disabled={!hasChanges}
+              >
+                <CheckIcon className="w-4 h-4" />
+                Save changes
+              </Button>
+              {/* Two presses rather than one, since there is no undo behind it. */}
+              {confirmDelete ? (
+                <>
+                  <Button variant="destructive" size="sm" onClick={onDelete}>
+                    <TrashIcon className="w-4 h-4" />
+                    Delete for good
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirmDelete(false)}
+                  >
+                    Keep
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  <TrashIcon className="w-4 h-4" />
+                  Delete shipment
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="px-6 py-6 flex flex-col gap-10">
+            <section>
+              <SectionLabel>Shipment information</SectionLabel>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                  <h3 className="mb-3 text-sm font-semibold text-text-primary">
+                    Shipment
+                  </h3>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <ReadOnlyField
+                      label="Shipment no."
+                      value={shipment.shipment_no}
+                      copyable
+                    />
+                    <ReadOnlyField
+                      label="Voucher no."
+                      value={shipment.voucher_no}
+                      copyable
+                    />
+                    <ReadOnlyField
+                      label="Supplier / Factory"
+                      value={shipment.supplier_name}
+                    />
+                  </dl>
+                </div>
+                <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                  <h3 className="mb-3 text-sm font-semibold text-text-primary">
+                    Shipment details
+                  </h3>
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <Controller
                       control={control}
-                      name="shipment.total_quantity_pairs"
+                      name="shipment.carrier_name"
                       render={({ field }) => (
-                        <QuantityField
-                          label="Quantity"
-                          unitLabel="Unit the products are counted in"
+                        <SuggestInput
+                          label="Cargo"
+                          placeholder="Shwe Moe Cargo"
+                          suggestions={CARGO_NAMES}
                           value={field.value}
-                          unit={shipment.total_unit}
-                          hint={formatIn(shipmentPairs(shipment), "pair")}
-                          error={quantityMismatch}
                           onChange={(next) => {
                             field.onChange(next);
-                            apply({ total_quantity_pairs: next });
+                            apply({ carrier_name: next });
                           }}
-                          onUnitChange={(total_unit) =>
-                            setValue("shipment.total_unit", total_unit, {
-                              shouldDirty: true,
-                              shouldValidate: true,
-                            })
-                          }
+                          error={errors.shipment?.carrier_name?.message}
                         />
                       )}
                     />
+                    <Controller
+                      control={control}
+                      name="shipment.final_destination"
+                      render={({ field }) => (
+                        <SuggestInput
+                          label="Receiving gate"
+                          placeholder="Bogyoke Rd, Mawlamyine"
+                          suggestions={RECEIVING_GATES}
+                          value={field.value}
+                          onChange={(next) => {
+                            field.onChange(next);
+                            apply({ final_destination: next });
+                          }}
+                          error={errors.shipment?.final_destination?.message}
+                        />
+                      )}
+                    />
+                    <Controller
+                      control={control}
+                      name="shipment.sent_on"
+                      render={({ field }) => (
+                        <Input
+                          label="Shipment date"
+                          type="date"
+                          className={EDITABLE}
+                          value={field.value}
+                          onChange={field.onChange}
+                          onBlur={field.onBlur}
+                          error={errors.shipment?.sent_on?.message}
+                        />
+                      )}
+                    />
+                    <Controller
+                      control={control}
+                      name="shipment.total_packages"
+                      render={({ field }) => (
+                        <CountField
+                          label="Packages"
+                          value={field.value}
+                          onChange={(next) => {
+                            field.onChange(next);
+                            apply({ total_packages: next });
+                          }}
+                        />
+                      )}
+                    />
+                    <div className="sm:col-span-1">
+                      <Controller
+                        control={control}
+                        name="shipment.total_quantity_pairs"
+                        render={({ field }) => (
+                          <QuantityField
+                            label="Quantity"
+                            unitLabel="Unit the products are counted in"
+                            value={field.value}
+                            unit={shipment.total_unit}
+                            hint={formatIn(shipmentPairs(shipment), shipment.total_unit)}
+                            error={quantityMismatch}
+                            onChange={(next) => {
+                              field.onChange(next);
+                              apply({ total_quantity_pairs: next });
+                            }}
+                            onUnitChange={(total_unit) =>
+                              setValue("shipment.total_unit", total_unit, {
+                                shouldDirty: true,
+                                shouldValidate: true,
+                              })
+                            }
+                          />
+                        )}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          </section>
+            </section>
 
-          <section>
-            <SectionLabel>Shipment journey</SectionLabel>
-            <DeliveryJourney
-              shipment={shipment}
-              receivings={receivings}
-              includeGateCount={false}
-            />
-          </section>
+            <section>
+              <SectionLabel>Shipment journey</SectionLabel>
+              <DeliveryJourney
+                shipment={shipment}
+                receivings={receivings}
+                includeGateCount={false}
+              />
+            </section>
 
-          <section>
-            <SectionLabel>Package tracking</SectionLabel>
-            <TableContainer className="[&>table]:min-w-max">
-              <thead>
-                <Tr>
-                  <Th
-                    style={{ backgroundColor: JourneyFace("supplier") }}
-                    className="text-white text-center"
-                    colSpan={3}
-                  >
-                    Supplier
-                  </Th>
-                  <ArrowHead />
-                  <Th
-                    style={{ backgroundColor: JourneyFace("cargo") }}
-                    className="text-white text-center"
-                    colSpan={2}
-                  >
-                    {shipment.carrier_name}
-                  </Th>
-                  {shipment.legs.map((leg, index) => (
-                    <Fragment key={leg.leg_id}>
-                      <ArrowHead
-                        insertLabel={`Add a destination before ${leg.stop_name}`}
-                        onInsert={() => setInsertAt(index)}
+            <section>
+              <SectionLabel>Package tracking</SectionLabel>
+              <TableContainer className="[&>table]:min-w-max">
+                <thead>
+                  <Tr>
+                    <Th
+                      style={{ backgroundColor: JourneyFace("supplier") }}
+                      className="text-white text-center"
+                      colSpan={3}
+                    >
+                      Supplier
+                    </Th>
+                    <ArrowHead />
+                    <Th
+                      style={{ backgroundColor: JourneyFace("cargo") }}
+                      className="text-white text-center"
+                      colSpan={2}
+                    >
+                      {shipment.carrier_name}
+                    </Th>
+                    {shipment.legs.map((leg, index) => (
+                      <Fragment key={leg.leg_id}>
+                        <ArrowHead
+                          insertLabel={`Add a destination before ${leg.stop_name}`}
+                          onInsert={() => setInsertAt(index)}
+                        />
+                        <Th
+                          style={{ backgroundColor: JourneyFace("stop") }}
+                          className="text-white text-center"
+                          colSpan={3}
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            {leg.stop_name}
+                            <button
+                              type="button"
+                              aria-label={`Rename ${leg.stop_name}`}
+                              title={`Edit ${leg.stop_name}`}
+                              onClick={() => {
+                                setEditingLeg(index);
+                                setInsertAt(null);
+                              }}
+                              className={cn(
+                                "flex items-center justify-center w-5 h-5 rounded-full shrink-0",
+                                "bg-white/25 text-white",
+                                "transition-colors duration-150",
+                                "hover:bg-white/40",
+                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white",
+                              )}
+                            >
+                              <PencilIcon className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Remove ${leg.stop_name}`}
+                              title={`Remove ${leg.stop_name}`}
+                              onClick={() => removeLeg(index)}
+                              className={cn(
+                                "flex items-center justify-center w-5 h-5 rounded-full shrink-0",
+                                "bg-white/25 text-white",
+                                "transition-colors duration-150",
+                                "hover:bg-error hover:text-white",
+                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white",
+                              )}
+                            >
+                              <CloseIcon className="w-3.5 h-3.5" />
+                            </button>
+                          </span>
+                        </Th>
+                      </Fragment>
+                    ))}
+                    <ArrowHead
+                      insertLabel="Add a destination before Final received"
+                      onInsert={() => setInsertAt(shipment.legs.length)}
+                    />
+                    <Th
+                      style={{ backgroundColor: JourneyFace("final") }}
+                      className="text-white text-center"
+                      colSpan={2}
+                    >
+                      <span className="block">Final received</span>
+                      <span className="block text-[10px] font-normal normal-case text-white/70">
+                        {shipment.final_destination}
+                      </span>
+                    </Th>
+                  </Tr>
+                  <Tr>
+                    <Th className="text-center">Name</Th>
+                    <Th className="text-center">Packages</Th>
+                    <Th className="text-center">Quantity</Th>
+                    <ArrowCell />
+                    <Th className="text-center">Sent</Th>
+                    <Th className="text-center">Remaining</Th>
+                    {shipment.legs.map((leg) => (
+                      <Fragment key={`${leg.leg_id}-sub`}>
+                        <ArrowCell />
+                        <Th className="text-center">Received</Th>
+                        <Th className="text-center">Sent</Th>
+                        <Th className="text-center">Remaining</Th>
+                      </Fragment>
+                    ))}
+                    <ArrowCell />
+                    <Th className="text-center">Received</Th>
+                    <Th className="text-center">Remaining</Th>
+                    <Th className="text-center">Mismatch</Th>
+                  </Tr>
+                </thead>
+                <Tbody>
+                  <Tr className="hover:bg-transparent">
+                    <Td className="bg-bg-subtle font-medium whitespace-nowrap">
+                      {shipment.supplier_name}
+                    </Td>
+                    <Td className="bg-bg-subtle text-center">
+                      <BigCount value={shipment.total_packages} />
+                    </Td>
+                    <Td className="bg-bg-subtle text-center">
+                      <BigCount
+                        value={shipmentPairs(shipment)}
+                        unit={shipment.total_unit}
                       />
-                      <Th
-                        style={{ backgroundColor: JourneyFace("stop") }}
-                        className="text-white text-center"
-                        colSpan={3}
-                      >
-                        <span className="inline-flex items-center gap-1.5">
-                          {leg.stop_name}
-                          <button
-                            type="button"
-                            aria-label={`Rename ${leg.stop_name}`}
-                            title={`Edit ${leg.stop_name}`}
-                            onClick={() => {
-                              setEditingLeg(index);
-                              setInsertAt(null);
-                            }}
-                            className={cn(
-                              "flex items-center justify-center w-5 h-5 rounded-full shrink-0",
-                              "bg-white/25 text-white",
-                              "transition-colors duration-150",
-                              "hover:bg-white/40",
-                              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white",
-                            )}
-                          >
-                            <PencilIcon className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Remove ${leg.stop_name}`}
-                            title={`Remove ${leg.stop_name}`}
-                            onClick={() => removeLeg(index)}
-                            className={cn(
-                              "flex items-center justify-center w-5 h-5 rounded-full shrink-0",
-                              "bg-white/25 text-white",
-                              "transition-colors duration-150",
-                              "hover:bg-error hover:text-white",
-                              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white",
-                            )}
-                          >
-                            <CloseIcon className="w-3.5 h-3.5" />
-                          </button>
-                        </span>
-                      </Th>
-                    </Fragment>
-                  ))}
-                  <ArrowHead
-                    insertLabel="Add a destination before Final received"
-                    onInsert={() => setInsertAt(shipment.legs.length)}
-                  />
-                  <Th
-                    style={{ backgroundColor: JourneyFace("final") }}
-                    className="text-white text-center"
-                    colSpan={2}
-                  >
-                    <span className="block">Final received</span>
-                    <span className="block text-[10px] font-normal normal-case text-white/70">
-                      {shipment.final_destination}
-                    </span>
-                  </Th>
-                </Tr>
-                <Tr>
-                  <Th className="text-center">Name</Th>
-                  <Th className="text-center">Packages</Th>
-                  <Th className="text-center">Quantity</Th>
-                  <ArrowCell />
-                  <Th className="text-center">Sent</Th>
-                  <Th className="text-center">Remaining</Th>
-                  {shipment.legs.map((leg) => (
-                    <Fragment key={`${leg.leg_id}-sub`}>
-                      <ArrowCell />
-                      <Th className="text-center">Received</Th>
-                      <Th className="text-center">Sent</Th>
-                      <Th className="text-center">Remaining</Th>
-                    </Fragment>
-                  ))}
-                  <ArrowCell />
-                  <Th className="text-center">Received</Th>
-                  <Th className="text-center">Remaining</Th>
-                </Tr>
-              </thead>
-              <Tbody>
-                <Tr className="hover:bg-transparent">
-                  <Td className="bg-bg-subtle font-medium whitespace-nowrap">
-                    {shipment.supplier_name}
-                  </Td>
-                  <Td className="bg-bg-subtle text-center">
-                    <BigCount value={shipment.total_packages} />
-                  </Td>
-                  <Td className="bg-bg-subtle text-center">
-                    <BigCount
-                      value={shipmentPairs(shipment)}
-                      unit={shipment.total_unit}
-                    />
-                  </Td>
-                  <ArrowCell body />
-                  <Td className="text-center">
-                    <PackageInput
-                      label={`Packages sent by ${shipment.carrier_name}`}
-                      value={shipment.packages_sent_by_cargo}
-                      max={shipment.total_packages}
-                      onChange={(next) =>
-                        apply({ packages_sent_by_cargo: next })
-                      }
-                    />
-                  </Td>
-                  <Td className="text-center">
-                    <LeftOver
-                      value={cargoRemaining(shipment)}
-                      started={shipment.packages_sent_by_cargo > 0}
-                    />
-                  </Td>
-                  {shipment.legs.map((leg, index) => (
-                    <Fragment key={`${leg.leg_id}-cells`}>
-                      <ArrowCell body />
-                      <Td className="text-center">
-                        <PackageInput
-                          label={`Packages received at ${leg.stop_name}`}
-                          value={leg.packages_received}
-                          max={maxForLeg(shipment, index)}
-                          onChange={(next) =>
-                            setLeg(index, {
-                              packages_received: next,
-                              packages_sent: Math.min(leg.packages_sent, next),
-                            })
-                          }
-                        />
-                      </Td>
-                      <Td className="text-center">
-                        <PackageInput
-                          label={`Packages sent on from ${leg.stop_name}`}
-                          value={leg.packages_sent}
-                          max={leg.packages_received}
-                          onChange={(next) =>
-                            setLeg(index, { packages_sent: next })
-                          }
-                        />
-                      </Td>
-                      <Td className="text-center">
-                        <LeftOver
-                          value={legRemaining(shipment, index)}
-                          started={maxForLeg(shipment, index) > 0}
-                        />
-                      </Td>
-                    </Fragment>
-                  ))}
-                  <ArrowCell body />
-                  <Td className="text-center">
-                    {hasReceiving ? (
-                      <div className="flex flex-col items-center gap-0.5">
-                        <BigCount value={shipment.final_received_packages} />
-                        <span className="text-[10px] text-text-muted">
-                          From Receiving
-                        </span>
-                      </div>
-                    ) : (
+                    </Td>
+                    <ArrowCell body />
+                    <Td className="text-center">
                       <PackageInput
-                        label="Packages finally received"
-                        value={shipment.final_received_packages}
-                        max={heading}
+                        label={`Packages sent by ${shipment.carrier_name}`}
+                        value={shipment.packages_sent_by_cargo}
+                        max={shipment.total_packages}
                         onChange={(next) =>
-                          apply({ final_received_packages: next })
+                          apply({ packages_sent_by_cargo: next })
                         }
                       />
-                    )}
-                  </Td>
-                  <Td className="text-center">
-                    <LeftOver
-                      value={finalRemaining(shipment)}
-                      started={shipment.final_received_packages > 0}
-                    />
-                  </Td>
-                </Tr>
-              </Tbody>
-            </TableContainer>
-            {editingLeg !== null && shipment.legs[editingLeg] ? (
-              <DestinationForm
-                title={`Edit ${shipment.legs[editingLeg].stop_name}`}
-                initialName={shipment.legs[editingLeg].stop_name}
-                initialCarrier={shipment.legs[editingLeg].carrier_name}
-                submitLabel="Save"
-                onSubmit={(stopName, carrierName) => {
-                  setLeg(editingLeg, {
-                    stop_name: stopName,
-                    carrier_name: carrierName || "—",
-                  });
-                  setEditingLeg(null);
-                }}
-                onCancel={() => setEditingLeg(null)}
-              />
-            ) : insertAt === null ? (
-              <div className="mt-3">
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setInsertAt(shipment.legs.length);
+                    </Td>
+                    <Td className="text-center">
+                      <LeftOver
+                        value={cargoRemaining(shipment)}
+                        started={shipment.packages_sent_by_cargo > 0}
+                      />
+                    </Td>
+                    {shipment.legs.map((leg, index) => (
+                      <Fragment key={`${leg.leg_id}-cells`}>
+                        <ArrowCell body />
+                        <Td className="text-center">
+                          <PackageInput
+                            label={`Packages received at ${leg.stop_name}`}
+                            value={leg.packages_received}
+                            max={maxForLeg(shipment, index)}
+                            onChange={(next) =>
+                              setLeg(index, {
+                                packages_received: next,
+                                packages_sent: Math.min(
+                                  leg.packages_sent,
+                                  next,
+                                ),
+                              })
+                            }
+                          />
+                        </Td>
+                        <Td className="text-center">
+                          <PackageInput
+                            label={`Packages sent on from ${leg.stop_name}`}
+                            value={leg.packages_sent}
+                            max={leg.packages_received}
+                            onChange={(next) =>
+                              setLeg(index, { packages_sent: next })
+                            }
+                          />
+                        </Td>
+                        <Td className="text-center">
+                          <div className="flex flex-col items-center gap-1">
+                            <LeftOver
+                              value={legRemaining(shipment, index)}
+                              started={maxForLeg(shipment, index) > 0}
+                              writtenOff={leg.lost_packages ?? 0}
+                              explanation={latestMismatch(leg.leg_id)}
+                            />
+                          </div>
+                        </Td>
+                      </Fragment>
+                    ))}
+                    <ArrowCell body />
+                    <Td className="text-center">
+                      {hasReceiving ? (
+                        <div className="flex flex-col items-center gap-0.5">
+                          <BigCount value={shipment.final_received_packages} />
+                          <span className="text-[10px] text-text-muted">
+                            From Receiving
+                          </span>
+                        </div>
+                      ) : (
+                        <PackageInput
+                          label="Packages finally received"
+                          value={shipment.final_received_packages}
+                          max={heading}
+                          onChange={(next) =>
+                            apply({ final_received_packages: next })
+                          }
+                        />
+                      )}
+                    </Td>
+                    <Td className="text-center">
+                      <div className="flex flex-col items-center gap-1">
+                        <LeftOver
+                          value={finalRemaining(shipment)}
+                          started={
+                            shipment.final_received_packages > 0 ||
+                            (shipment.lost_packages ?? 0) > 0
+                          }
+                          writtenOff={shipment.lost_packages ?? 0}
+                          explanation={latestMismatch(shipment.shipment_id)}
+                        />
+                      </div>
+                    </Td>
+                    <Td className="text-center">
+                      <MismatchIconButton
+                        explained={writeOffs.some(
+                          (entry) =>
+                            entry.subject_id === shipment.shipment_id ||
+                            shipment.legs.some(
+                              (leg) => entry.subject_id === leg.leg_id,
+                            ),
+                        )}
+                        onClick={openMismatchExplanation}
+                      />
+                    </Td>
+                  </Tr>
+                </Tbody>
+              </TableContainer>
+              {editingLeg !== null && shipment.legs[editingLeg] ? (
+                <DestinationForm
+                  title={`Edit ${shipment.legs[editingLeg].stop_name}`}
+                  initialName={shipment.legs[editingLeg].stop_name}
+                  initialCarrier={shipment.legs[editingLeg].carrier_name}
+                  submitLabel="Save"
+                  onSubmit={(stopName, carrierName) => {
+                    setLeg(editingLeg, {
+                      stop_name: stopName,
+                      carrier_name: carrierName || "—",
+                    });
                     setEditingLeg(null);
                   }}
-                >
-                  <PlusIcon className="w-4 h-4" />
-                  Add destination
-                </Button>
-              </div>
-            ) : (
-              <DestinationForm
-                title={`New destination, straight after ${
-                  insertAt === 0
-                    ? shipment.carrier_name
-                    : (shipment.legs[insertAt - 1]?.stop_name ??
-                      shipment.carrier_name)
-                }`}
-                submitLabel="Add destination"
-                onSubmit={(stopName, carrierName) => {
-                  addLeg(stopName, carrierName, insertAt);
-                  setInsertAt(null);
-                }}
-                onCancel={() => setInsertAt(null)}
-              />
-            )}
-          </section>
+                  onCancel={() => setEditingLeg(null)}
+                />
+              ) : insertAt === null ? (
+                <div className="mt-3">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setInsertAt(shipment.legs.length);
+                      setEditingLeg(null);
+                    }}
+                  >
+                    <PlusIcon className="w-4 h-4" />
+                    Add destination
+                  </Button>
+                </div>
+              ) : (
+                <DestinationForm
+                  title={`New destination, straight after ${
+                    insertAt === 0
+                      ? shipment.carrier_name
+                      : (shipment.legs[insertAt - 1]?.stop_name ??
+                        shipment.carrier_name)
+                  }`}
+                  submitLabel="Add destination"
+                  onSubmit={(stopName, carrierName) => {
+                    addLeg(stopName, carrierName, insertAt);
+                    setInsertAt(null);
+                  }}
+                  onCancel={() => setInsertAt(null)}
+                />
+              )}
+            </section>
 
-          <section>
-            <SectionLabel>Shipment progress</SectionLabel>
-            <div className="flex items-center justify-between text-sm mb-2">
-              <span className="font-medium text-text-secondary">
-                Shipment progress
-              </span>
-              <span className="tabular-nums font-semibold text-text-primary">
-                {formatQty(shipment.final_received_packages)} /{" "}
-                {formatQty(shipment.total_packages)} packages ({pct}%)
-              </span>
-            </div>
-            <div
-              role="progressbar"
-              aria-valuenow={pct}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label="Shipment progress"
-              className="h-2 rounded-full bg-bg-raised overflow-hidden"
-            >
+            <section>
+              <SectionLabel>Shipment progress</SectionLabel>
+              <div className="flex items-center justify-between text-sm mb-2">
+                <span className="font-medium text-text-secondary">
+                  Shipment progress
+                </span>
+                <span className="tabular-nums font-semibold text-text-primary">
+                  {formatQty(shipment.final_received_packages)} /{" "}
+                  {formatQty(shipment.total_packages)} packages ({pct}%)
+                </span>
+              </div>
               <div
-                className={cn(
-                  "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
-                  pct === 100 ? "bg-success" : "bg-brand",
-                )}
-                style={{ width: `${pct}%` }}
-              />
+                role="progressbar"
+                aria-valuenow={pct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Shipment progress"
+                className="h-2 rounded-full bg-bg-raised overflow-hidden"
+              >
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
+                    pct === 100 ? "bg-success" : "bg-brand",
+                  )}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </section>
+          </div>
+        </Panel>
+      </div>
+      {stageChoices && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl border border-border bg-bg-base p-5 shadow-xl">
+            <div className="mb-5">
+              <h2 className="text-lg font-semibold text-text-primary">
+                Which stage?
+              </h2>
+              <p className="mt-1 text-sm text-text-muted">
+                Choose the stage where the package count needs an explanation.
+              </p>
             </div>
-          </section>
+            <div className="flex flex-col gap-2">
+              {stageChoices.map((choice) => (
+                <button
+                  key={choice.subjectId}
+                  type="button"
+                  className="rounded-lg border border-border px-3 py-2 text-left text-sm text-text-primary hover:border-brand hover:bg-bg-subtle"
+                  onClick={() => {
+                    setStageChoices(null);
+                    setWriteOffTarget(choice);
+                  }}
+                >
+                  <span className="block font-medium">{choice.subject}</span>
+                  <span className="block text-xs text-text-muted">
+                    {formatQty(choice.currentCount)} packages counted ·{" "}
+                    {formatQty(choice.remaining)} outstanding
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-5 flex justify-end">
+              <Button variant="ghost" onClick={() => setStageChoices(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
         </div>
-      </Panel>
-    </div>
+      )}
+      <WriteOffModal
+        open={writeOffTarget !== null}
+        subject={writeOffTarget?.subject ?? "this shipment"}
+        remaining={writeOffTarget?.remaining ?? 0}
+        unit="package"
+        allowRepackaged
+        currentCount={writeOffTarget?.currentCount ?? 0}
+        onClose={() => setWriteOffTarget(null)}
+        onSubmit={(quantity, reason, note) =>
+          onWriteOff(
+            serverShipment.shipment_id,
+            writeOffTarget?.legId,
+            quantity,
+            reason,
+            note,
+          )
+        }
+      />
+      <SplitShipmentModal
+        open={splitOpen}
+        shipmentNo={shipment.shipment_no}
+        availablePackages={cargoRemaining(shipment)}
+        availableQuantity={shipment.total_quantity_pairs}
+        unit={shipment.total_unit}
+        destinationSuggestions={[...RECEIVING_GATES, ...DESTINATION_NAMES]}
+        carrierSuggestions={CARRIER_NAMES}
+        onClose={() => setSplitOpen(false)}
+        onSubmit={(packages, quantity, finalDestination, carrierName) =>
+          onSplit(
+            serverShipment.shipment_id,
+            packages,
+            toPairs(quantity, shipment.total_unit),
+            finalDestination,
+            carrierName,
+          )
+        }
+      />
+    </>
   );
 }
 
@@ -1414,9 +1710,13 @@ function BigCount({
 function LeftOver({
   value,
   started,
+  writtenOff = 0,
+  explanation,
 }: {
   value: number;
   started: boolean;
+  writtenOff?: number;
+  explanation?: WriteOffWire;
 }): React.JSX.Element {
   const settled = started && value === 0;
   return (
@@ -1432,6 +1732,22 @@ function LeftOver({
     >
       {formatQty(value)}
       {settled && <CheckIcon className="w-3.5 h-3.5" />}
+      {writtenOff > 0 && !explanation && (
+        <span
+          className="text-[10px] font-medium text-warning"
+          title={`${formatQty(writtenOff)} written off`}
+        >
+          · {formatQty(writtenOff)} written off
+        </span>
+      )}
+      {explanation && (
+        <span
+          className="block max-w-[10rem] text-[10px] font-medium text-warning"
+          title={mismatchDescription(explanation)}
+        >
+          · {mismatchDescription(explanation)}
+        </span>
+      )}
     </span>
   );
 }
@@ -1579,7 +1895,7 @@ function NewShipmentForm({
     voucher &&
     totalSets.trim() !== "" &&
     toPairs(Number(totalSets) || 0, totalUnit) !== voucher.total_quantity_pairs
-      ? `The voucher says ${formatIn(voucher.total_quantity_pairs, "set")}.`
+      ? `The voucher says ${formatIn(voucher.total_quantity_pairs, "pair")}.`
       : undefined;
 
   function selectVoucher(nextVoucherNo: string): void {
@@ -1611,7 +1927,11 @@ function NewShipmentForm({
     });
     setValue(
       "total_sets",
-      String(wholeSets ? picked.total_quantity_pairs / PAIRS_PER.set : picked.total_quantity_pairs),
+      String(
+        wholeSets
+          ? picked.total_quantity_pairs / PAIRS_PER.set
+          : picked.total_quantity_pairs,
+      ),
       { shouldDirty: true },
     );
   }
@@ -1673,299 +1993,312 @@ function NewShipmentForm({
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <Button
-          variant="ghost"
-          size="sm"
-          title={isDirty ? "This new shipment has unsaved changes." : undefined}
-          onClick={onCancel}
-        >
-          <ChevronLeftIcon className="w-4 h-4" />
-          Back to shipments
-        </Button>
-      </div>
-
-      <Panel>
-        <div className="px-6 py-5 border-b border-border">
-          <h2 className="text-lg font-semibold text-text-primary tracking-tight mb-5">
-            New shipment
-          </h2>
-          <StepBar steps={STEPS} step={step} />
+    <>
+      <div className="flex flex-col gap-5">
+        <div>
+          <Button
+            variant="ghost"
+            size="sm"
+            title={
+              isDirty ? "This new shipment has unsaved changes." : undefined
+            }
+            onClick={onCancel}
+          >
+            <ChevronLeftIcon className="w-4 h-4" />
+            Back to shipments
+          </Button>
         </div>
 
-        {step === 0 && (
-          <div className="px-6 py-6 flex flex-col gap-5">
-            <SectionLabel>Step 1 — which voucher is travelling</SectionLabel>
-            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-              <Controller
-                control={control}
-                name="voucher_no"
-                render={() => (
-                  <Select
-                    label={<Required>Supplier voucher</Required>}
-                    className={EDITABLE}
-                    value={voucherNo}
-                    error={errors.voucher_no?.message}
-                    onChange={(event) => selectVoucher(event.target.value)}
-                  >
-                    <option value="">Choose…</option>
-                    {vouchers.map((entry) => (
-                      <option key={entry.voucher_id} value={entry.voucher_no}>
-                        {entry.voucher_no} — {entry.supplier_name}
-                      </option>
-                    ))}
-                  </Select>
-                )}
-              />
-              <Controller
-                control={control}
-                name="carrier_name"
-                render={({ field }) => (
-                  <SuggestInput
-                    label={<Required>Cargo</Required>}
-                    placeholder="Shwe Moe Cargo"
-                    suggestions={CARGO_NAMES}
-                    value={field.value}
-                    onChange={field.onChange}
-                    error={errors.carrier_name?.message}
-                  />
-                )}
-              />
-              <Controller
-                control={control}
-                name="final_destination"
-                render={({ field }) => (
-                  <SuggestInput
-                    label={<Required>Receiving gate</Required>}
-                    placeholder="Bogyoke Rd, Mawlamyine"
-                    suggestions={RECEIVING_GATES}
-                    value={field.value}
-                    onChange={field.onChange}
-                    error={errors.final_destination?.message}
-                  />
-                )}
-              />
-              <Input
-                label="Shipment date"
-                type="date"
-                className={EDITABLE}
-                error={errors.sent_on?.message}
-                {...register("sent_on")}
-              />
-              <Controller
-                control={control}
-                name="total_packages"
-                render={({ field }) => (
-                  <Input
-                    label="Packages"
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="0"
-                    className={cn(EDITABLE, "text-right")}
-                    value={field.value}
-                    onChange={(event) =>
-                      field.onChange(onlyDigits(event.target.value))
-                    }
-                    error={errors.total_packages?.message}
-                    hint={
-                      voucher
-                        ? `${formatQty(voucher.total_packages)} on the voucher.`
-                        : "Pick a voucher and this fills itself in."
-                    }
-                  />
-                )}
-              />
-              <Controller
-                control={control}
-                name="total_sets"
-                render={({ field }) => (
-                  <QuantityInput
-                    label="Quantity"
-                    unitLabel="Unit the products are counted in"
-                    value={field.value}
-                    unit={totalUnit}
-                    onChange={field.onChange}
-                    onUnitChange={(unit) =>
-                      setValue("total_unit", unit, {
-                        shouldDirty: true,
-                        shouldValidate: true,
-                      })
-                    }
-                    error={errors.total_sets?.message ?? quantityMismatch}
-                    hint={
-                      voucher
-                        ? `${formatIn(voucher.total_quantity_pairs, "set")} on the voucher.`
-                        : "Pick a voucher and this fills itself in."
-                    }
-                  />
-                )}
-              />
-            </div>
-            <div className="flex justify-end">
-              <Button onClick={() => void moveToDestinations()}>
-                Next: destinations
-                <ChevronRightIcon className="w-4 h-4" />
-              </Button>
-            </div>
+        <Panel>
+          <div className="px-6 py-5 border-b border-border">
+            <h2 className="text-lg font-semibold text-text-primary tracking-tight mb-5">
+              New shipment
+            </h2>
+            <StepBar steps={STEPS} step={step} />
           </div>
-        )}
 
-        {step === 1 && (
-          <div className="px-6 py-6 flex flex-col gap-5">
-            <SectionLabel>Step 2 — destinations on the way</SectionLabel>
+          {step === 0 && (
+            <div className="px-6 py-6 flex flex-col gap-5">
+              <SectionLabel>Step 1 — which voucher is travelling</SectionLabel>
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
+                <Controller
+                  control={control}
+                  name="voucher_no"
+                  render={() => (
+                    <Select
+                      label={<Required>Supplier voucher</Required>}
+                      className={EDITABLE}
+                      value={voucherNo}
+                      error={errors.voucher_no?.message}
+                      onChange={(event) => selectVoucher(event.target.value)}
+                    >
+                      <option value="">Choose…</option>
+                      {vouchers.map((entry) => (
+                        <option key={entry.voucher_id} value={entry.voucher_no}>
+                          {entry.voucher_no} — {entry.supplier_name}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                />
+                <Controller
+                  control={control}
+                  name="carrier_name"
+                  render={({ field }) => (
+                    <SuggestInput
+                      label={<Required>Cargo</Required>}
+                      placeholder="Shwe Moe Cargo"
+                      suggestions={CARGO_NAMES}
+                      value={field.value}
+                      onChange={field.onChange}
+                      error={errors.carrier_name?.message}
+                    />
+                  )}
+                />
+                <Controller
+                  control={control}
+                  name="final_destination"
+                  render={({ field }) => (
+                    <SuggestInput
+                      label={<Required>Receiving gate</Required>}
+                      placeholder="Bogyoke Rd, Mawlamyine"
+                      suggestions={RECEIVING_GATES}
+                      value={field.value}
+                      onChange={field.onChange}
+                      error={errors.final_destination?.message}
+                    />
+                  )}
+                />
+                <Input
+                  label="Shipment date"
+                  type="date"
+                  className={EDITABLE}
+                  error={errors.sent_on?.message}
+                  {...register("sent_on")}
+                />
+                <Controller
+                  control={control}
+                  name="total_packages"
+                  render={({ field }) => (
+                    <Input
+                      label="Packages"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="0"
+                      className={cn(EDITABLE, "text-right")}
+                      value={field.value}
+                      onChange={(event) =>
+                        field.onChange(onlyDigits(event.target.value))
+                      }
+                      error={errors.total_packages?.message}
+                      hint={
+                        voucher
+                          ? `${formatQty(voucher.total_packages)} on the voucher.`
+                          : "Pick a voucher and this fills itself in."
+                      }
+                    />
+                  )}
+                />
+                <Controller
+                  control={control}
+                  name="total_sets"
+                  render={({ field }) => (
+                    <QuantityInput
+                      label="Quantity"
+                      unitLabel="Unit the products are counted in"
+                      value={field.value}
+                      unit={totalUnit}
+                      onChange={field.onChange}
+                      onUnitChange={(unit) =>
+                        setValue("total_unit", unit, {
+                          shouldDirty: true,
+                          shouldValidate: true,
+                        })
+                      }
+                      error={errors.total_sets?.message ?? quantityMismatch}
+                      hint={
+                        voucher
+                          ? `${formatIn(voucher.total_quantity_pairs, "pair")} on the voucher.`
+                          : "Pick a voucher and this fills itself in."
+                      }
+                    />
+                  )}
+                />
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={() => void moveToDestinations()}>
+                  Next: destinations
+                  <ChevronRightIcon className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          )}
 
-            <div className="border border-border rounded-lg divide-y divide-border">
-              {fields.map((field, index) => {
-                return (
-                  <div
-                    key={field.id}
-                    className="grid gap-3 grid-cols-1 md:grid-cols-12 items-start p-3"
-                  >
-                    <span className="md:col-span-1 text-sm font-semibold text-text-muted md:pt-9">
-                      {index + 1}
-                    </span>
-                    <div className="md:col-span-4">
-                      <Controller
-                        control={control}
-                        name={`stops.${index}.stop_name`}
-                        render={({ field: destinationField }) => (
-                          <Select
-                            label="Destination"
-                            className={EDITABLE}
-                            {...destinationField}
-                          >
-                            <option value="">Choose…</option>
-                            {DESTINATION_NAMES.map((name) => (
-                              <option key={name} value={name}>
-                                {name}
-                              </option>
-                            ))}
-                          </Select>
-                        )}
-                      />
+          {step === 1 && (
+            <div className="px-6 py-6 flex flex-col gap-5">
+              <SectionLabel>Step 2 — destinations on the way</SectionLabel>
+
+              <div className="border border-border rounded-lg divide-y divide-border">
+                {fields.map((field, index) => {
+                  return (
+                    <div
+                      key={field.id}
+                      className="grid gap-3 grid-cols-1 md:grid-cols-12 items-start p-3"
+                    >
+                      <span className="md:col-span-1 text-sm font-semibold text-text-muted md:pt-9">
+                        {index + 1}
+                      </span>
+                      <div className="md:col-span-4">
+                        <Controller
+                          control={control}
+                          name={`stops.${index}.stop_name`}
+                          render={({ field: destinationField }) => (
+                            <Select
+                              label="Destination"
+                              className={EDITABLE}
+                              {...destinationField}
+                            >
+                              <option value="">Choose…</option>
+                              {DESTINATION_NAMES.map((name) => (
+                                <option key={name} value={name}>
+                                  {name}
+                                </option>
+                              ))}
+                            </Select>
+                          )}
+                        />
+                      </div>
+                      <div className="md:col-span-5">
+                        <Controller
+                          control={control}
+                          name={`stops.${index}.carrier_name`}
+                          render={({ field: carrierField }) => (
+                            <Select
+                              label="Carrier"
+                              className={EDITABLE}
+                              {...carrierField}
+                            >
+                              <option value="">Choose…</option>
+                              {CARRIER_NAMES.map((name) => (
+                                <option key={name} value={name}>
+                                  {name}
+                                </option>
+                              ))}
+                            </Select>
+                          )}
+                        />
+                      </div>
+                      <div className="md:col-span-2 flex md:justify-end md:pt-7">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={SOFT_RED}
+                          aria-label={`Remove destination ${index + 1}`}
+                          onClick={() => removeStop(index)}
+                        >
+                          <TrashIcon className="w-4 h-4" />
+                          Remove
+                        </Button>
+                      </div>
                     </div>
-                    <div className="md:col-span-5">
-                      <Controller
-                        control={control}
-                        name={`stops.${index}.carrier_name`}
-                        render={({ field: carrierField }) => (
-                          <Select
-                            label="Carrier"
-                            className={EDITABLE}
-                            {...carrierField}
-                          >
-                            <option value="">Choose…</option>
-                            {CARRIER_NAMES.map((name) => (
-                              <option key={name} value={name}>
-                                {name}
-                              </option>
-                            ))}
-                          </Select>
-                        )}
-                      />
-                    </div>
-                    <div className="md:col-span-2 flex md:justify-end md:pt-7">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={SOFT_RED}
-                        aria-label={`Remove destination ${index + 1}`}
-                        onClick={() => removeStop(index)}
-                      >
-                        <TrashIcon className="w-4 h-4" />
-                        Remove
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div>
-              <Button
-                variant="secondary"
-                className={SOFT_BLUE}
-                onClick={() => append({ ...EMPTY_STOP })}
-              >
-                <PlusIcon className="w-4 h-4" />
-                Add another destination
-              </Button>
-            </div>
+                  );
+                })}
+              </div>
+              <div>
+                <Button
+                  variant="secondary"
+                  className={SOFT_BLUE}
+                  onClick={() => append({ ...EMPTY_STOP })}
+                >
+                  <PlusIcon className="w-4 h-4" />
+                  Add another destination
+                </Button>
+              </div>
 
-            <div className="flex justify-between">
-              <Button
-                variant="secondary"
-                className={SOFT_BLUE}
-                onClick={() => setStep(0)}
-              >
-                <ChevronLeftIcon className="w-4 h-4" />
-                Back
-              </Button>
-              <Button onClick={() => void moveToReview()}>
-                Next: review
-                <ChevronRightIcon className="w-4 h-4" />
-              </Button>
+              <div className="flex justify-between">
+                <Button
+                  variant="secondary"
+                  className={SOFT_BLUE}
+                  onClick={() => setStep(0)}
+                >
+                  <ChevronLeftIcon className="w-4 h-4" />
+                  Back
+                </Button>
+                <Button onClick={() => void moveToReview()}>
+                  Next: review
+                  <ChevronRightIcon className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {step === 2 && (
-          <div className="px-6 py-6 flex flex-col gap-5">
-            <SectionLabel>Step 3 — review &amp; confirm</SectionLabel>
-            <dl className="grid gap-4 grid-cols-1 sm:grid-cols-4 bg-bg-subtle border border-border rounded-lg p-4">
-              <ReviewFact label="Shipment no." value="Assigned when you save" />
-              <ReviewFact label="Voucher no." value={voucherNo || "—"} />
-              <ReviewFact
-                label="Supplier / Factory"
-                value={voucher?.supplier_name ?? "—"}
-              />
-              <ReviewFact label="Cargo" value={cargoName || "—"} />
-              <ReviewFact label="Receiving gate" value={finalLocation || "—"} />
-              <ReviewFact label="Shipment date" value={formatDate(sentDate)} />
-              <ReviewFact
-                label="Total packages"
-                value={formatQty(
-                  Number(totalPackages) || voucher?.total_packages || 0,
-                )}
-              />
-              <ReviewFact
-                label="Quantity"
-                value={formatIn(
-                  toPairs(Number(totalSets) || 0, totalUnit),
-                  "set",
-                )}
-              />
-            </dl>
-            <div>
-              <SectionLabel>Shipment journey</SectionLabel>
-              <JourneyPreview
-                supplierName={voucher?.supplier_name ?? "—"}
-                cargoName={cargoName}
-                stops={filledStops.map((stop) => ({
-                  name: stop.stop_name,
-                  carrier: stop.carrier_name,
-                }))}
-                gate={finalLocation}
-              />
+          {step === 2 && (
+            <div className="px-6 py-6 flex flex-col gap-5">
+              <SectionLabel>Step 3 — review &amp; confirm</SectionLabel>
+              <dl className="grid gap-4 grid-cols-1 sm:grid-cols-4 bg-bg-subtle border border-border rounded-lg p-4">
+                <ReviewFact
+                  label="Shipment no."
+                  value="Assigned when you save"
+                />
+                <ReviewFact label="Voucher no." value={voucherNo || "—"} />
+                <ReviewFact
+                  label="Supplier / Factory"
+                  value={voucher?.supplier_name ?? "—"}
+                />
+                <ReviewFact label="Cargo" value={cargoName || "—"} />
+                <ReviewFact
+                  label="Receiving gate"
+                  value={finalLocation || "—"}
+                />
+                <ReviewFact
+                  label="Shipment date"
+                  value={formatDate(sentDate)}
+                />
+                <ReviewFact
+                  label="Total packages"
+                  value={formatQty(
+                    Number(totalPackages) || voucher?.total_packages || 0,
+                  )}
+                />
+                <ReviewFact
+                  label="Quantity"
+                  value={formatIn(
+                    toPairs(Number(totalSets) || 0, totalUnit),
+                    totalUnit,
+                  )}
+                />
+              </dl>
+              <div>
+                <SectionLabel>Shipment journey</SectionLabel>
+                <JourneyPreview
+                  supplierName={voucher?.supplier_name ?? "—"}
+                  cargoName={cargoName}
+                  stops={filledStops.map((stop) => ({
+                    name: stop.stop_name,
+                    carrier: stop.carrier_name,
+                  }))}
+                  gate={finalLocation}
+                />
+              </div>
+              <div className="flex justify-between">
+                <Button
+                  variant="secondary"
+                  className={SOFT_BLUE}
+                  onClick={() => setStep(1)}
+                >
+                  <ChevronLeftIcon className="w-4 h-4" />
+                  Back
+                </Button>
+                <Button onClick={handleSubmit(submit)}>
+                  <CheckIcon className="w-4 h-4" />
+                  Confirm shipment
+                </Button>
+              </div>
             </div>
-            <div className="flex justify-between">
-              <Button
-                variant="secondary"
-                className={SOFT_BLUE}
-                onClick={() => setStep(1)}
-              >
-                <ChevronLeftIcon className="w-4 h-4" />
-                Back
-              </Button>
-              <Button onClick={handleSubmit(submit)}>
-                <CheckIcon className="w-4 h-4" />
-                Confirm shipment
-              </Button>
-            </div>
-          </div>
-        )}
-      </Panel>
-    </div>
+          )}
+        </Panel>
+      </div>
+    </>
   );
 }
 

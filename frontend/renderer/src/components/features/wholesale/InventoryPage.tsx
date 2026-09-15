@@ -42,10 +42,10 @@ import {
   colorPairsForOrder,
   colorPairsForText,
   incomingMovements,
-  movementsFor,
   stockLines,
   type MovementKind,
   type StockLine,
+  type StockRecord,
   type StockMovement,
   type ColorPairs,
 } from "@renderer/components/features/wholesale/stock";
@@ -53,23 +53,21 @@ import {
   lineRemaining,
   type CustomerOrder,
 } from "@renderer/components/features/wholesale/customerOrders";
-import {
-  intoFinal,
-  shipmentPairs,
-  type Shipment,
-} from "@renderer/components/features/wholesale/shipments";
+import { type Shipment } from "@renderer/components/features/wholesale/shipments";
 import { hydrateOrders, useWholesale } from "@renderer/components/features/wholesale/store";
 import {
   CUSTOMER_ORDERS_URL,
   WHOLESALE_INVENTORY_URL,
+  WHOLESALE_STOCK_URL,
   inventoryMovementsFromWire,
   ordersFromWire,
+  stockRecordsFromWire,
   type InventoryMovementWire,
+  type StockRecordWire,
 } from "@renderer/components/features/wholesale/api";
 import {
   formatDate,
   formatQty,
-  todayIso,
 } from "@renderer/components/features/wholesale/shared";
 import { formatIn } from "@renderer/components/features/wholesale/units";
 import { GROUP_LABELS } from "@renderer/components/features/wholesale/products";
@@ -78,16 +76,12 @@ import {
   type SupplierVoucher,
 } from "@renderer/components/features/wholesale/supplierVouchers";
 
-// What the business is holding, and where. The receiving gate records one delivery at a
-// time and never changes again; this screen is the running total across all of them, less
-// whatever has gone out — the number a person needs before promising a customer anything.
-//
-// Everything coming in is worked out from the receivings, so nothing is typed twice: open
-// a package at the gate, and its sets are on this screen the same moment. Only what leaves
-// is recorded here. Read through React Query (see @renderer/lib/queryClient.ts) rather
-// than the hand-rolled useCachedFetch.
+// Stock Records is the running product-level picture across supplier vouchers, shipments,
+// receivings, customer orders and deliveries. The server computes the pipeline figures;
+// the legacy movement query remains for the Movement tab and offline fallback.
 
 const INVENTORY_QUERY_KEY = ["wholesale", "inventory"] as const;
+const STOCK_QUERY_KEY = ["wholesale", "stock"] as const;
 const ORDERS_QUERY_KEY = ["wholesale", "orders"] as const;
 
 type View = "list" | "detail";
@@ -96,9 +90,16 @@ type StockStatus =
   | "At Supplier"
   | "In Transit"
   | "At Receiving"
-  | "Customer Allocated";
+  | "Customer Allocated"
+  | "Customer Ordered"
+  | "Finished";
 type StatusFilter = StockStatus | "all";
-type InventoryHealth = "Healthy" | "Low Stock" | "Out of Stock" | "Overstock";
+type InventoryHealth =
+  | "Healthy"
+  | "Low Stock"
+  | "Out of Stock"
+  | "Overstock"
+  | "Not arrived yet";
 
 const LOW_STOCK_THRESHOLD = 20;
 const OVERSTOCK_THRESHOLD = 150;
@@ -109,6 +110,8 @@ const STOCK_STATUSES: StockStatus[] = [
   "In Transit",
   "At Receiving",
   "Customer Allocated",
+  "Customer Ordered",
+  "Finished",
 ];
 
 export default function InventoryPage({
@@ -132,6 +135,15 @@ export default function InventoryPage({
     queryFn: () => fetchJson<InventoryMovementWire[]>(WHOLESALE_INVENTORY_URL, session),
   });
   useLoadErrorToast(isError, "wholesale inventory");
+  const {
+    data: stockWire,
+    isFetching: isStockRefreshing,
+    isError: stockFailed,
+  } = useQuery({
+    queryKey: STOCK_QUERY_KEY,
+    queryFn: () => fetchJson<StockRecordWire[]>(WHOLESALE_STOCK_URL, session),
+  });
+  useLoadErrorToast(stockFailed, "wholesale stock records");
   const { data: orderWire, isError: ordersFailed } = useQuery({
     queryKey: ORDERS_QUERY_KEY,
     queryFn: () => fetchJson<CustomerOrder[]>(CUSTOMER_ORDERS_URL, session),
@@ -147,6 +159,7 @@ export default function InventoryPage({
   async function reload(): Promise<void> {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: INVENTORY_QUERY_KEY }),
+      queryClient.invalidateQueries({ queryKey: STOCK_QUERY_KEY }),
       queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY }),
     ]);
   }
@@ -155,10 +168,7 @@ export default function InventoryPage({
   // fetched here so Stock Record can show the current orders waiting on each product.
   const { orders, receivings, outgoing, shipments, vouchers } = useWholesale();
   const [view, setView] = useState<View>("list");
-  const [selected, setSelected] = useState<{
-    stock_code: string;
-    location: string;
-  } | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
 
   const movements = useMemo(
     () =>
@@ -169,36 +179,51 @@ export default function InventoryPage({
   );
   const lines = useMemo(() => stockLines(movements), [movements]);
   const ordersWithAllocations = orderWire ? serverOrders : orders;
+  const records = useMemo(
+    () =>
+      stockWire
+        ? stockRecordsFromWire(stockWire)
+        : legacyStockRecords(lines, ordersWithAllocations, movements, shipments, vouchers),
+    [stockWire, lines, ordersWithAllocations, movements, shipments, vouchers],
+  );
 
-  const line =
+  const { data: detailMovementWire } = useQuery({
+    queryKey: ["wholesale", "movements", selected],
+    enabled: selected !== null,
+    queryFn: () =>
+      fetchJson<InventoryMovementWire[]>(
+        `${WHOLESALE_INVENTORY_URL}/movements/${encodeURIComponent(selected ?? "")}`,
+        session,
+      ),
+  });
+
+  const record =
     selected === null
       ? null
-      : (lines.find(
-          (entry) =>
-            entry.stock_code === selected.stock_code &&
-            entry.location === selected.location,
-        ) ?? null);
+      : (records.find((entry) => entry.stock_code === selected) ?? null);
 
   useEffect(() => {
     if (!initialStockCode || selected || (!wire && !isError)) return;
-    const target = lines.find((entry) => entry.stock_code === initialStockCode);
+    const target = records.find((entry) => entry.stock_code === initialStockCode);
     if (!target) {
       onInitialStockOpened?.();
       return;
     }
-    setSelected({ stock_code: target.stock_code, location: target.location });
+    setSelected(target.stock_code);
     onInitialStockOpened?.();
-  }, [initialStockCode, isError, lines, onInitialStockOpened, selected, wire]);
+  }, [initialStockCode, isError, records, onInitialStockOpened, selected, wire]);
 
-  if (view === "detail" && line) {
+  if (view === "detail" && record) {
     return (
       <StockDetail
         orders={ordersWithAllocations}
-        line={line}
+        record={record}
         allMovements={movements}
-        shipments={shipments}
-        vouchers={vouchers}
-        movements={movementsFor(movements, line.stock_code, line.location)}
+        movements={
+          detailMovementWire
+            ? inventoryMovementsFromWire(detailMovementWire)
+            : movements.filter((movement) => movement.stock_code === record.stock_code)
+        }
         onOpenReceiving={onOpenReceiving}
         onBack={() => setView("list")}
       />
@@ -207,17 +232,14 @@ export default function InventoryPage({
 
   return (
     <StockList
-      lines={lines}
-      orders={ordersWithAllocations}
+      records={records}
       movements={movements}
-      shipments={shipments}
-      vouchers={vouchers}
-      onOpen={(stockCode, location) => {
-        setSelected({ stock_code: stockCode, location });
+      onOpen={(stockCode) => {
+        setSelected(stockCode);
         setView("detail");
       }}
       onRefresh={reload}
-      refreshing={isRefreshing}
+      refreshing={isRefreshing || isStockRefreshing}
     />
   );
 }
@@ -289,7 +311,7 @@ function reservedColorPairsForStockCode(
     for (const line of other.lines) {
       if (line.stock_code !== stockCode) continue;
       for (const [color, pairs] of Object.entries(
-        colorPairsForText(line.allocated_color_breakdown ?? "", line.unit),
+        colorPairsForText(line.allocated_color_breakdown ?? "", line.unit, line.unit_conversions),
       )) {
         reserved[color] = (reserved[color] ?? 0) + pairs;
       }
@@ -367,59 +389,56 @@ function StockRowMenu({ onView }: { onView: () => void }): React.JSX.Element {
 }
 
 function StockList({
-  lines,
-  orders,
+  records,
   movements,
-  shipments,
-  vouchers,
   onOpen,
   onRefresh,
   refreshing,
 }: {
-      lines: StockLine[];
-      orders: CustomerOrder[];
+      records: StockRecord[];
       movements: StockMovement[];
-      shipments: Shipment[];
-      vouchers: SupplierVoucher[];
-  onOpen: (stockCode: string, location: string) => void;
+  onOpen: (stockCode: string) => void;
   onRefresh: () => void;
   refreshing: boolean;
 }): React.JSX.Element {
   const [search, setSearch] = useState("");
   const [location, setLocation] = useState("all");
   const [status, setStatus] = useState<StatusFilter>("all");
+  const [source, setSource] = useState("all");
   const [healthFilter, setHealthFilter] = useState<InventoryHealth | "all">("all");
   const [page, setPage] = useState(1);
   const [section, setSection] = useState<InventorySection>("overview");
 
-  const locations = [...new Set(lines.map((line) => line.location))];
+  const locations = [...new Set(records.flatMap((record) => record.locations.map((entry) => entry.location)))].sort();
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return lines.filter((line) => {
+    return records.filter((record) => {
       const matchesQuery =
         query === "" ||
-        line.stock_code.toLowerCase().includes(query) ||
-        line.description.toLowerCase().includes(query) ||
-        line.location.toLowerCase().includes(query) ||
-        line.colors.toLowerCase().includes(query);
-      const matchesLocation = location === "all" || line.location === location;
-      const matchesStatus =
-        status === "all" ||
-        stockStatusForLine(line, orders, movements, shipments, vouchers) === status;
+        record.stock_code.toLowerCase().includes(query) ||
+        record.description.toLowerCase().includes(query) ||
+        record.colors.toLowerCase().includes(query) ||
+        record.locations.some((entry) => entry.location.toLowerCase().includes(query)) ||
+        [
+          ...record.voucher_nos,
+          ...record.shipment_nos,
+          ...record.order_nos,
+          ...record.receiving_nos,
+        ].some((reference) => reference.toLowerCase().includes(query));
+      const matchesLocation = location === "all" || record.locations.some((entry) => entry.location === location);
+      const matchesStatus = status === "all" || record.status === status;
+      const matchesSource = source === "all" || record.sources.includes(source);
       const matchesHealth =
-        healthFilter === "all" || inventoryHealth(line) === healthFilter;
-      return matchesQuery && matchesLocation && matchesStatus && matchesHealth;
+        healthFilter === "all" || inventoryHealth(record) === healthFilter;
+      return matchesQuery && matchesLocation && matchesStatus && matchesSource && matchesHealth;
     });
   }, [
-    lines,
-    orders,
-    movements,
-    shipments,
-    vouchers,
+    records,
     search,
     location,
     status,
+    source,
     healthFilter,
   ]);
 
@@ -433,41 +452,17 @@ function StockList({
     search.trim() !== "" ||
     location !== "all" ||
     status !== "all" ||
+    source !== "all" ||
     healthFilter !== "all";
 
   function resetFilters(): void {
     setSearch("");
     setLocation("all");
     setStatus("all");
+    setSource("all");
     setHealthFilter("all");
     setPage(1);
   }
-
-  const physicalPairs = lines.reduce(
-    (sum, line) => sum + Math.max(0, line.quantity_available_pairs),
-    0,
-  );
-  const gatePairs = movements
-    .filter((movement) => movement.movement_type === "in")
-    .reduce((sum, movement) => sum + movement.quantity_pairs, 0);
-  const allocatedPairsTotal = lines.reduce(
-    (sum, line) => sum + allocatedPairs(line, orders),
-    0,
-  );
-  const warehousePairs = Math.max(0, physicalPairs - gatePairs);
-  const physicalHealth = lines.filter((line) => line.quantity_available_pairs > 0);
-  const lowStockCount = physicalHealth.filter(
-    (line) => inventoryHealth(line) === "Low Stock",
-  ).length;
-  const outOfStockCount = lines.filter(
-    (line) => inventoryHealth(line) === "Out of Stock",
-  ).length;
-  const receivedToday = movements
-    .filter((movement) => movement.movement_type === "in" && movement.moved_on === todayIso())
-    .reduce((sum, movement) => sum + movement.quantity_pairs, 0);
-  const deliveredToday = movements
-    .filter((movement) => movement.movement_type === "out" && movement.moved_on === todayIso())
-    .reduce((sum, movement) => sum + movement.quantity_pairs, 0);
 
   return (
     <div className="flex flex-col gap-4">
@@ -483,23 +478,9 @@ function StockList({
             <InventoryRefreshButton onRefresh={onRefresh} refreshing={refreshing} />
           </div>
           <InventorySummaryCards
-            lines={lines}
-            orders={orders}
-            movements={movements}
-            shipments={shipments}
+            records={records}
           />
-          <InventoryInsights
-            physicalPairs={physicalPairs}
-            warehousePairs={warehousePairs}
-            gatePairs={gatePairs}
-            allocatedPairs={allocatedPairsTotal}
-            receivedToday={receivedToday}
-            deliveredToday={deliveredToday}
-            lowStockCount={lowStockCount}
-            outOfStockCount={outOfStockCount}
-            physicalLines={physicalHealth}
-            compact
-          />
+          <InventoryInsights records={records} compact />
         </>
       )}
 
@@ -580,6 +561,24 @@ function StockList({
                 <option value="Low Stock">Low Stock</option>
                 <option value="Out of Stock">Out of Stock</option>
                 <option value="Overstock">Overstock</option>
+                <option value="Not arrived yet">Not arrived yet</option>
+              </Select>
+            </div>
+            <div className="w-full sm:w-56">
+              <Select
+                aria-label="Filter by source"
+                value={source}
+                onChange={(event) => {
+                  setSource(event.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="all">Anywhere</option>
+                <option value="voucher">On a supplier voucher</option>
+                <option value="shipment">On a shipment</option>
+                <option value="order">On a customer order</option>
+                <option value="receiving">Received</option>
+                <option value="delivery">Delivered</option>
               </Select>
             </div>
             {isFiltered && (
@@ -596,7 +595,7 @@ function StockList({
               description={
                 isFiltered
                   ? "Nothing here matches what you searched for. Try a different code or place."
-                  : "Stock appears here as packages are opened at the receiving gate."
+                  : "Products appear here as soon as they are on a supplier voucher, a shipment or a customer order — not only once they arrive."
               }
               action={
                 isFiltered ? (
@@ -612,84 +611,63 @@ function StockList({
                 <Thead>
                   <Tr>
                     <Th className="min-w-[12rem]">Product</Th>
+                    <Th>Available</Th>
                     <Th>Color</Th>
-                    <Th className="min-w-[15rem]">Stock</Th>
-                    <Th>Location</Th>
                     <Th>Stock Status</Th>
                     <Th>Stock Health</Th>
-                    <Th>Last Movement</Th>
+                    <Th>Last moved</Th>
                     <Th className="w-12" aria-label="Actions" />
                   </Tr>
                 </Thead>
                 <Tbody>
-                  {visible.map((line) => {
-                    const allocated = allocatedPairs(line, orders);
-                    const available = Math.max(0, line.quantity_available_pairs - allocated);
-                    const stockStatus = stockStatusForLine(line, orders, movements, shipments, vouchers);
-                    const health = inventoryHealth(line);
-                    const incoming = incomingPairsForLine(line.stock_code, shipments, vouchers);
-                    const lastMovement = movementsFor(movements, line.stock_code, line.location)[0];
+                  {visible.map((record) => {
+                    const health = inventoryHealth(record);
                     return (
-                      <Tr key={`${line.stock_code}@${line.location}`}>
+                      <Tr key={record.stock_code}>
                         <Td>
                           <div className="min-w-0">
                             <div className="flex items-center gap-1">
                               <button
                                 type="button"
-                                onClick={() => onOpen(line.stock_code, line.location)}
+                                onClick={() => onOpen(record.stock_code)}
                                 className={cn(
                                   "whitespace-nowrap font-bold text-brand hover:underline underline-offset-2",
                                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
                                 )}
                               >
-                                {line.stock_code || "No stock code"}
+                                {record.stock_code || "No stock code"}
                               </button>
-                              {line.stock_code && <CopyButton value={line.stock_code} what="stock code" />}
+                              {record.stock_code && <CopyButton value={record.stock_code} what="stock code" />}
                             </div>
                             <div className="mt-1 max-w-[14rem]">
-                              <span className="block truncate text-sm text-text-primary" title={line.description}>
-                                {line.description || "—"}
+                              <span className="block truncate text-sm text-text-primary" title={record.description}>
+                                {record.description || "—"}
                               </span>
-                              <span className="text-xs text-text-muted">{GROUP_LABELS[line.product_group]}</span>
+                              <span className="text-xs text-text-muted">{GROUP_LABELS[record.product_group]}</span>
                             </div>
                           </div>
-                        </Td>
-                        <Td className="font-mono text-xs text-text-secondary">
-                          {line.colors || "—"}
                         </Td>
                         <Td>
-                          <div className="grid grid-cols-2 text-sm">
-                            <div className="border-b border-r border-border p-2">
-                              <div className="text-text-muted">On hand</div>
-                              <div className="font-semibold tabular-nums text-text-primary">{formatQty(line.quantity_available_pairs)} pairs</div>
-                            </div>
-                            <div className="border-b border-border p-2">
-                              <div className="text-text-muted">Allocated</div>
-                              <div className="font-semibold tabular-nums text-purple-500">{formatQty(allocated)} pairs</div>
-                            </div>
-                            <div className="border-r border-border p-2">
-                              <div className="text-text-muted">Available</div>
-                              <div className="font-semibold tabular-nums text-success">{formatQty(available)} pairs</div>
-                            </div>
-                            <div className="p-2">
-                              <div className="text-text-muted">Incoming</div>
-                              <div className="font-semibold tabular-nums text-warning">{formatQty(incoming)} pairs</div>
-                            </div>
+                          <div className="text-xs text-text-muted">Available</div>
+                          <div className="font-semibold tabular-nums text-success">
+                            {formatQty(record.available_pairs)} pairs
                           </div>
                         </Td>
-                        <Td className="whitespace-nowrap text-text-secondary">{line.location}</Td>
+                        <Td className="font-mono text-xs text-text-secondary whitespace-nowrap">
+                          {record.colors || "—"}
+                        </Td>
                         <Td>
                           <StatusPill
-                            label={stockStatus}
-                            className={STOCK_STATUS_STYLES[stockStatus]}
+                            label={record.status}
+                            className={STOCK_STATUS_STYLES[record.status as StockStatus] ?? "bg-text-secondary text-white"}
                           />
                         </Td>
                         <Td><StatusPill label={health} className={HEALTH_STYLES[health]} /></Td>
                         <Td className="text-text-muted whitespace-nowrap">
-                          {lastMovement ? formatDate(lastMovement.moved_on) : "—"}
+                          {record.last_activity_on ? formatDate(record.last_activity_on) : "—"}
                         </Td>
                         <Td>
-                          <StockRowMenu onView={() => onOpen(line.stock_code, line.location)} />
+                          <StockRowMenu onView={() => onOpen(record.stock_code)} />
                         </Td>
                       </Tr>
                     );
@@ -728,7 +706,7 @@ function InventoryMovementTable({
   refreshing,
 }: {
   movements: StockMovement[];
-  onOpen: (stockCode: string, location: string) => void;
+  onOpen: (stockCode: string) => void;
   onRefresh: () => void;
   refreshing: boolean;
 }): React.JSX.Element {
@@ -855,7 +833,7 @@ function InventoryMovementTable({
                     <div className="min-w-0">
                       <button
                         type="button"
-                        onClick={() => onOpen(movement.stock_code, movement.location)}
+                        onClick={() => onOpen(movement.stock_code)}
                         className={cn(
                           "font-bold text-brand hover:underline underline-offset-2",
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
@@ -888,7 +866,7 @@ function InventoryMovementTable({
                   <Td className="text-text-secondary whitespace-nowrap">{movement.location}</Td>
                   <Td className="text-text-muted whitespace-nowrap">{movement.reference || "—"}</Td>
                   <Td className="text-text-secondary">{movement.counterparty_name || "—"}</Td>
-                  <Td><StockRowMenu onView={() => onOpen(movement.stock_code, movement.location)} /></Td>
+                  <Td><StockRowMenu onView={() => onOpen(movement.stock_code)} /></Td>
                 </Tr>
               ))}
             </Tbody>
@@ -915,19 +893,18 @@ interface InventorySummaryRow {
   tone: "green" | "blue" | "orange" | "purple" | "gray";
 }
 
-function inventoryHealth(line: StockLine): InventoryHealth {
-  const onHand = Math.max(0, line.quantity_available_pairs);
-  if (onHand <= 0) return "Out of Stock";
+function inventoryHealth(record: StockRecord | StockLine): InventoryHealth {
+  const onHand = "on_hand_pairs" in record
+    ? Math.max(0, record.on_hand_pairs)
+    : Math.max(0, record.quantity_available_pairs);
+  if (onHand <= 0) {
+    return "on_hand_pairs" in record && !record.has_receiving_history
+      ? "Not arrived yet"
+      : "Out of Stock";
+  }
   if (onHand > OVERSTOCK_THRESHOLD) return "Overstock";
   if (onHand < LOW_STOCK_THRESHOLD) return "Low Stock";
   return "Healthy";
-}
-
-function isReceivingGateLine(line: StockLine, movements: StockMovement[]): boolean {
-  return movements.some(
-    (movement) =>
-      movement.movement_type === "in" && movement.location === line.location,
-  );
 }
 
 const STOCK_STATUS_STYLES: Record<StockStatus, string> = {
@@ -935,39 +912,9 @@ const STOCK_STATUS_STYLES: Record<StockStatus, string> = {
   "In Transit": "bg-warning text-white",
   "At Receiving": "bg-brand text-white",
   "Customer Allocated": "bg-purple-400 text-white",
+  "Customer Ordered": "bg-error text-white",
+  Finished: "bg-text-secondary text-white",
 };
-
-function stockStatusForLine(
-  line: StockLine,
-  orders: CustomerOrder[],
-  movements: StockMovement[],
-  shipments: Shipment[],
-  vouchers: SupplierVoucher[],
-): StockStatus {
-  const allocated = allocatedPairs(line, orders);
-  if (allocated > 0 && allocated >= line.quantity_available_pairs) {
-    return "Customer Allocated";
-  }
-  if (isReceivingGateLine(line, movements)) return "At Receiving";
-  const openVoucherNos = new Set(
-    vouchers
-      .filter(
-        (voucher) =>
-          remainingQty(voucher) > 0 &&
-          voucher.lines.some((entry) => entry.stock_code === line.stock_code),
-      )
-      .map((voucher) => voucher.voucher_no),
-  );
-  let inTransit = false;
-  for (const shipment of shipments) {
-    if (!openVoucherNos.has(shipment.voucher_no)) continue;
-    const reachedFinal = Math.min(intoFinal(shipment), shipment.final_received_packages);
-    if (shipment.total_packages > shipment.packages_sent_by_cargo) return "At Supplier";
-    if (shipment.packages_sent_by_cargo > reachedFinal) inTransit = true;
-  }
-  if (inTransit) return "In Transit";
-  return "At Receiving";
-}
 
 function incomingPairsForLine(
   stockCode: string,
@@ -994,38 +941,172 @@ const HEALTH_STYLES: Record<InventoryHealth, string> = {
   "Low Stock": "bg-warning text-white",
   "Out of Stock": "bg-error text-white",
   Overstock: "bg-brand text-white",
+  "Not arrived yet": "bg-text-secondary text-white",
 };
 
+function legacyLineFromRecord(record: StockRecord): StockLine {
+  const firstLocation = record.locations[0];
+  return {
+    stock_code: record.stock_code,
+    description: record.description,
+    product_group: record.product_group,
+    location: firstLocation?.location ?? "",
+    quantity_in_pairs: record.on_hand_pairs + record.delivered_pairs,
+    quantity_out_pairs: record.delivered_pairs,
+    quantity_available_pairs: record.on_hand_pairs,
+    last_moved_on: record.last_activity_on ?? "",
+    colors: record.colors,
+    color_quantities_pairs: record.color_quantities_pairs,
+  };
+}
+
+/** Keep a useful picture on screen when the stock endpoint has not resolved yet.
+ * This deliberately mirrors only the old, locally available data; once the server
+ * response arrives it replaces these approximations with authoritative figures. */
+function legacyStockRecords(
+  lines: StockLine[],
+  orders: CustomerOrder[],
+  movements: StockMovement[],
+  shipments: Shipment[],
+  vouchers: SupplierVoucher[],
+): StockRecord[] {
+  const byCode = new Map<string, StockLine>();
+  const ensure = (stockCode: string, line?: Partial<StockLine>): StockLine => {
+    const existing = byCode.get(stockCode);
+    if (existing) return existing;
+    const created: StockLine = {
+      stock_code: stockCode,
+      description: line?.description ?? "",
+      product_group: line?.product_group ?? "man",
+      location: line?.location ?? "",
+      quantity_in_pairs: line?.quantity_in_pairs ?? 0,
+      quantity_out_pairs: line?.quantity_out_pairs ?? 0,
+      quantity_available_pairs: line?.quantity_available_pairs ?? 0,
+      last_moved_on: line?.last_moved_on ?? "",
+      colors: line?.colors ?? "",
+      color_quantities_pairs: line?.color_quantities_pairs ?? {},
+    };
+    byCode.set(stockCode, created);
+    return created;
+  };
+  lines.forEach((line) => ensure(line.stock_code, line));
+  vouchers.forEach((voucher) => voucher.lines.forEach((line) => {
+    const colors = colorPairsForText(line.color_breakdown, line.unit, line.unit_conversions);
+    ensure(line.stock_code, {
+      description: line.description,
+      product_group: line.product_group,
+      colors: formatColorPairs(colors),
+      color_quantities_pairs: colors,
+    });
+  }));
+  orders.forEach((order) => order.lines.forEach((line) => {
+    const colors = colorPairsForText(line.color_breakdown, line.unit, line.unit_conversions);
+    ensure(line.stock_code, {
+      description: line.description,
+      product_group: line.product_group,
+      colors: formatColorPairs(colors),
+      color_quantities_pairs: colors,
+    });
+  }));
+  movements.forEach((movement) => {
+    const colors = colorPairsForText(movement.color_breakdown, "set", movement.unit_conversions);
+    ensure(movement.stock_code, {
+      description: movement.description,
+      product_group: movement.product_group,
+      colors: formatColorPairs(colors),
+      color_quantities_pairs: colors,
+    });
+  });
+
+  return [...byCode.keys()].sort().map((stockCode) => {
+    const line = byCode.get(stockCode)!;
+    const productLines = lines.filter((entry) => entry.stock_code === stockCode);
+    const productMovements = movements.filter((entry) => entry.stock_code === stockCode);
+    const productOrders = orders.filter((order) => order.order_status !== "cancelled" && order.lines.some((entry) => entry.stock_code === stockCode));
+    const voucherNos = vouchers.filter((voucher) => voucher.lines.some((entry) => entry.stock_code === stockCode)).map((voucher) => voucher.voucher_no);
+    const shipmentNos = shipments.filter((shipment) => voucherNos.includes(shipment.voucher_no)).map((shipment) => shipment.shipment_no);
+    const orderNos = productOrders.map((order) => order.order_no);
+    const receivingMovements = productMovements.filter((movement) => movement.movement_type === "in");
+    const locations = productLines.map((entry) => ({
+      location: entry.location,
+      on_hand_pairs: Math.max(0, entry.quantity_available_pairs),
+      colors: entry.colors,
+      last_moved_on: entry.last_moved_on || null,
+    })).filter((entry) => entry.location);
+    const customerOrdered = productOrders.reduce((sum, order) => sum + order.lines.filter((entry) => entry.stock_code === stockCode).reduce((subtotal, entry) => subtotal + entry.quantity_pairs, 0), 0);
+    const owed = productOrders.reduce((sum, order) => sum + order.lines.filter((entry) => entry.stock_code === stockCode).reduce((subtotal, entry) => subtotal + lineRemaining(entry), 0), 0);
+    const delivered = productMovements.filter((movement) => movement.movement_type === "out").reduce((sum, movement) => sum + movement.quantity_pairs, 0);
+    const allocated = productLines.reduce((sum, entry) => sum + allocatedPairs(entry, orders), 0);
+    const incoming = incomingPairsForLine(stockCode, shipments, vouchers);
+    const atSupplier = shipmentNos.length > 0 ? incoming : incoming;
+    const sources = new Set<string>();
+    if (voucherNos.length) sources.add("voucher");
+    if (shipmentNos.length) sources.add("shipment");
+    if (productOrders.length) sources.add("order");
+    if (receivingMovements.length) sources.add("receiving");
+    if (productMovements.some((movement) => movement.movement_type === "out")) sources.add("delivery");
+    const lastActivity = [...productMovements.map((entry) => entry.moved_on), ...productOrders.map((entry) => entry.order_date), ...vouchers.filter((voucher) => voucher.lines.some((entry) => entry.stock_code === stockCode)).map((entry) => entry.voucher_date), ...shipments.filter((entry) => shipmentNos.includes(entry.shipment_no)).map((entry) => entry.sent_on)].sort().at(-1) ?? null;
+    const onHand = Math.max(0, line.quantity_available_pairs);
+    const available = Math.max(0, onHand - allocated);
+    const status = onHand > 0 && allocated >= onHand
+      ? "Customer Allocated"
+      : onHand > 0
+        ? "At Receiving"
+        : incoming > 0
+          ? "At Supplier"
+          : owed > 0
+            ? "Customer Ordered"
+            : "Finished";
+    return {
+      stock_code: stockCode,
+      description: line.description,
+      product_group: line.product_group,
+      on_hand_pairs: onHand,
+      allocated_pairs: allocated,
+      available_pairs: available,
+      at_supplier_pairs: atSupplier,
+      in_transit_pairs: 0,
+      incoming_pairs: incoming,
+      customer_ordered_pairs: customerOrdered,
+      owed_to_customers_pairs: owed,
+      delivered_pairs: delivered,
+      lost_pairs: productOrders.reduce((sum, order) => sum + order.lines.filter((entry) => entry.stock_code === stockCode).reduce((subtotal, entry) => subtotal + (entry.lost_quantity_pairs ?? 0), 0), 0),
+      colors: line.colors,
+      color_quantities_pairs: line.color_quantities_pairs,
+      locations,
+      sources: [...sources],
+      voucher_nos: [...new Set(voucherNos)],
+      shipment_nos: [...new Set(shipmentNos)],
+      order_nos: [...new Set(orderNos)],
+      receiving_nos: [...new Set(receivingMovements.map((entry) => entry.reference))],
+      status,
+      last_activity_on: lastActivity,
+      has_receiving_history: receivingMovements.length > 0,
+    };
+  });
+}
+
 function InventoryInsights({
-  physicalPairs,
-  warehousePairs,
-  gatePairs,
-  allocatedPairs: allocated,
-  receivedToday,
-  deliveredToday,
-  lowStockCount,
-  outOfStockCount,
-  physicalLines,
+  records,
   compact,
 }: {
-  physicalPairs: number;
-  warehousePairs: number;
-  gatePairs: number;
-  allocatedPairs: number;
-  receivedToday: number;
-  deliveredToday: number;
-  lowStockCount: number;
-  outOfStockCount: number;
-  physicalLines: StockLine[];
+  records: StockRecord[];
   compact?: boolean;
 }): React.JSX.Element {
+  const physicalPairs = records.reduce((sum, record) => sum + Math.max(0, record.on_hand_pairs), 0);
+  const availablePairs = records.reduce((sum, record) => sum + Math.max(0, record.available_pairs), 0);
+  const allocated = records.reduce((sum, record) => sum + Math.max(0, record.allocated_pairs), 0);
+  const incomingPairs = records.reduce((sum, record) => sum + Math.max(0, record.incoming_pairs), 0);
+  const receivedToday = records.reduce((sum, record) => sum + Math.max(0, record.received_today_pairs ?? 0), 0);
+  const deliveredToday = records.reduce((sum, record) => sum + Math.max(0, record.delivered_today_pairs ?? 0), 0);
   const counts: Record<InventoryHealth, number> = {
-    Healthy: physicalLines.filter((line) => inventoryHealth(line) === "Healthy").length,
-    "Low Stock": lowStockCount,
-    "Out of Stock": outOfStockCount,
-    Overstock: physicalLines.filter((line) => inventoryHealth(line) === "Overstock").length,
+    Healthy: records.filter((record) => inventoryHealth(record) === "Healthy").length,
+    "Low Stock": records.filter((record) => inventoryHealth(record) === "Low Stock").length,
+    "Out of Stock": records.filter((record) => inventoryHealth(record) === "Out of Stock").length,
+    Overstock: records.filter((record) => inventoryHealth(record) === "Overstock").length,
+    "Not arrived yet": records.filter((record) => inventoryHealth(record) === "Not arrived yet").length,
   };
-  const total = Math.max(1, physicalLines.length);
+  const total = Math.max(1, records.length);
   const value = physicalPairs * ESTIMATED_PAIR_PRICE;
   const fmtValue = (amount: number): string =>
     amount >= 1_000_000
@@ -1035,6 +1116,7 @@ function InventoryInsights({
     { label: "Healthy", color: "bg-success", text: "text-success" },
     { label: "Low Stock", color: "bg-warning", text: "text-warning" },
     { label: "Out of Stock", color: "bg-error", text: "text-error" },
+    { label: "Not arrived yet", color: "bg-text-secondary", text: "text-text-muted" },
   ];
 
   if (compact) {
@@ -1068,7 +1150,7 @@ function InventoryInsights({
               );
             })}
           </div>
-          <p className="mt-3 text-xs text-text-muted">{formatQty(physicalLines.length)} physical stock SKUs</p>
+          <p className="mt-3 text-xs text-text-muted">{formatQty(records.length)} stock-record SKUs</p>
         </Panel>
       </div>
     );
@@ -1090,8 +1172,8 @@ function InventoryInsights({
         </div>
         <div className="grid gap-3 border-t border-border p-4 sm:grid-cols-3 sm:p-5">
           {[
-            ["Warehouse Stock Value", warehousePairs, "text-success"],
-              ["At Receiving Stock Value", gatePairs, "text-brand"],
+            ["Available Stock Value", availablePairs, "text-success"],
+            ["Incoming Stock Value", incomingPairs, "text-brand"],
             ["Allocated Stock Value", allocated, "text-purple-500"],
           ].map(([label, pairs, color]) => (
             <div key={String(label)} className="rounded-xl border border-border bg-bg-subtle px-4 py-3">
@@ -1125,7 +1207,7 @@ function InventoryInsights({
               );
             })}
           </div>
-          <p className="mt-3 text-xs text-text-muted">Based on {formatQty(physicalLines.length)} physical stock SKUs.</p>
+          <p className="mt-3 text-xs text-text-muted">Based on {formatQty(records.length)} stock records.</p>
         </Panel>
 
         <Panel className="p-4 sm:p-5">
@@ -1152,65 +1234,24 @@ function InventoryInsights({
   );
 }
 
-function pairsForShipmentStage(
-  shipment: Shipment,
-  packages: number,
-): number {
-  if (packages <= 0 || shipment.total_packages <= 0) return 0;
-  return Math.round(
-    (shipmentPairs(shipment) * Math.max(0, packages)) / shipment.total_packages,
-  );
-}
-
 function InventorySummaryCards({
-  lines,
-  orders,
-  movements,
-  shipments,
+  records,
 }: {
-  lines: StockLine[];
-  orders: CustomerOrder[];
-  movements: StockMovement[];
-  shipments: Shipment[];
+  records: StockRecord[];
 }): React.JSX.Element {
-  const physicalRows = lines
-    .filter((line) => line.quantity_available_pairs > 0)
-    .reduce<{ location: string; pairs: number; gate: boolean }[]>((rows, line) => {
-      const existing = rows.find((row) => row.location === line.location);
-      const gate = movements.some(
-        (movement) =>
-          movement.movement_type === "in" && movement.location === line.location,
-      );
-      if (existing) existing.pairs += line.quantity_available_pairs;
-      else rows.push({ location: line.location, pairs: line.quantity_available_pairs, gate });
-      return rows;
-    }, [])
+  const physicalRows = records
+    .flatMap((record) => record.locations.map((location) => ({
+      stockCode: record.stock_code,
+      location: location.location,
+      pairs: location.on_hand_pairs,
+    })))
+    .filter((row) => row.pairs > 0)
     .sort((a, b) => b.pairs - a.pairs);
-  const physicalPairs = physicalRows.reduce((sum, row) => sum + row.pairs, 0);
-  const emptyLocations = lines.filter((line) => line.quantity_available_pairs <= 0).length;
-
-  const atSupplierPairs = shipments.reduce(
-    (sum, shipment) =>
-      sum + pairsForShipmentStage(
-        shipment,
-        Math.max(0, shipment.total_packages - shipment.packages_sent_by_cargo),
-      ),
-    0,
-  );
-  const inTransitPairs = shipments.reduce((sum, shipment) => {
-    const reachedFinal = Math.min(
-      intoFinal(shipment),
-      shipment.final_received_packages,
-    );
-    return sum + pairsForShipmentStage(shipment, shipment.packages_sent_by_cargo - reachedFinal);
-  }, 0);
-  const receivingGatePairs = movements
-    .filter((movement) => movement.movement_type === "in")
-    .reduce((sum, movement) => sum + movement.quantity_pairs, 0);
-  const committedPairs = lines.reduce(
-    (sum, line) => sum + allocatedPairs(line, orders),
-    0,
-  );
+  const physicalPairs = records.reduce((sum, record) => sum + Math.max(0, record.on_hand_pairs), 0);
+  const emptyLocations = records.filter((record) => record.locations.length === 0).length;
+  const atSupplierPairs = records.reduce((sum, record) => sum + record.at_supplier_pairs, 0);
+  const inTransitPairs = records.reduce((sum, record) => sum + record.in_transit_pairs, 0);
+  const committedPairs = records.reduce((sum, record) => sum + record.allocated_pairs, 0);
   const incomingRows: InventorySummaryRow[] = [
     {
       label: "At Supplier",
@@ -1224,20 +1265,14 @@ function InventorySummaryCards({
       pairs: inTransitPairs,
       tone: "orange",
     },
-    {
-      label: "At Receiving",
-      detail: "Physically received at gate",
-      pairs: receivingGatePairs,
-      tone: "blue",
-    },
-    {
-      label: "Customer Allocated",
-      detail: "Reserved for customers",
-      pairs: committedPairs,
-      tone: "purple",
-    },
   ];
-  const incomingCommittedPairs = incomingRows.reduce((sum, row) => sum + row.pairs, 0);
+  const committedRow: InventorySummaryRow = {
+    label: "Customer Allocated",
+    detail: "Reserved for customers",
+    pairs: committedPairs,
+    tone: "purple",
+  };
+  const incomingCommittedPairs = incomingRows.reduce((sum, row) => sum + row.pairs, committedRow.pairs);
 
   return (
     <div className="grid gap-4 xl:grid-cols-2">
@@ -1251,13 +1286,13 @@ function InventorySummaryCards({
       >
         <div className="divide-y divide-border border-t border-border">
           {physicalRows.slice(0, 6).map((row) => (
-            <div key={row.location} className="flex items-center gap-3 px-4 py-3 sm:px-5">
-              <span className={cn("h-3 w-3 shrink-0 rounded-full", row.gate ? "bg-brand" : "bg-success")} />
+            <div key={`${row.stockCode}-${row.location}`} className="flex items-center gap-3 px-4 py-3 sm:px-5">
+              <span className="h-3 w-3 shrink-0 rounded-full bg-success" />
               <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary sm:text-base">
-                {row.location}
+                {row.stockCode} · {row.location}
               </span>
               <span className="shrink-0 rounded-full bg-bg-subtle px-3 py-1 text-xs font-medium text-text-muted">
-              {row.gate ? "At Receiving" : "Warehouse"}
+              On hand
             </span>
               <span className="shrink-0 text-right text-sm font-bold tabular-nums text-text-primary sm:text-base">
                 {formatQty(row.pairs)} pairs
@@ -1291,7 +1326,7 @@ function InventorySummaryCards({
           <div className="border-t border-border px-5 pb-1 pt-4 text-xs font-bold uppercase tracking-widest text-text-muted sm:px-6">
             Committed
           </div>
-          <SummaryRow row={incomingRows[3]} />
+          <SummaryRow row={committedRow} />
         </div>
       </SummaryCard>
     </div>
@@ -1463,29 +1498,26 @@ function formatColorPairs(quantity_pairs: ColorPairs): string {
 }
 
 function StockDetail({
-  line,
+  record,
   orders,
   allMovements,
-  shipments,
-  vouchers,
   onOpenReceiving,
   movements,
   onBack,
 }: {
-  line: StockLine;
+  record: StockRecord;
   orders: CustomerOrder[];
   allMovements: StockMovement[];
-  shipments: Shipment[];
-  vouchers: SupplierVoucher[];
   onOpenReceiving: (receivingNo: string) => void;
   movements: StockMovement[];
   onBack: () => void;
 }): React.JSX.Element {
-  const allocated = allocatedPairs(line, orders);
-  const available = Math.max(0, line.quantity_available_pairs - allocated);
-  const incoming = incomingPairsForLine(line.stock_code, shipments, vouchers);
-  const stockStatus = stockStatusForLine(line, orders, movements, shipments, vouchers);
-  const health = inventoryHealth(line);
+  const line = legacyLineFromRecord(record);
+  const allocated = record.allocated_pairs;
+  const available = record.available_pairs;
+  const incoming = record.incoming_pairs;
+  const stockStatus = record.status as StockStatus;
+  const health = inventoryHealth(record);
   const relatedOrders = useMemo(
     () => relatedOrdersFor(line.stock_code, orders),
     [line.stock_code, orders],
@@ -1503,6 +1535,44 @@ function StockDetail({
     [relatedOrders],
   );
 
+  const pipelineStages = [
+    {
+      label: "At Supplier",
+      detail: "Not yet shipped",
+      pairs: record.at_supplier_pairs,
+    },
+    {
+      label: "In Transit",
+      detail: "On the way",
+      pairs: record.in_transit_pairs,
+    },
+    {
+      label: "At Receiving",
+      detail: "Physically received at the gate",
+      pairs: record.on_hand_pairs,
+    },
+    {
+      label: "Customer Allocated",
+      detail: "Reserved against a customer order",
+      pairs: record.allocated_pairs,
+    },
+    {
+      label: "Customer Owed",
+      detail: "Ordered but not yet reserved",
+      pairs: record.owed_to_customers_pairs,
+    },
+    {
+      label: "Delivered",
+      detail: "Sent to customers",
+      pairs: record.delivered_pairs,
+    },
+    {
+      label: "Lost",
+      detail: "Written off from the pipeline",
+      pairs: record.lost_pairs,
+    },
+  ];
+
   return (
     <div className="flex flex-col gap-5">
       <div>
@@ -1519,19 +1589,11 @@ function StockDetail({
               <h2 className="text-lg font-semibold text-text-primary tracking-tight">
                 {line.stock_code}
               </h2>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-                  Stock status
-                </span>
-                <StatusPill
-                  label={stockStatus}
-                  className={STOCK_STATUS_STYLES[stockStatus]}
-                />
-                <span className="ml-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
-                  Stock health
-                </span>
-                <StatusPill label={health} className={HEALTH_STYLES[health]} />
-              </div>
+              <StatusPill
+                label={stockStatus}
+                className={STOCK_STATUS_STYLES[stockStatus]}
+              />
+              <StatusPill label={health} className={HEALTH_STYLES[health]} />
             </div>
             <p className="mt-0.5 truncate text-sm text-text-muted">
               {line.description} · {GROUP_LABELS[line.product_group]}
@@ -1576,28 +1638,63 @@ function StockDetail({
                   Inventory
                 </h3>
                 <dl className="grid gap-3 sm:grid-cols-2">
-                  <ReadOnlyField label="Location" value={line.location} wrap />
+                  <ReadOnlyField
+                    label="Location"
+                    value={record.locations.length === 0 ? "Not arrived yet" : record.locations.map((entry) => entry.location).join(", ")}
+                    wrap
+                  />
                   <ReadOnlyField
                     label="On hand"
-                    value={formatIn(line.quantity_available_pairs, "set")}
+                    value={formatIn(record.on_hand_pairs, "pair")}
                   />
                   <ReadOnlyField
                     label="Allocated"
-                    value={formatIn(allocated, "set")}
+                    value={formatIn(allocated, "pair")}
                   />
                   <ReadOnlyField
                     label="Available"
-                    value={formatIn(available, "set")}
+                    value={formatIn(available, "pair")}
                   />
                   <ReadOnlyField
                     label="Incoming"
-                    value={formatIn(incoming, "set")}
+                    value={formatIn(incoming, "pair")}
                   />
                   <ReadOnlyField
                     label="Last moved"
-                    value={formatDate(line.last_moved_on)}
+                    value={record.last_activity_on ? formatDate(record.last_activity_on) : "—"}
                   />
                 </dl>
+              </div>
+            </div>
+            <div className="mt-4 rounded-lg border border-border bg-bg-subtle/50 p-4">
+              <h3 className="mb-3 text-sm font-semibold text-text-primary">Pipeline</h3>
+              <div className="divide-y divide-border">
+                {pipelineStages.map((stage) => (
+                  <div key={stage.label} className="flex items-center justify-between gap-4 py-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-text-primary">{stage.label}</div>
+                      <div className="text-xs text-text-muted">{stage.detail}</div>
+                    </div>
+                    <div className="shrink-0 font-semibold tabular-nums text-text-primary">
+                      {formatIn(stage.pairs, "pair")}
+                    </div>
+                  </div>
+                ))}
+                {record.locations.length > 0 && (
+                  <div className="py-3">
+                    <div className="text-sm font-medium text-text-primary">On-hand locations</div>
+                    <div className="mt-2 space-y-1.5">
+                      {record.locations.map((location) => (
+                        <div key={location.location} className="flex items-center justify-between gap-4 text-xs">
+                          <span className="truncate text-text-muted">{location.location}</span>
+                          <span className="shrink-0 font-semibold tabular-nums text-text-secondary">
+                            {formatIn(location.on_hand_pairs, "pair")}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </section>
@@ -1685,10 +1782,10 @@ function StockDetail({
                             {line.colors || "—"}
                           </Td>
                           <Td className="text-right tabular-nums font-medium">
-                            {formatIn(ordered, "set")}
+                            {formatIn(ordered, "pair")}
                           </Td>
                           <Td className="text-right tabular-nums font-medium">
-                            {formatIn(received, "set")}
+                            {formatIn(received, "pair")}
                           </Td>
                           <Td
                             className={cn(
@@ -1696,7 +1793,7 @@ function StockDetail({
                               remaining > 0 ? "text-error" : "text-success",
                             )}
                           >
-                            {formatIn(remaining, "set")}
+                            {formatIn(remaining, "pair")}
                           </Td>
                           <Td>
                             <StatusPill
@@ -1717,13 +1814,13 @@ function StockDetail({
                         Total
                       </Td>
                       <Td className="text-right font-bold tabular-nums">
-                        {formatIn(relatedOrderTotals.ordered, "set")}
+                        {formatIn(relatedOrderTotals.ordered, "pair")}
                       </Td>
                       <Td className="text-right font-bold tabular-nums">
-                        {formatIn(relatedOrderTotals.received, "set")}
+                        {formatIn(relatedOrderTotals.received, "pair")}
                       </Td>
                       <Td className="text-right font-bold tabular-nums whitespace-nowrap">
-                        {formatIn(relatedOrderTotals.remaining, "set")}
+                        {formatIn(relatedOrderTotals.remaining, "pair")}
                       </Td>
                       <Td />
                     </Tr>

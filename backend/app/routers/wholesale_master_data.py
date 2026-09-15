@@ -48,7 +48,9 @@ def _require_wholesale(user: User) -> None:
 
 def _product_out(row: WholesaleProduct) -> dict:
     return {"product_id": row.id, "stock_code": row.stock_code, "description": row.description,
-            "product_group": row.product_group.value, "active": row.active, "created_at": row.created_at,
+            "product_group": row.product_group.value, "default_unit": row.default_unit.value,
+            "default_unit_conversions": row.default_unit_conversions,
+            "active": row.active, "created_at": row.created_at,
             "updated_at": row.updated_at}
 
 

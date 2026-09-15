@@ -15,9 +15,9 @@ reading zero until a later phase supplies what they are derived from. Each phase
 own tables to this module rather than opening a new file, so the whole wholesale schema
 stays in one place.
 
-Quantities here are always whole pairs (Integer, never Numeric) — 6 pairs make a set, 12
-make a dozen, and the conversion is a plain constant (see app/services/wholesale/units.py)
-rather than a per-product column, matching frontend/renderer/.../wholesale/units.ts.
+Quantities here are always whole pairs (Integer, never Numeric). Each product supplies a
+rate map for new lines, and every quantity-bearing line retains that map as an immutable
+snapshot so its historic meaning cannot be changed by a later product update.
 
 Phase 1: Delivery — wholesale_shipments and wholesale_shipment_legs.
 Phase 2 (this revision): Receiving — wholesale_receivings, wholesale_receiving_packages,
@@ -35,8 +35,8 @@ from datetime import date, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
-    JSON,
     Date,
+    JSON,
     DateTime,
     Enum,
     ForeignKey,
@@ -74,6 +74,16 @@ class WholesaleUnit(str, enum.Enum):
     PAIR = "pair"
     SET = "set"
     DOZEN = "dozen"
+
+
+class WholesaleWriteOffReason(str, enum.Enum):
+    """Why a shipment quantity does not match the expected count."""
+
+    LOST_IN_TRANSIT = "lost_in_transit"
+    DAMAGED = "damaged"
+    SHORT_SHIPPED = "short_shipped"
+    OTHER = "other"
+    REPACKAGED = "repackaged"
 
 
 class Shipment(Base):
@@ -122,6 +132,17 @@ class Shipment(Base):
     # Stored today; becomes a fallback once a receiving exists (phase 2). See class
     # docstring.
     final_received_packages: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Packages that will never reach the final destination. This is deliberately a
+    # running total; WholesaleWriteOff is the append-only explanation for each change.
+    lost_packages: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Set only when this shipment was carved out of another one's still-undispatched
+    # remainder (see app/services/wholesale_shipments.py::split_shipment) — e.g. the
+    # cargo company sends part of a voucher toward Yangon and holds the rest for
+    # Mandalay. NULL for an ordinary shipment. SET NULL on delete rather than CASCADE:
+    # removing the parent shouldn't take a since-independent split down with it.
+    split_from_shipment_id: Mapped[str | None] = mapped_column(
+        ForeignKey("wholesale_shipments.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -151,6 +172,8 @@ class ShipmentLeg(Base):
     carrier_name: Mapped[str] = mapped_column(String(255), nullable=False)
     packages_received: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     packages_sent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Packages lost after this stop received them and before it could send them on.
+    lost_packages: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     shipment: Mapped["Shipment"] = relationship(back_populates="legs")
@@ -272,6 +295,7 @@ class ReceivingItem(Base):
         nullable=False,
         default=WholesaleUnit.SET,
     )
+    unit_conversions: Mapped[dict] = mapped_column(JSON, nullable=False, default=lambda: {"pair": 1, "set": 6, "dozen": 12})
     quantity_pairs: Mapped[int] = mapped_column("qty_pairs", Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -292,12 +316,21 @@ class ReceivingCost(Base):
     receiving_id: Mapped[str] = mapped_column(
         ForeignKey("wholesale_receivings.id", ondelete="CASCADE"), nullable=False
     )
+    cost_date: Mapped[date] = mapped_column(Date, nullable=False)
     # Where it was spent — the cargo company, one of the destinations, or the gate.
     # Blank reads as "Not said where" (see cost_by_stage).
     stage: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     carrier: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     kind: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    # Always the Kyat amount, whatever currency this charge was actually paid in — see
+    # app/services/wholesale/currency.py. A non-MMK currency_code additionally carries
+    # original_amount/exchange_rate, the immutable snapshot this figure was computed
+    # from; a `ck_wholesale_receiving_costs_currency_fields` check constraint enforces
+    # that MMK rows never carry them and foreign rows always do.
     amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="MMK")
+    original_amount: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
+    exchange_rate: Mapped[float | None] = mapped_column(Numeric(24, 12), nullable=True)
     note: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -353,8 +386,18 @@ class SupplierVoucherLine(Base):
         Enum(WholesaleUnit, name="wholesale_unit", values_callable=lambda enum_cls: [m.value for m in enum_cls]),
         nullable=False,
     )
+    unit_conversions: Mapped[dict] = mapped_column(JSON, nullable=False, default=lambda: {"pair": 1, "set": 6, "dozen": 12})
     quantity_pairs: Mapped[int] = mapped_column("wanted_pairs", Integer, nullable=False)
+    lost_quantity_pairs: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Always the Kyat unit price, whatever currency this line was actually priced in —
+    # see app/services/wholesale/currency.py. A non-MMK currency_code additionally
+    # carries original_buying_price/exchange_rate, the immutable snapshot this figure
+    # was computed from; a `ck_wholesale_supplier_voucher_lines_currency_fields` check
+    # constraint enforces that MMK rows never carry them and foreign rows always do.
     buying_price: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="MMK")
+    original_buying_price: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
+    exchange_rate: Mapped[float | None] = mapped_column(Numeric(24, 12), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     voucher: Mapped["SupplierVoucher"] = relationship(back_populates="lines")
@@ -422,10 +465,20 @@ class CustomerOrderLine(Base):
     color_breakdown: Mapped[str] = mapped_column("color_qty", String(1000), nullable=False)
     colors: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     unit: Mapped[WholesaleUnit] = mapped_column(Enum(WholesaleUnit, name="wholesale_unit", values_callable=lambda e: [m.value for m in e]), nullable=False)
+    unit_conversions: Mapped[dict] = mapped_column(JSON, nullable=False, default=lambda: {"pair": 1, "set": 6, "dozen": 12})
     quantity_pairs: Mapped[int] = mapped_column("wanted_pairs", Integer, nullable=False)
     allocated_quantity_pairs: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     allocated_color_breakdown: Mapped[str] = mapped_column(String(1000), nullable=False, default="", server_default="")
+    lost_quantity_pairs: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Always the Kyat unit price, whatever currency this line was actually priced in —
+    # see app/services/wholesale/currency.py. A non-MMK currency_code additionally
+    # carries original_selling_price/exchange_rate, the immutable snapshot this figure
+    # was computed from; a `ck_wholesale_customer_order_lines_currency_fields` check
+    # constraint enforces that MMK rows never carry them and foreign rows always do.
     selling_price: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="MMK")
+    original_selling_price: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
+    exchange_rate: Mapped[float | None] = mapped_column(Numeric(24, 12), nullable=True)
     order: Mapped["CustomerOrder"] = relationship(back_populates="lines")
 
 
@@ -456,6 +509,9 @@ class WholesaleStockMovement(Base):
     )
     color_breakdown: Mapped[str] = mapped_column("color_qty", String(1000), nullable=False)
     colors: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # The source order line's rates at delivery time.  Colour shorthand remains readable
+    # even if the product's set size changes after stock leaves the gate.
+    unit_conversions: Mapped[dict] = mapped_column(JSON, nullable=False, default=lambda: {"pair": 1, "set": 6, "dozen": 12})
     quantity_pairs: Mapped[int] = mapped_column("qty_pairs", Integer, nullable=False)
     location: Mapped[str] = mapped_column(String(255), nullable=False)
     delivery_address: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
@@ -506,6 +562,7 @@ class AllocationEvent(Base):
         Enum(WholesaleUnit, name="wholesale_unit", values_callable=lambda e: [m.value for m in e]),
         nullable=False,
     )
+    unit_conversions: Mapped[dict] = mapped_column(JSON, nullable=False, default=lambda: {"pair": 1, "set": 6, "dozen": 12})
     previous_color_breakdown: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
     previous_quantity_pairs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     color_breakdown: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
@@ -515,3 +572,42 @@ class AllocationEvent(Base):
 
     branch: Mapped["Branch | None"] = relationship()
     order: Mapped["CustomerOrder"] = relationship()
+
+
+class WholesaleWriteOff(Base):
+    """An append-only explanation for a quantity that will not arrive or be delivered.
+
+    The subject is polymorphic because the same action applies to a shipment, a route
+    leg, a supplier-voucher line, and a customer-order line. The denormalised labels
+    keep the audit trail readable even if the source row is later edited.
+    """
+
+    __tablename__ = "wholesale_write_offs"
+    __table_args__ = (
+        Index("ix_wholesale_write_offs_branch_id_created_at", "branch_id", "created_at"),
+        Index("ix_wholesale_write_offs_subject", "subject_type", "subject_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True)
+    subject_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    subject_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    reference: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    description: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    stock_code: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit: Mapped[str] = mapped_column(String(30), nullable=False)
+    unit_conversions: Mapped[dict] = mapped_column(JSON, nullable=False, default=lambda: {"pair": 1, "set": 6, "dozen": 12})
+    reason: Mapped[WholesaleWriteOffReason] = mapped_column(
+        Enum(
+            WholesaleWriteOffReason,
+            name="wholesale_write_off_reason",
+            values_callable=lambda enum_cls: [m.value for m in enum_cls],
+        ),
+        nullable=False,
+    )
+    note: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
+    recorded_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    branch: Mapped["Branch | None"] = relationship()

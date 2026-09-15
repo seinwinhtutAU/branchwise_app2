@@ -19,8 +19,8 @@ import {
 } from "./receivings";
 import { type SupplierVoucher } from "./supplierVouchers";
 import { type AllocationEvent, type CustomerOrder } from "./customerOrders";
-import { type StockMovement } from "./stock";
-import { fromPairs, PAIRS_PER } from "./units";
+import { type StockMovement, type StockRecord } from "./stock";
+import { fromPairs, PAIRS_PER, type Unit, type UnitConversions } from "./units";
 import { type Product } from "./products";
 
 export class WholesaleApiError extends Error {}
@@ -77,6 +77,7 @@ interface ShipmentLegWire {
   carrier_name: string;
   packages_received: number;
   packages_sent: number;
+  lost_packages?: number;
 }
 
 export interface ShipmentWire {
@@ -93,6 +94,9 @@ export interface ShipmentWire {
   total_unit: string;
   packages_sent_by_cargo: number;
   final_received_packages: number;
+  lost_packages?: number;
+  final_lost_packages?: number;
+  split_from_shipment_id?: string | null;
   legs: (ShipmentLegWire & { leg_id: string; leg_order: number })[];
 }
 
@@ -191,6 +195,9 @@ export function shipmentFromWire(wire: ShipmentWire): Shipment {
     total_unit: wire.total_unit as Shipment["total_unit"],
     packages_sent_by_cargo: wire.packages_sent_by_cargo,
     final_received_packages: wire.final_received_packages,
+    lost_packages: wire.lost_packages ?? 0,
+    final_lost_packages: wire.final_lost_packages ?? 0,
+    split_from_shipment_id: wire.split_from_shipment_id ?? null,
     legs: wire.legs.map((leg) => ({
       leg_id: leg.leg_id,
       leg_order: leg.leg_order,
@@ -198,6 +205,7 @@ export function shipmentFromWire(wire: ShipmentWire): Shipment {
       carrier_name: leg.carrier_name,
       packages_received: leg.packages_received,
       packages_sent: leg.packages_sent,
+      lost_packages: leg.lost_packages ?? 0,
     })),
   };
 }
@@ -297,6 +305,76 @@ export async function deleteShipment(
   });
 }
 
+export type WriteOffReason =
+  "lost_in_transit" | "damaged" | "short_shipped" | "other" | "repackaged";
+
+export interface WriteOffInput {
+  quantity: number;
+  reason: WriteOffReason;
+  note: string;
+}
+
+export interface WriteOffWire extends WriteOffInput {
+  write_off_id: string;
+  branch_id: string | null;
+  subject_type: "shipment" | "shipment_leg" | "voucher_line" | "order_line";
+  subject_id: string;
+  reference: string;
+  description: string;
+  stock_code: string;
+  unit: string;
+  unit_conversions?: UnitConversions;
+  recorded_by_user_id: string;
+  created_at: string;
+}
+
+export async function writeOffShipment(
+  session: Session,
+  shipmentId: string,
+  input: WriteOffInput & { leg_id?: string },
+): Promise<WriteOffWire> {
+  return request<WriteOffWire>(
+    session,
+    `/api/wholesale/shipments/${shipmentId}/write-off`,
+    { method: "POST", body: input },
+  );
+}
+
+export interface SplitShipmentInput {
+  packages: number;
+  /** Real pairs, already converted — same convention as NewShipmentInput.total_quantity_pairs. */
+  quantity_pairs: number;
+  final_destination: string;
+  carrier_name: string;
+}
+
+export interface SplitShipmentResult {
+  original: Shipment;
+  newShipment: Shipment;
+}
+
+/** Carves part of a shipment's still-undispatched remainder into a shipment of its
+ *  own — see app/services/wholesale_shipments.py::split_shipment. Both the reduced
+ *  original and the new shipment come back from the one call, since the server changes
+ *  them together in one transaction. */
+export async function splitShipment(
+  session: Session,
+  shipmentId: string,
+  input: SplitShipmentInput,
+): Promise<SplitShipmentResult> {
+  const wire = await request<{
+    original: ShipmentWire;
+    new_shipment: ShipmentWire;
+  }>(session, `/api/wholesale/shipments/${shipmentId}/split`, {
+    method: "POST",
+    body: input,
+  });
+  return {
+    original: shipmentFromWire(wire.original),
+    newShipment: shipmentFromWire(wire.new_shipment),
+  };
+}
+
 // ── Global wholesale master data ───────────────────────────────────────────
 
 export interface WholesaleProductWire {
@@ -304,6 +382,8 @@ export interface WholesaleProductWire {
   stock_code: string;
   description: string;
   product_group: Product["product_group"];
+  default_unit: Unit;
+  default_unit_conversions: UnitConversions;
   active: boolean;
 }
 
@@ -334,10 +414,12 @@ export const RECEIVING_GATES_URL = `${apiBaseUrl}/api/wholesale/receiving-gates`
 export function productsFromWire(wires: WholesaleProductWire[]): Product[] {
   return wires
     .filter((wire) => wire.active)
-    .map(({ stock_code, description, product_group }) => ({
+    .map(({ stock_code, description, product_group, default_unit, default_unit_conversions }) => ({
       stock_code,
       description,
       product_group,
+      default_unit,
+      default_unit_conversions,
     }));
 }
 
@@ -359,6 +441,8 @@ export interface NewWholesaleProductInput {
   stock_code: string;
   description: string;
   product_group: Product["product_group"];
+  default_unit?: Unit;
+  default_unit_conversions?: UnitConversions;
 }
 
 export async function createWholesaleProduct(
@@ -506,6 +590,7 @@ interface ReceivingItemWire {
   color_breakdown: string;
   quantity: number;
   unit: Receiving["total_unit"];
+  unit_conversions: UnitConversions;
   quantity_pairs: number;
 }
 
@@ -520,10 +605,14 @@ interface ReceivingPackageWire {
 
 interface ReceivingCostWire {
   cost_id: string;
+  cost_date: string;
   stage: string;
   carrier: string;
   kind: string;
   amount: number;
+  currency_code: string;
+  original_amount: number | null;
+  exchange_rate: number | null;
   note: string;
 }
 
@@ -561,6 +650,7 @@ function packageFromWire(wire: ReceivingPackageWire): ReceivingPackage {
       quantity: item.quantity,
       quantity_pairs: item.quantity_pairs,
       unit: item.unit,
+      unit_conversions: item.unit_conversions ?? PAIRS_PER,
     })),
   };
 }
@@ -607,6 +697,7 @@ function packageToWire(entry: ReceivingPackage): {
     color_breakdown: string;
     quantity: number;
     unit: Receiving["total_unit"];
+    unit_conversions: UnitConversions;
   }[];
 } {
   return {
@@ -620,24 +711,35 @@ function packageToWire(entry: ReceivingPackage): {
       color_breakdown: item.color_breakdown,
       quantity: item.quantity,
       unit: item.unit,
+      unit_conversions: item.unit_conversions ?? PAIRS_PER,
     })),
   };
 }
 
 function costsToWire(costs: ReceivingCost[]): {
+  cost_date: string;
   stage: string;
   carrier: string;
   kind: string;
+  currency_code: string;
   amount: number;
+  original_amount: number | null;
+  exchange_rate: number | null;
   note: string;
 }[] {
-  return costs.map(({ stage, carrier, kind, amount, note }) => ({
-    stage,
-    carrier,
-    kind,
-    amount,
-    note,
-  }));
+  return costs.map(
+    ({ cost_date, stage, carrier, kind, currency_code, amount, original_amount, exchange_rate, note }) => ({
+      cost_date,
+      stage,
+      carrier,
+      kind,
+      currency_code: currency_code ?? "MMK",
+      amount,
+      original_amount: original_amount ?? null,
+      exchange_rate: exchange_rate ?? null,
+      note,
+    }),
+  );
 }
 
 export async function createReceiving(
@@ -757,7 +859,11 @@ function voucherBody(input: NewSupplierVoucherInput): {
     product_group: "man" | "lady" | "child";
     color_breakdown: string;
     unit: SupplierVoucher["lines"][number]["unit"];
+    unit_conversions: UnitConversions;
+    currency_code: string;
     buying_price: number;
+    original_buying_price: number | null;
+    exchange_rate: number | null;
   }[];
 } {
   return {
@@ -771,7 +877,11 @@ function voucherBody(input: NewSupplierVoucherInput): {
       product_group: line.product_group,
       color_breakdown: line.color_breakdown,
       unit: line.unit,
+      unit_conversions: line.unit_conversions ?? PAIRS_PER,
+      currency_code: line.currency_code ?? "MMK",
       buying_price: line.buying_price,
+      original_buying_price: line.original_buying_price ?? null,
+      exchange_rate: line.exchange_rate ?? null,
     })),
   };
 }
@@ -806,6 +916,18 @@ export async function deleteSupplierVoucher(
     session,
     `/api/wholesale/supplier-vouchers/${voucherId}`,
     { method: "DELETE" },
+  );
+}
+
+export async function writeOffSupplierVoucherLine(
+  session: Session,
+  lineId: string,
+  input: WriteOffInput,
+): Promise<WriteOffWire> {
+  return request<WriteOffWire>(
+    session,
+    `/api/wholesale/supplier-vouchers/lines/${lineId}/write-off`,
+    { method: "POST", body: input },
   );
 }
 
@@ -870,7 +992,11 @@ function orderBody(input: NewCustomerOrderInput): object {
       supplier_name: line.supplier_name,
       color_breakdown: line.color_breakdown,
       unit: line.unit,
+      unit_conversions: line.unit_conversions ?? PAIRS_PER,
+      currency_code: line.currency_code ?? "MMK",
       selling_price: line.selling_price,
+      original_selling_price: line.original_selling_price ?? null,
+      exchange_rate: line.exchange_rate ?? null,
     })),
   };
 }
@@ -908,6 +1034,20 @@ export async function updateCustomerOrderLineAllocation(
     },
   );
 }
+
+export async function writeOffCustomerOrderLine(
+  session: Session,
+  lineId: string,
+  input: WriteOffInput,
+): Promise<WriteOffWire> {
+  return request<WriteOffWire>(
+    session,
+    `/api/wholesale/orders/lines/${lineId}/write-off`,
+    { method: "POST", body: input },
+  );
+}
+
+export const WHOLESALE_WRITE_OFFS_URL = `${apiBaseUrl}/api/wholesale/write-offs`;
 
 export async function updateCustomerOrder(
   session: Session,
@@ -973,6 +1113,23 @@ export async function removeCustomerOrderPayment(
 // ── Inventory movements ────────────────────────────────────────────────────
 
 export const WHOLESALE_INVENTORY_URL = `${apiBaseUrl}/api/wholesale/inventory`;
+export const WHOLESALE_STOCK_URL = `${apiBaseUrl}/api/wholesale/inventory/stock`;
+
+export interface StockRecordWire extends Omit<StockRecord, "product_group"> {
+  product_group: string;
+}
+
+export function stockRecordsFromWire(wires: StockRecordWire[]): StockRecord[] {
+  return wires.map((wire) => ({
+    ...wire,
+    product_group: wire.product_group as StockRecord["product_group"],
+    locations: wire.locations.map((location) => ({
+      ...location,
+      last_moved_on: location.last_moved_on ?? null,
+    })),
+    last_activity_on: wire.last_activity_on ?? null,
+  }));
+}
 
 /** The current API uses descriptive field names, while desktop clients with an older
  * backend can still receive the original inventory field names. Normalize at the wire
@@ -997,6 +1154,7 @@ export function inventoryMovementsFromWire(
     product_group: wire.product_group ?? wire.group ?? "man",
     color_breakdown: wire.color_breakdown ?? wire.color_qty ?? "",
     quantity_pairs: wire.quantity_pairs ?? wire.pairs ?? 0,
+    unit_conversions: wire.unit_conversions,
     location: wire.location ?? "",
     moved_on: wire.moved_on ?? wire.date ?? "",
     reference: wire.reference ?? "",
@@ -1004,4 +1162,158 @@ export function inventoryMovementsFromWire(
     note: wire.note ?? "",
     delivery_address: wire.delivery_address,
   }));
+}
+
+// ── Four-pillar reports ────────────────────────────────────────────────────
+
+export const WHOLESALE_REPORTS_URL = `${apiBaseUrl}/api/wholesale/reports`;
+
+export interface WholesaleReportKpi {
+  value: number;
+  previous_value: number | null;
+  delta_pct: number | null;
+}
+
+export interface WholesaleRevenueReport {
+  period: string;
+  date_from: string;
+  date_to: string;
+  delivered_revenue: WholesaleReportKpi;
+  ordered_value: WholesaleReportKpi;
+  pairs_delivered: WholesaleReportKpi;
+  collected: WholesaleReportKpi;
+  trend: { date: string; delivered_revenue: number; collected: number }[];
+  top_customers: {
+    customer_name: string;
+    pairs_delivered: number;
+    delivered_revenue: number;
+  }[];
+  top_products: {
+    stock_code: string;
+    description: string;
+    pairs_delivered: number;
+    delivered_revenue: number;
+    avg_selling_price: number | null;
+  }[];
+  orders: {
+    order_no: string;
+    customer_name: string;
+    pairs_ordered: number;
+    ordered_value: number;
+    delivered_pct: number;
+    balance_due: number;
+  }[];
+}
+
+export interface WholesaleCostReport {
+  period: string;
+  date_from: string;
+  date_to: string;
+  purchases: WholesaleReportKpi;
+  freight_and_handling: WholesaleReportKpi;
+  gross_margin_pct: WholesaleReportKpi;
+  owed_to_suppliers: WholesaleReportKpi;
+  trend: {
+    date: string;
+    delivered_revenue: number;
+    cost_of_goods_delivered: number | null;
+  }[];
+  freight_by_stage: { stage: string; amount: number }[];
+  suppliers: {
+    supplier_name: string;
+    vouchers: number;
+    pairs: number;
+    value: number;
+    paid: number;
+    balance: number;
+  }[];
+  payables: {
+    voucher_no: string;
+    supplier_name: string;
+    voucher_date: string;
+    days_since: number;
+    balance_due: number;
+  }[];
+  write_offs: {
+    reference: string;
+    stock_code: string;
+    description: string;
+    quantity_pairs: number;
+    reason: string;
+    value: number;
+  }[];
+}
+
+export interface WholesaleInventoryReport {
+  period: string;
+  date_from: string;
+  date_to: string;
+  on_hand: WholesaleReportKpi;
+  available: WholesaleReportKpi;
+  incoming: WholesaleReportKpi;
+  stock_value: WholesaleReportKpi;
+  received_in_period: number;
+  delivered_in_period: number;
+  locations: { location: string; on_hand_pairs: number }[];
+  pipeline: { stage: string; pairs: number }[];
+  products: WholesaleInventoryProduct[];
+  cannot_supply: WholesaleInventoryProduct[];
+  not_moving: (WholesaleInventoryProduct & { days_since: number | null })[];
+}
+
+export interface WholesaleInventoryProduct {
+  stock_code: string;
+  description: string;
+  on_hand_pairs: number;
+  available_pairs: number;
+  allocated_pairs: number;
+  at_supplier_pairs: number;
+  in_transit_pairs: number;
+  incoming_pairs: number;
+  owed_to_customers_pairs: number;
+  last_movement_on: string | null;
+  stock_value: number;
+  locations: {
+    location: string;
+    on_hand_pairs: number;
+    last_moved_on: string | null;
+  }[];
+}
+
+export interface WholesaleCustomerReport {
+  period: string;
+  date_from: string;
+  date_to: string;
+  active_customers: WholesaleReportKpi;
+  new_customers: WholesaleReportKpi;
+  average_order_value: WholesaleReportKpi;
+  receivables: WholesaleReportKpi;
+  fulfilment_days: WholesaleReportKpi;
+  trend: { date: string; order_count: number }[];
+  top_customers: WholesaleCustomerRanking[];
+  ranking: WholesaleCustomerRanking[];
+  open_orders: {
+    order_no: string;
+    customer_name: string;
+    order_date: string;
+    pairs_ordered: number;
+    pairs_delivered: number;
+    balance_due: number;
+    days_open: number;
+  }[];
+  quiet_customers: { customer_name: string }[];
+}
+
+export interface WholesaleCustomerRanking {
+  customer_name: string;
+  orders: number;
+  pairs_ordered: number;
+  pairs_delivered: number;
+  delivered_revenue: number;
+  paid: number;
+  balance: number;
+}
+
+export function wholesaleReportFromWire<T>(wire: T): T {
+  return wire;
 }

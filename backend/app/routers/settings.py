@@ -1,13 +1,15 @@
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_app_user
 from app.db.session import get_db
 from app.models.user import User, UserRole
 from app.services.settings import get_all_settings, get_setting, set_setting
+from app.services.wholesale.currency import DEFAULT_CURRENCY, SUPPORTED_CURRENCIES
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -69,6 +71,34 @@ class AppSettingsUpdate(BaseModel):
     # See docs/branch_health.md. Whole-set updates (see each model's docstring).
     branch_health_weights: BranchHealthWeights | None = None
     early_warning_thresholds: EarlyWarningThresholds | None = None
+    # Today's MMK rate for each non-MMK currency the wholesale screens deal in — MMK
+    # per 1 unit of that currency, e.g. {"THB": "120.000000000000"}. A whole-set update,
+    # same as the two settings above: a currency left out of the payload simply has no
+    # current rate to prefill a new order/voucher line or receiving cost with, though
+    # one can still be saved with a hand-typed rate. Values are decimal strings, not
+    # floats, so a precise rate survives the round trip exactly — see
+    # app/services/wholesale/currency.py for where a line's own saved rate is used
+    # instead of this "current" one once the line exists.
+    today_exchange_rates: dict[str, str] | None = None
+
+    @field_validator("today_exchange_rates")
+    @classmethod
+    def _validate_exchange_rates(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        if value is None:
+            return value
+        validated: dict[str, str] = {}
+        for code, rate in value.items():
+            upper = code.strip().upper()
+            if upper == DEFAULT_CURRENCY or upper not in SUPPORTED_CURRENCIES:
+                raise ValueError(f'"{code}" is not a supported non-MMK currency')
+            try:
+                parsed = Decimal(str(rate))
+            except InvalidOperation:
+                raise ValueError(f'"{rate}" is not a valid exchange rate for {upper}')
+            if parsed <= 0:
+                raise ValueError(f"Exchange rate for {upper} must be greater than zero")
+            validated[upper] = str(parsed)
+        return validated
 
 
 @router.get("/theme")

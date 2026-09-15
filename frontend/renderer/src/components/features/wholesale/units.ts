@@ -7,11 +7,12 @@
 // the same pairs underneath.
 
 export type Unit = "pair" | "set" | "dozen";
+export type UnitConversions = Record<Unit, number>;
 
 export const UNITS: Unit[] = ["pair", "set", "dozen"];
 
-/** How many pairs each unit is worth. The whole conversion lives here. */
-export const PAIRS_PER: Record<Unit, number> = {
+/** Legacy/default rate used only where a record has no explicit snapshot. */
+export const PAIRS_PER: UnitConversions = {
   pair: 1,
   set: 6,
   dozen: 12,
@@ -30,26 +31,48 @@ export function unitName(unit: Unit, qty: number): string {
 }
 
 /** Turns a figure typed in some unit into pairs. */
-export function toPairs(qty: number, unit: Unit): number {
-  return qty * PAIRS_PER[unit];
+export function toPairs(qty: number, unit: Unit, conversions: UnitConversions = PAIRS_PER): number {
+  return qty * conversions[unit];
 }
 
 /** Turns pairs back into a unit. Can come out fractional — 9 pairs is one and a half
  *  sets — so the caller decides how to show it. */
-export function fromPairs(pairs: number, unit: Unit): number {
-  return pairs / PAIRS_PER[unit];
+export function fromPairs(pairs: number, unit: Unit, conversions: UnitConversions = PAIRS_PER): number {
+  return pairs / conversions[unit];
+}
+
+/** The amount for pairs stored at a price staff quoted in the line's unit. */
+export function pricedAmount(
+  quantityPairs: number,
+  unit: Unit,
+  price: number,
+  conversions: UnitConversions = PAIRS_PER,
+): number {
+  return (quantityPairs / conversions[unit]) * price;
 }
 
 const NUMBER = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 
-/** A quantity written in the unit asked for, with its name: "90 pairs", "15 sets". */
-export function formatIn(pairs: number, unit: Unit): string {
-  const value = Number.isFinite(pairs) ? fromPairs(pairs, unit) : 0;
-  return `${NUMBER.format(value)} ${unitName(unit, value)}`;
+/** A quantity written in the requested unit, keeping any incomplete unit as pairs. */
+export function formatIn(pairs: number, unit: Unit, conversions: UnitConversions = PAIRS_PER): string {
+  const safePairs = Number.isFinite(pairs) ? pairs : 0;
+  if (unit === "pair" || safePairs === 0) {
+    return `${NUMBER.format(safePairs)} ${unitName("pair", safePairs)}`;
+  }
+
+  const whole = Math.floor(safePairs / conversions[unit]);
+  const leftover = safePairs % conversions[unit];
+  if (whole === 0)
+    return `${NUMBER.format(leftover)} ${unitName("pair", leftover)}`;
+  if (leftover === 0) return `${NUMBER.format(whole)} ${unitName(unit, whole)}`;
+  return `${NUMBER.format(whole)} ${unitName(unit, whole)} ${NUMBER.format(leftover)} ${unitName("pair", leftover)}`;
 }
 
-/** The same quantity twice, when both matter: "15 sets (90 pairs)". */
-export function formatWithPairs(pairs: number, unit: Unit): string {
-  if (unit === "pair") return formatIn(pairs, "pair");
-  return `${formatIn(pairs, unit)} (${formatIn(pairs, "pair")})`;
+/** A quantity displayed in its requested unit. Retained for existing display callers. */
+export function formatWithPairs(
+  pairs: number,
+  unit: Unit,
+  conversions: UnitConversions = PAIRS_PER,
+): string {
+  return formatIn(pairs, unit, conversions);
 }

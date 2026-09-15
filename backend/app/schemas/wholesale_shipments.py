@@ -7,7 +7,7 @@ from datetime import date
 
 from pydantic import BaseModel, Field
 
-from app.models.wholesale import WholesaleUnit
+from app.models.wholesale import WholesaleUnit, WholesaleWriteOffReason
 
 
 class ShipmentLegIn(BaseModel):
@@ -15,6 +15,26 @@ class ShipmentLegIn(BaseModel):
     carrier_name: str = ""
     packages_received: int = Field(ge=0)
     packages_sent: int = Field(ge=0)
+
+
+class ShipmentWriteOffIn(BaseModel):
+    quantity: int = Field(ge=0)
+    reason: WholesaleWriteOffReason
+    note: str = Field(default="", max_length=1000)
+    leg_id: str | None = None
+
+
+class ShipmentSplitIn(BaseModel):
+    """Carves part of a shipment's still-undispatched remainder into a new shipment of
+    its own — e.g. the cargo company sends part of a voucher toward Yangon and holds the
+    rest for Mandalay. See app/services/wholesale_shipments.py::split_shipment."""
+
+    packages: int = Field(gt=0)
+    quantity_pairs: int = Field(gt=0)
+    final_destination: str = Field(min_length=1, max_length=255)
+    # Defaults to the original shipment's own carrier when left blank — the split-off
+    # portion often travels with a different driver/agent, but doesn't have to.
+    carrier_name: str = ""
 
 
 class ShipmentCreate(BaseModel):

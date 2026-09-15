@@ -50,7 +50,8 @@ def incoming_movements(db: Session, branch_id: str | None) -> list[dict]:
                     "movement_id": f"in-{package.id}-{item.id}", "movement_type": "in",
                     "stock_code": item.stock_code, "description": item.description,
                     "product_group": item.product_group.value, "color_breakdown": item.color_breakdown,
-                    "quantity_pairs": item.quantity_pairs, "location": receiving.gate,
+                    "quantity_pairs": item.quantity_pairs, "unit_conversions": item.unit_conversions,
+                    "location": receiving.gate,
                     "moved_on": package.received_on or receiving.received_on,
                     "reference": receiving.receiving_no, "counterparty_name": receiving.supplier_name,
                     "note": package.note,
@@ -67,6 +68,7 @@ def outgoing_movements(db: Session, branch_id: str | None) -> list[dict]:
             "movement_id": movement.id, "movement_type": "out", "stock_code": movement.stock_code,
             "description": movement.description, "product_group": movement.product_group.value,
             "color_breakdown": movement.color_breakdown, "quantity_pairs": movement.quantity_pairs,
+            "unit_conversions": movement.unit_conversions,
             "location": movement.location, "moved_on": movement.delivered_on,
             "reference": movement.order.order_no, "counterparty_name": movement.order.customer_name,
             "note": movement.note, "order_id": movement.order_id,
@@ -135,7 +137,7 @@ def delivered_color_pairs_by_order(
 
     result: dict[str, int] = defaultdict(int)
     for movement in query.all():
-        for color, pairs in color_qty_pairs_by_color(movement.color_breakdown, WholesaleUnit.SET).items():
+        for color, pairs in color_qty_pairs_by_color(movement.color_breakdown, WholesaleUnit.SET, movement.unit_conversions).items():
             result[color] += pairs
     return dict(result)
 
@@ -153,8 +155,8 @@ def effective_allocated_color_pairs(
     reservation.
     """
     delivered_colors = delivered_colors or {}
-    ordered_colors = color_qty_pairs_by_color(line.color_breakdown, line.unit)
-    stored_colors = color_qty_pairs_by_color(line.allocated_color_breakdown, line.unit)
+    ordered_colors = color_qty_pairs_by_color(line.color_breakdown, line.unit, line.unit_conversions)
+    stored_colors = color_qty_pairs_by_color(line.allocated_color_breakdown, line.unit, line.unit_conversions)
     return {
         color: min(
             pairs,
@@ -220,7 +222,7 @@ def _available_color_pairs(
             for item in package.items:
                 if item.stock_code != stock_code:
                     continue
-                for color, pairs in color_qty_pairs_by_color(item.color_breakdown, item.unit).items():
+                for color, pairs in color_qty_pairs_by_color(item.color_breakdown, item.unit, item.unit_conversions).items():
                     available[color] += pairs
 
     query = db.query(WholesaleStockMovement).filter(
@@ -232,7 +234,7 @@ def _available_color_pairs(
     if excluding_id is not None:
         query = query.filter(WholesaleStockMovement.id != excluding_id)
     for movement in query.all():
-        for color, pairs in color_qty_pairs_by_color(movement.color_breakdown, WholesaleUnit.SET).items():
+        for color, pairs in color_qty_pairs_by_color(movement.color_breakdown, WholesaleUnit.SET, movement.unit_conversions).items():
             available[color] -= pairs
     return dict(available)
 
@@ -295,7 +297,7 @@ def allocated_color_pairs_for_stock_code(
     if branch_id is not None:
         movement_query = movement_query.filter(WholesaleStockMovement.branch_id == branch_id)
     for movement in movement_query.all():
-        for color, pairs in color_qty_pairs_by_color(movement.color_breakdown, WholesaleUnit.SET).items():
+        for color, pairs in color_qty_pairs_by_color(movement.color_breakdown, WholesaleUnit.SET, movement.unit_conversions).items():
             delivered_by_order[movement.order_id][color] += pairs
     reserved: dict[str, int] = defaultdict(int)
     for line in query.all():
@@ -338,15 +340,16 @@ def _validate_delivery(
     problem = color_qty_problem(payload.color_breakdown.strip())
     if problem:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, problem)
-    pairs = color_qty_pairs(payload.color_breakdown.strip(), payload.unit)
     code = stock_code.strip()
     ordered_lines = [line for line in order.lines if line.stock_code == code]
     ordered = sum(line.quantity_pairs for line in ordered_lines)
     if ordered == 0:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "This product is not on the customer order")
+    source = next(line for line in ordered_lines)
+    pairs = color_qty_pairs(payload.color_breakdown.strip(), payload.unit, source.unit_conversions)
     ordered_colors: dict[str, int] = defaultdict(int)
     for line in ordered_lines:
-        for color, color_pairs in color_qty_pairs_by_color(line.color_breakdown, line.unit).items():
+        for color, color_pairs in color_qty_pairs_by_color(line.color_breakdown, line.unit, line.unit_conversions).items():
             ordered_colors[color] += color_pairs
     delivered_colors = delivered_color_pairs_by_order(
         db, order.id, code, branch_id, excluding_id=excluding_id,
@@ -355,7 +358,7 @@ def _validate_delivery(
         color: max(0, color_pairs - delivered_colors.get(color, 0))
         for color, color_pairs in ordered_colors.items()
     }
-    requested_colors = color_qty_pairs_by_color(payload.color_breakdown.strip(), payload.unit)
+    requested_colors = color_qty_pairs_by_color(payload.color_breakdown.strip(), payload.unit, source.unit_conversions)
     for color, requested in requested_colors.items():
         if ordered_colors.get(color, 0) <= 0:
             raise HTTPException(
@@ -402,7 +405,6 @@ def _validate_delivery(
             if reserved_colors
             else "Delivery cannot exceed what is in stock at this place",
         )
-    source = next(line for line in ordered_lines)
     return pairs, source
 
 
@@ -413,6 +415,7 @@ def create_delivery(db: Session, branch_id: str | None, user_id: str, payload) -
         branch_id=order.branch_id, order_id=order.id, stock_code=payload.stock_code.strip(),
         description=source.description, product_group=source.product_group,
         color_breakdown=payload.color_breakdown.strip(), colors=colors_as_json(payload.color_breakdown.strip()),
+        unit_conversions=source.unit_conversions,
         quantity_pairs=pairs, location=payload.location.strip(), delivered_on=payload.delivered_on,
         note=payload.note.strip(), recorded_by_user_id=user_id,
     )
@@ -457,6 +460,7 @@ def create_delivery_batch(
             product_group=source.product_group,
             color_breakdown=line.color_breakdown.strip(),
             colors=colors_as_json(line.color_breakdown.strip()),
+            unit_conversions=source.unit_conversions,
             quantity_pairs=pairs,
             location=line.location.strip(),
             delivery_address=payload.delivery_address.strip(),

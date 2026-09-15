@@ -58,19 +58,28 @@ def _resolve_branch(db, name_or_id: str) -> Branch:
 
 
 def _seed_shipments(db, branch: Branch, shipments: list[dict], *, dry_run: bool) -> int:
-    existing_nos = {
-        row[0]
-        for row in db.query(Shipment.shipment_no).filter(Shipment.branch_id == branch.id).all()
+    existing = {
+        row[0]: row[1]
+        for row in db.query(Shipment.shipment_no, Shipment.id).filter(Shipment.branch_id == branch.id).all()
     }
+    # shipment_no -> id, so a split entry can reference the shipment it was carved out
+    # of even though that parent's id doesn't exist until its own row is flushed.
+    by_no: dict[str, str] = dict(existing)
     created = 0
     for entry in shipments:
-        if entry["shipment_no"] in existing_nos:
+        if entry["shipment_no"] in existing:
             print(f"  skip {entry['shipment_no']} — already seeded")
             continue
         print(f"  {'would create' if dry_run else 'create'} {entry['shipment_no']}")
         if dry_run:
             created += 1
             continue
+        split_from_no = entry.get("split_from_shipment_no")
+        if split_from_no and split_from_no not in by_no:
+            raise SystemExit(
+                f"{entry['shipment_no']} splits from {split_from_no}, which hasn't been "
+                "seeded yet — list the parent shipment first in wholesale_demo.json."
+            )
         shipment = Shipment(
             branch_id=branch.id,
             shipment_no=entry["shipment_no"],
@@ -84,6 +93,7 @@ def _seed_shipments(db, branch: Branch, shipments: list[dict], *, dry_run: bool)
             total_unit=entry["total_unit"],
             packages_sent_by_cargo=entry["packages_sent_by_cargo"],
             final_received_packages=entry["final_received_packages"],
+            split_from_shipment_id=by_no.get(split_from_no) if split_from_no else None,
             legs=[
                 ShipmentLeg(
                     leg_order=index + 1,
@@ -96,6 +106,8 @@ def _seed_shipments(db, branch: Branch, shipments: list[dict], *, dry_run: bool)
             ],
         )
         db.add(shipment)
+        db.flush()
+        by_no[entry["shipment_no"]] = shipment.id
         created += 1
     return created
 
@@ -228,7 +240,15 @@ def _seed_receivings(
                     items=items,
                 )
             )
-        costs = [ReceivingCost(**cost) for cost in entry["costs"]]
+        costs = [
+            ReceivingCost(
+                **{
+                    **cost,
+                    "cost_date": date.fromisoformat(cost.get("cost_date", entry["received_date"])),
+                }
+            )
+            for cost in entry["costs"]
+        ]
         db.add(
             Receiving(
                 branch_id=branch.id,

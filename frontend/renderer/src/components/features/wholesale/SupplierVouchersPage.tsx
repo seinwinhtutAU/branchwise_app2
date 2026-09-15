@@ -9,11 +9,13 @@ import { useToast } from "@renderer/lib/useToast";
 import {
   CellInput,
   CountField,
+  CurrencySelect,
   EDITABLE,
   GroupSelect,
   FigureCard,
   FloatingLayer,
   MenuItem,
+  MismatchIconButton,
   PAGE_SIZE,
   Panel,
   PaymentsTable,
@@ -31,6 +33,15 @@ import {
   StepBar,
   SuggestInput,
 } from "@renderer/components/features/wholesale/ui";
+import type { AppSettings } from "@renderer/lib/appSettings";
+import {
+  DEFAULT_CURRENCY,
+  formatOriginalAmount,
+  formatRate,
+  isForeignCurrency,
+  previewKyatAmount,
+  type CurrencyCode,
+} from "@renderer/components/features/wholesale/currency";
 import { cn } from "@renderer/lib/utils";
 import { Button } from "@renderer/components/ui/Button";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
@@ -87,6 +98,7 @@ import {
   duplicateStockCodeProblem,
   formatKyat,
   formatQty,
+  mismatchDescription,
   nextReference,
   onlyDigits,
   todayIso,
@@ -95,6 +107,9 @@ import {
 import {
   formatIn,
   PAIRS_PER,
+  pricedAmount,
+  UNIT_LABELS,
+  UNITS,
 } from "@renderer/components/features/wholesale/units";
 import {
   colorPairsForText,
@@ -110,6 +125,7 @@ import {
 import {
   CUSTOMER_ORDERS_URL,
   SUPPLIER_VOUCHERS_URL,
+  WHOLESALE_WRITE_OFFS_URL,
   WholesaleApiError,
   addSupplierVoucherPayment,
   createSupplierVoucher,
@@ -118,11 +134,17 @@ import {
   ordersFromWire,
   updateCustomerOrder,
   updateSupplierVoucher,
+  writeOffSupplierVoucherLine,
+  type WriteOffReason,
+  type WriteOffWire,
   vouchersFromWire,
   type NewSupplierVoucherInput,
   type SupplierVoucherWire,
 } from "@renderer/components/features/wholesale/api";
-import { GROUP_LABELS, type ProductGroup } from "@renderer/components/features/wholesale/products";
+import {
+  GROUP_LABELS,
+  type ProductGroup,
+} from "@renderer/components/features/wholesale/products";
 import {
   CARGO_NAMES,
   STOCK_CODES,
@@ -130,16 +152,22 @@ import {
   productOf,
   useHydrateMasterData,
 } from "@renderer/components/features/wholesale/masterData";
+import { WriteOffModal } from "@renderer/components/features/wholesale/WriteOffModal";
 
-/** A quantity of goods, written in sets — the unit the business trades in. Pairs stay
- *  the figure underneath, so nothing is ever converted twice. */
-const sets = (qty: number): string => formatIn(qty, "set");
+/** An aggregate may combine products with different units, so pairs are its only
+ * unambiguous display unit. Individual lines use their own unit below. */
+const sets = (qty: number): string => formatIn(qty, "pair");
 
 function lineReceivedQty(line: SupplierVoucherLine): number {
   return line.received_quantity_pairs ?? 0;
 }
 function lineRemainingQty(line: SupplierVoucherLine): number {
-  return Math.max(0, line.quantity_pairs - lineReceivedQty(line));
+  return Math.max(
+    0,
+    line.quantity_pairs -
+      lineReceivedQty(line) -
+      (line.lost_quantity_pairs ?? 0),
+  );
 }
 
 // The wholesale Supplier Vouchers screen — the supplier's (factory's) own document for
@@ -234,10 +262,12 @@ function PaymentBadge({
 
 export default function SupplierVouchersPage({
   session,
+  settings,
   initialVoucherId,
   onInitialVoucherOpened,
 }: {
   session: Session;
+  settings: AppSettings | null;
   initialVoucherId?: string | null;
   onInitialVoucherOpened?: () => void;
 }): React.JSX.Element {
@@ -254,12 +284,20 @@ export default function SupplierVouchersPage({
       fetchJson<SupplierVoucherWire[]>(SUPPLIER_VOUCHERS_URL, session),
   });
   useLoadErrorToast(isError, "supplier vouchers");
+  const { data: writeOffs = [], isError: writeOffsFailed } = useQuery({
+    queryKey: ["wholesale", "write-offs"],
+    queryFn: () => fetchJson<WriteOffWire[]>(WHOLESALE_WRITE_OFFS_URL, session),
+  });
+  useLoadErrorToast(writeOffsFailed, "mismatch explanations");
   useEffect(() => {
     if (wire) hydrateVouchers(vouchersFromWire(wire));
   }, [wire]);
 
   async function reload(): Promise<void> {
     await queryClient.invalidateQueries({ queryKey: VOUCHERS_QUERY_KEY });
+    await queryClient.invalidateQueries({
+      queryKey: ["wholesale", "write-offs"],
+    });
   }
 
   const { data: orderWire, isError: ordersFailed } = useQuery({
@@ -408,6 +446,21 @@ export default function SupplierVouchersPage({
     }
   }
 
+  async function writeOffVoucherLine(
+    lineId: string,
+    quantity: number,
+    reason: WriteOffReason,
+    note: string,
+  ): Promise<void> {
+    await writeOffSupplierVoucherLine(session, lineId, {
+      quantity,
+      reason,
+      note,
+    });
+    await reload();
+    showToast("success", "Write-off recorded.");
+  }
+
   function addVoucher(input: NewSupplierVoucherInput): void {
     createSupplierVoucher(session, input)
       .then(async (voucher) => {
@@ -483,6 +536,7 @@ export default function SupplierVouchersPage({
         initialSupplierName={newSupplierName}
         initialOrderLines={newOrderLines}
         lockedSupplier={Boolean(newSupplierName)}
+        settings={settings}
         onCancel={() => {
           setNewSupplierName("");
           setNewOrderLines(undefined);
@@ -516,6 +570,9 @@ export default function SupplierVouchersPage({
         initialMode={openMode}
         onSave={persistVoucher}
         onBack={() => setView("list")}
+        onWriteOff={writeOffVoucherLine}
+        writeOffs={writeOffs}
+        settings={settings}
       />
     );
   }
@@ -776,7 +833,9 @@ function VoucherList({
                   <Th className="text-right whitespace-nowrap">
                     Total packages
                   </Th>
-                  <Th className="text-right whitespace-nowrap">Ordered quantity</Th>
+                  <Th className="text-right whitespace-nowrap">
+                    Ordered quantity
+                  </Th>
                   <Th className="text-right whitespace-nowrap">
                     Remaining quantity
                   </Th>
@@ -959,7 +1018,10 @@ function ToOrderView({
     () => supplierDemandGroups(orders, vouchers),
     [orders, vouchers],
   );
-  const totalQty = groups.reduce((sum, product_group) => sum + product_group.total, 0);
+  const totalQty = groups.reduce(
+    (sum, product_group) => sum + product_group.total,
+    0,
+  );
   const selectedGroup = groups.find(
     (product_group) => product_group.supplierName === selectedSupplier,
   );
@@ -1007,7 +1069,10 @@ function ToOrderView({
         <FigureCard
           label="Products waiting"
           value={formatQty(
-            groups.reduce((sum, product_group) => sum + product_group.lines.length, 0),
+            groups.reduce(
+              (sum, product_group) => sum + product_group.lines.length,
+              0,
+            ),
           )}
           sub="products to request"
         />
@@ -1066,7 +1131,8 @@ function ToOrderView({
             </div>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {groups.map((product_group) => {
-                const isUnassigned = product_group.supplierName === UNASSIGNED_SUPPLIER;
+                const isUnassigned =
+                  product_group.supplierName === UNASSIGNED_SUPPLIER;
                 return (
                   <section
                     key={product_group.supplierName}
@@ -1129,7 +1195,9 @@ function ToOrderView({
                         onClick={() => {
                           setSelectedSupplier(product_group.supplierName);
                           setSelectedLineIds(
-                            product_group.lines.map((line) => line.order_line_id),
+                            product_group.lines.map(
+                              (line) => line.order_line_id,
+                            ),
                           );
                         }}
                       >
@@ -1379,6 +1447,7 @@ interface OpenOrderLine {
   description: string;
   product_group: ProductGroup;
   color_breakdown: string;
+  unit: "pair" | "set" | "dozen";
   remaining: number;
 }
 
@@ -1444,6 +1513,7 @@ function openOrderLines(
         description: line.description,
         product_group: line.product_group,
         color_breakdown: colorQtyFromPairs(remainingColors),
+        unit: line.unit,
         remaining: openPairs,
       });
     }
@@ -1490,7 +1560,10 @@ function draftLinesFromOpenOrderLines(rows: OpenOrderLine[]): DraftLine[] {
     if (existing >= 0) {
       lines[existing] = {
         ...lines[existing],
-        color_breakdown: mergeColorQty(lines[existing].color_breakdown, row.color_breakdown),
+        color_breakdown: mergeColorQty(
+          lines[existing].color_breakdown,
+          row.color_breakdown,
+        ),
       };
     } else {
       lines.push({
@@ -1498,7 +1571,12 @@ function draftLinesFromOpenOrderLines(rows: OpenOrderLine[]): DraftLine[] {
         description: row.description,
         product_group: row.product_group,
         color_breakdown: row.color_breakdown,
+        unit: row.unit,
+        unit_conversions: PAIRS_PER,
+        currency_code: DEFAULT_CURRENCY,
         buying_price: "",
+        original_buying_price: "",
+        exchange_rate: "",
       });
     }
   }
@@ -1663,8 +1741,12 @@ function VoucherInfoView({
 
 function VoucherProductsView({
   voucher,
+  onWriteOff,
+  writeOffs,
 }: {
   voucher: SupplierVoucher;
+  onWriteOff: (line: SupplierVoucherLine) => void;
+  writeOffs: WriteOffWire[];
 }): React.JSX.Element {
   return (
     <TableContainer>
@@ -1678,55 +1760,102 @@ function VoucherProductsView({
           <Th className="text-right min-w-[7rem]">Buying price</Th>
           <Th className="text-right">Amount</Th>
           <Th>Customers</Th>
+          <Th className="text-center">Mismatch</Th>
         </Tr>
       </Thead>
       <Tbody>
-        {voucher.lines.map((line) => (
-          <Tr key={line.voucher_line_id}>
-            <Td>
-              <div className="flex min-w-0 flex-col gap-0.5">
-                <div className="flex min-w-0 items-center gap-1">
-                  <span className="font-semibold text-brand break-words">
-                    {line.stock_code || "No stock code"}
+        {voucher.lines.map((line) => {
+          const explanation = writeOffs.find(
+            (entry) => entry.subject_id === line.voucher_line_id,
+          );
+          return (
+            <Tr key={line.voucher_line_id}>
+              <Td>
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <div className="flex min-w-0 items-center gap-1">
+                    <span className="font-semibold text-brand break-words">
+                      {line.stock_code || "No stock code"}
+                    </span>
+                    {line.stock_code && (
+                      <CopyButton value={line.stock_code} what="stock code" />
+                    )}
+                  </div>
+                  <span className="break-words text-text-primary">
+                    {line.description || "—"}
                   </span>
-                  {line.stock_code && (
-                    <CopyButton value={line.stock_code} what="stock code" />
+                  <span className="text-xs text-text-muted">
+                    {GROUP_LABELS[line.product_group]}
+                  </span>
+                </div>
+              </Td>
+              <Td className="whitespace-normal break-words text-text-secondary">
+                {line.color_breakdown || "—"}
+              </Td>
+              <Td className="text-right tabular-nums">
+                {formatIn(line.quantity_pairs, line.unit, line.unit_conversions)}
+              </Td>
+              <Td className="text-right tabular-nums">
+                {formatIn(lineReceivedQty(line), line.unit, line.unit_conversions)}
+              </Td>
+              <Td className="text-right tabular-nums">
+                <div className="flex flex-col items-end gap-1">
+                  <span
+                    className={
+                      line.lost_quantity_pairs ? "text-warning" : undefined
+                    }
+                  >
+                    {formatIn(lineRemainingQty(line), line.unit, line.unit_conversions)}
+                    {(line.lost_quantity_pairs ?? 0) > 0 && !explanation && (
+                      <span className="ml-1 text-xs font-medium text-warning">
+                        ({formatIn(line.lost_quantity_pairs ?? 0, line.unit, line.unit_conversions)}{" "}
+                        written off)
+                      </span>
+                    )}
+                  </span>
+                  {explanation && (
+                    <span
+                      className="text-[10px] font-medium text-warning"
+                      title={
+                        explanation
+                          ? mismatchDescription(explanation)
+                          : undefined
+                      }
+                    >
+                      {mismatchDescription(explanation)}
+                    </span>
                   )}
                 </div>
-                <span className="break-words text-text-primary">
-                  {line.description || "—"}
-                </span>
-                <span className="text-xs text-text-muted">
-                  {GROUP_LABELS[line.product_group]}
-                </span>
-              </div>
-            </Td>
-            <Td className="whitespace-normal break-words text-text-secondary">
-              {line.color_breakdown || "—"}
-            </Td>
-            <Td className="text-right tabular-nums">
-              {sets(line.quantity_pairs)}
-            </Td>
-            <Td className="text-right tabular-nums">
-              {sets(lineReceivedQty(line))}
-            </Td>
-            <Td className="text-right tabular-nums">
-              {sets(lineRemainingQty(line))}
-            </Td>
-            <Td className="text-right tabular-nums">
-              {formatKyat(line.buying_price)}
-            </Td>
-            <Td className="text-right tabular-nums font-medium whitespace-nowrap">
-              {formatKyat(line.quantity_pairs * line.buying_price)}
-            </Td>
-            <Td>
-              <WaitingList
-                stockCode={line.stock_code}
-                voucherQty={line.quantity_pairs}
-              />
-            </Td>
-          </Tr>
-        ))}
+              </Td>
+              <Td className="text-right tabular-nums">
+                {formatKyat(line.buying_price)}
+                {isForeignCurrency(line.currency_code ?? DEFAULT_CURRENCY) &&
+                  line.original_buying_price != null &&
+                  line.exchange_rate != null && (
+                    <div className="text-xs text-text-muted font-normal whitespace-nowrap">
+                      {formatOriginalAmount(line.currency_code ?? DEFAULT_CURRENCY, line.original_buying_price)}{" "}
+                      × {formatRate(line.exchange_rate)}
+                    </div>
+                  )}
+              </Td>
+              <Td className="text-right tabular-nums font-medium whitespace-nowrap">
+                {formatKyat(pricedAmount(line.quantity_pairs, line.unit, line.buying_price, line.unit_conversions))}
+              </Td>
+              <Td>
+                <WaitingList
+                  stockCode={line.stock_code}
+                  voucherQty={line.quantity_pairs}
+                />
+              </Td>
+              <Td className="text-center">
+                <MismatchIconButton
+                  explained={Boolean(explanation)}
+                  disabled={lineRemainingQty(line) <= 0}
+                  onClick={() => onWriteOff(line)}
+                />
+              </Td>
+            </Tr>
+          );
+        })}
         <Tr className="bg-bg-subtle hover:bg-bg-subtle">
           <Td className="font-semibold" colSpan={2}>
             Total
@@ -1744,6 +1873,7 @@ function VoucherProductsView({
           <Td className="text-right tabular-nums font-semibold text-brand">
             {formatKyat(voucherAmount(voucher))}
           </Td>
+          <Td />
           <Td />
         </Tr>
       </Tbody>
@@ -1785,6 +1915,9 @@ const supplierVoucherDetailLineSchema = z.object({
   quantity_pairs: z.number().finite().min(0),
   received_quantity_pairs: z.number().finite().min(0).optional(),
   buying_price: z.number().finite().min(0),
+  currency_code: z.string().optional(),
+  original_buying_price: z.number().finite().min(0).nullable().optional(),
+  exchange_rate: z.number().finite().gt(0).nullable().optional(),
 });
 
 const supplierVoucherDetailSchema = z.object({
@@ -1821,6 +1954,9 @@ function VoucherDetail({
   initialMode,
   onSave,
   onBack,
+  onWriteOff,
+  writeOffs,
+  settings,
 }: {
   voucher: SupplierVoucher;
   initialMode: VoucherDetailMode;
@@ -1829,10 +1965,21 @@ function VoucherDetail({
     originalVoucher: SupplierVoucher,
   ) => Promise<void>;
   onBack: () => void;
+  onWriteOff: (
+    lineId: string,
+    quantity: number,
+    reason: WriteOffReason,
+    note: string,
+  ) => Promise<void>;
+  writeOffs: WriteOffWire[];
+  settings: AppSettings | null;
 }): React.JSX.Element {
   const [detailMode, setDetailMode] = useState<VoucherDetailMode>(initialMode);
   const [saving, setSaving] = useState(false);
   const [addingLineId, setAddingLineId] = useState<string | null>(null);
+  const [writeOffLine, setWriteOffLine] = useState<SupplierVoucherLine | null>(
+    null,
+  );
   const {
     control,
     getValues,
@@ -1937,6 +2084,8 @@ function VoucherDetail({
             stock_code: code,
             description: known.description,
             product_group: known.product_group,
+            unit: known.default_unit,
+            unit_conversions: known.default_unit_conversions ?? PAIRS_PER,
           }
         : { stock_code: code },
     );
@@ -2023,399 +2172,496 @@ function VoucherDetail({
   const hasChanges = isDirty;
 
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          <ChevronLeftIcon className="w-4 h-4" />
-          Back to vouchers
-        </Button>
-      </div>
-
-      <Panel>
-        <div className="grid items-center gap-3 px-6 py-4 border-b border-border lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-semibold text-text-primary tracking-tight">
-                {voucher.voucher_no}
-              </h2>
-              <ReceivingBadge status={receivingStatus(voucher)} />
-              <PaymentBadge status={paymentStatus(voucher)} />
-            </div>
-            <p className="mt-0.5 truncate text-sm text-text-muted">
-              {voucher.supplier_name} · {formatDate(voucher.voucher_date)}
-            </p>
-          </div>
-          <div
-            role="tablist"
-            aria-label="Voucher detail mode"
-            className="order-2 flex w-full rounded-md bg-bg-subtle p-0.5 lg:order-none lg:w-auto lg:justify-self-center"
-          >
-            {(["view", "edit"] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                role="tab"
-                aria-selected={detailMode === mode}
-                onClick={() => setDetailMode(mode)}
-                className={cn(
-                  "flex-1 rounded-[5px] px-4 py-1.5 text-sm font-medium capitalize transition-colors duration-150 sm:flex-none",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
-                  detailMode === mode
-                    ? "bg-brand text-white shadow-sm"
-                    : "text-text-muted hover:text-text-primary",
-                )}
-              >
-                {mode}
-              </button>
-            ))}
-          </div>
-          <div className="order-3 flex items-center gap-2 lg:order-none lg:justify-self-end">
-            {(detailMode === "edit" || hasChanges) && (
-              <Button
-                size="sm"
-                onClick={() => void handleSubmit(saveChanges)()}
-                loading={saving}
-                disabled={!hasChanges}
-              >
-                <CheckIcon className="w-4 h-4" />
-                Save changes
-              </Button>
-            )}
-          </div>
+    <>
+      <div className="flex flex-col gap-5">
+        <div>
+          <Button variant="ghost" size="sm" onClick={onBack}>
+            <ChevronLeftIcon className="w-4 h-4" />
+            Back to vouchers
+          </Button>
         </div>
 
-        <div className="px-6 py-6 flex flex-col gap-10">
-          <section>
-            <SectionLabel>Voucher information</SectionLabel>
-            {detailMode === "view" ? (
-              <VoucherInfoView voucher={voucher} />
-            ) : (
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-text-primary">
-                    Supplier
-                  </h3>
-                  <Controller
-                    control={control}
-                    name="voucher.supplier_name"
-                    render={({ field }) => (
-                      <SuggestInput
-                        label="Supplier / Factory"
-                        placeholder="Goody Factory"
-                        suggestions={SUPPLIER_NAMES}
-                        value={field.value}
-                        onChange={field.onChange}
-                        error={errors.voucher?.supplier_name?.message}
-                      />
-                    )}
-                  />
-                </div>
-                <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-text-primary">
-                    Voucher
-                  </h3>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <ReadOnlyField
-                      label="Voucher no."
-                      value={voucher.voucher_no}
-                      copyable
-                    />
+        <Panel>
+          <div className="grid items-center gap-3 px-6 py-4 border-b border-border lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-semibold text-text-primary tracking-tight">
+                  {voucher.voucher_no}
+                </h2>
+                <ReceivingBadge status={receivingStatus(voucher)} />
+                <PaymentBadge status={paymentStatus(voucher)} />
+              </div>
+              <p className="mt-0.5 truncate text-sm text-text-muted">
+                {voucher.supplier_name} · {formatDate(voucher.voucher_date)}
+              </p>
+            </div>
+            <div
+              role="tablist"
+              aria-label="Voucher detail mode"
+              className="order-2 flex w-full rounded-md bg-bg-subtle p-0.5 lg:order-none lg:w-auto lg:justify-self-center"
+            >
+              {(["view", "edit"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="tab"
+                  aria-selected={detailMode === mode}
+                  onClick={() => setDetailMode(mode)}
+                  className={cn(
+                    "flex-1 rounded-[5px] px-4 py-1.5 text-sm font-medium capitalize transition-colors duration-150 sm:flex-none",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+                    detailMode === mode
+                      ? "bg-brand text-white shadow-sm"
+                      : "text-text-muted hover:text-text-primary",
+                  )}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+            <div className="order-3 flex items-center gap-2 lg:order-none lg:justify-self-end">
+              {(detailMode === "edit" || hasChanges) && (
+                <Button
+                  size="sm"
+                  onClick={() => void handleSubmit(saveChanges)()}
+                  loading={saving}
+                  disabled={!hasChanges}
+                >
+                  <CheckIcon className="w-4 h-4" />
+                  Save changes
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="px-6 py-6 flex flex-col gap-10">
+            <section>
+              <SectionLabel>Voucher information</SectionLabel>
+              {detailMode === "view" ? (
+                <VoucherInfoView voucher={voucher} />
+              ) : (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                    <h3 className="mb-3 text-sm font-semibold text-text-primary">
+                      Supplier
+                    </h3>
                     <Controller
                       control={control}
-                      name="voucher.voucher_date"
-                      render={({ field }) => (
-                        <Input
-                          label="Date"
-                          type="date"
-                          className={EDITABLE}
-                          value={field.value}
-                          onChange={field.onChange}
-                          onBlur={field.onBlur}
-                          error={errors.voucher?.voucher_date?.message}
-                        />
-                      )}
-                    />
-                    <Controller
-                      control={control}
-                      name="voucher.carrier_name"
+                      name="voucher.supplier_name"
                       render={({ field }) => (
                         <SuggestInput
-                          label="Cargo"
-                          placeholder="Shwe Moe Cargo"
-                          suggestions={CARGO_NAMES}
+                          label="Supplier / Factory"
+                          placeholder="Goody Factory"
+                          suggestions={SUPPLIER_NAMES}
                           value={field.value}
                           onChange={field.onChange}
-                        />
-                      )}
-                    />
-                    <Controller
-                      control={control}
-                      name="voucher.total_packages"
-                      render={({ field }) => (
-                        <CountField
-                          label="Packages"
-                          value={field.value}
-                          onChange={field.onChange}
+                          error={errors.voucher?.supplier_name?.message}
                         />
                       )}
                     />
                   </div>
+                  <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                    <h3 className="mb-3 text-sm font-semibold text-text-primary">
+                      Voucher
+                    </h3>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <ReadOnlyField
+                        label="Voucher no."
+                        value={voucher.voucher_no}
+                        copyable
+                      />
+                      <Controller
+                        control={control}
+                        name="voucher.voucher_date"
+                        render={({ field }) => (
+                          <Input
+                            label="Date"
+                            type="date"
+                            className={EDITABLE}
+                            value={field.value}
+                            onChange={field.onChange}
+                            onBlur={field.onBlur}
+                            error={errors.voucher?.voucher_date?.message}
+                          />
+                        )}
+                      />
+                      <Controller
+                        control={control}
+                        name="voucher.carrier_name"
+                        render={({ field }) => (
+                          <SuggestInput
+                            label="Cargo"
+                            placeholder="Shwe Moe Cargo"
+                            suggestions={CARGO_NAMES}
+                            value={field.value}
+                            onChange={field.onChange}
+                          />
+                        )}
+                      />
+                      <Controller
+                        control={control}
+                        name="voucher.total_packages"
+                        render={({ field }) => (
+                          <CountField
+                            label="Packages"
+                            value={field.value}
+                            onChange={field.onChange}
+                          />
+                        )}
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
-            )}
-          </section>
+              )}
+            </section>
 
-          <section>
-            <div className="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-              <h3 className="pt-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
-                Products
-              </h3>
-              <InlineProgress
-                label="Receiving"
-                value={`${sets(voucher.received_quantity_pairs)} / ${sets(voucher.total_quantity_pairs)} (${pct}%)`}
-                pct={pct}
-              />
-            </div>
-            {detailMode === "view" ? (
-              <VoucherProductsView voucher={voucher} />
-            ) : (
-              <>
-                <TableContainer>
-                  <Thead className="top-0">
-                    <Tr>
-                      <Th className="min-w-[18rem]">Product</Th>
-                      <Th className="min-w-[11rem]">Colors</Th>
-                      <Th className="text-right whitespace-nowrap">
-                        Ordered quantity
-                      </Th>
-                      <Th className="text-right whitespace-nowrap">
-                        Received quantity
-                      </Th>
-                      <Th className="text-right whitespace-nowrap">
-                        Qty to receive
-                      </Th>
-                      <Th className="text-right min-w-[7rem]">Buying price</Th>
-                      <Th className="text-right">Amount</Th>
-                      <Th>Customers</Th>
-                    </Tr>
-                  </Thead>
-                  <Tbody>
-                    {lineFields.map((field, index) => {
-                      const line = voucher.lines[index];
-                      if (!line) return null;
-                      return (
-                        <Tr key={field.id}>
-                          <Td>
-                            <div className="flex flex-col gap-1.5">
-                              <div className="flex items-center gap-1">
+            <section>
+              <div className="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+                <h3 className="pt-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
+                  Products
+                </h3>
+                <InlineProgress
+                  label="Receiving"
+                  value={`${sets(voucher.received_quantity_pairs)} / ${sets(voucher.total_quantity_pairs)} (${pct}%)`}
+                  pct={pct}
+                />
+              </div>
+              {detailMode === "view" ? (
+                <VoucherProductsView
+                  voucher={voucher}
+                  onWriteOff={setWriteOffLine}
+                  writeOffs={writeOffs}
+                />
+              ) : (
+                <>
+                  <TableContainer>
+                    <Thead className="top-0">
+                      <Tr>
+                        <Th className="min-w-[18rem]">Product</Th>
+                        <Th className="min-w-[11rem]">Colors</Th>
+                        <Th className="text-right whitespace-nowrap">
+                          Ordered quantity
+                        </Th>
+                        <Th className="text-right whitespace-nowrap">
+                          Received quantity
+                        </Th>
+                        <Th className="text-right whitespace-nowrap">
+                          Qty to receive
+                        </Th>
+                        <Th className="text-right min-w-[7rem]">
+                          Buying price
+                        </Th>
+                        <Th className="text-right">Amount</Th>
+                        <Th>Customers</Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {lineFields.map((field, index) => {
+                        const line = voucher.lines[index];
+                        if (!line) return null;
+                        return (
+                          <Tr key={field.id}>
+                            <Td>
+                              <div className="flex flex-col gap-1.5">
+                                <div className="flex items-center gap-1">
+                                  <Controller
+                                    control={control}
+                                    name={`voucher.lines.${index}.stock_code`}
+                                    render={({ field: stockField }) => (
+                                      <SuggestInput
+                                        bare
+                                        label={`Stock code for product ${index + 1}`}
+                                        placeholder="A1001"
+                                        suggestions={STOCK_CODES}
+                                        value={stockField.value}
+                                        onChange={(next) => {
+                                          stockField.onChange(next);
+                                          setStockCode(index, next);
+                                        }}
+                                        error={
+                                          duplicateStockCodeProblem(
+                                            voucher.lines,
+                                            index,
+                                          ) ?? undefined
+                                        }
+                                      />
+                                    )}
+                                  />
+                                  <CopyButton
+                                    value={line.stock_code}
+                                    what="stock code"
+                                  />
+                                </div>
                                 <Controller
                                   control={control}
-                                  name={`voucher.lines.${index}.stock_code`}
-                                  render={({ field: stockField }) => (
-                                    <SuggestInput
-                                      bare
-                                      label={`Stock code for product ${index + 1}`}
-                                      placeholder="A1001"
-                                      suggestions={STOCK_CODES}
-                                      value={stockField.value}
-                                      onChange={(next) => {
-                                        stockField.onChange(next);
-                                        setStockCode(index, next);
-                                      }}
-                                      error={
-                                        duplicateStockCodeProblem(
-                                          voucher.lines,
-                                          index,
-                                        ) ?? undefined
-                                      }
+                                  name={`voucher.lines.${index}.description`}
+                                  render={({ field: descriptionField }) => (
+                                    <CellInput
+                                      label={`Description for product ${index + 1}`}
+                                      placeholder="Men's leather sandal"
+                                      multiline
+                                      value={descriptionField.value}
+                                      onChange={descriptionField.onChange}
                                     />
                                   )}
                                 />
-                                <CopyButton
-                                  value={line.stock_code}
-                                  what="stock code"
+                                <Controller
+                                  control={control}
+                                  name={`voucher.lines.${index}.product_group`}
+                                  render={({ field: groupField }) => (
+                                    <GroupSelect
+                                      label={`Group for product ${index + 1}`}
+                                      value={groupField.value}
+                                      onChange={groupField.onChange}
+                                    />
+                                  )}
                                 />
                               </div>
+                            </Td>
+                            <Td>
                               <Controller
                                 control={control}
-                                name={`voucher.lines.${index}.description`}
-                                render={({ field: descriptionField }) => (
+                                name={`voucher.lines.${index}.color_breakdown`}
+                                render={({ field: colorField }) => (
                                   <CellInput
-                                    label={`Description for product ${index + 1}`}
-                                    placeholder="Men's leather sandal"
+                                    label={`Colors for product ${index + 1}`}
+                                    placeholder="black10s,pink2p"
                                     multiline
-                                    value={descriptionField.value}
-                                    onChange={descriptionField.onChange}
+                                    value={colorField.value}
+                                    onChange={(next) => {
+                                      colorField.onChange(next);
+                                      setColors(index, next);
+                                    }}
+                                    error={
+                                      colorQtyProblem(line.color_breakdown) ??
+                                      undefined
+                                    }
                                   />
                                 )}
                               />
-                              <Controller
-                                control={control}
-                                name={`voucher.lines.${index}.product_group`}
-                                render={({ field: groupField }) => (
-                                  <GroupSelect
-                                    label={`Group for product ${index + 1}`}
-                                    value={groupField.value}
-                                    onChange={groupField.onChange}
-                                  />
-                                )}
-                              />
-                            </div>
-                          </Td>
-                          <Td>
-                            <Controller
-                              control={control}
-                              name={`voucher.lines.${index}.color_breakdown`}
-                              render={({ field: colorField }) => (
-                                <CellInput
-                                  label={`Colors for product ${index + 1}`}
-                                  placeholder="black10s,pink2p"
-                                  multiline
-                                  value={colorField.value}
-                                  onChange={(next) => {
-                                    colorField.onChange(next);
-                                    setColors(index, next);
-                                  }}
-                                  error={
-                                    colorQtyProblem(line.color_breakdown) ?? undefined
-                                  }
-                                />
-                              )}
-                            />
-                          </Td>
-                          <Td className="text-right tabular-nums">
-                            {sets(line.quantity_pairs)}
-                          </Td>
-                          <Td className="text-right tabular-nums">
-                            {sets(lineReceivedQty(line))}
-                          </Td>
-                          <Td className="text-right tabular-nums">
-                            {sets(lineRemainingQty(line))}
-                          </Td>
-                          <Td>
-                            <Controller
-                              control={control}
-                              name={`voucher.lines.${index}.buying_price`}
-                              render={({ field: priceField }) => (
-                                <CellInput
-                                  label={`Buying price for product ${index + 1}`}
-                                  placeholder="0"
-                                  numeric
-                                  className="text-right"
-                                  value={String(priceField.value)}
-                                  onChange={(next) => {
-                                    const buyingPrice = Number(next) || 0;
-                                    priceField.onChange(buyingPrice);
+                            </Td>
+                            <Td className="text-right tabular-nums">
+                              {sets(line.quantity_pairs)}
+                            </Td>
+                            <Td className="text-right tabular-nums">
+                              {sets(lineReceivedQty(line))}
+                            </Td>
+                            <Td className="text-right tabular-nums">
+                              {sets(lineRemainingQty(line))}
+                            </Td>
+                            <Td>
+                              <div className="flex flex-col gap-1.5 min-w-[9rem]">
+                                <CurrencySelect
+                                  label={`Currency for product ${index + 1}`}
+                                  value={(line.currency_code as CurrencyCode) ?? DEFAULT_CURRENCY}
+                                  onChange={(code) => {
+                                    if (code === DEFAULT_CURRENCY) {
+                                      setLine(index, {
+                                        currency_code: DEFAULT_CURRENCY,
+                                        original_buying_price: null,
+                                        exchange_rate: null,
+                                      });
+                                      return;
+                                    }
+                                    const todayRate = settings?.today_exchange_rates?.[code];
+                                    const rate =
+                                      line.exchange_rate ?? (todayRate ? Number(todayRate) : null);
+                                    const original = line.original_buying_price ?? 0;
                                     setLine(index, {
-                                      buying_price: buyingPrice,
+                                      currency_code: code,
+                                      original_buying_price: original,
+                                      exchange_rate: rate,
+                                      buying_price: rate ? previewKyatAmount(original, rate) : 0,
                                     });
                                   }}
-                                  error={
-                                    errors.voucher?.lines?.[index]?.buying_price
-                                      ?.message
-                                  }
                                 />
+                                {isForeignCurrency(line.currency_code ?? DEFAULT_CURRENCY) ? (
+                                  <>
+                                    <CellInput
+                                      label={`Original price for product ${index + 1}`}
+                                      placeholder="0"
+                                      className="text-right"
+                                      value={String(line.original_buying_price ?? "")}
+                                      onChange={(next) => {
+                                        const cleaned = next.replace(/[^0-9.]/g, "");
+                                        const original = Number(cleaned) || 0;
+                                        const rate = line.exchange_rate ?? 0;
+                                        setLine(index, {
+                                          original_buying_price: original,
+                                          buying_price: previewKyatAmount(original, rate),
+                                        });
+                                      }}
+                                    />
+                                    <CellInput
+                                      label={`Exchange rate for product ${index + 1}`}
+                                      placeholder="0"
+                                      className="text-right"
+                                      value={String(line.exchange_rate ?? "")}
+                                      onChange={(next) => {
+                                        const cleaned = next.replace(/[^0-9.]/g, "");
+                                        const rate = Number(cleaned) || 0;
+                                        const original = line.original_buying_price ?? 0;
+                                        setLine(index, {
+                                          exchange_rate: rate,
+                                          buying_price: previewKyatAmount(original, rate),
+                                        });
+                                      }}
+                                    />
+                                    <p className="text-xs text-text-muted text-right tabular-nums">
+                                      {formatKyat(line.buying_price)}
+                                    </p>
+                                  </>
+                                ) : (
+                                  <Controller
+                                    control={control}
+                                    name={`voucher.lines.${index}.buying_price`}
+                                    render={({ field: priceField }) => (
+                                      <CellInput
+                                        label={`Buying price for product ${index + 1}`}
+                                        placeholder="0"
+                                        numeric
+                                        className="text-right"
+                                        value={String(priceField.value)}
+                                        onChange={(next) => {
+                                          const buyingPrice = Number(next) || 0;
+                                          priceField.onChange(buyingPrice);
+                                          setLine(index, {
+                                            buying_price: buyingPrice,
+                                          });
+                                        }}
+                                        error={
+                                          errors.voucher?.lines?.[index]
+                                            ?.buying_price?.message
+                                        }
+                                      />
+                                    )}
+                                  />
+                                )}
+                              </div>
+                            </Td>
+                            <Td className="text-right tabular-nums font-medium whitespace-nowrap">
+                              {formatKyat(
+                                pricedAmount(line.quantity_pairs, line.unit, line.buying_price, line.unit_conversions),
                               )}
-                            />
-                          </Td>
-                          <Td className="text-right tabular-nums font-medium whitespace-nowrap">
-                            {formatKyat(line.quantity_pairs * line.buying_price)}
-                            <button
-                              type="button"
-                              onClick={() => removeLine(index)}
-                              title="Remove this product"
-                              aria-label={`Remove product ${index + 1}`}
-                              className={cn(
-                                "ml-2 p-1 rounded-md align-middle transition-colors duration-150",
-                                SOFT_RED,
-                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
-                              )}
-                            >
-                              <TrashIcon className="w-4 h-4" />
-                            </button>
-                          </Td>
-                          <Td>
-                            <WaitingList
-                              stockCode={line.stock_code}
-                              voucherQty={line.quantity_pairs}
-                            />
-                          </Td>
-                        </Tr>
-                      );
-                    })}
-                    <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-                      <Td className="font-semibold" colSpan={2}>
-                        Total
-                      </Td>
-                      <Td className="text-right tabular-nums font-semibold">
-                        {sets(voucher.total_quantity_pairs)}
-                      </Td>
-                      <Td className="text-right tabular-nums font-semibold text-success">
-                        {sets(voucher.received_quantity_pairs)}
-                      </Td>
-                      <Td className="text-right tabular-nums font-semibold text-error">
-                        {sets(remaining)}
-                      </Td>
-                      <Td />
-                      <Td className="text-right tabular-nums font-semibold text-brand">
-                        {formatKyat(amount)}
-                      </Td>
-                      <Td />
-                    </Tr>
-                  </Tbody>
-                </TableContainer>
-                <div className="mt-3">
-                  <Button size="sm" onClick={addLine}>
-                    <PlusIcon className="w-4 h-4" />
-                    Add product
-                  </Button>
-                  {addingLineId && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={cancelAddLine}
-                      className={cn(SOFT_RED, "ml-2")}
-                    >
-                      Cancel
+                              {isForeignCurrency(line.currency_code ?? DEFAULT_CURRENCY) &&
+                                line.original_buying_price != null &&
+                                line.exchange_rate != null && (
+                                  <div className="text-xs text-text-muted font-normal whitespace-nowrap">
+                                    {formatOriginalAmount(line.currency_code ?? DEFAULT_CURRENCY, line.original_buying_price)}{" "}
+                                    × {formatRate(line.exchange_rate)}
+                                  </div>
+                                )}
+                              <button
+                                type="button"
+                                onClick={() => removeLine(index)}
+                                title="Remove this product"
+                                aria-label={`Remove product ${index + 1}`}
+                                className={cn(
+                                  "ml-2 p-1 rounded-md align-middle transition-colors duration-150",
+                                  SOFT_RED,
+                                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
+                                )}
+                              >
+                                <TrashIcon className="w-4 h-4" />
+                              </button>
+                            </Td>
+                            <Td>
+                              <WaitingList
+                                stockCode={line.stock_code}
+                                voucherQty={line.quantity_pairs}
+                              />
+                            </Td>
+                          </Tr>
+                        );
+                      })}
+                      <Tr className="bg-bg-subtle hover:bg-bg-subtle">
+                        <Td className="font-semibold" colSpan={2}>
+                          Total
+                        </Td>
+                        <Td className="text-right tabular-nums font-semibold">
+                          {sets(voucher.total_quantity_pairs)}
+                        </Td>
+                        <Td className="text-right tabular-nums font-semibold text-success">
+                          {sets(voucher.received_quantity_pairs)}
+                        </Td>
+                        <Td className="text-right tabular-nums font-semibold text-error">
+                          {sets(remaining)}
+                        </Td>
+                        <Td />
+                        <Td className="text-right tabular-nums font-semibold text-brand">
+                          {formatKyat(amount)}
+                        </Td>
+                        <Td />
+                      </Tr>
+                    </Tbody>
+                  </TableContainer>
+                  <div className="mt-3">
+                    <Button size="sm" onClick={addLine}>
+                      <PlusIcon className="w-4 h-4" />
+                      Add product
                     </Button>
-                  )}
-                </div>
-              </>
-            )}
-          </section>
+                    {addingLineId && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={cancelAddLine}
+                        className={cn(SOFT_RED, "ml-2")}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                </>
+              )}
+            </section>
 
-          <section>
-            <div className="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-              <h3 className="pt-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
-                Payment
-              </h3>
-              <InlineProgress
-                label="Paid so far"
-                value={`${formatKyat(paid)} / ${formatKyat(amount)} (${paidShare}%)`}
-                pct={paidShare}
-                warn
-              />
-            </div>
-            {/* The same table the customer side uses, so money paid to a supplier is
+            <section>
+              <div className="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+                <h3 className="pt-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
+                  Payment
+                </h3>
+                <InlineProgress
+                  label="Paid so far"
+                  value={`${formatKyat(paid)} / ${formatKyat(amount)} (${paidShare}%)`}
+                  pct={paidShare}
+                  warn
+                />
+              </div>
+              {/* The same table the customer side uses, so money paid to a supplier is
                 written down exactly the way money from a customer is. */}
-            <PaymentsTable
-              payments={voucher.payment.payments}
-              balance={balance}
-              who="supplier"
-              onAdd={addPayment}
-              onUpdate={(payment) => setPayment(payment.payment_id, payment)}
-              onRemove={removePayment}
-              readOnly={detailMode === "view"}
-            />
-          </section>
+              <PaymentsTable
+                payments={voucher.payment.payments}
+                balance={balance}
+                who="supplier"
+                onAdd={addPayment}
+                onUpdate={(payment) => setPayment(payment.payment_id, payment)}
+                onRemove={removePayment}
+                readOnly={detailMode === "view"}
+              />
+            </section>
 
-          <section>
-            <SectionLabel>Shipment journey</SectionLabel>
-            <VoucherJourney voucher={voucher} />
-          </section>
-        </div>
-      </Panel>
-    </div>
+            <section>
+              <SectionLabel>Shipment journey</SectionLabel>
+              <VoucherJourney voucher={voucher} />
+            </section>
+          </div>
+        </Panel>
+      </div>
+      <WriteOffModal
+        open={writeOffLine !== null}
+        subject={
+          writeOffLine
+            ? `${voucher.voucher_no} · ${writeOffLine.stock_code}`
+            : "this voucher line"
+        }
+        remaining={writeOffLine ? lineRemainingQty(writeOffLine) : 0}
+        unit={writeOffLine?.unit ?? "pair"}
+        onClose={() => setWriteOffLine(null)}
+        onSubmit={(quantity, reason, note) =>
+          onWriteOff(writeOffLine!.voucher_line_id, quantity, reason, note)
+        }
+      />
+    </>
   );
 }
 
@@ -2551,7 +2797,12 @@ interface DraftLine {
   description: string;
   product_group: ProductGroup;
   color_breakdown: string;
+  unit: "pair" | "set" | "dozen";
+  unit_conversions: { pair: number; set: number; dozen: number };
+  currency_code: CurrencyCode;
   buying_price: string;
+  original_buying_price: string;
+  exchange_rate: string;
 }
 
 const voucherDraftLineSchema = z
@@ -2560,11 +2811,40 @@ const voucherDraftLineSchema = z
     description: z.string(),
     product_group: z.enum(["man", "lady", "child"]),
     color_breakdown: z.string(),
+    unit: z.enum(["pair", "set", "dozen"]),
+    unit_conversions: z.object({
+      pair: z.number().int().positive(),
+      set: z.number().int().positive(),
+      dozen: z.number().int().positive(),
+    }),
+    currency_code: z.enum(["MMK", "THB", "USD"]),
     buying_price: z
       .string()
       .regex(/^\d*$/, "Buying price can only contain numbers."),
+    original_buying_price: z
+      .string()
+      .regex(/^\d*\.?\d*$/, "Original price can only contain numbers."),
+    exchange_rate: z
+      .string()
+      .regex(/^\d*\.?\d*$/, "Exchange rate can only contain numbers."),
   })
   .superRefine((line, context) => {
+    if (line.currency_code !== "MMK" && line.stock_code.trim() !== "") {
+      if (line.original_buying_price.trim() === "") {
+        context.addIssue({
+          code: "custom",
+          path: ["original_buying_price"],
+          message: "Enter the original price.",
+        });
+      }
+      if (line.exchange_rate.trim() === "" || Number(line.exchange_rate) <= 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["exchange_rate"],
+          message: "Enter an exchange rate greater than zero.",
+        });
+      }
+    }
     const hasProductDetails =
       line.stock_code.trim() !== "" ||
       line.description.trim() !== "" ||
@@ -2626,8 +2906,7 @@ interface SupplierVoucherFormValues {
 
 /** The pairs one drafted row comes to: its colors read in its own unit. */
 function draftPairs(line: DraftLine): number {
-  // A colour with no letter of its own is counted in sets.
-  return colorQtyPairs(line.color_breakdown, "set");
+  return colorQtyPairs(line.color_breakdown, line.unit, line.unit_conversions);
 }
 
 const EMPTY_LINE: DraftLine = {
@@ -2635,7 +2914,12 @@ const EMPTY_LINE: DraftLine = {
   description: "",
   product_group: "man",
   color_breakdown: "",
+  unit: "set",
+  unit_conversions: PAIRS_PER,
+  currency_code: DEFAULT_CURRENCY,
   buying_price: "",
+  original_buying_price: "",
+  exchange_rate: "",
 };
 
 const STEPS = ["Supplier", "Products", "Review"] as const;
@@ -2647,6 +2931,7 @@ function NewVoucherForm({
   lockedSupplier = false,
   title = "New supplier voucher",
   backLabel = "Back to vouchers",
+  settings,
   onCancel,
   onCreate,
 }: {
@@ -2657,6 +2942,7 @@ function NewVoucherForm({
   lockedSupplier?: boolean;
   title?: string;
   backLabel?: string;
+  settings: AppSettings | null;
   onCancel: () => void;
   onCreate: (input: NewSupplierVoucherInput) => void;
 }): React.JSX.Element {
@@ -2708,7 +2994,7 @@ function NewVoucherForm({
   const filledLines = lines.filter((line) => line.stock_code.trim() !== "");
   const totalQty = filledLines.reduce((sum, line) => sum + draftPairs(line), 0);
   const totalAmount = filledLines.reduce(
-    (sum, line) => sum + draftPairs(line) * (Number(line.buying_price) || 0),
+    (sum, line) => sum + pricedAmount(draftPairs(line), line.unit, Number(line.buying_price) || 0, line.unit_conversions),
     0,
   );
   // A code we already buy fills its own description and product_group in, so the same shoe is not
@@ -2724,8 +3010,55 @@ function NewVoucherForm({
         shouldDirty: true,
         shouldValidate: true,
       });
-      setValue(`lines.${index}.product_group`, known.product_group, { shouldDirty: true });
+      setValue(`lines.${index}.product_group`, known.product_group, {
+        shouldDirty: true,
+      });
+      setValue(`lines.${index}.unit`, known.default_unit, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+      setValue(`lines.${index}.unit_conversions`, known.default_unit_conversions ?? PAIRS_PER, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
     }
+  }
+
+  // Switching a draft line's currency clears (MMK) or seeds (foreign, from today's
+  // Settings rate) the original-amount/exchange-rate pair, and recomputes the Kyat
+  // buying_price shown/submitted for the line — the same preview-then-server-verifies
+  // split every other foreign-currency field in this app follows.
+  function setLineCurrency(index: number, code: CurrencyCode): void {
+    setValue(`lines.${index}.currency_code`, code, { shouldDirty: true });
+    if (code === DEFAULT_CURRENCY) {
+      setValue(`lines.${index}.original_buying_price`, "", { shouldDirty: true });
+      setValue(`lines.${index}.exchange_rate`, "", { shouldDirty: true });
+      return;
+    }
+    const line = lines[index] ?? EMPTY_LINE;
+    const rate = line.exchange_rate || settings?.today_exchange_rates?.[code] || "";
+    setValue(`lines.${index}.exchange_rate`, rate, { shouldDirty: true });
+    setValue(
+      `lines.${index}.buying_price`,
+      String(previewKyatAmount(Number(line.original_buying_price) || 0, Number(rate) || 0)),
+      { shouldDirty: true },
+    );
+  }
+
+  function setForeignPrice(
+    index: number,
+    patch: { original_buying_price?: string; exchange_rate?: string },
+  ): void {
+    const line = lines[index] ?? EMPTY_LINE;
+    const original = Number(patch.original_buying_price ?? line.original_buying_price) || 0;
+    const rate = Number(patch.exchange_rate ?? line.exchange_rate) || 0;
+    if (patch.original_buying_price !== undefined)
+      setValue(`lines.${index}.original_buying_price`, patch.original_buying_price, { shouldDirty: true });
+    if (patch.exchange_rate !== undefined)
+      setValue(`lines.${index}.exchange_rate`, patch.exchange_rate, { shouldDirty: true });
+    setValue(`lines.${index}.buying_price`, String(previewKyatAmount(original, rate)), {
+      shouldDirty: true,
+    });
   }
 
   function removeLine(index: number): void {
@@ -2746,7 +3079,10 @@ function NewVoucherForm({
     );
     if (matchIndex !== -1) {
       const existing = current[matchIndex];
-      const combined = mergeColorQty(existing.color_breakdown, source.color_breakdown);
+      const combined = mergeColorQty(
+        existing.color_breakdown,
+        source.color_breakdown,
+      );
       setValue(`lines.${matchIndex}.color_breakdown`, combined, {
         shouldDirty: true,
         shouldValidate: true,
@@ -2758,7 +3094,12 @@ function NewVoucherForm({
       description: source.description,
       product_group: source.product_group,
       color_breakdown: source.color_breakdown,
+      unit: source.unit,
+      unit_conversions: PAIRS_PER,
+      currency_code: DEFAULT_CURRENCY,
       buying_price: "",
+      original_buying_price: "",
+      exchange_rate: "",
     };
     const emptyIndex = current.findIndex(
       (line) => line.stock_code.trim() === "",
@@ -2792,7 +3133,8 @@ function NewVoucherForm({
     if (colorProblem >= 0) {
       setError(`lines.${colorProblem}.color_breakdown`, {
         type: "validate",
-        message: colorQtyProblem(lines[colorProblem].color_breakdown) ?? undefined,
+        message:
+          colorQtyProblem(lines[colorProblem].color_breakdown) ?? undefined,
       });
     }
     const duplicateStockCode = lines.findIndex(
@@ -2831,9 +3173,17 @@ function NewVoucherForm({
         description: line.description.trim(),
         product_group: line.product_group,
         color_breakdown: line.color_breakdown.trim(),
-        unit: "set",
+        unit: line.unit,
+        unit_conversions: line.unit_conversions,
         quantity_pairs: draftPairs(line),
+        currency_code: line.currency_code,
         buying_price: Number(line.buying_price) || 0,
+        original_buying_price: isForeignCurrency(line.currency_code)
+          ? Number(line.original_buying_price) || 0
+          : null,
+        exchange_rate: isForeignCurrency(line.currency_code)
+          ? Number(line.exchange_rate) || 0
+          : null,
       }));
     onCreate({
       supplier_name: values.supplier_name.trim(),
@@ -3047,7 +3397,9 @@ function NewVoucherForm({
                 <Tr>
                   <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[13rem]">Colors</Th>
-                  <Th className="text-right whitespace-nowrap">Ordered quantity</Th>
+                  <Th className="text-right whitespace-nowrap">
+                    Ordered quantity
+                  </Th>
                   <Th className="text-right min-w-[8rem]">Buying price</Th>
                   <Th className="text-right min-w-[8rem]">Amount</Th>
                 </Tr>
@@ -3056,7 +3408,12 @@ function NewVoucherForm({
                 {fields.map((field, index) => {
                   const line = lines[index] ?? EMPTY_LINE;
                   const lineQty = draftPairs(line);
-                  const lineAmount = lineQty * (Number(line.buying_price) || 0);
+                  const lineAmount = pricedAmount(
+                    lineQty,
+                    line.unit,
+                    Number(line.buying_price) || 0,
+                    line.unit_conversions,
+                  );
                   return (
                     <Tr key={field.id}>
                       <Td className="min-w-[18rem]">
@@ -3119,6 +3476,23 @@ function NewVoucherForm({
                       <Td>
                         <Controller
                           control={control}
+                          name={`lines.${index}.unit`}
+                          render={({ field: unitField }) => (
+                            <Select
+                              aria-label={`Default unit for product ${index + 1}`}
+                              className={EDITABLE}
+                              {...unitField}
+                            >
+                              {UNITS.map((unit) => (
+                                <option key={unit} value={unit}>
+                                  {UNIT_LABELS[unit]}
+                                </option>
+                              ))}
+                            </Select>
+                          )}
+                        />
+                        <Controller
+                          control={control}
                           name={`lines.${index}.color_breakdown`}
                           render={({ field: colorField }) => (
                             <CellInput
@@ -3128,7 +3502,8 @@ function NewVoucherForm({
                               value={colorField.value}
                               onChange={colorField.onChange}
                               error={
-                                errors.lines?.[index]?.color_breakdown?.message ??
+                                errors.lines?.[index]?.color_breakdown
+                                  ?.message ??
                                 colorQtyProblem(line.color_breakdown) ??
                                 undefined
                               }
@@ -3137,31 +3512,82 @@ function NewVoucherForm({
                         />
                         <span className="mt-1 block text-xs text-text-muted">
                           {lineQty > 0
-                            ? sets(lineQty)
+                            ? formatIn(lineQty, line.unit, line.unit_conversions)
                             : "Every color needs a unit — s sets, p pairs, d dozens"}
                         </span>
                       </Td>
                       <Td className="text-right tabular-nums font-medium whitespace-nowrap">
-                        {sets(lineQty)}
+                        {formatIn(lineQty, line.unit, line.unit_conversions)}
                       </Td>
                       <Td>
-                        <Controller
-                          control={control}
-                          name={`lines.${index}.buying_price`}
-                          render={({ field: priceField }) => (
-                            <CellInput
-                              label={`Buying price for product ${index + 1}`}
-                              placeholder="0"
-                              numeric
-                              className="text-right"
-                              value={priceField.value}
-                              onChange={priceField.onChange}
-                              error={
-                                errors.lines?.[index]?.buying_price?.message
-                              }
+                        <div className="flex flex-col gap-1.5 min-w-[9rem]">
+                          <Controller
+                            control={control}
+                            name={`lines.${index}.currency_code`}
+                            render={({ field: currencyField }) => (
+                              <CurrencySelect
+                                label={`Currency for product ${index + 1}`}
+                                value={currencyField.value}
+                                onChange={(code) => setLineCurrency(index, code)}
+                              />
+                            )}
+                          />
+                          {isForeignCurrency(line.currency_code) ? (
+                            <>
+                              <CellInput
+                                label={`Original price for product ${index + 1}`}
+                                placeholder="0"
+                                className="text-right"
+                                value={line.original_buying_price}
+                                onChange={(next) =>
+                                  setForeignPrice(index, {
+                                    original_buying_price: next.replace(/[^0-9.]/g, ""),
+                                  })
+                                }
+                                error={
+                                  errors.lines?.[index]?.original_buying_price
+                                    ?.message
+                                }
+                              />
+                              <CellInput
+                                label={`Exchange rate for product ${index + 1}`}
+                                placeholder="0"
+                                className="text-right"
+                                value={line.exchange_rate}
+                                onChange={(next) =>
+                                  setForeignPrice(index, {
+                                    exchange_rate: next.replace(/[^0-9.]/g, ""),
+                                  })
+                                }
+                                error={
+                                  errors.lines?.[index]?.exchange_rate?.message
+                                }
+                              />
+                              <p className="text-xs text-text-muted text-right tabular-nums">
+                                {formatKyat(Number(line.buying_price) || 0)}
+                              </p>
+                            </>
+                          ) : (
+                            <Controller
+                              control={control}
+                              name={`lines.${index}.buying_price`}
+                              render={({ field: priceField }) => (
+                                <CellInput
+                                  label={`Buying price for product ${index + 1}`}
+                                  placeholder="0"
+                                  numeric
+                                  className="text-right"
+                                  value={priceField.value}
+                                  onChange={priceField.onChange}
+                                  error={
+                                    errors.lines?.[index]?.buying_price
+                                      ?.message
+                                  }
+                                />
+                              )}
                             />
                           )}
-                        />
+                        </div>
                       </Td>
                       <Td className="text-right tabular-nums font-medium whitespace-nowrap">
                         {formatKyat(lineAmount)}
@@ -3243,7 +3669,9 @@ function NewVoucherForm({
                 <Tr>
                   <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[13rem]">Colors</Th>
-                  <Th className="text-right whitespace-nowrap">Ordered quantity</Th>
+                  <Th className="text-right whitespace-nowrap">
+                    Ordered quantity
+                  </Th>
                   <Th className="text-right min-w-[8rem] whitespace-nowrap">
                     Buying price
                   </Th>
@@ -3280,9 +3708,17 @@ function NewVoucherForm({
                       <Td className="text-right tabular-nums">{sets(qty)}</Td>
                       <Td className="text-right tabular-nums text-text-secondary">
                         {formatKyat(Number(line.buying_price) || 0)}
+                        {isForeignCurrency(line.currency_code) &&
+                          line.original_buying_price.trim() !== "" &&
+                          line.exchange_rate.trim() !== "" && (
+                            <div className="text-xs text-text-muted whitespace-nowrap">
+                              {formatOriginalAmount(line.currency_code, Number(line.original_buying_price))}{" "}
+                              × {formatRate(Number(line.exchange_rate))}
+                            </div>
+                          )}
                       </Td>
                       <Td className="text-right tabular-nums font-medium">
-                        {formatKyat(qty * (Number(line.buying_price) || 0))}
+                        {formatKyat(pricedAmount(qty, line.unit, Number(line.buying_price) || 0, line.unit_conversions))}
                       </Td>
                     </Tr>
                   );

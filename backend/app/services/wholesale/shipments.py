@@ -49,7 +49,8 @@ def leg_remaining(shipment: Shipment, index: int) -> int:
     have received — if the cargo company sends 10 to Yangon, only 7 turn up there and
     Yangon forwards all 7, Yangon is not finished: 3 are still missing between the two
     places. Same rule as the gate at the end of the route."""
-    return max(0, max_for_leg(shipment, index) - shipment.legs[index].packages_sent)
+    leg = shipment.legs[index]
+    return max(0, max_for_leg(shipment, index) - leg.packages_sent - getattr(leg, "lost_packages", 0))
 
 
 def into_final(shipment: Shipment) -> int:
@@ -64,13 +65,19 @@ def final_remaining(shipment: Shipment, final_received_packages: int) -> int:
     """Packages of this shipment that have still not reached us, measured against
     everything the shipment set out with — not against what the last stop happened to
     send on."""
-    return max(0, shipment.total_packages - final_received_packages)
+    lost = getattr(shipment, "lost_packages", 0) + sum(
+        getattr(leg, "lost_packages", 0) for leg in shipment.legs
+    )
+    return max(0, shipment.total_packages - final_received_packages - lost)
 
 
 def shipment_status(shipment: Shipment, final_received_packages: int) -> str:
     if shipment.packages_sent_by_cargo <= 0:
         return "waiting_at_cargo"
-    if shipment.total_packages > 0 and final_received_packages >= shipment.total_packages:
+    accounted = final_received_packages + getattr(shipment, "lost_packages", 0) + sum(
+        getattr(leg, "lost_packages", 0) for leg in shipment.legs
+    )
+    if shipment.total_packages > 0 and accounted >= shipment.total_packages:
         return "completed"
     if final_received_packages > 0:
         return "partly_delivered"
@@ -136,6 +143,10 @@ def shipment_derived(shipment: Shipment, final_received_override: int | None = N
         "total_quantity_pairs": shipment_pairs(shipment.total_quantity_pairs),
         "final_received_packages": final_received,
         "cargo_remaining": cargo_remaining(shipment),
+        "lost_packages": getattr(shipment, "lost_packages", 0) + sum(
+            getattr(leg, "lost_packages", 0) for leg in legs
+        ),
+        "final_lost_packages": getattr(shipment, "lost_packages", 0),
         "final_remaining": final_remaining(shipment, final_received),
         "shipment_status": shipment_status(shipment, final_received),
         "destination_count": destination_count(shipment),
@@ -144,6 +155,7 @@ def shipment_derived(shipment: Shipment, final_received_override: int | None = N
             {
                 "max_for_leg": max_for_leg(shipment, index),
                 "leg_remaining": leg_remaining(shipment, index),
+                "lost_packages": getattr(legs[index], "lost_packages", 0),
             }
             for index in range(len(legs))
         ],

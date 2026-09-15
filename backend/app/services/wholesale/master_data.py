@@ -15,6 +15,7 @@ from app.models.wholesale_master_data import (
     WholesaleReceivingGate,
     WholesaleSupplier,
 )
+from app.services.wholesale.colors import conversion_rates
 
 NamedModel = TypeVar(
     "NamedModel",
@@ -63,6 +64,8 @@ def create_product(db: Session, payload) -> WholesaleProduct:
         stock_code=payload.stock_code.strip(),
         description=payload.description.strip(),
         product_group=payload.product_group,
+        default_unit=payload.default_unit,
+        default_unit_conversions=conversion_rates(payload.default_unit_conversions),
         active=payload.active,
     )
     db.add(product)
@@ -74,7 +77,15 @@ def create_product(db: Session, payload) -> WholesaleProduct:
 def update_product(db: Session, entity_id: str, payload) -> WholesaleProduct:
     product = get_product(db, entity_id)
     for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(product, field, value.strip() if isinstance(value, str) and field != "product_group" else value)
+        if field == "default_unit_conversions":
+            value = conversion_rates(value)
+        setattr(
+            product,
+            field,
+            value.strip()
+            if isinstance(value, str) and field not in {"product_group", "default_unit"}
+            else value,
+        )
     _commit(db, "A product with this stock code already exists")
     db.refresh(product)
     return product

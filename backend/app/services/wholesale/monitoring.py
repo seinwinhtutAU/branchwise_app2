@@ -56,6 +56,7 @@ def _order_statuses(db: Session, branch_id: str | None) -> list[tuple[CustomerOr
         remaining_deliveries = dict(delivered.get(order.id, {}))
         received = 0
         allocated = 0
+        lost = 0
         for line in order.lines:
             delivered_colors = delivered_color_pairs_by_order(
                 db, order.id, line.stock_code, branch_id,
@@ -64,10 +65,11 @@ def _order_statuses(db: Session, branch_id: str | None) -> list[tuple[CustomerOr
             allocated += sum(effective_colors.values())
             line_received = min(remaining_deliveries.get(line.stock_code, 0), line.quantity_pairs)
             received += line_received
+            lost += line.lost_quantity_pairs
             remaining_deliveries[line.stock_code] = max(
                 0, remaining_deliveries.get(line.stock_code, 0) - line_received
             )
-        statuses.append((order, order_status(sum(line.quantity_pairs for line in order.lines), received, allocated, order.cancelled)))
+        statuses.append((order, order_status(sum(line.quantity_pairs for line in order.lines), received, allocated, order.cancelled, lost)))
     return statuses
 
 

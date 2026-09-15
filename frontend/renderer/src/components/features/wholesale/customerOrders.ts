@@ -5,7 +5,7 @@
 // formatting and colour-shorthand helpers live in ./shared, shared with factory vouchers.
 
 import { paymentStatusOf, sharePct, type PaymentStatus } from "./shared";
-import { type Unit } from "./units";
+import { pricedAmount, type Unit, type UnitConversions } from "./units";
 import { type ProductGroup } from "./products";
 
 /** new → allocating → ready_to_deliver → partly_delivered → fulfilled, or cancelled at
@@ -40,6 +40,7 @@ export interface CustomerOrderLine {
   /** The unit the colors were written in — "black10" can mean ten pairs, ten sets or ten
    *  dozen, and the quantity_pairs below is that reading turned into pairs. */
   unit: Unit;
+  unit_conversions?: UnitConversions;
   /** Total pairs across those colors — derived from color_breakdown and the unit, never typed
    *  directly. */
   quantity_pairs: number;
@@ -53,7 +54,16 @@ export interface CustomerOrderLine {
   allocated_quantity_pairs?: number;
   /** The colour shorthand entered when the stock reservation was made. */
   allocated_color_breakdown?: string;
+  lost_quantity_pairs?: number;
+  /** Always the Kyat unit price, whatever currency this line was actually priced in. */
   selling_price: number;
+  /** "MMK" unless this line was priced in a foreign currency — see ./currency.ts. */
+  currency_code?: string;
+  /** The unit price before conversion, only present for a non-MMK currency_code. */
+  original_selling_price?: number | null;
+  /** The exchange rate this line was saved at — a fixed snapshot, only present for a
+   *  non-MMK currency_code. Never re-derived from "today's" rate after saving. */
+  exchange_rate?: number | null;
 }
 
 /** One change made to a customer-order line's allocation, logged by the server whenever
@@ -71,6 +81,7 @@ export interface AllocationEvent {
   description: string;
   product_group: ProductGroup;
   unit: Unit;
+  unit_conversions?: UnitConversions;
   previous_color_breakdown: string;
   previous_quantity_pairs: number;
   color_breakdown: string;
@@ -115,22 +126,24 @@ export interface CustomerOrder {
   order_date: string;
   total_quantity_pairs: number;
   delivered_quantity_pairs: number;
+  lost_quantity_pairs?: number;
   order_status: OrderStatus;
   payment: PaymentAccount;
   lines: CustomerOrderLine[];
 }
 
-/** Every line's qty x price. The ERD stores line_amount per line; this is their sum. */
+/** Every line's unit-aware amount. The ERD stores line_amount per line; this is their sum. */
 export function orderAmount(order: CustomerOrder): number {
   return order.lines.reduce(
-    (sum, line) => sum + line.quantity_pairs * line.selling_price,
+    (sum, line) =>
+      sum + pricedAmount(line.quantity_pairs, line.unit, line.selling_price, line.unit_conversions),
     0,
   );
 }
 
 /** What is still owed of one stock code on this order. */
 export function lineRemaining(line: CustomerOrderLine): number {
-  return Math.max(0, line.quantity_pairs - line.delivered_quantity_pairs);
+  return Math.max(0, line.quantity_pairs - line.delivered_quantity_pairs - (line.lost_quantity_pairs ?? 0));
 }
 
 /** What is still owed of one stock code across a whole order. */
@@ -141,18 +154,18 @@ export function remainingOf(order: CustomerOrder, stockCode: string): number {
 }
 
 export function remainingQty(order: CustomerOrder): number {
-  return Math.max(0, order.total_quantity_pairs - order.delivered_quantity_pairs);
+  return Math.max(0, order.total_quantity_pairs - order.delivered_quantity_pairs - (order.lost_quantity_pairs ?? 0));
 }
 
 export function receivedPct(order: CustomerOrder): number {
   if (order.total_quantity_pairs <= 0) return 0;
-  return Math.round((order.delivered_quantity_pairs / order.total_quantity_pairs) * 100);
+  return Math.round(((order.delivered_quantity_pairs + (order.lost_quantity_pairs ?? 0)) / order.total_quantity_pairs) * 100);
 }
 
 /** What is still owed on this order. A cancelled order owes nothing. */
 export function orderBalance(order: CustomerOrder): number {
   if (order.order_status === "cancelled") return 0;
-  return Math.max(0, orderAmount(order) - paidAmount(order));
+  return orderAmount(order) - paidAmount(order);
 }
 
 export function paymentStatus(order: CustomerOrder): PaymentStatus {

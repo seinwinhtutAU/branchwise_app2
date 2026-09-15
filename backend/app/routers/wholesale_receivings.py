@@ -54,8 +54,9 @@ def _item_out(item: ReceivingItem) -> dict:
         "product_group": item.product_group.value,
         "color_breakdown": item.color_breakdown,
         "colors": item.colors,
-        "quantity": from_pairs(item.quantity_pairs, item.unit),
+        "quantity": item.quantity_pairs / item.unit_conversions[item.unit.value],
         "unit": item.unit.value,
+        "unit_conversions": item.unit_conversions,
         "quantity_pairs": item.quantity_pairs,
     }
 
@@ -76,10 +77,14 @@ def _package_out(package: ReceivingPackage) -> dict:
 def _cost_out(cost: ReceivingCost) -> dict:
     return {
         "cost_id": cost.id,
+        "cost_date": cost.cost_date,
         "stage": cost.stage,
         "carrier": cost.carrier,
         "kind": cost.kind,
         "amount": float(cost.amount),
+        "currency_code": cost.currency_code,
+        "original_amount": float(cost.original_amount) if cost.original_amount is not None else None,
+        "exchange_rate": float(cost.exchange_rate) if cost.exchange_rate is not None else None,
         "note": cost.note,
     }
 

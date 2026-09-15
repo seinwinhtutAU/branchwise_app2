@@ -11,6 +11,8 @@
 //
 // Product master data is hydrated from the backend by masterData.ts.
 
+import { type Unit, type UnitConversions } from "./units";
+
 export type ProductGroup = "man" | "lady" | "child";
 
 export const PRODUCT_GROUPS: ProductGroup[] = ["man", "lady", "child"];
@@ -25,6 +27,9 @@ export interface Product {
   stock_code: string;
   description: string;
   product_group: ProductGroup;
+  default_unit: Unit;
+  /** The rate to copy into a new transaction line. Existing lines keep their own copy. */
+  default_unit_conversions?: UnitConversions;
 }
 
 /** A product on one line, short enough for a table cell: "Men's slipper · Man". */

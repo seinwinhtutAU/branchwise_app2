@@ -43,6 +43,12 @@ export interface AppSettings {
   show_buying_price_source: boolean;
   branch_health_weights: BranchHealthWeights;
   early_warning_thresholds: EarlyWarningThresholds;
+  // Today's MMK rate for each non-MMK currency the wholesale screens deal in — MMK per
+  // 1 unit of that currency, e.g. { THB: "120.000000000000" }. Only prefills a new
+  // foreign-currency order/voucher line or receiving cost; a saved line keeps its own
+  // rate forever (see app/services/wholesale/currency.py). Values are decimal strings,
+  // not numbers, so a precise rate survives the round trip exactly.
+  today_exchange_rates: Record<string, string>;
 }
 
 // Business-wide preferences (theme, check/list windows, column visibility, pricing

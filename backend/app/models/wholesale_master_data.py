@@ -3,11 +3,11 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, String, UniqueConstraint, func
+from sqlalchemy import JSON, DateTime, Enum, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
-from app.models.wholesale import ProductGroup
+from app.models.wholesale import ProductGroup, WholesaleUnit
 
 
 class _NamedMasterData(Base):
@@ -30,6 +30,18 @@ class WholesaleProduct(Base):
         Enum(ProductGroup, name="wholesale_product_group", values_callable=lambda enum_cls: [m.value for m in enum_cls]),
         nullable=False,
         default=ProductGroup.MAN,
+    )
+    default_unit: Mapped[WholesaleUnit] = mapped_column(
+        Enum(WholesaleUnit, name="wholesale_unit", values_callable=lambda enum_cls: [m.value for m in enum_cls]),
+        nullable=False,
+        default=WholesaleUnit.SET,
+        server_default=WholesaleUnit.SET.value,
+    )
+    default_unit_conversions: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        default=lambda: {"pair": 1, "set": 6, "dozen": 12},
+        server_default='{"pair": 1, "set": 6, "dozen": 12}',
     )
     active: Mapped[bool] = mapped_column(nullable=False, default=True, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

@@ -85,6 +85,46 @@ def test_customer_names_are_allowed_to_repeat(authed_client: TestClient, db_sess
     assert authed_client.post("/api/wholesale/customers", json=payload).status_code == 201
 
 
+def test_products_default_to_sets_and_allow_a_different_default_unit(
+    authed_client: TestClient, db_session: Session
+):
+    _make_user(db_session, UserRole.WHOLESALE)
+
+    defaulted = authed_client.post(
+        "/api/wholesale/products",
+        json={"stock_code": "U1001", "description": "Default unit", "product_group": "man"},
+    )
+    assert defaulted.status_code == 201
+    assert defaulted.json()["default_unit"] == "set"
+    assert defaulted.json()["default_unit_conversions"] == {"pair": 1, "set": 6, "dozen": 12}
+
+    created = authed_client.post(
+        "/api/wholesale/products",
+        json={
+            "stock_code": "U1002",
+            "description": "Dozen unit",
+            "product_group": "lady",
+            "default_unit": "dozen",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["default_unit"] == "dozen"
+
+    updated = authed_client.patch(
+        f"/api/wholesale/products/{created.json()['product_id']}",
+        json={"default_unit": "pair"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["default_unit"] == "pair"
+
+    changed_rate = authed_client.patch(
+        f"/api/wholesale/products/{created.json()['product_id']}",
+        json={"default_unit_conversions": {"pair": 1, "set": 5, "dozen": 10}},
+    )
+    assert changed_rate.status_code == 200
+    assert changed_rate.json()["default_unit_conversions"] == {"pair": 1, "set": 5, "dozen": 10}
+
+
 def test_non_wholesale_role_is_refused(authed_client: TestClient, db_session: Session):
     branch = Branch(name="Retail", phone_number="000", address="TBD")
     db_session.add(branch)

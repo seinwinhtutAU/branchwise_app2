@@ -44,18 +44,34 @@
       ]
     },
     {
+      "_comment": "Split example: the cargo company only sent 12 of the 20 packages toward Zay Gyi St so far — the other 8 were carved off below into SHP-260903-0002, bound for Anawrahta Rd instead. See split_from_shipment_no on that entry.",
       "shipment_no": "SHP-260903-0001",
       "voucher_no": "VCH-260901-0001",
       "supplier_name": "Panda Shoes",
       "cargo_name": "Tiger Cargo",
       "final_location": "Zay Gyi St, Magway",
       "sent_date": "2026-09-03",
-      "total_packages": 20,
-      "total_pairs": 396,
+      "total_packages": 12,
+      "total_pairs": 236,
+      "total_unit": "set",
+      "packages_sent_by_cargo": 12,
+      "final_received_packages": 0,
+      "legs": []
+    },
+    {
+      "shipment_no": "SHP-260903-0002",
+      "voucher_no": "VCH-260901-0001",
+      "supplier_name": "Panda Shoes",
+      "cargo_name": "Tiger Cargo",
+      "final_location": "Anawrahta Rd, Yangon",
+      "sent_date": "2026-09-03",
+      "total_packages": 8,
+      "total_pairs": 160,
       "total_unit": "set",
       "packages_sent_by_cargo": 0,
       "final_received_packages": 0,
-      "legs": []
+      "legs": [],
+      "split_from_shipment_no": "SHP-260903-0001"
     },
     {
       "shipment_no": "SHP-260906-0001",
@@ -208,6 +224,7 @@
       "total_qty": 50,
       "costs": [
         {
+          "cost_date": "2026-09-08",
           "stage": "Shwe Moe Cargo",
           "carrier": "Shwe Moe Cargo",
           "kind": "Cargo fee",
@@ -215,6 +232,7 @@
           "note": ""
         },
         {
+          "cost_date": "2026-09-08",
           "stage": "Yangon",
           "carrier": "U Hla Myint",
           "kind": "Carrier fee",
@@ -222,6 +240,7 @@
           "note": ""
         },
         {
+          "cost_date": "2026-09-08",
           "stage": "Bogyoke Rd, Mawlamyine",
           "carrier": "Gate porters",
           "kind": "Porters",
@@ -342,6 +361,7 @@
       "total_qty": 27,
       "costs": [
         {
+          "cost_date": "2026-09-04",
           "stage": "Ayar Cargo",
           "carrier": "Ayar Cargo",
           "kind": "Cargo fee",
@@ -369,6 +389,7 @@
       "total_qty": 20,
       "costs": [
         {
+          "cost_date": "2026-09-09",
           "stage": "Shwe Moe Cargo",
           "carrier": "Shwe Moe Cargo",
           "kind": "Cargo fee",

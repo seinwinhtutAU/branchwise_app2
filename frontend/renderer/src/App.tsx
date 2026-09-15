@@ -1043,6 +1043,7 @@ function App(): React.JSX.Element {
               {section === "orders" && (
                 <CustomerOrdersPage
                   session={session}
+                  settings={settings}
                   initialOrderId={orderTarget}
                   onInitialOrderOpened={() => setOrderTarget(null)}
                 />
@@ -1050,6 +1051,7 @@ function App(): React.JSX.Element {
               {section === "vouchers" && (
                 <SupplierVouchersPage
                   session={session}
+                  settings={settings}
                   initialVoucherId={voucherTarget}
                   onInitialVoucherOpened={() => setVoucherTarget(null)}
                 />
@@ -1064,6 +1066,7 @@ function App(): React.JSX.Element {
               {section === "receiving" && (
                 <ReceivingPage
                   session={session}
+                  settings={settings}
                   initialReceivingNo={receivingTarget}
                   onInitialReceivingOpened={() => setReceivingTarget(null)}
                 />

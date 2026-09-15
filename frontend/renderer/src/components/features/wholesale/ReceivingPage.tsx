@@ -9,6 +9,7 @@ import { useToast } from "@renderer/lib/useToast";
 import {
   CellInput,
   CountField,
+  CurrencySelect,
   EDITABLE,
   FigureCard,
   FloatingLayer,
@@ -27,6 +28,15 @@ import {
   StepBar,
   SuggestInput,
 } from "@renderer/components/features/wholesale/ui";
+import {
+  DEFAULT_CURRENCY,
+  formatOriginalAmount,
+  formatRate,
+  isForeignCurrency,
+  previewKyatAmount,
+  type CurrencyCode,
+} from "@renderer/components/features/wholesale/currency";
+import type { AppSettings } from "@renderer/lib/appSettings";
 import { cn } from "@renderer/lib/utils";
 import { Button } from "@renderer/components/ui/Button";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
@@ -85,6 +95,7 @@ import {
 } from "@renderer/components/features/wholesale/shared";
 import {
   formatIn,
+  PAIRS_PER,
   toPairs,
   type Unit,
 } from "@renderer/components/features/wholesale/units";
@@ -257,7 +268,7 @@ function receivedColorQuantityProblem(
   );
   if (!over) return null;
   const [color, pairs] = over;
-  return `${formatIn(pairs, "set")} of ${color} recorded, but the voucher only says ${formatIn(wanted.get(color) ?? 0, "set")}.`;
+  return `${formatIn(pairs, receiving.total_unit)} of ${color} recorded, but the voucher only says ${formatIn(wanted.get(color) ?? 0, receiving.total_unit)}.`;
 }
 
 function StatusBadge({
@@ -279,10 +290,12 @@ function StatusBadge({
 
 export default function ReceivingGatePage({
   session,
+  settings,
   initialReceivingNo,
   onInitialReceivingOpened,
 }: {
   session: Session;
+  settings: AppSettings | null;
   initialReceivingNo?: string | null;
   onInitialReceivingOpened?: () => void;
 }): React.JSX.Element {
@@ -431,6 +444,7 @@ export default function ReceivingGatePage({
       <ReceivingDetail
         receiving={selected}
         initialMode={openMode}
+        settings={settings}
         onBack={() => setView("list")}
         onSave={persistReceiving}
         onDelete={() => deleteReceiving(selected.receiving_id)}
@@ -746,13 +760,13 @@ function ReceivingList({
                           <span className="flex min-h-7 items-center justify-end gap-1 px-4">
                             <span className="text-text-muted">Total:</span>
                             <span>
-                              {formatIn(expectedPairs(receiving), "set")}
+                              {formatIn(expectedPairs(receiving), receiving.total_unit)}
                             </span>
                           </span>
                           <span className="flex min-h-7 items-center justify-end gap-1 px-4 text-success">
                             <span className="text-text-muted">Received:</span>
                             <span>
-                              {formatIn(countedPairs(receiving), "set")}
+                              {formatIn(countedPairs(receiving), receiving.total_unit)}
                             </span>
                           </span>
                         </div>
@@ -999,6 +1013,7 @@ function ReceivingCostsView({
       <Thead>
         <Tr>
           <Th>Location</Th>
+          <Th>Date</Th>
           <Th>Carrier</Th>
           <Th>Cost type</Th>
           <Th className="text-right">Amount</Th>
@@ -1008,7 +1023,7 @@ function ReceivingCostsView({
       <Tbody>
         {receiving.costs.length === 0 ? (
           <Tr>
-            <Td colSpan={5} className="text-sm text-text-muted">
+            <Td colSpan={6} className="text-sm text-text-muted">
               Nothing charged for this delivery yet.
             </Td>
           </Tr>
@@ -1016,10 +1031,22 @@ function ReceivingCostsView({
           receiving.costs.map((cost) => (
             <Tr key={cost.cost_id}>
               <Td>{cost.stage || "—"}</Td>
+              <Td className="whitespace-nowrap">
+                {cost.cost_date ? formatDate(cost.cost_date) : "—"}
+              </Td>
               <Td>{cost.carrier || "—"}</Td>
               <Td>{cost.kind || "—"}</Td>
               <Td className="text-right tabular-nums">
                 {formatKyat(cost.amount)}
+                {cost.currency_code &&
+                  isForeignCurrency(cost.currency_code) &&
+                  cost.original_amount != null &&
+                  cost.exchange_rate != null && (
+                    <div className="text-xs text-text-muted font-normal">
+                      {formatOriginalAmount(cost.currency_code, cost.original_amount)} ×{" "}
+                      {formatRate(cost.exchange_rate)}
+                    </div>
+                  )}
               </Td>
               <Td className="whitespace-normal break-words text-text-muted">
                 {cost.note || "—"}
@@ -1028,7 +1055,7 @@ function ReceivingCostsView({
           ))
         )}
         <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-          <Td colSpan={3} className="font-semibold">
+          <Td colSpan={4} className="font-semibold">
             Total
           </Td>
           <Td className="text-right tabular-nums font-semibold text-brand">
@@ -1152,8 +1179,8 @@ function ReceivingPackagesView({
             {formatQty(packageTarget)}
           </Td>
           <Td colSpan={2} className="text-right font-semibold text-success">
-            {formatIn(countedPairs(receiving), "set")} /{" "}
-            {formatIn(expectedPairs(receiving), "set")} received
+            {formatIn(countedPairs(receiving), receiving.total_unit)} /{" "}
+            {formatIn(expectedPairs(receiving), receiving.total_unit)} received
           </Td>
         </Tr>
       </Tbody>
@@ -1182,10 +1209,14 @@ const receivingDetailPackageSchema = z.object({
 
 const receivingDetailCostSchema = z.object({
   cost_id: z.string(),
+  cost_date: z.string().trim().min(1, "Choose a cost date."),
   stage: z.string(),
   carrier: z.string(),
   kind: z.string(),
   amount: z.number().finite().min(0),
+  currency_code: z.string().optional(),
+  original_amount: z.number().finite().min(0).nullable().optional(),
+  exchange_rate: z.number().finite().min(0).nullable().optional(),
   note: z.string(),
 });
 
@@ -1213,12 +1244,14 @@ interface ReceivingDetailFormValues {
 function ReceivingDetail({
   receiving: initialReceiving,
   initialMode,
+  settings,
   onBack,
   onSave,
   onDelete,
 }: {
   receiving: Receiving;
   initialMode: ReceivingDetailMode;
+  settings: AppSettings | null;
   onBack: () => void;
   onSave: (receiving: Receiving) => Promise<void>;
   onDelete: () => void;
@@ -1332,8 +1365,54 @@ function ReceivingDetail({
     });
   }
 
+  /** Switching a cost's currency. Back to MMK drops the foreign-currency snapshot so a
+   *  resubmit can't send stale original_amount/exchange_rate; switching to a foreign
+   *  currency prefills today's rate from Settings, but only as a starting point — it
+   *  stays editable, and a rate already on the row is never overwritten. */
+  function setCostCurrency(index: number, code: CurrencyCode): void {
+    const cost = receiving.costs[index];
+    if (code === DEFAULT_CURRENCY) {
+      setCost(index, {
+        currency_code: DEFAULT_CURRENCY,
+        original_amount: null,
+        exchange_rate: null,
+        amount: 0,
+      });
+      return;
+    }
+    const original = cost.original_amount ?? 0;
+    const rate =
+      cost.exchange_rate ?? (Number(settings?.today_exchange_rates[code]) || 0);
+    setCost(index, {
+      currency_code: code,
+      original_amount: original,
+      exchange_rate: rate,
+      amount: previewKyatAmount(original, rate),
+    });
+  }
+
+  function setCostOriginalAmount(index: number, value: number): void {
+    const cost = receiving.costs[index];
+    setCost(index, {
+      original_amount: value,
+      amount: previewKyatAmount(value, cost.exchange_rate ?? 0),
+    });
+  }
+
+  function setCostExchangeRate(index: number, value: number): void {
+    const cost = receiving.costs[index];
+    setCost(index, {
+      exchange_rate: value,
+      amount: previewKyatAmount(cost.original_amount ?? 0, value),
+    });
+  }
+
   function addCost(): void {
-    const cost = emptyCost(receiving.receiving_id, receiving.gate);
+    const cost = emptyCost(
+      receiving.receiving_id,
+      receiving.gate,
+      receiving.received_on,
+    );
     setAddingCostId(cost.cost_id);
     apply({
       costs: [...receiving.costs, cost],
@@ -1400,6 +1479,8 @@ function ReceivingDetail({
             stock_code: code,
             description: known.description,
             product_group: known.product_group,
+            unit: known.default_unit,
+            unit_conversions: known.default_unit_conversions ?? PAIRS_PER,
           }
         : { stock_code: code },
     );
@@ -1619,7 +1700,7 @@ function ReceivingDetail({
                           unitLabel="Unit the voucher is written in"
                           value={field.value}
                           unit={receiving.total_unit}
-                          hint={formatIn(expectedPairs(receiving), "set")}
+                          hint={formatIn(expectedPairs(receiving), receiving.total_unit)}
                           onChange={field.onChange}
                           onUnitChange={(total_unit) =>
                             setValue("receiving.total_unit", total_unit, {
@@ -1646,9 +1727,11 @@ function ReceivingDetail({
                   <Thead className="top-0">
                     <Tr>
                       <Th>Location</Th>
+                      <Th className="w-36">Date</Th>
                       <Th>Carrier</Th>
                       <Th>Cost type</Th>
-                      <Th className="text-right w-40">Amount</Th>
+                      <Th className="w-24">Currency</Th>
+                      <Th className="text-right w-48">Amount</Th>
                       <Th>Note</Th>
                       <Th className="w-10" aria-label="Remove cost" />
                     </Tr>
@@ -1664,6 +1747,17 @@ function ReceivingDetail({
                             value={cost.stage}
                             onChange={(next) => setCost(index, { stage: next })}
                             bare
+                          />
+                        </Td>
+                        <Td>
+                          <CellInput
+                            label={`Date of cost ${index + 1}`}
+                            placeholder="YYYY-MM-DD"
+                            type="date"
+                            value={cost.cost_date}
+                            onChange={(cost_date) =>
+                              setCost(index, { cost_date })
+                            }
                           />
                         </Td>
                         <Td>
@@ -1688,17 +1782,50 @@ function ReceivingDetail({
                             bare
                           />
                         </Td>
-                        <Td className="text-right">
-                          <CellInput
-                            label={`Amount of cost ${index + 1}`}
-                            placeholder="0"
-                            numeric
-                            className="text-right"
-                            value={String(cost.amount)}
-                            onChange={(next) =>
-                              setCost(index, { amount: Number(next) || 0 })
-                            }
+                        <Td>
+                          <CurrencySelect
+                            label={`Currency of cost ${index + 1}`}
+                            value={(cost.currency_code as CurrencyCode) || DEFAULT_CURRENCY}
+                            onChange={(code) => setCostCurrency(index, code)}
                           />
+                        </Td>
+                        <Td className="text-right">
+                          {cost.currency_code && isForeignCurrency(cost.currency_code) ? (
+                            <div className="flex flex-col gap-1">
+                              <CellInput
+                                label={`Original amount of cost ${index + 1}`}
+                                placeholder="Original amount"
+                                className="text-right"
+                                value={String(cost.original_amount ?? "")}
+                                onChange={(next) =>
+                                  setCostOriginalAmount(index, Number(next) || 0)
+                                }
+                              />
+                              <CellInput
+                                label={`Exchange rate of cost ${index + 1}`}
+                                placeholder="Exchange rate"
+                                className="text-right"
+                                value={String(cost.exchange_rate ?? "")}
+                                onChange={(next) =>
+                                  setCostExchangeRate(index, Number(next) || 0)
+                                }
+                              />
+                              <span className="text-xs text-text-muted tabular-nums">
+                                = {formatKyat(cost.amount)}
+                              </span>
+                            </div>
+                          ) : (
+                            <CellInput
+                              label={`Amount of cost ${index + 1}`}
+                              placeholder="0"
+                              numeric
+                              className="text-right"
+                              value={String(cost.amount)}
+                              onChange={(next) =>
+                                setCost(index, { amount: Number(next) || 0 })
+                              }
+                            />
+                          )}
                         </Td>
                         <Td>
                           <CellInput
@@ -1728,13 +1855,13 @@ function ReceivingDetail({
                     ))}
                     {receiving.costs.length === 0 && (
                       <Tr>
-                        <Td className="text-text-muted text-sm" colSpan={6}>
+                        <Td className="text-text-muted text-sm" colSpan={8}>
                           Nothing charged for this delivery yet.
                         </Td>
                       </Tr>
                     )}
                     <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-                      <Td className="font-semibold" colSpan={3}>
+                      <Td className="font-semibold" colSpan={5}>
                         Total
                       </Td>
                       <Td className="text-right tabular-nums font-semibold text-brand">
@@ -1854,7 +1981,7 @@ function ReceivingDetail({
                               </Td>
                               <Td />
                               <Td className="text-right font-semibold tabular-nums text-success">
-                                {formatIn(packagePairs(entry), "set")}
+                                {formatIn(packagePairs(entry), "pair")}
                               </Td>
                               <Td className="text-right">
                                 {entry.opened ? (
@@ -1981,8 +2108,8 @@ function ReceivingDetail({
                             colSpan={2}
                             className="text-right font-semibold text-success"
                           >
-                            {formatIn(counted, "set")} /{" "}
-                            {formatIn(expectedPairs(receiving), "set")} received
+                            {formatIn(counted, receiving.total_unit)} /{" "}
+                            {formatIn(expectedPairs(receiving), receiving.total_unit)} received
                           </Td>
                         </Tr>
                       </Tbody>
@@ -2252,6 +2379,7 @@ function NewReceivingForm({
           ? [
               {
                 cost_id: "",
+                cost_date: values.received_on,
                 stage: shipment.carrier_name,
                 carrier: shipment.carrier_name,
                 kind: "Cargo fee",
@@ -2384,7 +2512,7 @@ function NewReceivingForm({
                     error={errors.sets?.message}
                     hint={
                       shipment
-                        ? `${formatIn(toPairs(shipment.total_quantity_pairs, shipment.total_unit), "set")} on the voucher.`
+                        ? `${formatIn(toPairs(shipment.total_quantity_pairs, shipment.total_unit), shipment.total_unit)} on the voucher.`
                         : "From the supplier's voucher."
                     }
                   />
@@ -2444,7 +2572,7 @@ function NewReceivingForm({
                 value={shipment ? formatQty(shipment.total_packages) : "—"}
               />
               <ReviewFact
-                label="Total sets"
+                label="Total quantity"
                 value={formatIn(toPairs(Number(sets) || 0, setsUnit), setsUnit)}
               />
               <ReviewFact label="Cost" value={formatKyat(Number(cost) || 0)} />

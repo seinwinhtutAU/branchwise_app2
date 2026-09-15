@@ -30,6 +30,7 @@ from app.services.settings import (
     get_sale_warning_window_days,
 )
 from app.services.stock import latest_stock_query
+from app.services.reporting import each_day, kpi_value
 
 PeriodKey = Literal["today", "yesterday", "7d", "30d"]
 VALID_PERIODS: frozenset[str] = frozenset({"today", "yesterday", "7d", "30d"})
@@ -142,19 +143,10 @@ def _revenue_totals(db: Session, branch_id: str, start: date, end: date) -> tupl
     return float(net_revenue), int(transaction_count)
 
 
-def _kpi(value: float, previous_value: float) -> dict:
-    delta_pct = ((value - previous_value) / previous_value * 100) if previous_value else None
-    return {"value": value, "previous_value": previous_value, "delta_pct": delta_pct}
+_kpi = kpi_value
 
 
-def _each_day(start: date, end: date):
-    """Every date in [start, end] — the zero-fill backbone of each daily trend: a
-    day with no sales imported yet should read as an actual 0 on the chart, not
-    silently disappear."""
-    current = start
-    while current <= end:
-        yield current
-        current += timedelta(days=1)
+_each_day = each_day
 
 
 def _daily_trend(db: Session, branch_id: str, start: date, end: date) -> list[dict]:

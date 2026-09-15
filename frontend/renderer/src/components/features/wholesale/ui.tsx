@@ -28,6 +28,7 @@ import {
   todayIso,
 } from "@renderer/components/features/wholesale/shared";
 import { type Payment } from "@renderer/components/features/wholesale/customerOrders";
+import { CURRENCY_CODES, type CurrencyCode } from "@renderer/components/features/wholesale/currency";
 import { Button } from "@renderer/components/ui/Button";
 import {
   TableContainer,
@@ -264,8 +265,19 @@ export function FigureCard({
   className?: string;
 }): React.JSX.Element {
   return (
-    <div className={cn("bg-bg-base border border-border rounded-xl", compact ? "p-3" : "p-5", className)}>
-      <span className={cn("block text-xs font-semibold uppercase tracking-wide text-text-muted", compact ? "mb-1" : "mb-2")}>
+    <div
+      className={cn(
+        "bg-bg-base border border-border rounded-xl",
+        compact ? "p-3" : "p-5",
+        className,
+      )}
+    >
+      <span
+        className={cn(
+          "block text-xs font-semibold uppercase tracking-wide text-text-muted",
+          compact ? "mb-1" : "mb-2",
+        )}
+      >
         {label}
       </span>
       <span
@@ -279,6 +291,38 @@ export function FigureCard({
       </span>
       {sub && <span className="block text-xs text-text-muted">{sub}</span>}
     </div>
+  );
+}
+
+/** A compact, row-end entry point for explaining a discovered mismatch. */
+export function MismatchIconButton({
+  explained = false,
+  disabled = false,
+  onClick,
+}: {
+  explained?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      aria-label="Explain mismatch"
+      title={
+        explained ? "View or add mismatch explanation" : "Explain mismatch"
+      }
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-7 w-7 items-center justify-center rounded-md border text-sm font-bold leading-none transition-colors",
+        explained
+          ? "border-warning bg-warning-subtle text-warning"
+          : "border-border-strong bg-bg-base text-text-muted hover:border-warning hover:text-warning",
+        disabled && "cursor-not-allowed opacity-40",
+      )}
+    >
+      !
+    </button>
   );
 }
 
@@ -376,7 +420,9 @@ export function ProductCell({
       <span className="break-words text-text-primary leading-snug">
         {description || "—"}
       </span>
-      <span className="text-xs text-text-muted">{GROUP_LABELS[product_group]}</span>
+      <span className="text-xs text-text-muted">
+        {GROUP_LABELS[product_group]}
+      </span>
     </div>
   );
 }
@@ -411,6 +457,43 @@ export function GroupSelect({
         ))}
       </select>
     </div>
+  );
+}
+
+/** Which currency an order line, voucher line, or receiving cost was priced in. MMK is
+ *  the default and needs no other field; picking another currency is what makes a
+ *  form show its original-amount and exchange-rate inputs (see each page's line
+ *  form) — this select only ever carries the code itself. */
+export function CurrencySelect({
+  label,
+  value,
+  onChange,
+  className,
+}: {
+  label: string;
+  value: CurrencyCode;
+  onChange: (currency_code: CurrencyCode) => void;
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <select
+      aria-label={label}
+      value={value}
+      onChange={(event) => onChange(event.target.value as CurrencyCode)}
+      className={cn(
+        "h-9 rounded-md border border-border px-2 text-sm text-text-primary",
+        EDITABLE,
+        "transition-all duration-150",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base focus:border-transparent",
+        className,
+      )}
+    >
+      {CURRENCY_CODES.map((code) => (
+        <option key={code} value={code}>
+          {code}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -1221,7 +1304,12 @@ export function PaymentsTable({
   function addPayment(): void {
     const id = `pay-${Date.now()}`;
     setAddingId(id);
-    const payment = { payment_id: id, paid_on: todayIso(), amount: 0, note: "" };
+    const payment = {
+      payment_id: id,
+      paid_on: todayIso(),
+      amount: 0,
+      note: "",
+    };
     append(payment);
     onAdd(payment);
   }
@@ -1377,7 +1465,9 @@ export function PaymentsTable({
             <Td colSpan={readOnly ? 1 : 2} className="text-text-muted">
               {balance > 0
                 ? `${formatKyat(balance)} still unpaid`
-                : "Nothing left to pay"}
+                : balance < 0
+                  ? `${formatKyat(-balance)} overpaid — reconcile this payment`
+                  : "Nothing left to pay"}
             </Td>
           </Tr>
         </Tbody>
@@ -1412,7 +1502,9 @@ export function PaymentsTable({
         ) : null}
         {balance <= 0 && formPayments.length > 0 && (
           <span className="text-xs text-text-muted">
-            This {who} has paid in full.
+            {balance < 0
+              ? `This ${who} is overpaid by ${formatKyat(-balance)}.`
+              : `This ${who} has paid in full.`}
           </span>
         )}
       </div>

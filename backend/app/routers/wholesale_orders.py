@@ -9,6 +9,7 @@ from app.db.session import get_db
 from app.models.user import User, UserRole
 from app.models.wholesale import CustomerOrder
 from app.schemas.wholesale_orders import OrderIn, OrderLineAllocationIn, OrderPaymentIn
+from app.schemas.wholesale_write_offs import WriteOffIn
 from app.services.branches import resolve_wholesale_branch_id
 from app.services.wholesale.orders import (
     add_payment,
@@ -31,6 +32,7 @@ from app.services.wholesale.inventory import (
     effective_allocated_color_pairs,
 )
 from app.services.wholesale.references import allocate_reference
+from app.services.wholesale.write_offs import write_off_order_line, write_off_to_dict
 
 router = APIRouter(prefix="/api/wholesale/orders", tags=["wholesale"])
 
@@ -72,6 +74,7 @@ def _out(
             "supplier_name": line.supplier_name,
             "color_breakdown": line.color_breakdown,
             "unit": line.unit.value,
+            "unit_conversions": line.unit_conversions,
             "quantity_pairs": line.quantity_pairs,
             "allocated_quantity_pairs": sum(effective_colors.values()),
             "allocated_color_breakdown": (
@@ -82,7 +85,17 @@ def _out(
             "delivered_quantity_pairs": min(
                 remaining_deliveries.get(line.stock_code, 0), line.quantity_pairs
             ),
+            "lost_quantity_pairs": line.lost_quantity_pairs,
+            "remaining_quantity_pairs": max(
+                0,
+                line.quantity_pairs
+                - min(remaining_deliveries.get(line.stock_code, 0), line.quantity_pairs)
+                - line.lost_quantity_pairs,
+            ),
             "selling_price": float(line.selling_price),
+            "currency_code": line.currency_code,
+            "original_selling_price": float(line.original_selling_price) if line.original_selling_price is not None else None,
+            "exchange_rate": float(line.exchange_rate) if line.exchange_rate is not None else None,
         })
     for line in lines:
         remaining_deliveries[line["stock_code"]] = max(
@@ -102,7 +115,8 @@ def _out(
     received = sum(line["delivered_quantity_pairs"] for line in lines)
     total_wanted = sum(line["quantity_pairs"] for line in lines)
     allocated = sum(line["allocated_quantity_pairs"] for line in lines)
-    status_value = order_status(total_wanted, received, allocated, order.cancelled)
+    lost = sum(line["lost_quantity_pairs"] for line in lines)
+    status_value = order_status(total_wanted, received, allocated, order.cancelled, lost)
     return {
         "order_id": order.id,
         "branch_id": order.branch_id,
@@ -113,6 +127,8 @@ def _out(
         "order_date": order.order_date,
         "total_quantity_pairs": total_wanted,
         "delivered_quantity_pairs": received,
+        "lost_quantity_pairs": lost,
+        "remaining_quantity_pairs": max(0, total_wanted - received - lost),
         "order_status": status_value,
         "lines": lines,
         "payment": {"account_id": order.id, "payments": payments},
@@ -168,7 +184,7 @@ def list_customer_orders(
     if payment_status:
         rows = [
             row for row in rows
-            if ("paid" if row["balance_due"] == 0 else "partial" if row["paid_amount"] > 0 else "unpaid") == payment_status
+            if ("paid" if row["balance_due"] <= 0 else "partial" if row["paid_amount"] > 0 else "unpaid") == payment_status
         ]
     response.headers["X-Total-Count"] = str(len(rows))
     start = (page - 1) * page_size
@@ -201,6 +217,7 @@ def list_customer_order_allocations(
             "description": event.description,
             "product_group": event.product_group.value,
             "unit": event.unit.value,
+            "unit_conversions": event.unit_conversions,
             "previous_color_breakdown": event.previous_color_breakdown,
             "previous_quantity_pairs": event.previous_quantity_pairs,
             "color_breakdown": event.color_breakdown,
@@ -298,6 +315,21 @@ def update_customer_order_line_allocation(
         delivered_pairs_by_order(db, [order.id], user.branch_id).get(order.id),
         _delivered_colors(db, order, user.branch_id),
     )
+
+
+@router.post("/lines/{line_id}/write-off", status_code=status.HTTP_201_CREATED)
+def write_off_customer_order_line(
+    line_id: str,
+    payload: WriteOffIn,
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_wholesale(user)
+    entry = write_off_order_line(
+        db, line_id, payload.quantity, payload.reason, payload.note, user.id,
+        branch_id=user.branch_id,
+    )
+    return write_off_to_dict(entry)
 
 
 @router.delete("/{order_id}/payments/{payment_id}", status_code=status.HTTP_204_NO_CONTENT)
