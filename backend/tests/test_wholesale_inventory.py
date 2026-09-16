@@ -63,11 +63,29 @@ def _incoming_stock(db: Session, branch: Branch) -> None:
     db.commit()
 
 
+
+def _allocate(client: TestClient, order: dict, colors: str, stock_code: str = "A1001") -> None:
+    """Goods can only be delivered once they are allocated, so every delivery test has to
+    reserve the stock first — the same two steps a user takes on the Fulfill screen.
+
+    Looked up by stock code rather than by position: the API does not promise to hand the
+    lines back in the order they were sent."""
+    line_id = next(
+        line["order_line_id"] for line in order["lines"] if line["stock_code"] == stock_code
+    )
+    response = client.put(
+        f"/api/wholesale/orders/lines/{line_id}/allocation",
+        json={"color_breakdown": colors},
+    )
+    assert response.status_code == 200, response.text
+
+
 def test_delivery_is_capped_by_stock_and_updates_order_progress(authed_client: TestClient, db_session: Session) -> None:
     branch = _branch(db_session)
     _user(db_session, branch.id)
     _incoming_stock(db_session, branch)
     order = authed_client.post("/api/wholesale/orders", json=_order_payload()).json()
+    _allocate(authed_client, order, "black2s")
     payload = {"order_id": order["order_id"], "stock_code": "A1001", "location": "Gate", "color_breakdown": "black1s", "unit": "set", "delivered_on": "2026-09-13", "note": "Collected"}
 
     delivery = authed_client.post("/api/wholesale/inventory/deliveries", json=payload)
@@ -103,7 +121,7 @@ def test_customer_order_line_allocation_persists_and_is_returned_on_order_reads(
     assert allocated.status_code == 200
     assert allocated.json()["lines"][0]["allocated_quantity_pairs"] == 6
     assert allocated.json()["lines"][0]["allocated_color_breakdown"] == "black1s"
-    assert allocated.json()["order_status"] == "allocating"
+    assert allocated.json()["order_status"] == "ready_to_deliver"
 
     reread = authed_client.get(f"/api/wholesale/orders/{order['order_id']}")
     assert reread.status_code == 200
@@ -132,7 +150,7 @@ def test_customer_order_line_allocation_persists_and_is_returned_on_order_reads(
     assert cleared.status_code == 200
     assert cleared.json()["lines"][0]["allocated_quantity_pairs"] == 0
     assert cleared.json()["lines"][0]["allocated_color_breakdown"] == ""
-    assert cleared.json()["order_status"] == "new"
+    assert cleared.json()["order_status"] == "waiting_for_stock"
 
     events = authed_client.get("/api/wholesale/orders/allocations")
     assert events.status_code == 200
@@ -163,8 +181,16 @@ def test_delivery_cannot_take_stock_allocated_to_another_order(
     assert allocated.status_code == 200
     assert allocated.json()["lines"][0]["allocated_quantity_pairs"] == 6
 
-    # Order B cannot be delivered from the 6 pairs reserved for order A: 12 total minus
-    # 6 reserved leaves only 6 available to anyone else.
+    # B cannot reserve all 12: 6 of them are already held for A.
+    greedy_b = authed_client.put(
+        f"/api/wholesale/orders/lines/{order_b['lines'][0]['order_line_id']}/allocation",
+        json={"color_breakdown": "black2s"},
+    )
+    assert greedy_b.status_code == 422
+    assert "available" in greedy_b.json()["detail"].lower()
+
+    # B takes the 6 pairs A did not, then asks to deliver twice what it holds.
+    _allocate(authed_client, order_b, "black1s")
     too_much_for_b = authed_client.post(
         "/api/wholesale/inventory/deliveries",
         json={
@@ -173,9 +199,9 @@ def test_delivery_cannot_take_stock_allocated_to_another_order(
         },
     )
     assert too_much_for_b.status_code == 422
-    assert "reserved" in too_much_for_b.json()["detail"].lower()
+    assert "allocated" in too_much_for_b.json()["detail"].lower()
 
-    # The unreserved 6 pairs are still first-come-first-served.
+    # The 6 pairs B reserved for itself can go out.
     fits_for_b = authed_client.post(
         "/api/wholesale/inventory/deliveries",
         json={
@@ -235,6 +261,7 @@ def test_delivery_must_match_order_and_stock_colors(authed_client: TestClient, d
     order_payload = _order_payload()
     order_payload["lines"][0]["color_breakdown"] = "black1s,pink1s"
     order = authed_client.post("/api/wholesale/orders", json=order_payload).json()
+    _allocate(authed_client, order, "black1s")
     payload = {
         "order_id": order["order_id"],
         "stock_code": "A1001",
@@ -272,6 +299,8 @@ def test_customer_delivery_batch_records_multiple_products_together(
         "selling_price": 16000,
     })
     order = authed_client.post("/api/wholesale/orders", json=order_payload).json()
+    _allocate(authed_client, order, "black2s", "A1001")
+    _allocate(authed_client, order, "white1s", "A1002")
 
     delivery = authed_client.post("/api/wholesale/inventory/deliveries/batch", json={
         "order_id": order["order_id"], "delivered_on": "2026-09-13",
@@ -458,21 +487,19 @@ def test_stock_records_split_shipment_stage_and_received_stock(
     assert partial["at_supplier_pairs"] + partial["in_transit_pairs"] == 12
 
 
-def test_delivery_does_not_require_an_allocation_first(
+def test_delivery_requires_the_stock_to_be_allocated_first(
     authed_client: TestClient,
     db_session: Session,
 ) -> None:
-    """The screen used to cap a delivery at what had been allocated. The server never
-    did: an unreserved pair is first-come-first-served, and a customer at the counter
-    should not be turned away because an internal planning step was skipped. This pins
-    that down so the two cannot drift apart again."""
+    """Allocation is the step that decides whose goods these are. Handing over stock that
+    was never set aside would let one customer take what another is waiting for."""
     branch = _branch(db_session)
     _user(db_session, branch.id)
     _incoming_stock(db_session, branch)
     order = authed_client.post("/api/wholesale/orders", json=_order_payload()).json()
     assert order["lines"][0]["allocated_quantity_pairs"] == 0
 
-    delivery = authed_client.post("/api/wholesale/inventory/deliveries/batch", json={
+    refused = authed_client.post("/api/wholesale/inventory/deliveries/batch", json={
         "order_id": order["order_id"], "delivered_on": "2026-09-13",
         "delivery_address": "Yangon", "note": "",
         "lines": [
@@ -480,7 +507,19 @@ def test_delivery_does_not_require_an_allocation_first(
              "color_breakdown": "black1s", "unit": "set"},
         ],
     })
-    assert delivery.status_code == 201, delivery.text
+    assert refused.status_code == 422
+    assert "allocate" in refused.json()["detail"].lower()
+
+    _allocate(authed_client, order, "black1s")
+    allowed = authed_client.post("/api/wholesale/inventory/deliveries/batch", json={
+        "order_id": order["order_id"], "delivered_on": "2026-09-13",
+        "delivery_address": "Yangon", "note": "",
+        "lines": [
+            {"stock_code": "A1001", "location": "Gate",
+             "color_breakdown": "black1s", "unit": "set"},
+        ],
+    })
+    assert allowed.status_code == 201, allowed.text
 
     after = authed_client.get(f"/api/wholesale/orders/{order['order_id']}").json()
     assert after["delivered_quantity_pairs"] == 6
@@ -521,6 +560,7 @@ def test_order_line_reports_what_has_been_delivered_by_color(
     payload["lines"][0]["color_breakdown"] = "black1s,pink1s"
     order = authed_client.post("/api/wholesale/orders", json=payload).json()
     assert order["lines"][0]["delivered_color_breakdown"] == ""
+    _allocate(authed_client, order, "black1s")
 
     delivery = authed_client.post("/api/wholesale/inventory/deliveries/batch", json={
         "order_id": order["order_id"], "delivered_on": "2026-09-13",

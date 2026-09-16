@@ -8,19 +8,17 @@ import { paymentStatusOf, sharePct, type PaymentStatus } from "./shared";
 import { pricedAmount, type Unit, type UnitConversions } from "./units";
 import { type ProductGroup } from "./products";
 
-/** new → allocating → ready_to_deliver → partly_delivered → fulfilled, or cancelled at
+/** waiting_for_stock → ready_to_deliver → partly_delivered → fulfilled, or cancelled at
  *  any point. Status follows the stock reserved and delivered for the order. */
 export type OrderStatus =
-  | "new"
-  | "allocating"
+  | "waiting_for_stock"
   | "ready_to_deliver"
   | "partly_delivered"
   | "fulfilled"
   | "cancelled";
 
 export const ORDER_STATUSES: OrderStatus[] = [
-  "new",
-  "allocating",
+  "waiting_for_stock",
   "ready_to_deliver",
   "partly_delivered",
   "fulfilled",
@@ -205,15 +203,14 @@ export function readyToDeliver(order: CustomerOrder): boolean {
 
 /** The next operational action for staff on this order: deliver if goods are allocated,
  *  allocate if stock remains to be allocated, or null if fulfilled/cancelled/nothing to do. */
-export function nextAction(order: CustomerOrder): "deliver" | "allocate" | null {
+export function nextAction(order: CustomerOrder): "deliver" | null {
   if (order.order_status === "cancelled" || order.order_status === "fulfilled") {
     return null;
   }
-  const allocated = orderAllocatedPairs(order);
-  const stillToAllocate = remainingQty(order) - allocated;
-  if (allocated > 0) return "deliver";
-  if (stillToAllocate > 0) return "allocate";
-  return null;
+  // Delivering is the only thing a person does to an order now. Arriving stock allocates
+  // itself, so an order with nothing set aside is one whose goods have not turned up —
+  // and offering "Allocate" there is a button that opens an empty screen.
+  return orderAllocatedPairs(order) > 0 ? "deliver" : null;
 }
 
 // ── Seed rows ────────────────────────────────────────────────────────────────
@@ -228,7 +225,7 @@ export const SEED_ORDERS: CustomerOrder[] = [
     order_date: "2026-09-02",
     total_quantity_pairs: 120,
     delivered_quantity_pairs: 24,
-    order_status: "allocating",
+    order_status: "ready_to_deliver",
     payment: {
       account_id: "pa-1",
       payments: [
@@ -324,7 +321,7 @@ export const SEED_ORDERS: CustomerOrder[] = [
     order_date: "2026-09-08",
     total_quantity_pairs: 204,
     delivered_quantity_pairs: 0,
-    order_status: "new",
+    order_status: "waiting_for_stock",
     payment: {
       account_id: "pa-3",
       payments: [],
@@ -365,7 +362,7 @@ export const SEED_ORDERS: CustomerOrder[] = [
     order_date: "2026-09-09",
     total_quantity_pairs: 60,
     delivered_quantity_pairs: 0,
-    order_status: "new",
+    order_status: "waiting_for_stock",
     payment: {
       account_id: "pa-4",
       payments: [
@@ -401,7 +398,7 @@ export const SEED_ORDERS: CustomerOrder[] = [
     order_date: "2026-09-10",
     total_quantity_pairs: 150,
     delivered_quantity_pairs: 36,
-    order_status: "allocating",
+    order_status: "ready_to_deliver",
     payment: {
       account_id: "pa-5",
       payments: [],

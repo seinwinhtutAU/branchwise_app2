@@ -420,9 +420,30 @@ def _validate_delivery(
                 f'Color "{color}" exceeds what the customer is still owed',
             )
 
+    # Goods may only leave against this order's own allocation. Allocation is the step
+    # that decides whose stock this is, so handing over anything that was not set aside
+    # would let one customer walk off with what another is waiting for. What is still
+    # reserved is what was allocated less what has already gone out, which is exactly
+    # what effective_allocated_color_pairs returns.
+    allocated_here: dict[str, int] = defaultdict(int)
+    for line in ordered_lines:
+        line_delivered = delivered_color_pairs_by_order(
+            db, order.id, line.stock_code, branch_id, excluding_id=excluding_id,
+        )
+        for color, color_pairs in effective_allocated_color_pairs(line, line_delivered).items():
+            allocated_here[color] += color_pairs
+    for color, requested in requested_colors.items():
+        if requested > allocated_here.get(color, 0):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f'Color "{color}" has not been allocated to this order — allocate it first'
+                if allocated_here.get(color, 0) <= 0
+                else f'Only {allocated_here[color]} pairs of "{color}" are allocated to this order',
+            )
+
     # Stock allocated to another open order is off-limits here — this order can still
-    # draw on its own allocation (excluding_order_id), and unallocated stock is still
-    # first-come-first-served, but a reservation made for someone else has to hold.
+    # draw on its own allocation (excluding_order_id), but a reservation made for
+    # someone else has to hold.
     reserved_colors = allocated_color_pairs_for_stock_code(
         db, branch_id, code, excluding_order_id=order.id,
     )
@@ -546,3 +567,72 @@ def update_delivery(db: Session, movement_id: str, branch_id: str | None, payloa
 def delete_delivery(db: Session, movement_id: str, branch_id: str | None) -> None:
     db.delete(_load_delivery(db, movement_id, branch_id))
     db.commit()
+
+
+def auto_allocate_arrivals(db: Session, branch_id: str | None, stock_codes: set[str]) -> int:
+    """Share newly-counted stock out to the customers already waiting for it.
+
+    The decision this makes has effectively been made once already: a supplier voucher is
+    raised from the open customer-order lines it is meant to cover, so by the time the
+    boxes are opened the app knows who the goods are for. Asking somebody to reopen the
+    Fulfill screen and retype the same colours is doing that work a second time, so it is
+    done here instead, the moment a package is counted in.
+
+    Oldest order first, colour by colour, and never more than a line is still owed. What
+    cannot be covered is simply left unallocated — the day a shipment arrives short, the
+    Allocate screen is where a person decides who goes without, and that judgement is not
+    one to take away from them.
+
+    Returns the number of lines whose reservation grew, so the caller can say whether
+    anything happened.
+    """
+    touched = 0
+    for stock_code in sorted(code for code in stock_codes if code and code.strip()):
+        code = stock_code.strip()
+        free = dict(available_color_pairs_for_stock_code(db, branch_id, code))
+        for color, taken in allocated_color_pairs_for_stock_code(db, branch_id, code).items():
+            free[color] = max(0, free.get(color, 0) - taken)
+        if not any(pairs > 0 for pairs in free.values()):
+            continue
+
+        query = (
+            db.query(CustomerOrderLine)
+            .join(CustomerOrder)
+            .options(selectinload(CustomerOrderLine.order))
+            .filter(CustomerOrderLine.stock_code == code, CustomerOrder.cancelled.is_(False))
+        )
+        if branch_id is not None:
+            query = query.filter(CustomerOrder.branch_id == branch_id)
+        lines = sorted(
+            query.all(),
+            key=lambda line: (line.order.order_date, line.order.order_no),
+        )
+
+        for line in lines:
+            delivered_colors = delivered_color_pairs_by_order(
+                db, line.order_id, line.stock_code, branch_id,
+            )
+            ordered = color_qty_pairs_by_color(line.color_breakdown, line.unit, line.unit_conversions)
+            reserved = effective_allocated_color_pairs(line, delivered_colors)
+            stored = color_qty_pairs_by_color(
+                line.allocated_color_breakdown, line.unit, line.unit_conversions,
+            )
+            grew = False
+            for color, wanted in ordered.items():
+                # Still owed of this colour, less whatever is already set aside for it.
+                room = max(0, wanted - delivered_colors.get(color, 0) - reserved.get(color, 0))
+                take = min(room, free.get(color, 0))
+                if take <= 0:
+                    continue
+                stored[color] = stored.get(color, 0) + take
+                free[color] = free.get(color, 0) - take
+                grew = True
+            if not grew:
+                continue
+
+            line.allocated_color_breakdown = color_pairs_breakdown(stored)
+            line.allocated_quantity_pairs = sum(stored.values())
+            touched += 1
+    if touched:
+        db.commit()
+    return touched

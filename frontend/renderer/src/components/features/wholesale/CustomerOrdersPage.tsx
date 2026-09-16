@@ -104,7 +104,6 @@ import {
 import {
   CUSTOMER_ORDERS_URL,
   WHOLESALE_INVENTORY_URL,
-  WHOLESALE_STOCK_URL,
   WholesaleApiError,
   addCustomerOrderPayment,
   cancelCustomerOrder,
@@ -121,8 +120,6 @@ import {
   type CustomerDeliveryBatchInput,
   inventoryMovementsFromWire,
   type InventoryMovementWire,
-  stockRecordsFromWire,
-  type StockRecordWire,
   type NewCustomerOrderInput,
 } from "@renderer/components/features/wholesale/api";
 import {
@@ -132,7 +129,10 @@ import {
   type ColorPairs,
   type StockLine,
 } from "@renderer/components/features/wholesale/stock";
-import { ColorQtyPicker } from "@renderer/components/features/wholesale/ColorQtyPicker";
+import {
+  ColorQtyPicker,
+  ColorQtySummary,
+} from "@renderer/components/features/wholesale/ColorQtyPicker";
 import {
   GROUP_LABELS,
   type ProductGroup,
@@ -181,8 +181,7 @@ type StatusFilter = OrderStatus | "all";
 type PayFilter = PaymentStatus | "all";
 
 const STATUS_LABELS: Record<OrderStatus, string> = {
-  new: "New",
-  allocating: "Allocating",
+  waiting_for_stock: "Waiting for stock",
   ready_to_deliver: "Ready to deliver",
   partly_delivered: "Partially delivered",
   fulfilled: "Fulfilled",
@@ -216,13 +215,9 @@ const PAYMENT_STYLES: Record<PaymentStatus, { bg: string; dot: string }> = {
 const PAYMENT_STATUSES: PaymentStatus[] = ["unpaid", "partial", "paid"];
 
 const STATUS_STYLES: Record<OrderStatus, { bg: string; dot: string }> = {
-  new: {
+  waiting_for_stock: {
     bg: "bg-bg-raised text-text-secondary border border-border-strong",
     dot: "bg-text-muted",
-  },
-  allocating: {
-    bg: "bg-warning-subtle text-warning border border-warning/30",
-    dot: "bg-warning animate-pulse",
   },
   ready_to_deliver: {
     bg: "bg-brand-subtle text-brand border border-brand/30",
@@ -242,8 +237,19 @@ const STATUS_STYLES: Record<OrderStatus, { bg: string; dot: string }> = {
   },
 };
 
+/** A status the app does not recognise still has to say something. The server is the one
+ *  that names these, so a version of it older or newer than this screen would otherwise
+ *  paint a pill with a dot and no word in it — which tells the reader nothing at all and
+ *  looks like a rendering fault rather than a mismatch. */
+function statusLabel(status: OrderStatus): string {
+  const known = STATUS_LABELS[status];
+  if (known) return known;
+  const words = String(status).replace(/_/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Unknown";
+}
+
 function StatusBadge({ status }: { status: OrderStatus }): React.JSX.Element {
-  const style = STATUS_STYLES[status] ?? STATUS_STYLES.new;
+  const style = STATUS_STYLES[status] ?? STATUS_STYLES.waiting_for_stock;
   return (
     <span
       className={cn(
@@ -252,7 +258,7 @@ function StatusBadge({ status }: { status: OrderStatus }): React.JSX.Element {
       )}
     >
       <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", style.dot)} />
-      {STATUS_LABELS[status]}
+      {statusLabel(status)}
     </span>
   );
 }
@@ -348,14 +354,6 @@ export default function CustomerOrdersPage({
         : [],
     [inventoryWire],
   );
-  const { data: stockWire } = useQuery({
-    queryKey: STOCK_QUERY_KEY,
-    queryFn: () => fetchJson<StockRecordWire[]>(WHOLESALE_STOCK_URL, session),
-  });
-  const stockRecords = useMemo(
-    () => (stockWire ? stockRecordsFromWire(stockWire) : []),
-    [stockWire],
-  );
   // The shared store still holds orders — other screens (Supplier Vouchers' waiting
   // list, Inventory) read them from there — so this query's answer, which React Query
   // already keeps correct on its own, is pushed in as-is rather than recomputed.
@@ -364,34 +362,6 @@ export default function CustomerOrdersPage({
   }, [wire]);
   const { orders } = useWholesale();
 
-  const readyToAllocatePairs = useMemo(() => {
-    if (stockRecords.length > 0) {
-      return stockRecords.reduce(
-        (sum, record) => sum + Math.max(0, record.available_pairs),
-        0,
-      );
-    }
-    const allocatedByCode: Record<string, number> = {};
-    for (const order of orders.filter(
-      (o) => o.order_status !== "cancelled" && o.order_status !== "fulfilled",
-    )) {
-      for (const line of order.lines) {
-        allocatedByCode[line.stock_code] =
-          (allocatedByCode[line.stock_code] ?? 0) +
-          (line.allocated_quantity_pairs ?? 0);
-      }
-    }
-    const onHandByCode: Record<string, number> = {};
-    for (const invLine of inventoryLines) {
-      onHandByCode[invLine.stock_code] =
-        (onHandByCode[invLine.stock_code] ?? 0) +
-        invLine.quantity_available_pairs;
-    }
-    return Object.entries(onHandByCode).reduce((sum, [code, onHand]) => {
-      const allocated = allocatedByCode[code] ?? 0;
-      return sum + Math.max(0, onHand - allocated);
-    }, 0);
-  }, [stockRecords, orders, inventoryLines]);
 
   async function reload(): Promise<void> {
     await queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY });
@@ -648,7 +618,6 @@ export default function CustomerOrdersPage({
   return (
     <OrderList
       orders={orders}
-      readyToAllocatePairs={readyToAllocatePairs}
       inventoryLines={inventoryLines}
       onOpen={openOrder}
       onAllocate={openAllocation}
@@ -667,44 +636,10 @@ function nextOrderNo(orders: CustomerOrder[]): string {
   );
 }
 
-function orderHasAvailableStockToAllocate(
-  order: CustomerOrder,
-  orders: CustomerOrder[],
-  inventoryLines: StockLine[],
-): boolean {
-  if (order.order_status === "cancelled" || order.order_status === "fulfilled") {
-    return false;
-  }
-  return order.lines.some((line) => {
-    const unallocated = lineRemaining(line) - (line.allocated_quantity_pairs ?? 0);
-    if (unallocated <= 0) return false;
-
-    const stockColors = availableStockColors(line.stock_code, inventoryLines);
-    const reservedByOthers = allocationsFromOtherOrders(
-      orders,
-      line.stock_code,
-      order.order_id,
-    );
-    const ownColors = colorPairsForText(
-      line.allocated_color_breakdown ?? "",
-      line.unit,
-      line.unit_conversions,
-    );
-    const availableForEdit = subtractColorPairs(stockColors, reservedByOthers);
-    const availableToAllocate = subtractColorPairs(availableForEdit, ownColors);
-    const lineAvailablePairs = Object.values(availableToAllocate).reduce(
-      (acc, p) => acc + p,
-      0,
-    );
-    return lineAvailablePairs > 0;
-  });
-}
-
 // ── List ─────────────────────────────────────────────────────────────────────
 
 function OrderList({
   orders,
-  readyToAllocatePairs,
   inventoryLines,
   onOpen,
   onAllocate,
@@ -714,7 +649,6 @@ function OrderList({
   refreshing,
 }: {
   orders: CustomerOrder[];
-  readyToAllocatePairs: number;
   inventoryLines: StockLine[];
   onOpen: (orderId: string) => void;
   onAllocate: (orderId: string, tab: "allocate" | "deliver") => void;
@@ -726,7 +660,7 @@ function OrderList({
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [pay, setPay] = useState<PayFilter>("all");
-  type QuickView = "all" | "ready_to_allocate" | "ready_to_deliver" | "unpaid";
+  type QuickView = "all" | "ready_to_deliver" | "unpaid";
   const [quickView, setQuickView] = useState<QuickView>("all");
   const [page, setPage] = useState(1);
 
@@ -771,13 +705,11 @@ function OrderList({
       const matchesQuickView =
         quickView === "all"
           ? true
-          : quickView === "ready_to_allocate"
-            ? orderHasAvailableStockToAllocate(order, orders, inventoryLines)
-            : quickView === "ready_to_deliver"
-              ? readyToDeliver(order)
-              : quickView === "unpaid"
-                ? paymentStatus(order) === "unpaid" && order.order_status !== "cancelled"
-                : true;
+          : quickView === "ready_to_deliver"
+            ? readyToDeliver(order)
+            : quickView === "unpaid"
+              ? paymentStatus(order) === "unpaid" && order.order_status !== "cancelled"
+              : true;
 
       return matchesQuery && matchesStatus && matchesPay && matchesQuickView;
     });
@@ -815,9 +747,6 @@ function OrderList({
 
   // Quick filter counts based on actionable operational status
   const countAll = orders.length;
-  const countReadyToAllocate = orders.filter((o) =>
-    orderHasAvailableStockToAllocate(o, orders, inventoryLines),
-  ).length;
   const countReadyToDeliver = orders.filter(readyToDeliver).length;
   const countUnpaid = orders.filter((o) => paymentStatus(o) === "unpaid" && o.order_status !== "cancelled").length;
 
@@ -838,17 +767,11 @@ function OrderList({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <FigureCard
           label="Open Orders"
           value={formatQty(openOrders.length)}
           sub="not fulfilled or cancelled"
-        />
-        <FigureCard
-          label="Ready to Allocate"
-          value={sets(readyToAllocatePairs)}
-          sub="in stock, unallocated"
-          tone={readyToAllocatePairs > 0 ? "brand" : "success"}
         />
         <FigureCard
           label="Ready to Deliver"
@@ -921,29 +844,6 @@ function OrderList({
               )}
             >
               {countAll}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleQuickFilter("ready_to_allocate")}
-            className={cn(
-              "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 border",
-              quickView === "ready_to_allocate"
-                ? "bg-warning text-white border-warning shadow-xs"
-                : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
-            )}
-          >
-            <span>Ready to Allocate</span>
-            <span
-              className={cn(
-                "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
-                quickView === "ready_to_allocate"
-                  ? "bg-white/20 text-white"
-                  : "bg-warning-subtle text-warning font-bold",
-              )}
-            >
-              {countReadyToAllocate}
             </span>
           </button>
 
@@ -1104,17 +1004,11 @@ function OrderList({
                   const remaining = remainingQty(order);
                   const action = nextAction(order);
                   const rowTint =
-                    action === "allocate"
-                      ? "bg-warning-subtle/30 hover:bg-warning-subtle/50"
-                      : action === "deliver"
-                        ? "bg-brand-subtle/30 hover:bg-brand-subtle/50"
-                        : undefined;
+                    action === "deliver"
+                      ? "bg-brand-subtle/30 hover:bg-brand-subtle/50"
+                      : undefined;
                   const firstCellBorder =
-                    action === "allocate"
-                      ? "border-l-4 border-l-warning"
-                      : action === "deliver"
-                        ? "border-l-4 border-l-brand"
-                        : undefined;
+                    action === "deliver" ? "border-l-4 border-l-brand" : undefined;
 
                   return (
                     <Tr key={order.order_id} className={rowTint}>
@@ -1162,18 +1056,30 @@ function OrderList({
                         <PaymentBadge status={paymentStatus(order)} />
                       </Td>
                       <Td className="whitespace-nowrap">
-                        {action && (
+                        {action ? (
                           <Button
                             size="sm"
-                            onClick={() => onAllocate(order.order_id, action)}
+                            onClick={() => onAllocate(order.order_id, "deliver")}
                           >
-                            {action === "deliver" ? "Deliver" : "Allocate"}
+                            Deliver
                           </Button>
+                        ) : (
+                          order.order_status === "waiting_for_stock" && (
+                            <span className="text-xs text-text-muted">
+                              Waiting for stock
+                            </span>
+                          )
                         )}
                       </Td>
                       <Td className="text-right">
                         <RowMenu
                           onOpen={() => onOpen(order.order_id)}
+                          onAllocate={
+                            order.order_status === "cancelled" ||
+                            order.order_status === "fulfilled"
+                              ? undefined
+                              : () => onAllocate(order.order_id, "allocate")
+                          }
                           onCancel={
                             order.order_status === "cancelled"
                               ? undefined
@@ -1209,9 +1115,14 @@ function OrderList({
  *  something with no backend behind them. */
 function RowMenu({
   onOpen,
+  onAllocate,
   onCancel,
 }: {
   onOpen: () => void;
+  /** Reaching the allocation screen. It lives in the menu rather than beside Deliver
+   *  because stock allocates itself on arrival now — coming here is the exception, and a
+   *  second button next to the daily one would say otherwise. */
+  onAllocate?: () => void;
   onCancel?: () => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -1264,6 +1175,16 @@ function RowMenu({
               onOpen();
             }}
           />
+          {onAllocate && (
+            <MenuItem
+              icon={<ClipboardIcon className="w-4 h-4" />}
+              label="Allocate stock"
+              onClick={() => {
+                setOpen(false);
+                onAllocate();
+              }}
+            />
+          )}
           {onCancel && (
             <MenuItem
               icon={<CloseIcon className="w-4 h-4" />}
@@ -1412,6 +1333,10 @@ function AllocationLineRow({
     line.unit_conversions,
   );
 
+  // Resting state is a figure, not a row of input boxes: most rows of a multi-line order
+  // are not being touched today, and a table of open pickers reads as a form to fill in
+  // rather than a list to scan.
+  const [editing, setEditing] = useState(false);
   const availableForPicker: ColorPairs = {};
   const allColors = new Set([
     ...Object.keys(orderColors),
@@ -1499,11 +1424,6 @@ function AllocationLineRow({
         </div>
       </Td>
       <Td>
-        <span className="font-bold text-brand">
-          {formatColorBreakdown(line.allocated_color_breakdown, line.unit, line.unit_conversions) || "Not allocated"}
-        </span>
-      </Td>
-      <Td>
         <div className="min-w-[12rem]">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-sm font-semibold text-brand tabular-nums">
@@ -1552,13 +1472,24 @@ function AllocationLineRow({
         </div>
       </Td>
       <Td className="min-w-[21rem]">
-        <ColorQtyPicker
-          available={availableForPicker}
-          setSize={setSize}
-          value={draftPairs}
-          onChange={onDraftChange}
-          disabled={inventoryLoading}
-        />
+        {editing ? (
+          <ColorQtyPicker
+            available={availableForPicker}
+            setSize={setSize}
+            value={draftPairs}
+            onChange={onDraftChange}
+            disabled={inventoryLoading}
+          />
+        ) : (
+          <ColorQtySummary
+            value={draftPairs}
+            available={availableForPicker}
+            setSize={setSize}
+            emptyLabel="Nothing available to allocate"
+            onEdit={() => setEditing(true)}
+            disabled={inventoryLoading}
+          />
+        )}
         {validationMessage && (
           <div className="mt-1 text-xs font-medium text-error">
             {validationMessage}
@@ -1664,6 +1595,13 @@ function AllocationTable({
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Nobody has to come here on an ordinary day, and staff who think they skipped a
+          step will go looking for it. Say plainly that the work is already done. */}
+      <p className="text-sm text-text-secondary">
+        Stock is set aside automatically when it arrives, oldest order first. Come here
+        only to decide who goes first when a shipment falls short, or to move stock to
+        another customer.
+      </p>
       <TableContainer>
         <Thead className="top-0">
           <Tr>
@@ -1674,7 +1612,6 @@ function AllocationTable({
                 delivered / ordered
               </span>
             </Th>
-            <Th className="min-w-[13rem]">Allocated colors</Th>
             <Th className="min-w-[12rem]">Available to allocate</Th>
             <Th className="min-w-[21rem]">Allocate colors</Th>
           </Tr>
@@ -1774,20 +1711,18 @@ function availableDeliveryColors(
   );
 }
 
-/** The same three rules the server applies to a delivery: the colour has to be on the
- *  order, the line cannot pass what the customer is still owed, and the stock has to be
- *  free at this place once other orders' reservations are held back.
+/** The same rules the server applies to a delivery: the colour has to be allocated to
+ *  this order, the line cannot pass what the customer is still owed, and the stock has to
+ *  be there at this place.
  *
- *  Allocation is deliberately NOT one of them. Reserving stock is a planning step, not a
- *  gate — the server has always let unallocated stock go out first-come-first-served, and
- *  a customer standing at the counter should not be turned away because an internal step
- *  was skipped. The screen used to cap delivery at what had been allocated, which blocked
- *  handovers the server would have accepted.
- */
+ *  Allocation is the ceiling, not a suggestion. It is the step that decides whose goods
+ *  these are, so handing over stock nobody set aside would let one customer walk off with
+ *  what another is waiting for. */
 function deliveryValidationMessage(
   line: CustomerOrderLine,
   draft: string,
   owedColors: ColorPairs,
+  allocatedColors: ColorPairs,
   availableColors: ColorPairs,
   inventoryLoading: boolean,
 ): string | null {
@@ -1806,8 +1741,10 @@ function deliveryValidationMessage(
   if (requestedPairs > lineRemaining(line))
     return `Delivery cannot exceed ${formatIn(lineRemaining(line), line.unit, line.unit_conversions)}.`;
   for (const [color, pairs] of Object.entries(requestedColors)) {
-    if ((owedColors[color] ?? 0) <= 0)
-      return `${color} is not still owed on this order.`;
+    if ((allocatedColors[color] ?? 0) <= 0)
+      return `${color} is not allocated to this order — allocate it first.`;
+    if (pairs > (allocatedColors[color] ?? 0))
+      return `Only ${formatSets(allocatedColors[color] ?? 0)} of ${color} is allocated.`;
     if (pairs > (owedColors[color] ?? 0))
       return `Only ${formatSets(owedColors[color] ?? 0)} of ${color} is still owed.`;
     if (pairs > (availableColors[color] ?? 0))
@@ -1830,6 +1767,9 @@ function DeliveryView({
   onSaveDelivery: (input: CustomerDeliveryBatchInput) => Promise<void>;
 }): React.JSX.Element {
   const [drafts, setDrafts] = useState<Record<string, ColorPairs>>({});
+  // Which rows are open for typing. A delivery usually touches one or two products out
+  // of the order, so the rest rest as a figure rather than as a form.
+  const [editingLines, setEditingLines] = useState<Set<string>>(new Set());
   const [fromLocation, setFromLocation] = useState("");
   const [deliveryDate, setDeliveryDate] = useState(todayIso());
   const [deliveryAddress, setDeliveryAddress] = useState(
@@ -1883,6 +1823,7 @@ function DeliveryView({
         line,
         serialized,
         owedColors,
+        allocatedColors,
         availableColors,
         inventoryLoading,
       ),
@@ -1999,7 +1940,6 @@ function DeliveryView({
                 Delivered / Ordered
               </span>
             </Th>
-            <Th className="min-w-[13rem]">Allocated colors</Th>
             <Th className="min-w-[13rem]">Available to deliver</Th>
             <Th className="min-w-[21rem]">Deliver colors</Th>
           </Tr>
@@ -2007,10 +1947,11 @@ function DeliveryView({
         <Tbody>
           {rows.map((row) => {
             const deliverableColors = Object.entries(
-              row.owedColors,
+              row.allocatedColors,
             ).reduce<ColorPairs>((colors, [color, pairs]) => {
               const deliverablePairs = Math.min(
                 pairs,
+                row.owedColors[color] ?? 0,
                 row.availableColors[color] ?? 0,
               );
               if (deliverablePairs > 0) colors[color] = deliverablePairs;
@@ -2025,11 +1966,28 @@ function DeliveryView({
               <Tr key={row.line.order_line_id}>
                 <Td>
                   <div className="flex min-w-[12rem] flex-col gap-0.5">
-                    <span className="font-bold text-brand">
-                      {row.line.stock_code || "No stock code"}
-                    </span>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="font-bold text-brand">
+                        {row.line.stock_code || "No stock code"}
+                      </span>
+                      <span className="text-xs text-text-muted">
+                        {GROUP_LABELS[row.line.product_group]}
+                      </span>
+                    </div>
                     <span className="font-semibold text-text-primary">
                       {row.line.description || "Unnamed product"}
+                    </span>
+                    {/* What the customer actually asked for — context every row wants,
+                        and the only place it appeared before was the allocate screen. */}
+                    <span className="text-xs">
+                      <span className="font-semibold text-text-primary">Colors:</span>{" "}
+                      <span className="font-bold text-brand">
+                        {formatColorBreakdown(
+                          row.line.color_breakdown,
+                          row.line.unit,
+                          row.line.unit_conversions,
+                        ) || "—"}
+                      </span>
                     </span>
                   </div>
                 </Td>
@@ -2065,11 +2023,6 @@ function DeliveryView({
                   )}
                 </Td>
                 <Td>
-                  <span className="font-bold text-brand">
-                    {formatColorPairs(row.allocatedColors, { ...PAIRS_PER, set: setSize }) || "No allocation"}
-                  </span>
-                </Td>
-                <Td>
                   <div className="min-w-[13rem]">
                     <div className="font-semibold tabular-nums text-brand">
                       {inventoryLoading
@@ -2080,27 +2033,42 @@ function DeliveryView({
                       {inventoryLoading
                         ? "Checking stock…"
                         : formatColorPairs(deliverableColors, { ...PAIRS_PER, set: setSize }) ||
-                          "Nothing on this order is in stock here."}
+                          "Nothing is allocated and in stock here."}
                     </div>
                   </div>
                 </Td>
                 <Td className="min-w-[21rem]">
-                  <ColorQtyPicker
-                    available={deliverableColors}
-                    setSize={setSize}
-                    value={row.draftPairs}
-                    onChange={(next) =>
-                      setDrafts((current) => ({
-                        ...current,
-                        [row.line.order_line_id]: next,
-                      }))
-                    }
-                    disabled={
-                      (row.line.allocated_quantity_pairs ?? 0) <= 0 ||
-                      inventoryLoading ||
-                      selectedLocation === ""
-                    }
-                  />
+                  {editingLines.has(row.line.order_line_id) ? (
+                    <ColorQtyPicker
+                      available={deliverableColors}
+                      setSize={setSize}
+                      value={row.draftPairs}
+                      onChange={(next) =>
+                        setDrafts((current) => ({
+                          ...current,
+                          [row.line.order_line_id]: next,
+                        }))
+                      }
+                      disabled={
+                        (row.line.allocated_quantity_pairs ?? 0) <= 0 ||
+                        inventoryLoading ||
+                        selectedLocation === ""
+                      }
+                    />
+                  ) : (
+                    <ColorQtySummary
+                      value={row.draftPairs}
+                      available={deliverableColors}
+                      setSize={setSize}
+                      emptyLabel="Nothing allocated and in stock here"
+                      onEdit={() =>
+                        setEditingLines((current) =>
+                          new Set(current).add(row.line.order_line_id),
+                        )
+                      }
+                      disabled={inventoryLoading || selectedLocation === ""}
+                    />
+                  )}
                   {row.problem && (
                     <div className="mt-1 text-xs font-medium text-error">
                       {row.problem}
@@ -2142,7 +2110,7 @@ function AllocateAndDeliveryView({
   orders,
   inventoryLines,
   inventoryLoading,
-  initialTab = "allocate",
+  initialTab = "deliver",
   onSaveAllocation,
   onSaveAllocationsComplete,
   onSaveDelivery,
@@ -2197,11 +2165,16 @@ function AllocateAndDeliveryView({
     const roomLeft = Math.max(0, lineRemaining(line) - ownPairs);
     return sum + Math.min(takeable, roomLeft);
   }, 0);
-  // What could actually be handed over now: on the order, free at a place, and within
-  // what the customer is still owed. Same three rules deliveryValidationMessage applies,
-  // so the badge and the rows below never disagree.
+  // What could actually be handed over now: allocated to this order, still owed, and
+  // physically there. The same rules deliveryValidationMessage applies, so the badge and
+  // the rows below never disagree.
   const availableToDeliverPairs = order.lines.reduce((sum, line) => {
     const owedColors = stillOwedColors(line);
+    const allocatedColors = colorPairsForText(
+      line.allocated_color_breakdown ?? "",
+      line.unit,
+      line.unit_conversions,
+    );
     const stockColors = availableStockColors(line.stock_code, inventoryLines);
     const reservedByOthers = allocationsFromOtherOrders(
       orders,
@@ -2209,9 +2182,14 @@ function AllocateAndDeliveryView({
       order.order_id,
     );
     const availableStock = subtractColorPairs(stockColors, reservedByOthers);
-    const deliverable = Object.entries(owedColors).reduce(
-      (acc, [color, wanted]) =>
-        acc + Math.min(wanted, availableStock[color] ?? 0),
+    const deliverable = Object.entries(allocatedColors).reduce(
+      (acc, [color, allocated]) =>
+        acc +
+        Math.min(
+          allocated,
+          owedColors[color] ?? 0,
+          availableStock[color] ?? 0,
+        ),
       0,
     );
     return sum + Math.min(deliverable, lineRemaining(line));
@@ -2385,8 +2363,7 @@ const customerOrderDetailSchema = z.object({
     total_quantity_pairs: z.number().finite().min(0),
     delivered_quantity_pairs: z.number().finite().min(0),
     order_status: z.enum([
-      "new",
-      "allocating",
+      "waiting_for_stock",
       "ready_to_deliver",
       "partly_delivered",
       "fulfilled",
@@ -2434,7 +2411,10 @@ function OrderDetail({
   writeOffs: WriteOffWire[];
 }): React.JSX.Element {
   const [saving, setSaving] = useState(false);
+  const showToast = useToast();
   const [addingLineId, setAddingLineId] = useState<string | null>(null);
+  /** The line whose removal is waiting for a second click. */
+  const [confirmingRemoval, setConfirmingRemoval] = useState<string | null>(null);
   const [writeOffLine, setWriteOffLine] = useState<CustomerOrderLine | null>(
     null,
   );
@@ -2567,7 +2547,22 @@ function OrderDetail({
     });
   }
 
+  /** A line that has had goods go out against it, or has stock set aside for it, is not
+   *  the kind of thing to take off an order with one click: the delivery records would
+   *  then point at a product the order no longer lists, and the reservation would be
+   *  holding stock for nobody. Take the delivery back, or release the allocation, first. */
+  function lineLockedReason(line: CustomerOrderLine): string | null {
+    if (line.delivered_quantity_pairs > 0) {
+      return "Already given to the customer — take that delivery back first.";
+    }
+    if ((line.allocated_quantity_pairs ?? 0) > 0) {
+      return "Stock is set aside for this — release the allocation first.";
+    }
+    return null;
+  }
+
   function removeLine(index: number): void {
+    setConfirmingRemoval(null);
     if (order.lines[index]?.order_line_id === addingLineId) {
       setAddingLineId(null);
     }
@@ -2638,7 +2633,6 @@ function OrderDetail({
     (sum, line) => sum + (line.allocated_quantity_pairs ?? 0),
     0,
   );
-  const remainingToAllocate = Math.max(0, order.total_quantity_pairs - allocatedPairs);
   const allocatedPct = order.total_quantity_pairs > 0
     ? Math.round((allocatedPairs / order.total_quantity_pairs) * 100)
     : 0;
@@ -3148,26 +3142,68 @@ function OrderDetail({
                               line.unit_conversions,
                             ),
                           )}
-                          <button
-                            type="button"
-                            onClick={() => removeLine(index)}
-                            title="Remove this product"
-                            aria-label={`Remove product ${index + 1}`}
-                            className={cn(
-                              "ml-2 p-1 rounded-md align-middle transition-colors duration-150",
-                              SOFT_RED,
-                              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
-                            )}
-                          >
-                            <TrashIcon className="w-4 h-4" />
-                          </button>
                         </Td>
+                        {/* The row's two icon actions sit together rather than one of them
+                            leaning on the money: a figure column reads as a figure. */}
                         <Td className="text-center">
-                          <MismatchIconButton
-                            explained={Boolean(explanation)}
-                            disabled={lineRemaining(line) <= 0}
-                            onClick={() => setWriteOffLine(line)}
-                          />
+                          <div className="flex flex-col items-center gap-1">
+                            <MismatchIconButton
+                              explained={Boolean(explanation)}
+                              disabled={lineRemaining(line) <= 0}
+                              onClick={() => setWriteOffLine(line)}
+                            />
+                            {(() => {
+                              const locked = lineLockedReason(line);
+                              if (locked) {
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => showToast("info", locked)}
+                                    title={locked}
+                                    aria-label={`Cannot remove product ${index + 1}. ${locked}`}
+                                    className="p-1 rounded-md text-text-disabled transition-colors hover:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                  >
+                                    <TrashIcon className="w-4 h-4" />
+                                  </button>
+                                );
+                              }
+                              if (confirmingRemoval === line.order_line_id) {
+                                return (
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => removeLine(index)}
+                                      className="rounded-md bg-error px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                                    >
+                                      Remove
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmingRemoval(null)}
+                                      className="rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium text-text-secondary"
+                                    >
+                                      Keep
+                                    </button>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmingRemoval(line.order_line_id)}
+                                  title="Remove this product"
+                                  aria-label={`Remove product ${index + 1}`}
+                                  className={cn(
+                                    "p-1 rounded-md transition-colors duration-150",
+                                    SOFT_RED,
+                                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
+                                  )}
+                                >
+                                  <TrashIcon className="w-4 h-4" />
+                                </button>
+                              );
+                            })()}
+                          </div>
                         </Td>
                       </Tr>
                     );
@@ -3223,16 +3259,6 @@ function OrderDetail({
                   <PlusIcon className="w-4 h-4 mr-1" />
                   Add product
                 </Button>
-                {onAllocate && remainingToAllocate > 0 && order.order_status !== "cancelled" && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => onAllocate(order.order_id, "allocate")}
-                  >
-                    <ClipboardIcon className="w-3.5 h-3.5 mr-1" />
-                    Allocate stock ({sets(remainingToAllocate)} unallocated)
-                  </Button>
-                )}
                 {addingLineId && (
                   <Button
                     variant="ghost"
@@ -3809,7 +3835,7 @@ function NewOrderForm({
         0,
       ),
       delivered_quantity_pairs: 0,
-      order_status: "new",
+      order_status: "waiting_for_stock",
       // Nothing has been paid at the moment an order is written down, so the account
       // starts unpaid.
       payment: { account_id: `pa-${now}`, payments: [] },

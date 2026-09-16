@@ -15,6 +15,7 @@ from app.models.wholesale import Receiving, ReceivingCost, ReceivingItem, Receiv
 from app.services.wholesale.colors import color_qty_problem, colors_as_json, conversion_rates
 from app.services.wholesale.currency import resolve_money
 from app.services.wholesale.master_data import get_or_create_product
+from app.services.wholesale.inventory import auto_allocate_arrivals
 from app.services.wholesale.references import allocate_reference, retry_on_reference_collision
 from app.services.wholesale.units import from_pairs, to_pairs
 from app.services.wholesale_shipments import get_shipment
@@ -168,6 +169,18 @@ def update_package(
         package.items = [_item_from_payload(db, item) for item in items_in]
 
     db.commit()
+
+    # Opening a package is the moment its contents become real stock, so it is also the
+    # moment the customers waiting for that stock can have it set aside. Doing it here
+    # means nobody has to reopen the Fulfill screen and retype a decision the supplier
+    # voucher already recorded.
+    if package.opened:
+        auto_allocate_arrivals(
+            db,
+            branch_id if branch_id is not None else receiving.branch_id,
+            {item.stock_code for item in package.items},
+        )
+
     db.refresh(receiving)
     return receiving
 

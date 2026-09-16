@@ -48,8 +48,7 @@ function relativeTime(value: string): string {
 function statusLabel(value: string | undefined): string {
   if (!value) return "—";
   const labels: Record<string, string> = {
-    allocating: "Allocating",
-    in_transit: "In transit",
+      in_transit: "In transit",
     not_arrived: "Not arrived yet",
     out_of_stock: "Out of stock",
     partly_delivered: "Partly delivered",

@@ -34,17 +34,24 @@ _LOAD_OPTIONS = (selectinload(CustomerOrder.lines), selectinload(CustomerOrder.p
 
 
 def order_status(total_wanted: int, received: int, allocated: int, cancelled: bool, lost: int = 0) -> str:
+    """Where this order's goods are, in words a shop owner uses.
+
+    Named after the goods rather than after a step somebody performs: arriving stock is
+    allocated to waiting orders by itself now (see auto_allocate_arrivals), so a status
+    like "allocating" described an activity nobody was doing. "Part of it has arrived"
+    and "all of it has arrived" both come out as ready_to_deliver, because the job they
+    ask for is the same one — go and hand over what is here — and how much that is is a
+    question the quantities answer.
+    """
     if cancelled:
         return "cancelled"
     if total_wanted > 0 and received + lost >= total_wanted:
         return "fulfilled"
     if received > 0:
         return "partly_delivered"
-    if allocated >= total_wanted and total_wanted > 0:
-        return "ready_to_deliver"
     if allocated > 0:
-        return "allocating"
-    return "new"
+        return "ready_to_deliver"
+    return "waiting_for_stock"
 
 
 def _load(db: Session, order_id: str, branch_id: str | None) -> CustomerOrder:

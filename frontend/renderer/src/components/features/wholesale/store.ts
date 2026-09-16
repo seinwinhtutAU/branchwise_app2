@@ -14,10 +14,9 @@
 //     and the order corrects itself; there is nowhere else to adjust it.
 //   • Counting a package at the gate is what a supplier voucher means by "received", and
 //     the packages recorded at the gate are what the shipment means by "finally received".
-//   • An order's status follows its goods: no allocation is new, a partial allocation is
-//     allocating, a complete allocation is ready to deliver, delivery moves it through
-//     partly delivered to fulfilled. Cancelled is the one status a person sets, and
-//     nothing overrides it.
+//   • An order's status follows its goods: nothing set aside is waiting for stock, any
+//     stock set aside is ready to deliver, delivery moves it through partly delivered to
+//     fulfilled. Cancelled is the one status a person sets, and nothing overrides it.
 //
 // `settle` below is where all of that happens, and it runs after every change, so no
 // screen has to remember to keep another screen honest.

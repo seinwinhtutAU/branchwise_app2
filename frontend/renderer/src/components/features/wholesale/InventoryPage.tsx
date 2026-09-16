@@ -1395,8 +1395,7 @@ const RELATED_ORDER_STATUS_LABELS: Record<
   CustomerOrder["order_status"],
   string
 > = {
-  new: "New",
-  allocating: "Allocating",
+  waiting_for_stock: "Waiting for stock",
   ready_to_deliver: "Ready to deliver",
   partly_delivered: "Partially delivered",
   fulfilled: "Fulfilled",
@@ -1407,8 +1406,7 @@ const RELATED_ORDER_STATUS_STYLES: Record<
   CustomerOrder["order_status"],
   string
 > = {
-  new: "bg-text-secondary text-white",
-  allocating: "bg-warning text-white",
+  waiting_for_stock: "bg-text-secondary text-white",
   ready_to_deliver: "bg-brand text-white",
   partly_delivered: "bg-warning text-white",
   fulfilled: "bg-success text-white",

@@ -1,7 +1,8 @@
 import React from "react";
 import { cn } from "@renderer/lib/utils";
-import { PAIRS_PER } from "./units";
+import { formatSets, PAIRS_PER } from "./units";
 import { onlyDigits } from "./shared";
+import { PencilIcon } from "@renderer/components/ui/icons";
 import { type ColorPairs } from "./stock";
 
 export interface ColorQtyPickerProps {
@@ -166,6 +167,68 @@ export function ColorQtyPicker({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/** The picker's resting state: what has been chosen, as words, with a way in.
+ *
+ *  A table of open pickers is a wall of input boxes, most of them for rows nobody is
+ *  touching today. This shows the figure instead and opens the picker when asked. A row
+ *  with nothing to pick has nothing to open, so it gets the reason rather than a button
+ *  that leads to an empty box. */
+export function ColorQtySummary({
+  value,
+  available,
+  setSize,
+  emptyLabel,
+  onEdit,
+  disabled = false,
+}: {
+  value: ColorPairs;
+  available: ColorPairs;
+  setSize: number;
+  /** Why there is nothing to pick, when there is nothing to pick. */
+  emptyLabel: string;
+  onEdit: () => void;
+  disabled?: boolean;
+}): React.JSX.Element {
+  const conversions = { ...PAIRS_PER, set: setSize > 0 ? setSize : PAIRS_PER.set };
+  const chosen = Object.entries(value).filter(([, pairs]) => pairs > 0);
+  const hasAnythingToPick = Object.values(available).some((pairs) => pairs > 0);
+
+  if (!hasAnythingToPick && chosen.length === 0) {
+    return <span className="text-xs text-text-muted">{emptyLabel}</span>;
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-sm">
+        {chosen.length === 0 ? (
+          <span className="text-text-muted">Nothing selected</span>
+        ) : (
+          <span className="font-semibold text-brand">
+            {chosen
+              .map(([color, pairs]) => `${color} ${formatSets(pairs, conversions)}`)
+              .join(", ")}
+          </span>
+        )}
+      </span>
+      <button
+        type="button"
+        onClick={onEdit}
+        disabled={disabled}
+        aria-label="Change quantities"
+        title="Change quantities"
+        className={cn(
+          "shrink-0 rounded-md border border-border p-1 text-text-muted transition-colors",
+          "hover:border-brand hover:text-brand",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+          disabled && "cursor-not-allowed opacity-40 hover:border-border hover:text-text-muted",
+        )}
+      >
+        <PencilIcon className="h-3.5 w-3.5" />
+      </button>
     </div>
   );
 }

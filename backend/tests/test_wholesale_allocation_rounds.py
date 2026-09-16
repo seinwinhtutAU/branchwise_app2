@@ -80,6 +80,7 @@ def test_repeat_partial_deliveries(authed_client: TestClient, db_session: Sessio
 
     total = 0
     for _ in range(2):
+        assert _alloc(authed_client, order["lines"][0]["order_line_id"], "black1s").status_code == 200
         d = authed_client.post("/api/wholesale/inventory/deliveries/batch", json={
             "order_id": oid, "delivered_on": "2026-09-13", "delivery_address": "Y", "note": "",
             "lines": [{"stock_code": "A1001", "location": "Gate", "color_breakdown": "black1s", "unit": "set"}],
@@ -137,6 +138,7 @@ def test_allocation_still_cannot_pass_what_is_owed_after_a_delivery(
     order = authed_client.post("/api/wholesale/orders", json=payload).json()
     oid, lid = order["order_id"], order["lines"][0]["order_line_id"]
 
+    assert _alloc(authed_client, lid, "black1s").status_code == 200
     d = authed_client.post("/api/wholesale/inventory/deliveries/batch", json={
         "order_id": oid, "delivered_on": "2026-09-13", "delivery_address": "Y", "note": "",
         "lines": [{"stock_code": "A1001", "location": "Gate", "color_breakdown": "black1s", "unit": "set"}],
