@@ -17,12 +17,13 @@ export function Card({
   return (
     <div
       className={cn(
-        "bg-bg-base rounded-xl border border-border shadow-sm p-6",
+        "bg-bg-base rounded-lg border border-border p-5",
+        // No lift on hover: the card's bottom edge flickers as it moves, and a surface
+        // that jumps under the pointer reads as a web page rather than as software.
+        // The border doing the work is enough to say "this one is clickable".
         interactive && [
-          "cursor-pointer transition-all duration-200",
-          "hover:-translate-y-0.5 hover:shadow-md hover:border-border-strong",
-          "active:translate-y-0 active:shadow-sm",
-          "motion-reduce:hover:translate-y-0",
+          "cursor-pointer transition-colors duration-150",
+          "hover:border-border-strong hover:bg-bg-subtle/40",
         ],
         className,
       )}

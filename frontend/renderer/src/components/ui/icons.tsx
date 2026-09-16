@@ -15,7 +15,19 @@ export function UploadIcon({
   return (
     <svg {...base} className={className}>
       <path
-        d="M12 16V4m0 0L7 9m5-5l5 5M5 20h14"
+        d="M14 2.5H6a2 2 0 00-2 2v15a2 2 0 002 2h12a2 2 0 002-2V8.5l-6-6z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14 2.5v6h6"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 17.5v-6.5m-3 3l3-3 3 3"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -33,7 +45,21 @@ export function HistoryIcon({
   return (
     <svg {...base} className={className}>
       <path
-        d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8M3 3v5h5M12 7v5l4 2"
+        d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3 3v5h5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 7v5l3 2"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -68,12 +94,32 @@ export function OverviewIcon({
 }): React.JSX.Element {
   return (
     <svg {...base} className={className}>
+      <rect
+        x="3.5"
+        y="3.5"
+        width="17"
+        height="17"
+        rx="2"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
       <path
-        d="M4 19V10M10 19V5M16 19v-7M4 19h16"
+        d="M3.5 9.5h17"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
-        strokeLinejoin="round"
+      />
+      <path
+        d="M9.5 20.5V9.5M15.5 20.5V9.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M3.5 15h17"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
       />
     </svg>
   );
@@ -89,35 +135,35 @@ export function DashboardIcon({
       <rect
         x="3.5"
         y="3.5"
-        width="7.5"
-        height="7.5"
+        width="7"
+        height="7"
         rx="1.6"
         stroke="currentColor"
         strokeWidth="1.6"
       />
       <rect
-        x="13"
+        x="13.5"
         y="3.5"
-        width="7.5"
-        height="4.5"
-        rx="1.6"
-        stroke="currentColor"
-        strokeWidth="1.6"
-      />
-      <rect
-        x="13"
-        y="10"
-        width="7.5"
-        height="10.5"
+        width="7"
+        height="7"
         rx="1.6"
         stroke="currentColor"
         strokeWidth="1.6"
       />
       <rect
         x="3.5"
-        y="13"
-        width="7.5"
-        height="7.5"
+        y="13.5"
+        width="7"
+        height="7"
+        rx="1.6"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <rect
+        x="13.5"
+        y="13.5"
+        width="7"
+        height="7"
         rx="1.6"
         stroke="currentColor"
         strokeWidth="1.6"
@@ -134,12 +180,13 @@ export function SalesIcon({
   return (
     <svg {...base} className={className}>
       <path
-        d="M3 3h2l2.4 12.4a2 2 0 002 1.6h8.2a2 2 0 002-1.6L21 8H6M9 21a1 1 0 100-2 1 1 0 000 2zM18 21a1 1 0 100-2 1 1 0 000 2z"
+        d="M12.586 2.586A2 2 0 0011.172 2H4a2 2 0 00-2 2v7.172a2 2 0 00.586 1.414l8.828 8.828a2 2 0 002.828 0l7.172-7.172a2 2 0 000-2.828L12.586 2.586z"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+      <circle cx="7.5" cy="7.5" r="1.5" fill="currentColor" />
     </svg>
   );
 }
@@ -152,7 +199,14 @@ export function InventoryIcon({
   return (
     <svg {...base} className={className}>
       <path
-        d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8"
+        d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -170,11 +224,24 @@ export function PurchaseIcon({
   return (
     <svg {...base} className={className}>
       <path
-        d="M3 3h2l1.6 3M6.6 6h13.4l-2 8H8.4M6.6 6L8.4 14M8.4 14l-1 4h11M10 21a1 1 0 100-2 1 1 0 000 2zM17 21a1 1 0 100-2 1 1 0 000 2z"
+        d="M3 10h18l-2 10H5L3 10z"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+      <path
+        d="M8 10V6a4 4 0 018 0v4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9 14v3M15 14v3"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
       />
     </svg>
   );
@@ -321,24 +388,28 @@ export function ClipboardIcon({
     <svg {...base} className={className}>
       <rect
         x="5"
-        y="5"
+        y="4"
         width="14"
-        height="16"
-        rx="2.5"
-        stroke="currentColor"
-        strokeWidth="1.6"
-      />
-      <rect
-        x="9"
-        y="3"
-        width="6"
-        height="4"
-        rx="1.5"
+        height="17"
+        rx="2"
         stroke="currentColor"
         strokeWidth="1.6"
       />
       <path
-        d="M9 12.5h6M9 16.5h4"
+        d="M9 4a2 2 0 014 0"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M8.5 11l1.5 1.5 3-3"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9 16h6"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -417,14 +488,14 @@ export function WarningIcon({
   return (
     <svg {...base} className={className}>
       <path
-        d="M12 3l10 18H2L12 3z"
+        d="M10.7 4.2a1.5 1.5 0 012.6 0l8.1 14A1.5 1.5 0 0120.1 20.5H3.9a1.5 1.5 0 01-1.3-2.3l8.1-14z"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
-        d="M12 9v5M12 17h.01"
+        d="M12 9v4.5M12 16.5h.01"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -440,8 +511,23 @@ export function HeartPulseIcon({
 }): React.JSX.Element {
   return (
     <svg {...base} className={className}>
+      <rect
+        x="2"
+        y="3"
+        width="20"
+        height="14"
+        rx="2"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
       <path
-        d="M3 12h4l2 7 4-14 2 7h6"
+        d="M8 21h8M12 17v4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M5 10h3l2 4 4-8 2 4h3"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -535,6 +621,45 @@ export function SettingsIcon({
   );
 }
 
+export function StoreIcon({
+  className = "w-5 h-5",
+}: {
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path
+        d="M2 9.5L4 4h16l2 5.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M2 9.5a2.5 2.5 0 005 0 2.5 2.5 0 005 0 2.5 2.5 0 005 0 2.5 2.5 0 005 0"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4 12v7.5a1.5 1.5 0 001.5 1.5h13a1.5 1.5 0 001.5-1.5V12"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 21v-5a1 1 0 011-1h2a1 1 0 011 1v5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function FactoryIcon({
   className = "w-5 h-5",
 }: {
@@ -543,11 +668,31 @@ export function FactoryIcon({
   return (
     <svg {...base} className={className}>
       <path
-        d="M3 21V11l6 4v-4l6 4v-4l6 4v6H3zM6 21v-4M12 21v-4M18 21v-4"
+        d="M2 21h20V12l-6 3V10l-6 3V8L2 12.5V21z"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+      <path
+        d="M18 4h2.5v4H18z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6 21v-4a1 1 0 011-1h2a1 1 0 011 1v4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M15 17h3"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
       />
     </svg>
   );
@@ -645,14 +790,21 @@ export function ReceivingIcon({
   return (
     <svg {...base} className={className}>
       <path
-        d="M4 5h16v14H4V5zM4 5l8 6 8-6"
+        d="M4 10v9a2 2 0 002 2h12a2 2 0 002-2v-9"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
-        d="M9 15.5l2 2 4-4.5"
+        d="M3 10l9-4 9 4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 3v10m-3-3l3 3 3-3"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -706,13 +858,7 @@ export function DollarIcon({
   return (
     <svg {...base} className={className}>
       <path
-        d="M12 3v18"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-      <path
-        d="M16.5 7.5c0-1.66-2.01-3-4.5-3S7.5 5.84 7.5 7.5 9.51 10.5 12 10.5s4.5 1.34 4.5 3-2.01 3-4.5 3-4.5-1.34-4.5-3"
+        d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -829,22 +975,28 @@ export function TruckIcon({
   return (
     <svg {...base} className={className}>
       <rect
-        x="2.5"
-        y="6.5"
-        width="11"
-        height="9.5"
-        rx="1.5"
+        x="2"
+        y="6"
+        width="12"
+        height="9"
+        rx="1"
         stroke="currentColor"
         strokeWidth="1.6"
       />
       <path
-        d="M13.5 10h3.6a1.5 1.5 0 011.2.6l2 2.7a1.5 1.5 0 01.3.9V16h-7.1V10z"
+        d="M14 9h4l3 3v3h-7V9z"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinejoin="round"
       />
-      <circle cx="7" cy="18" r="1.9" stroke="currentColor" strokeWidth="1.6" />
-      <circle cx="17" cy="18" r="1.9" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="6" cy="18" r="2" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="17" cy="18" r="2" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d="M9 18h5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -875,19 +1027,79 @@ export function VoucherIcon({
   return (
     <svg {...base} className={className}>
       <path
-        d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z"
+        d="M4 6a2 2 0 012-2h12a2 2 0 012 2v3a2 2 0 000 4v3a2 2 0 01-2 2H6a2 2 0 01-2-2v-3a2 2 0 000-4V6z"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinejoin="round"
       />
       <path
-        d="M14 3v4a1 1 0 001 1h4"
+        d="M12 4v2M12 9v2M12 14v2M12 19v1"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M7 10h2M15 10h2M15 14h2"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+export function ReportsIcon({
+  className = "w-5 h-5",
+}: {
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path
+        d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinejoin="round"
       />
       <path
-        d="M9 13h6M9 16.5h4"
+        d="M14 2v6h6"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 17v-2M12 17v-5M16 17v-7"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+export function MasterDataIcon({
+  className = "w-5 h-5",
+}: {
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <ellipse
+        cx="12"
+        cy="5"
+        rx="9"
+        ry="3"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <path
+        d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -932,3 +1144,22 @@ export function MoreVerticalIcon({
     </svg>
   );
 }
+
+export function LogOutIcon({
+  className = "w-5 h-5",
+}: {
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path
+        d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+

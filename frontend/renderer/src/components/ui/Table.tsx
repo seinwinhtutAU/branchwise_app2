@@ -30,7 +30,7 @@ export function TableContainer({
     <div
       style={style}
       className={cn(
-        "w-full overflow-x-auto rounded-lg border border-border",
+        "w-full overflow-x-auto rounded-md border border-border",
         className,
       )}
     >

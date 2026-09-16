@@ -69,6 +69,8 @@ import {
   WarningIcon,
   SettingsIcon,
   DollarIcon,
+  ReportsIcon,
+  MasterDataIcon,
 } from "@renderer/components/ui/icons";
 
 // Lazy-loaded so a given account's bundle only pays for the sections it can actually
@@ -168,15 +170,31 @@ const RETAIL_NAV_ITEMS: NavItem[] = [
   // Sits next to Dashboard rather than next to Warning, even though both are "things
   // that are wrong": this one is about the business, Warning is about the imported data
   // being wrong, and they are read by different people for different reasons.
-  { id: "businessAlerts", label: "Business Alerts", icon: <BellIcon /> },
+  {
+    id: "businessAlerts",
+    label: "Business Alerts",
+    shortLabel: "Alerts",
+    icon: <BellIcon />,
+  },
   { id: "import", label: "Import", icon: <UploadIcon /> },
-  { id: "history", label: "Import History", icon: <HistoryIcon /> },
+  {
+    id: "history",
+    label: "Import History",
+    shortLabel: "History",
+    icon: <HistoryIcon />,
+  },
   {
     id: "importOverview",
     label: "Import Overview",
+    shortLabel: "Imports",
     icon: <HeartPulseIcon />,
   },
-  { id: "overview", label: "Data Overview", icon: <OverviewIcon /> },
+  {
+    id: "overview",
+    label: "Data Overview",
+    shortLabel: "Data",
+    icon: <OverviewIcon />,
+  },
   {
     id: "sales",
     label: "Sale",
@@ -207,14 +225,29 @@ const RETAIL_NAV_ITEMS: NavItem[] = [
 // work in, and Master Data last because it is set up once and rarely touched.
 const WHOLESALE_NAV_ITEMS: NavItem[] = [
   { id: "monitoring", label: "Dashboard", icon: <DashboardIcon /> },
-  { id: "orders", label: "Customer Orders", icon: <ClipboardIcon /> },
-  { id: "vouchers", label: "Supplier Vouchers", icon: <VoucherIcon /> },
+  {
+    id: "orders",
+    label: "Customer Orders",
+    shortLabel: "Orders",
+    icon: <ClipboardIcon />,
+  },
+  {
+    id: "vouchers",
+    label: "Supplier Vouchers",
+    shortLabel: "Vouchers",
+    icon: <VoucherIcon />,
+  },
   { id: "delivery", label: "Shipment", icon: <TruckIcon /> },
   { id: "receiving", label: "Receiving", icon: <ReceivingIcon /> },
   { id: "stock", label: "Inventory", icon: <InventoryIcon /> },
   { id: "finance", label: "Finance", icon: <DollarIcon /> },
-  { id: "reports", label: "Reports", icon: <OverviewIcon /> },
-  { id: "masterData", label: "Master Data", icon: <WarehouseIcon /> },
+  { id: "reports", label: "Reports", icon: <ReportsIcon /> },
+  {
+    id: "masterData",
+    label: "Master Data",
+    shortLabel: "Master",
+    icon: <MasterDataIcon />,
+  },
 ];
 
 // Keep the wholesale Dashboard and Reports routes available, but hide their tabs from

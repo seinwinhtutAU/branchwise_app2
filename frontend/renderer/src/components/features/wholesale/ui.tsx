@@ -228,7 +228,7 @@ export function Panel({
   return (
     <div
       className={cn(
-        "bg-bg-base border border-border rounded-xl overflow-hidden",
+        "bg-bg-base border border-border rounded-md overflow-hidden",
         className,
       )}
     >
@@ -270,7 +270,7 @@ export function FigureCard({
   return (
     <div
       className={cn(
-        "bg-bg-base border border-border rounded-xl",
+        "bg-bg-base border border-border rounded-md",
         compact ? "p-3" : "p-5",
         className,
       )}
