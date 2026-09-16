@@ -1009,6 +1009,12 @@ function ShipmentDetail({
                 variant="secondary"
                 size="sm"
                 onClick={() => setSplitOpen(true)}
+                disabled={finalRemaining(shipment) <= 0}
+                title={
+                  finalRemaining(shipment) <= 0
+                    ? "All packages have already arrived — there is nothing left to split."
+                    : undefined
+                }
               >
                 <TruckIcon className="w-4 h-4" />
                 Split shipment
@@ -1609,7 +1615,7 @@ function ShipmentDetail({
       <SplitShipmentModal
         open={splitOpen}
         shipmentNo={shipment.shipment_no}
-        availablePackages={cargoRemaining(shipment)}
+        availablePackages={finalRemaining(shipment)}
         availableQuantity={shipment.total_quantity_pairs}
         unit={shipment.total_unit}
         destinationSuggestions={[...RECEIVING_GATES, ...DESTINATION_NAMES]}

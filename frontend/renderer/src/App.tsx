@@ -217,6 +217,10 @@ const WHOLESALE_NAV_ITEMS: NavItem[] = [
   { id: "masterData", label: "Master Data", icon: <WarehouseIcon /> },
 ];
 
+// Keep the wholesale Dashboard and Reports routes available, but hide their tabs from
+// the left navigation until those screens are ready to be part of the daily workflow.
+const HIDDEN_WHOLESALE_NAV_IDS = new Set(["monitoring", "reports"]);
+
 const WORKSPACE_NAV_ITEMS: Record<Workspace, NavItem[]> = {
   retail: RETAIL_NAV_ITEMS,
   wholesale: WHOLESALE_NAV_ITEMS,
@@ -610,13 +614,19 @@ function App(): React.JSX.Element {
 
   const navItems = useMemo(
     () =>
-      WORKSPACE_NAV_ITEMS[effectiveWorkspace].map((item) => {
-        if (item.id === "warnings")
-          return { ...item, badgeCount: warningCount };
-        if (item.id === "businessAlerts")
-          return { ...item, badgeCount: businessAlertCount };
-        return item;
-      }),
+      WORKSPACE_NAV_ITEMS[effectiveWorkspace]
+        .filter(
+          (item) =>
+            effectiveWorkspace !== "wholesale" ||
+            !HIDDEN_WHOLESALE_NAV_IDS.has(item.id),
+        )
+        .map((item) => {
+          if (item.id === "warnings")
+            return { ...item, badgeCount: warningCount };
+          if (item.id === "businessAlerts")
+            return { ...item, badgeCount: businessAlertCount };
+          return item;
+        }),
     [effectiveWorkspace, warningCount, businessAlertCount],
   );
 
@@ -1090,6 +1100,7 @@ function App(): React.JSX.Element {
                     setReceivingTarget(receivingNo);
                     setSection("receiving");
                   }}
+                  onOpenOrders={() => handleSectionChange("orders")}
                 />
               )}
               {section === "monitoring" && (

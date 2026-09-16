@@ -103,7 +103,6 @@ type InventoryHealth =
 
 const LOW_STOCK_THRESHOLD = 20;
 const OVERSTOCK_THRESHOLD = 150;
-const ESTIMATED_PAIR_PRICE = 19500;
 
 const STOCK_STATUSES: StockStatus[] = [
   "At Supplier",
@@ -117,11 +116,13 @@ const STOCK_STATUSES: StockStatus[] = [
 export default function InventoryPage({
   session,
   onOpenReceiving,
+  onOpenOrders,
   initialStockCode,
   onInitialStockOpened,
 }: {
   session: Session;
   onOpenReceiving: (receivingNo: string) => void;
+  onOpenOrders?: () => void;
   initialStockCode?: string | null;
   onInitialStockOpened?: () => void;
 }): React.JSX.Element {
@@ -240,6 +241,7 @@ export default function InventoryPage({
       }}
       onRefresh={reload}
       refreshing={isRefreshing || isStockRefreshing}
+      onOpenOrders={onOpenOrders}
     />
   );
 }
@@ -394,12 +396,14 @@ function StockList({
   onOpen,
   onRefresh,
   refreshing,
+  onOpenOrders,
 }: {
-      records: StockRecord[];
-      movements: StockMovement[];
+  records: StockRecord[];
+  movements: StockMovement[];
   onOpen: (stockCode: string) => void;
   onRefresh: () => void;
   refreshing: boolean;
+  onOpenOrders?: () => void;
 }): React.JSX.Element {
   const [search, setSearch] = useState("");
   const [location, setLocation] = useState("all");
@@ -408,6 +412,15 @@ function StockList({
   const [healthFilter, setHealthFilter] = useState<InventoryHealth | "all">("all");
   const [page, setPage] = useState(1);
   const [section, setSection] = useState<InventorySection>("overview");
+
+  const unallocatedPairs = records.reduce(
+    (sum, record) => sum + Math.max(0, record.available_pairs),
+    0,
+  );
+  const owedToCustomersPairs = records.reduce(
+    (sum, record) => sum + Math.max(0, record.owed_to_customers_pairs),
+    0,
+  );
 
   const locations = [...new Set(records.flatMap((record) => record.locations.map((entry) => entry.location)))].sort();
 
@@ -470,6 +483,23 @@ function StockList({
 
       {section === "overview" && (
         <>
+          {unallocatedPairs > 0 && onOpenOrders && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-success/40 bg-success-subtle px-5 py-4">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-text-primary">
+                  {formatSets(unallocatedPairs)} on the shelf with no customer allocated yet.
+                </p>
+                <p className="mt-0.5 text-sm text-text-secondary">
+                  {owedToCustomersPairs > 0
+                    ? `Customers are still waiting for ${formatSets(owedToCustomersPairs)}.`
+                    : "Counting the boxes is only half the job — the stock still has to be shared out."}
+                </p>
+              </div>
+              <Button size="sm" onClick={onOpenOrders}>
+                Allocate to customers
+              </Button>
+            </div>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold text-text-primary tracking-tight">Inventory Overview</h2>
@@ -480,7 +510,7 @@ function StockList({
           <InventorySummaryCards
             records={records}
           />
-          <InventoryInsights records={records} compact />
+          <InventoryInsights records={records} />
         </>
       )}
 
@@ -612,10 +642,9 @@ function StockList({
                   <Tr>
                     <Th className="min-w-[12rem]">Product</Th>
                     <Th>Available</Th>
+                    <Th>Location</Th>
                     <Th>Color</Th>
-                    <Th>Stock Status</Th>
                     <Th>Stock Health</Th>
-                    <Th>Last moved</Th>
                     <Th className="w-12" aria-label="Actions" />
                   </Tr>
                 </Thead>
@@ -643,28 +672,27 @@ function StockList({
                               <span className="block truncate text-sm text-text-primary" title={record.description}>
                                 {record.description || "—"}
                               </span>
-                              <span className="text-xs text-text-muted">{GROUP_LABELS[record.product_group]}</span>
+                              <div className="text-xs text-text-muted">
+                                {GROUP_LABELS[record.product_group]} • {record.status}
+                              </div>
                             </div>
                           </div>
                         </Td>
                         <Td>
-                          <div className="text-xs text-text-muted">Available</div>
                           <div className="font-semibold tabular-nums text-success">
                             {formatSets(record.available_pairs)}
                           </div>
+                        </Td>
+                        <Td className="text-text-secondary whitespace-nowrap">
+                          {record.locations.length > 0
+                            ? record.locations.map((entry) => entry.location).join(", ")
+                            : "—"}
                         </Td>
                         <Td className="font-mono text-xs text-text-secondary whitespace-nowrap">
                           {record.colors || "—"}
                         </Td>
                         <Td>
-                          <StatusPill
-                            label={record.status}
-                            className={STOCK_STATUS_STYLES[record.status as StockStatus] ?? "bg-text-secondary text-white"}
-                          />
-                        </Td>
-                        <Td><StatusPill label={health} className={HEALTH_STYLES[health]} /></Td>
-                        <Td className="text-text-muted whitespace-nowrap">
-                          {record.last_activity_on ? formatDate(record.last_activity_on) : "—"}
+                          <StatusPill label={health} className={HEALTH_STYLES[health]} />
                         </Td>
                         <Td>
                           <StockRowMenu onView={() => onOpen(record.stock_code)} />
@@ -1088,17 +1116,9 @@ function legacyStockRecords(
 
 function InventoryInsights({
   records,
-  compact,
 }: {
   records: StockRecord[];
-  compact?: boolean;
 }): React.JSX.Element {
-  const physicalPairs = records.reduce((sum, record) => sum + Math.max(0, record.on_hand_pairs), 0);
-  const availablePairs = records.reduce((sum, record) => sum + Math.max(0, record.available_pairs), 0);
-  const allocated = records.reduce((sum, record) => sum + Math.max(0, record.allocated_pairs), 0);
-  const incomingPairs = records.reduce((sum, record) => sum + Math.max(0, record.incoming_pairs), 0);
-  const receivedToday = records.reduce((sum, record) => sum + Math.max(0, record.received_today_pairs ?? 0), 0);
-  const deliveredToday = records.reduce((sum, record) => sum + Math.max(0, record.delivered_today_pairs ?? 0), 0);
   const counts: Record<InventoryHealth, number> = {
     Healthy: records.filter((record) => inventoryHealth(record) === "Healthy").length,
     "Low Stock": records.filter((record) => inventoryHealth(record) === "Low Stock").length,
@@ -1106,131 +1126,42 @@ function InventoryInsights({
     Overstock: records.filter((record) => inventoryHealth(record) === "Overstock").length,
     "Not arrived yet": records.filter((record) => inventoryHealth(record) === "Not arrived yet").length,
   };
-  const total = Math.max(1, records.length);
-  const value = physicalPairs * ESTIMATED_PAIR_PRICE;
-  const fmtValue = (amount: number): string =>
-    amount >= 1_000_000
-      ? `${(amount / 1_000_000).toFixed(1)}M MMK`
-      : `${Math.round(amount / 1_000)}K MMK`;
+  const total = Math.max(
+    1,
+    counts.Healthy +
+      counts["Low Stock"] +
+      counts["Out of Stock"] +
+      counts.Overstock +
+      counts["Not arrived yet"],
+  );
   const healthRows: { label: InventoryHealth; color: string; text: string }[] = [
     { label: "Healthy", color: "bg-success", text: "text-success" },
     { label: "Low Stock", color: "bg-warning", text: "text-warning" },
     { label: "Out of Stock", color: "bg-error", text: "text-error" },
+    { label: "Overstock", color: "bg-brand", text: "text-brand" },
     { label: "Not arrived yet", color: "bg-text-secondary", text: "text-text-muted" },
   ];
 
-  if (compact) {
-    return (
-      <div className="grid items-start gap-4 xl:grid-cols-2">
-        <Panel className="p-5">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h3 className="text-base font-bold text-text-primary">Inventory value</h3>
-              <p className="mt-0.5 text-xs text-text-muted">Physical stock value.</p>
-            </div>
-            <div className="text-right">
-              <div className="text-2xl font-extrabold text-brand">{fmtValue(value)}</div>
-            </div>
-          </div>
-        </Panel>
-        <Panel className="p-5">
-          <h3 className="text-base font-bold text-text-primary">Stock health</h3>
-          <div className="mt-4 space-y-2.5">
-            {healthRows.map((row) => {
-              const count = counts[row.label];
-              const pct = Math.round((count / total) * 100);
-              return (
-                <div key={row.label} className="flex items-center gap-3">
-                  <span className="w-24 shrink-0 text-xs text-text-muted">{row.label}</span>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-bg-subtle">
-                    <div className={cn("h-full rounded-full", row.color)} style={{ width: `${pct}%` }} />
-                  </div>
-                  <span className={cn("w-16 text-right text-xs font-bold", row.text)}>{formatQty(count)}</span>
-                </div>
-              );
-            })}
-          </div>
-          <p className="mt-3 text-xs text-text-muted">{formatQty(records.length)} stock-record SKUs</p>
-        </Panel>
-      </div>
-    );
-  }
-
   return (
-    <>
-      <Panel>
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
-          <div>
-            <h3 className="text-base font-bold text-text-primary">Inventory Value</h3>
-            <p className="mt-0.5 text-xs text-text-muted">
-              Physical stock value based on warehouse holdings. Management reference only.
-            </p>
-          </div>
-          <div className="text-right">
-            <div className="text-3xl font-extrabold text-brand">{fmtValue(value)}</div>
-          </div>
-        </div>
-        <div className="grid gap-3 border-t border-border p-4 sm:grid-cols-3 sm:p-5">
-          {[
-            ["Available Stock Value", availablePairs, "text-success"],
-            ["Incoming Stock Value", incomingPairs, "text-brand"],
-            ["Allocated Stock Value", allocated, "text-purple-500"],
-          ].map(([label, pairs, color]) => (
-            <div key={String(label)} className="rounded-xl border border-border bg-bg-subtle px-4 py-3">
-              <div className="mb-1 text-xs text-text-muted">{label}</div>
-              <div className={cn("text-lg font-extrabold", String(color))}>
-                {fmtValue(Number(pairs) * ESTIMATED_PAIR_PRICE)}
+    <Panel className="p-5">
+      <h3 className="text-base font-bold text-text-primary">Stock health</h3>
+      <div className="mt-4 space-y-2.5">
+        {healthRows.map((row) => {
+          const count = counts[row.label];
+          const pct = Math.round((count / total) * 100);
+          return (
+            <div key={row.label} className="flex items-center gap-3">
+              <span className="w-24 shrink-0 text-xs text-text-muted">{row.label}</span>
+              <div className="h-2 flex-1 overflow-hidden rounded-full bg-bg-subtle">
+                <div className={cn("h-full rounded-full", row.color)} style={{ width: `${pct}%` }} />
               </div>
-              <div className="text-xs text-text-muted">{formatSets(Number(pairs))} × 19.5K per pair est.</div>
+              <span className={cn("w-16 text-right text-xs font-bold", row.text)}>{formatQty(count)}</span>
             </div>
-          ))}
-        </div>
-      </Panel>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Panel className="p-4 sm:p-5">
-          <h3 className="mb-3 text-base font-bold text-text-primary">Inventory Health Overview</h3>
-          <div className="space-y-2.5">
-            {healthRows.map((row) => {
-              const count = counts[row.label];
-              const pct = Math.round((count / total) * 100);
-              return (
-                <div key={row.label} className="flex items-center gap-3">
-                  <span className="w-24 shrink-0 text-xs text-text-muted">{row.label}</span>
-                  <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-bg-subtle">
-                    <div className={cn("h-full rounded-full", row.color)} style={{ width: `${pct}%` }} />
-                  </div>
-                  <span className={cn("w-20 text-right text-xs font-bold", row.text)}>
-                    {pct}% ({formatQty(count)})
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-          <p className="mt-3 text-xs text-text-muted">Based on {formatQty(records.length)} stock records.</p>
-        </Panel>
-
-        <Panel className="p-4 sm:p-5">
-          <h3 className="mb-3 text-base font-bold text-text-primary">Today&apos;s Inventory Movement</h3>
-          <div className="grid gap-3 sm:grid-cols-3">
-            {[
-              ["Received", receivedToday, "text-success", "+"],
-              ["Delivered", deliveredToday, "text-error", "−"],
-              ["Net Change", receivedToday - deliveredToday, "text-brand", receivedToday >= deliveredToday ? "+" : "−"],
-            ].map(([label, amount, color, sign]) => (
-              <div key={String(label)} className="rounded-xl border border-border bg-bg-subtle p-4 text-center">
-                <div className={cn("text-xs font-semibold uppercase tracking-wide", String(color))}>{label}</div>
-                <div className={cn("mt-1 text-2xl font-extrabold", String(color))}>
-                  {sign}{formatSets(Math.abs(Number(amount)))}
-                </div>
-                <div className="text-xs text-text-muted">{label === "Net Change" ? "net today" : String(label).toLowerCase()}</div>
-              </div>
-            ))}
-          </div>
-          <p className="mt-2 text-xs italic text-text-muted">Confirmed transactions only.</p>
-        </Panel>
+          );
+        })}
       </div>
-    </>
+      <p className="mt-3 text-xs text-text-muted">{formatQty(records.length)} stock-record SKUs</p>
+    </Panel>
   );
 }
 

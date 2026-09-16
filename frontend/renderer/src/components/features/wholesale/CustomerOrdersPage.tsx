@@ -101,6 +101,7 @@ import {
 import {
   CUSTOMER_ORDERS_URL,
   WHOLESALE_INVENTORY_URL,
+  WHOLESALE_STOCK_URL,
   WholesaleApiError,
   addCustomerOrderPayment,
   cancelCustomerOrder,
@@ -117,6 +118,8 @@ import {
   type CustomerDeliveryBatchInput,
   inventoryMovementsFromWire,
   type InventoryMovementWire,
+  stockRecordsFromWire,
+  type StockRecordWire,
   type NewCustomerOrderInput,
 } from "@renderer/components/features/wholesale/api";
 import {
@@ -168,6 +171,7 @@ const sets = (qty: number): string => formatSets(qty);
 // recomputes what the query already got right.
 
 const ORDERS_QUERY_KEY = ["wholesale", "orders"] as const;
+const STOCK_QUERY_KEY = ["wholesale", "stock"] as const;
 
 type View = "list" | "detail" | "allocate" | "new";
 type StatusFilter = OrderStatus | "all";
@@ -310,6 +314,14 @@ export default function CustomerOrdersPage({
         : [],
     [inventoryWire],
   );
+  const { data: stockWire } = useQuery({
+    queryKey: STOCK_QUERY_KEY,
+    queryFn: () => fetchJson<StockRecordWire[]>(WHOLESALE_STOCK_URL, session),
+  });
+  const stockRecords = useMemo(
+    () => (stockWire ? stockRecordsFromWire(stockWire) : []),
+    [stockWire],
+  );
   // The shared store still holds orders — other screens (Supplier Vouchers' waiting
   // list, Inventory) read them from there — so this query's answer, which React Query
   // already keeps correct on its own, is pushed in as-is rather than recomputed.
@@ -318,10 +330,43 @@ export default function CustomerOrdersPage({
   }, [wire]);
   const { orders } = useWholesale();
 
+  const readyToAllocatePairs = useMemo(() => {
+    if (stockRecords.length > 0) {
+      return stockRecords.reduce(
+        (sum, record) => sum + Math.max(0, record.available_pairs),
+        0,
+      );
+    }
+    const allocatedByCode: Record<string, number> = {};
+    for (const order of orders.filter(
+      (o) => o.order_status !== "cancelled" && o.order_status !== "fulfilled",
+    )) {
+      for (const line of order.lines) {
+        allocatedByCode[line.stock_code] =
+          (allocatedByCode[line.stock_code] ?? 0) +
+          (line.allocated_quantity_pairs ?? 0);
+      }
+    }
+    const onHandByCode: Record<string, number> = {};
+    for (const invLine of inventoryLines) {
+      onHandByCode[invLine.stock_code] =
+        (onHandByCode[invLine.stock_code] ?? 0) +
+        invLine.quantity_available_pairs;
+    }
+    return Object.entries(onHandByCode).reduce((sum, [code, onHand]) => {
+      const allocated = allocatedByCode[code] ?? 0;
+      return sum + Math.max(0, onHand - allocated);
+    }, 0);
+  }, [stockRecords, orders, inventoryLines]);
+
   async function reload(): Promise<void> {
     await queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY });
     await queryClient.invalidateQueries({
       queryKey: ["wholesale", "write-offs"],
+    });
+    await queryClient.invalidateQueries({ queryKey: STOCK_QUERY_KEY });
+    await queryClient.invalidateQueries({
+      queryKey: ["wholesale", "inventory"],
     });
   }
 
@@ -333,7 +378,11 @@ export default function CustomerOrdersPage({
   }
 
   async function finishAllocationSave(): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY }),
+      queryClient.invalidateQueries({ queryKey: STOCK_QUERY_KEY }),
+      queryClient.invalidateQueries({ queryKey: ["wholesale", "inventory"] }),
+    ]);
     showToast("success", "Customer allocation saved.");
   }
 
@@ -344,6 +393,7 @@ export default function CustomerOrdersPage({
       await createCustomerDeliveryBatch(session, input);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: STOCK_QUERY_KEY }),
         queryClient.invalidateQueries({ queryKey: ["wholesale", "inventory"] }),
       ]);
       showToast("success", "Customer delivery recorded.");
@@ -563,6 +613,7 @@ export default function CustomerOrdersPage({
   return (
     <OrderList
       orders={orders}
+      readyToAllocatePairs={readyToAllocatePairs}
       onOpen={openOrder}
       onAllocate={openAllocation}
       onCancel={cancelOrder}
@@ -584,6 +635,7 @@ function nextOrderNo(orders: CustomerOrder[]): string {
 
 function OrderList({
   orders,
+  readyToAllocatePairs,
   onOpen,
   onAllocate,
   onCancel,
@@ -592,6 +644,7 @@ function OrderList({
   refreshing,
 }: {
   orders: CustomerOrder[];
+  readyToAllocatePairs: number;
   onOpen: (orderId: string) => void;
   onAllocate: (orderId: string, tab: "allocate" | "deliver") => void;
   onCancel: (orderId: string) => void;
@@ -615,20 +668,6 @@ function OrderList({
         (lineSum, line) =>
           lineSum +
           Math.min(lineRemaining(line), line.allocated_quantity_pairs ?? 0),
-        0,
-      ),
-    0,
-  );
-  const awaitingAllocationPairs = openOrders.reduce(
-    (sum, order) =>
-      sum +
-      order.lines.reduce(
-        (lineSum, line) =>
-          lineSum +
-          Math.max(
-            0,
-            lineRemaining(line) - (line.allocated_quantity_pairs ?? 0),
-          ),
         0,
       ),
     0,
@@ -685,10 +724,10 @@ function OrderList({
           sub="not fulfilled or cancelled"
         />
         <FigureCard
-          label="Awaiting Allocation"
-          value={sets(awaitingAllocationPairs)}
-          sub="across all open orders"
-          tone={awaitingAllocationPairs > 0 ? "warning" : "success"}
+          label="Ready to Allocate"
+          value={sets(readyToAllocatePairs)}
+          sub="in stock, unallocated"
+          tone={readyToAllocatePairs > 0 ? "brand" : "success"}
         />
         <FigureCard
           label="Ready to Deliver"

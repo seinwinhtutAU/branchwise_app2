@@ -940,6 +940,7 @@ export function SuggestInput({
   /** Inside a table cell there is no room for a label above the box. */
   bare = false,
   error,
+  onBlur,
 }: {
   label: React.ReactNode;
   placeholder: string;
@@ -948,6 +949,7 @@ export function SuggestInput({
   onChange: (value: string) => void;
   bare?: boolean;
   error?: string;
+  onBlur?: () => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -984,6 +986,7 @@ export function SuggestInput({
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
+        onBlur={onBlur}
         onKeyDown={(event) => {
           if (event.key === "Escape") setOpen(false);
         }}

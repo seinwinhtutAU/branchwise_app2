@@ -4,7 +4,7 @@ import { Button } from "@renderer/components/ui/Button";
 import { Input } from "@renderer/components/ui/Input";
 import { WholesaleApiError } from "./api";
 import { SuggestInput } from "./ui";
-import { formatIn, type Unit } from "./units";
+import { formatIn, type Unit, UNIT_LABELS } from "./units";
 
 /**
  * Carves part of a shipment's still-undispatched remainder into a shipment of its own —
@@ -47,6 +47,12 @@ export function SplitShipmentModal({
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
 
+  // Touch state: errors only show once the user has left a field or pressed Submit.
+  const [packagesTouched, setPackagesTouched] = useState(false);
+  const [quantityTouched, setQuantityTouched] = useState(false);
+  const [destinationTouched, setDestinationTouched] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+
   useEffect(() => {
     if (!open) return;
     setPackages("");
@@ -54,28 +60,53 @@ export function SplitShipmentModal({
     setDestination("");
     setCarrierName("");
     setError(undefined);
+    setPackagesTouched(false);
+    setQuantityTouched(false);
+    setDestinationTouched(false);
+    setSubmitAttempted(false);
   }, [open]);
 
   if (!open) return null;
 
   const parsedPackages = Number(packages);
   const parsedQuantity = Number(quantity);
-  const packagesError =
+
+  // ── Validation: split each field into "is the value wrong" vs "show the error" ──
+
+  const packagesWrong: string | undefined =
     packages.trim() === "" || !Number.isInteger(parsedPackages) || parsedPackages <= 0
       ? "Enter a whole number of packages greater than zero."
       : parsedPackages > availablePackages
-        ? `Only ${availablePackages} packages are still undispatched.`
+        ? `Only ${availablePackages} package${availablePackages === 1 ? "" : "s"} are still in transit.`
         : undefined;
-  const quantityError =
+  const packagesError =
+    packagesWrong !== undefined && (packagesTouched || submitAttempted)
+      ? packagesWrong
+      : undefined;
+
+  const quantityWrong: string | undefined =
     quantity.trim() === "" || !Number.isFinite(parsedQuantity) || parsedQuantity <= 0
       ? `Enter a quantity greater than zero.`
-      : parsedQuantity > availableQuantity
-        ? `Only ${formatIn(availableQuantity, unit)} left on this shipment.`
-        : undefined;
-  const destinationError = destination.trim() === "" ? "Say where this part is going." : undefined;
+      : !Number.isInteger(parsedQuantity)
+        ? "Quantity must be a whole number."
+        : parsedQuantity > availableQuantity
+          ? `Only ${formatIn(availableQuantity, unit)} left on this shipment.`
+          : undefined;
+  const quantityError =
+    quantityWrong !== undefined && (quantityTouched || submitAttempted)
+      ? quantityWrong
+      : undefined;
+
+  const destinationWrong: string | undefined =
+    destination.trim() === "" ? "Say where this part is going." : undefined;
+  const destinationError =
+    destinationWrong !== undefined && (destinationTouched || submitAttempted)
+      ? destinationWrong
+      : undefined;
 
   async function submit(): Promise<void> {
-    if (packagesError || quantityError || destinationError || saving) return;
+    setSubmitAttempted(true);
+    if (packagesWrong || quantityWrong || destinationWrong || saving) return;
     setSaving(true);
     setError(undefined);
     try {
@@ -108,29 +139,38 @@ export function SplitShipmentModal({
             Split shipment
           </h2>
           <p className="mt-1 text-sm text-text-muted">
-            Send part of {shipmentNo} to a different destination. It becomes its own
-            shipment with the same voucher and supplier — only what has not been sent by
-            the cargo company yet can move.
+            Send part of {shipmentNo} to a different destination.{" "}
+            It keeps the same voucher and supplier.
           </p>
         </div>
         <div className="flex flex-col gap-4">
           <Input
-            label={`Packages moving (up to ${availablePackages})`}
+            label="Packages moving"
+            hint={`${availablePackages} package${availablePackages === 1 ? "" : "s"} are still in transit.`}
             type="number"
             min={1}
             max={availablePackages}
             step={1}
             value={packages}
             onChange={(event) => setPackages(event.target.value)}
+            onBlur={() => setPackagesTouched(true)}
             error={packagesError}
           />
           <Input
-            label={`Quantity moving (${formatIn(1, unit)}, up to ${formatIn(availableQuantity, unit)})`}
+            label="Quantity moving"
+            hint={`Up to ${formatIn(availableQuantity, unit)}.`}
             type="number"
-            min={0}
-            step="any"
+            min={1}
+            max={availableQuantity}
+            step={1}
+            endIcon={
+              <span className="text-sm text-text-secondary">
+                {UNIT_LABELS[unit]}
+              </span>
+            }
             value={quantity}
             onChange={(event) => setQuantity(event.target.value)}
+            onBlur={() => setQuantityTouched(true)}
             error={quantityError}
           />
           <SuggestInput
@@ -139,10 +179,11 @@ export function SplitShipmentModal({
             value={destination}
             onChange={setDestination}
             suggestions={destinationSuggestions}
+            onBlur={() => setDestinationTouched(true)}
             error={destinationError}
           />
           <SuggestInput
-            label="Carrier (optional — defaults to the original)"
+            label="Carrier"
             placeholder="Same carrier if left blank"
             value={carrierName}
             onChange={setCarrierName}
@@ -157,7 +198,7 @@ export function SplitShipmentModal({
           <Button
             onClick={() => void submit()}
             loading={saving}
-            disabled={Boolean(packagesError || quantityError || destinationError)}
+            disabled={Boolean(packagesWrong || quantityWrong || destinationWrong)}
           >
             Split shipment
           </Button>
