@@ -78,8 +78,51 @@ def outgoing_movements(db: Session, branch_id: str | None) -> list[dict]:
     ]
 
 
+def allocated_movements(db: Session, branch_id: str | None) -> list[dict]:
+    query = _orders_query(db, branch_id).filter(CustomerOrder.cancelled.is_(False))
+    orders = query.all()
+    if not orders:
+        return []
+    rows: list[dict] = []
+    for order in orders:
+        for line in order.lines:
+            effective_colors = effective_allocated_color_pairs(
+                line,
+                delivered_color_pairs_by_order(db, order.id, line.stock_code, branch_id),
+            )
+            allocated_pairs = sum(effective_colors.values())
+            if allocated_pairs <= 0:
+                continue
+            color_text = ",".join(
+                f"{color}{pairs // 6}s" if pairs % 6 == 0 else f"{color}{pairs}p"
+                for color, pairs in sorted(effective_colors.items())
+                if pairs > 0
+            )
+            rows.append({
+                "movement_id": f"alloc-{order.id}-{line.id}",
+                "movement_type": "allocated",
+                "stock_code": line.stock_code,
+                "description": line.description,
+                "product_group": line.product_group.value,
+                "color_breakdown": color_text or (line.allocated_color_breakdown or ""),
+                "quantity_pairs": allocated_pairs,
+                "unit_conversions": line.unit_conversions,
+                "location": "Allocated",
+                "moved_on": order.order_date,
+                "reference": order.order_no,
+                "counterparty_name": order.customer_name,
+                "note": f"Allocated to order {order.order_no}",
+                "order_id": order.id,
+            })
+    return rows
+
+
 def movements(db: Session, branch_id: str | None) -> list[dict]:
-    return [*incoming_movements(db, branch_id), *outgoing_movements(db, branch_id)]
+    return [
+        *incoming_movements(db, branch_id),
+        *outgoing_movements(db, branch_id),
+        *allocated_movements(db, branch_id),
+    ]
 
 
 def net_pairs_by_stock_code(db: Session, branch_id: str | None) -> dict[str, int]:

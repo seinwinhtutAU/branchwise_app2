@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Session } from "@renderer/lib/auth";
 import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
@@ -86,14 +86,6 @@ const ORDERS_QUERY_KEY = ["wholesale", "orders"] as const;
 
 type View = "list" | "detail";
 type InventorySection = "overview" | "locations" | "movement";
-type StockStatus =
-  | "At Supplier"
-  | "In Transit"
-  | "At Receiving"
-  | "Customer Allocated"
-  | "Customer Ordered"
-  | "Finished";
-type StatusFilter = StockStatus | "all";
 type InventoryHealth =
   | "Healthy"
   | "Low Stock"
@@ -101,17 +93,12 @@ type InventoryHealth =
   | "Overstock"
   | "Not arrived yet";
 
+const IN_TRANSIT_PLACE = "In transit";
+const AT_SUPPLIER_PLACE = "At supplier";
+const ON_ORDER_PLACE = "On customer order";
+
 const LOW_STOCK_THRESHOLD = 20;
 const OVERSTOCK_THRESHOLD = 150;
-
-const STOCK_STATUSES: StockStatus[] = [
-  "At Supplier",
-  "In Transit",
-  "At Receiving",
-  "Customer Allocated",
-  "Customer Ordered",
-  "Finished",
-];
 
 export default function InventoryPage({
   session,
@@ -407,9 +394,7 @@ function StockList({
 }): React.JSX.Element {
   const [search, setSearch] = useState("");
   const [location, setLocation] = useState("all");
-  const [status, setStatus] = useState<StatusFilter>("all");
-  const [source, setSource] = useState("all");
-  const [healthFilter, setHealthFilter] = useState<InventoryHealth | "all">("all");
+  const [health, setHealth] = useState<InventoryHealth | "all">("all");
   const [page, setPage] = useState(1);
   const [section, setSection] = useState<InventorySection>("overview");
 
@@ -422,7 +407,11 @@ function StockList({
     0,
   );
 
-  const locations = [...new Set(records.flatMap((record) => record.locations.map((entry) => entry.location)))].sort();
+  // Every place stock is actually sitting, gates and pipeline stages alike, so the filter
+  // offers the same answers the Location column gives.
+  const locations = [
+    ...new Set(records.flatMap((record) => stockPlaces(record).map((place) => place.label))),
+  ].sort();
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -439,20 +428,17 @@ function StockList({
           ...record.order_nos,
           ...record.receiving_nos,
         ].some((reference) => reference.toLowerCase().includes(query));
-      const matchesLocation = location === "all" || record.locations.some((entry) => entry.location === location);
-      const matchesStatus = status === "all" || record.status === status;
-      const matchesSource = source === "all" || record.sources.includes(source);
-      const matchesHealth =
-        healthFilter === "all" || inventoryHealth(record) === healthFilter;
-      return matchesQuery && matchesLocation && matchesStatus && matchesSource && matchesHealth;
+      const matchesLocation =
+        location === "all" ||
+        stockPlaces(record).some((place) => place.label === location);
+      const matchesHealth = health === "all" || inventoryHealth(record) === health;
+      return matchesQuery && matchesLocation && matchesHealth;
     });
   }, [
     records,
     search,
     location,
-    status,
-    source,
-    healthFilter,
+    health,
   ]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -463,17 +449,13 @@ function StockList({
   );
   const isFiltered =
     search.trim() !== "" ||
-    location !== "all" ||
-    status !== "all" ||
-    source !== "all" ||
-    healthFilter !== "all";
+    (locations.length > 1 && location !== "all") ||
+    health !== "all";
 
   function resetFilters(): void {
     setSearch("");
     setLocation("all");
-    setStatus("all");
-    setSource("all");
-    setHealthFilter("all");
+    setHealth("all");
     setPage(1);
   }
 
@@ -531,7 +513,7 @@ function StockList({
 
         <>
           <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-bg-subtle">
-            <div className="w-full sm:w-[28rem] lg:w-[32rem]">
+            <div className="w-full sm:w-[24rem] lg:w-[28rem]">
               <Input
                 aria-label="Search stock"
                 placeholder="Search product, place or color"
@@ -543,46 +525,14 @@ function StockList({
                 }}
               />
             </div>
-            <div className="w-full sm:w-64">
-              <Select
-                aria-label="Filter by place"
-                value={location}
-                onChange={(event) => {
-                  setLocation(event.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="all">Any location</option>
-                {locations.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="w-full sm:w-48">
-              <Select
-                aria-label="Filter by stock status"
-                value={status}
-                onChange={(event) => {
-                  setStatus(event.target.value as StatusFilter);
-                  setPage(1);
-                }}
-              >
-                <option value="all">All Stock Status</option>
-                {STOCK_STATUSES.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="w-full sm:w-48">
+            <div className="w-full sm:w-60">
+              {/* The same five words the Overview chart uses, so one screen never asks
+                  the reader to learn a second name for the same bucket. */}
               <Select
                 aria-label="Filter by stock health"
-                value={healthFilter}
+                value={health}
                 onChange={(event) => {
-                  setHealthFilter(event.target.value as InventoryHealth | "all");
+                  setHealth(event.target.value as InventoryHealth | "all");
                   setPage(1);
                 }}
               >
@@ -594,23 +544,25 @@ function StockList({
                 <option value="Not arrived yet">Not arrived yet</option>
               </Select>
             </div>
-            <div className="w-full sm:w-56">
-              <Select
-                aria-label="Filter by source"
-                value={source}
-                onChange={(event) => {
-                  setSource(event.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="all">Anywhere</option>
-                <option value="voucher">On a supplier voucher</option>
-                <option value="shipment">On a shipment</option>
-                <option value="order">On a customer order</option>
-                <option value="receiving">Received</option>
-                <option value="delivery">Delivered</option>
-              </Select>
-            </div>
+            {locations.length > 1 && (
+              <div className="w-full sm:w-52">
+                <Select
+                  aria-label="Filter by place"
+                  value={location}
+                  onChange={(event) => {
+                    setLocation(event.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="all">All locations</option>
+                  {locations.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
             {isFiltered && (
               <Button variant="ghost" size="sm" onClick={resetFilters}>
                 Clear filters
@@ -650,7 +602,7 @@ function StockList({
                 </Thead>
                 <Tbody>
                   {visible.map((record) => {
-                    const health = inventoryHealth(record);
+                    const rowHealth = inventoryHealth(record);
                     return (
                       <Tr key={record.stock_code}>
                         <Td>
@@ -673,7 +625,7 @@ function StockList({
                                 {record.description || "—"}
                               </span>
                               <div className="text-xs text-text-muted">
-                                {GROUP_LABELS[record.product_group]} • {record.status}
+                                {GROUP_LABELS[record.product_group]}
                               </div>
                             </div>
                           </div>
@@ -684,15 +636,13 @@ function StockList({
                           </div>
                         </Td>
                         <Td className="text-text-secondary whitespace-nowrap">
-                          {record.locations.length > 0
-                            ? record.locations.map((entry) => entry.location).join(", ")
-                            : "—"}
+                          <StockPlaces record={record} />
                         </Td>
                         <Td className="font-mono text-xs text-text-secondary whitespace-nowrap">
                           {record.colors || "—"}
                         </Td>
                         <Td>
-                          <StatusPill label={health} className={HEALTH_STYLES[health]} />
+                          <StatusPill label={rowHealth} className={HEALTH_STYLES[rowHealth]} />
                         </Td>
                         <Td>
                           <StockRowMenu onView={() => onOpen(record.stock_code)} />
@@ -718,6 +668,7 @@ function StockList({
       {section === "movement" && (
         <InventoryMovementTable
           movements={movements}
+          records={records}
           onOpen={onOpen}
           onRefresh={onRefresh}
           refreshing={refreshing}
@@ -729,11 +680,15 @@ function StockList({
 
 function InventoryMovementTable({
   movements,
+  records,
   onOpen,
   onRefresh,
   refreshing,
 }: {
   movements: StockMovement[];
+  /** Only so an allocated row can say where the reserved goods physically are — the
+   *  reservation itself belongs to no place, so the server sends none. */
+  records: StockRecord[];
   onOpen: (stockCode: string) => void;
   onRefresh: () => void;
   refreshing: boolean;
@@ -742,7 +697,28 @@ function InventoryMovementTable({
   const [kind, setKind] = useState<MovementKind | "all">("all");
   const [location, setLocation] = useState("all");
   const [page, setPage] = useState(1);
-  const locations = [...new Set(movements.map((movement) => movement.location).filter(Boolean))].sort();
+  const placesByStockCode = useMemo(() => {
+    const places = new Map<string, string>();
+    for (const record of records) {
+      const label = stockPlaces(record)
+        .map((place) => place.label)
+        .join(", ");
+      if (label) places.set(record.stock_code, label);
+    }
+    return places;
+  }, [records]);
+  /** An allocated row shows where its goods are rather than the word the server sends,
+   *  so a reader can tell which shelf the reservation is sitting on. */
+  const locationOf = useCallback(
+    (movement: StockMovement): string =>
+      movement.movement_type === "allocated"
+        ? (placesByStockCode.get(movement.stock_code) ?? "")
+        : movement.location,
+    [placesByStockCode],
+  );
+  const locations = [
+    ...new Set(movements.map((movement) => locationOf(movement)).filter(Boolean)),
+  ].sort();
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     return [...movements]
@@ -751,17 +727,17 @@ function InventoryMovementTable({
           query === "" ||
           movement.stock_code.toLowerCase().includes(query) ||
           movement.description.toLowerCase().includes(query) ||
-          movement.location.toLowerCase().includes(query) ||
+          locationOf(movement).toLowerCase().includes(query) ||
           movement.reference.toLowerCase().includes(query) ||
           movement.counterparty_name.toLowerCase().includes(query);
         return (
           matchesQuery &&
           (kind === "all" || movement.movement_type === kind) &&
-          (location === "all" || movement.location === location)
+          (location === "all" || locationOf(movement) === location)
         );
       })
       .sort((a, b) => (a.moved_on < b.moved_on ? 1 : -1));
-  }, [movements, search, kind, location]);
+  }, [movements, search, kind, location, locationOf]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const visible = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
@@ -778,7 +754,7 @@ function InventoryMovementTable({
       <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
         <div>
           <h2 className="text-base font-semibold text-text-primary tracking-tight">Inventory Movement</h2>
-          <p className="text-sm text-text-muted mt-0.5">Confirmed stock received and delivered.</p>
+          <p className="text-sm text-text-muted mt-0.5">Stock received, delivered, and set aside for customers.</p>
         </div>
         <InventoryRefreshButton onRefresh={onRefresh} refreshing={refreshing} />
       </div>
@@ -807,6 +783,7 @@ function InventoryMovementTable({
             <option value="all">All movements</option>
             <option value="in">Received</option>
             <option value="out">Delivered</option>
+            <option value="allocated">Allocated</option>
           </Select>
         </div>
         <div className="w-full sm:w-56">
@@ -882,16 +859,31 @@ function InventoryMovementTable({
                   </Td>
                   <Td>
                     <StatusPill
-                      label={movement.movement_type === "in" ? "Received" : "Delivered"}
-                      className={movement.movement_type === "in" ? "bg-success text-white" : "bg-brand text-white"}
+                      label={MOVEMENT_LABELS[movement.movement_type] ?? movement.movement_type}
+                      className={MOVEMENT_STYLES[movement.movement_type] ?? "bg-text-secondary text-white"}
                     />
                   </Td>
                   <Td className="text-right font-semibold tabular-nums whitespace-nowrap">
-                    <span className={movement.movement_type === "in" ? "text-success" : "text-error"}>
-                      {movement.movement_type === "in" ? "+" : "−"}{formatSets(movement.quantity_pairs)}
+                    <span
+                      className={
+                        movement.movement_type === "in"
+                          ? "text-success"
+                          : movement.movement_type === "out"
+                            ? "text-error"
+                            : "text-warning"
+                      }
+                    >
+                      {movement.movement_type === "in"
+                        ? "+"
+                        : movement.movement_type === "out"
+                          ? "−"
+                          : "• "}
+                      {formatSets(movement.quantity_pairs)}
                     </span>
                   </Td>
-                  <Td className="text-text-secondary whitespace-nowrap">{movement.location}</Td>
+                  <Td className="text-text-secondary whitespace-nowrap">
+                    {locationOf(movement) || "—"}
+                  </Td>
                   <Td className="text-text-muted whitespace-nowrap">{movement.reference || "—"}</Td>
                   <Td className="text-text-secondary">{movement.counterparty_name || "—"}</Td>
                   <Td><StockRowMenu onView={() => onOpen(movement.stock_code)} /></Td>
@@ -921,6 +913,53 @@ interface InventorySummaryRow {
   tone: "green" | "blue" | "orange" | "purple" | "gray";
 }
 
+/** Where a product is, in the row. Two places at most: a reader scanning a column wants
+ *  the shape of it, and the detail sheet carries the full breakdown. */
+function StockPlaces({ record }: { record: StockRecord }): React.JSX.Element {
+  const places = stockPlaces(record);
+  if (places.length === 0) return <span className="text-text-muted">Nowhere yet</span>;
+
+  const shown = places.slice(0, 2);
+  const hidden = places.length - shown.length;
+  return (
+    <span title={places.map((place) => `${place.label} ${formatSets(place.pairs)}`).join(" · ")}>
+      {shown.map((place, index) => (
+        <span key={place.label}>
+          {index > 0 && <span className="text-text-muted"> · </span>}
+          {place.label}{" "}
+          <span className="tabular-nums text-text-muted">{formatSets(place.pairs)}</span>
+        </span>
+      ))}
+      {hidden > 0 && <span className="text-text-muted"> · +{hidden} more</span>}
+    </span>
+  );
+}
+
+/** Where this product's goods actually are at the moment, biggest holding first.
+ *
+ *  Deliberately not `record.status`: that is a priority ladder picking one label, so a
+ *  product with two sets at the gate and ten more on a truck reads only "At Receiving"
+ *  and the ten disappear. Stock is regularly in several places at once, and the reader
+ *  is asking where it is, not which single stage wins. */
+function stockPlaces(record: StockRecord): { label: string; pairs: number }[] {
+  const places = [
+    ...record.locations.map((entry) => ({
+      label: entry.location,
+      pairs: Math.max(0, entry.on_hand_pairs),
+    })),
+    { label: IN_TRANSIT_PLACE, pairs: Math.max(0, record.in_transit_pairs) },
+    { label: AT_SUPPLIER_PLACE, pairs: Math.max(0, record.at_supplier_pairs) },
+  ].filter((place) => place.pairs > 0);
+
+  // Nothing anywhere yet is still an answer when a customer is waiting for it: the goods
+  // exist only on paper, which is different from a product nobody has asked for.
+  if (places.length === 0 && record.owed_to_customers_pairs > 0) {
+    return [{ label: ON_ORDER_PLACE, pairs: record.owed_to_customers_pairs }];
+  }
+  return places.sort((a, b) => b.pairs - a.pairs);
+}
+
+
 function inventoryHealth(record: StockRecord | StockLine): InventoryHealth {
   const onHand = "on_hand_pairs" in record
     ? Math.max(0, record.on_hand_pairs)
@@ -934,15 +973,6 @@ function inventoryHealth(record: StockRecord | StockLine): InventoryHealth {
   if (onHand < LOW_STOCK_THRESHOLD) return "Low Stock";
   return "Healthy";
 }
-
-const STOCK_STATUS_STYLES: Record<StockStatus, string> = {
-  "At Supplier": "bg-text-secondary text-bg-base",
-  "In Transit": "bg-warning text-white",
-  "At Receiving": "bg-brand text-white",
-  "Customer Allocated": "bg-purple-400 text-white",
-  "Customer Ordered": "bg-error text-white",
-  Finished: "bg-text-secondary text-white",
-};
 
 function incomingPairsForLine(
   stockCode: string,
@@ -1352,11 +1382,13 @@ function SummaryRow({ row }: { row: InventorySummaryRow }): React.JSX.Element {
 const MOVEMENT_LABELS: Record<StockMovement["movement_type"], string> = {
   in: "Received",
   out: "Delivered",
+  allocated: "Allocated",
 };
 
 const MOVEMENT_STYLES: Record<StockMovement["movement_type"], string> = {
   in: "bg-success text-white",
   out: "bg-brand text-white",
+  allocated: "bg-warning text-white",
 };
 
 const RELATED_ORDER_STATUS_LABELS: Record<
@@ -1471,7 +1503,6 @@ function StockDetail({
   const allocated = record.allocated_pairs;
   const available = record.available_pairs;
   const incoming = record.incoming_pairs;
-  const stockStatus = record.status as StockStatus;
   const health = inventoryHealth(record);
   const relatedOrders = useMemo(
     () => relatedOrdersFor(line.stock_code, orders),
@@ -1544,10 +1575,6 @@ function StockDetail({
               <h2 className="text-lg font-semibold text-text-primary tracking-tight">
                 {line.stock_code}
               </h2>
-              <StatusPill
-                label={stockStatus}
-                className={STOCK_STATUS_STYLES[stockStatus]}
-              />
               <StatusPill label={health} className={HEALTH_STYLES[health]} />
             </div>
             <p className="mt-0.5 truncate text-sm text-text-muted">
@@ -1595,7 +1622,11 @@ function StockDetail({
                 <dl className="grid gap-3 sm:grid-cols-2">
                   <ReadOnlyField
                     label="Location"
-                    value={record.locations.length === 0 ? "Not arrived yet" : record.locations.map((entry) => entry.location).join(", ")}
+                    value={
+                      stockPlaces(record)
+                        .map((place) => `${place.label} ${formatSets(place.pairs)}`)
+                        .join(" · ") || "Nowhere yet"
+                    }
                     wrap
                   />
                   <ReadOnlyField
@@ -1823,17 +1854,25 @@ function StockDetail({
                     </Td>
                     <Td>
                       <StatusPill
-                        label={MOVEMENT_LABELS[movement.movement_type]}
-                        className={MOVEMENT_STYLES[movement.movement_type]}
+                        label={MOVEMENT_LABELS[movement.movement_type] ?? movement.movement_type}
+                        className={MOVEMENT_STYLES[movement.movement_type] ?? "bg-text-secondary text-white"}
                       />
                     </Td>
                     <Td
                       className={cn(
                         "text-right tabular-nums font-semibold whitespace-nowrap",
-                        movement.movement_type === "in" ? "text-success" : "text-error",
+                        movement.movement_type === "in"
+                          ? "text-success"
+                          : movement.movement_type === "out"
+                            ? "text-error"
+                            : "text-warning",
                       )}
                     >
-                      {movement.movement_type === "in" ? "+" : "−"}
+                      {movement.movement_type === "in"
+                        ? "+"
+                        : movement.movement_type === "out"
+                          ? "−"
+                          : "• "}
                       {formatSets(movement.quantity_pairs)}
                     </Td>
                     <Td className="text-text-secondary whitespace-nowrap">{movement.location}</Td>

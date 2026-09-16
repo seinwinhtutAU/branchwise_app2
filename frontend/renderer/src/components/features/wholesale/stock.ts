@@ -24,7 +24,7 @@ import { type Receiving } from "./receivings";
 import { PAIRS_PER, toPairs, type Unit, type UnitConversions } from "./units";
 import { type ProductGroup } from "./products";
 
-export type MovementKind = "in" | "out";
+export type MovementKind = "in" | "out" | "allocated";
 
 export type ColorPairs = Record<string, number>;
 
@@ -218,6 +218,7 @@ export function stockLines(movements: StockMovement[]): StockLine[] {
   const colours = new Map<string, Map<string, number>>();
 
   for (const movement of movements) {
+    if (movement.movement_type === "allocated") continue;
     const key = `${movement.stock_code}@@${movement.location}`;
     const line = lines.get(key) ?? {
       stock_code: movement.stock_code,
