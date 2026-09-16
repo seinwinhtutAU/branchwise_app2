@@ -54,6 +54,9 @@ export interface CustomerOrderLine {
   allocated_quantity_pairs?: number;
   /** The colour shorthand entered when the stock reservation was made. */
   allocated_color_breakdown?: string;
+  /** What has already gone out to the customer, by colour. Needed to work out how much
+   *  of one colour is still owed: the ordered colours alone only give the line total. */
+  delivered_color_breakdown?: string;
   lost_quantity_pairs?: number;
   /** Always the Kyat unit price, whatever currency this line was actually priced in. */
   selling_price: number;
@@ -176,16 +179,37 @@ export function paidPct(order: CustomerOrder): number {
   return sharePct(paidAmount(order), orderAmount(order));
 }
 
+/** Total pairs of stock explicitly allocated across all lines for this order. */
+export function orderAllocatedPairs(order: CustomerOrder): number {
+  return order.lines.reduce(
+    (sum, line) => sum + (line.allocated_quantity_pairs ?? 0),
+    0,
+  );
+}
+
+/** Whether the order still has unallocated items waiting to be allocated. */
+export function needsAllocation(order: CustomerOrder): boolean {
+  if (order.order_status === "cancelled" || order.order_status === "fulfilled") {
+    return false;
+  }
+  return remainingQty(order) > orderAllocatedPairs(order);
+}
+
+/** Whether the order has allocated stock ready to be delivered to the customer. */
+export function readyToDeliver(order: CustomerOrder): boolean {
+  if (order.order_status === "cancelled" || order.order_status === "fulfilled") {
+    return false;
+  }
+  return orderAllocatedPairs(order) > 0;
+}
+
 /** The next operational action for staff on this order: deliver if goods are allocated,
  *  allocate if stock remains to be allocated, or null if fulfilled/cancelled/nothing to do. */
 export function nextAction(order: CustomerOrder): "deliver" | "allocate" | null {
   if (order.order_status === "cancelled" || order.order_status === "fulfilled") {
     return null;
   }
-  const allocated = order.lines.reduce(
-    (sum, line) => sum + (line.allocated_quantity_pairs ?? 0),
-    0,
-  );
+  const allocated = orderAllocatedPairs(order);
   const stillToAllocate = remainingQty(order) - allocated;
   if (allocated > 0) return "deliver";
   if (stillToAllocate > 0) return "allocate";

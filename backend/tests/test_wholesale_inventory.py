@@ -456,3 +456,83 @@ def test_stock_records_split_shipment_stage_and_received_stock(
     assert partial["on_hand_pairs"] == 12
     assert partial["incoming_pairs"] == 12
     assert partial["at_supplier_pairs"] + partial["in_transit_pairs"] == 12
+
+
+def test_delivery_does_not_require_an_allocation_first(
+    authed_client: TestClient,
+    db_session: Session,
+) -> None:
+    """The screen used to cap a delivery at what had been allocated. The server never
+    did: an unreserved pair is first-come-first-served, and a customer at the counter
+    should not be turned away because an internal planning step was skipped. This pins
+    that down so the two cannot drift apart again."""
+    branch = _branch(db_session)
+    _user(db_session, branch.id)
+    _incoming_stock(db_session, branch)
+    order = authed_client.post("/api/wholesale/orders", json=_order_payload()).json()
+    assert order["lines"][0]["allocated_quantity_pairs"] == 0
+
+    delivery = authed_client.post("/api/wholesale/inventory/deliveries/batch", json={
+        "order_id": order["order_id"], "delivered_on": "2026-09-13",
+        "delivery_address": "Yangon", "note": "",
+        "lines": [
+            {"stock_code": "A1001", "location": "Gate",
+             "color_breakdown": "black1s", "unit": "set"},
+        ],
+    })
+    assert delivery.status_code == 201, delivery.text
+
+    after = authed_client.get(f"/api/wholesale/orders/{order['order_id']}").json()
+    assert after["delivered_quantity_pairs"] == 6
+    assert after["remaining_quantity_pairs"] == 6
+
+
+def test_delivery_still_cannot_pass_what_the_customer_is_owed(
+    authed_client: TestClient,
+    db_session: Session,
+) -> None:
+    branch = _branch(db_session)
+    _user(db_session, branch.id)
+    _incoming_stock(db_session, branch)
+    order = authed_client.post("/api/wholesale/orders", json=_order_payload()).json()
+
+    too_much = authed_client.post("/api/wholesale/inventory/deliveries/batch", json={
+        "order_id": order["order_id"], "delivered_on": "2026-09-13",
+        "delivery_address": "Yangon", "note": "",
+        "lines": [
+            {"stock_code": "A1001", "location": "Gate",
+             "color_breakdown": "black3s", "unit": "set"},
+        ],
+    })
+    assert too_much.status_code == 422
+    assert "owed" in too_much.json()["detail"]
+
+
+def test_order_line_reports_what_has_been_delivered_by_color(
+    authed_client: TestClient,
+    db_session: Session,
+) -> None:
+    """The screen caps a delivery per colour, so it needs the colours already gone out —
+    ordered colours alone only give it the line total."""
+    branch = _branch(db_session)
+    _user(db_session, branch.id)
+    _incoming_stock(db_session, branch)
+    payload = _order_payload()
+    payload["lines"][0]["color_breakdown"] = "black1s,pink1s"
+    order = authed_client.post("/api/wholesale/orders", json=payload).json()
+    assert order["lines"][0]["delivered_color_breakdown"] == ""
+
+    delivery = authed_client.post("/api/wholesale/inventory/deliveries/batch", json={
+        "order_id": order["order_id"], "delivered_on": "2026-09-13",
+        "delivery_address": "Yangon", "note": "",
+        "lines": [
+            {"stock_code": "A1001", "location": "Gate",
+             "color_breakdown": "black1s", "unit": "set"},
+        ],
+    })
+    assert delivery.status_code == 201, delivery.text
+
+    after = authed_client.get(f"/api/wholesale/orders/{order['order_id']}").json()
+    line = after["lines"][0]
+    assert line["delivered_color_breakdown"] == "black6p"
+    assert line["delivered_quantity_pairs"] == 6

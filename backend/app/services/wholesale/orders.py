@@ -21,6 +21,8 @@ from app.services.wholesale.colors import (
 from app.services.wholesale.currency import resolve_money
 from app.services.wholesale.master_data import get_or_create_product
 from app.services.wholesale.inventory import (
+    color_pairs_breakdown,
+    delivered_color_pairs_by_order,
     allocated_color_pairs_for_stock_code,
     available_color_pairs_for_stock_code,
     delivered_pairs_by_order,
@@ -249,6 +251,26 @@ def allocate_order_line(
     total_available = max(0, sum(available_colors.values()) - reserved_pairs)
     if requested_pairs > total_available:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Allocation cannot exceed available stock")
+
+    # What the caller sent is what should be set aside *from now on* — the same figure
+    # the API hands out, which already has the delivered pairs taken off it. The column
+    # underneath keeps the older, cumulative meaning, so the delivered pairs go back on
+    # before it is written. Without this the two meanings meet in one field: reading gave
+    # the net figure, writing stored it as the gross one, and the next read subtracted
+    # the deliveries a second time — so pressing Save on the allocation screen after a
+    # part delivery quietly ate the rest of the reservation.
+    delivered_colors = delivered_color_pairs_by_order(
+        db, line.order_id, line.stock_code, branch_id,
+    )
+    if delivered_colors:
+        stored_colors: dict[str, int] = dict(delivered_colors)
+        for color, pairs in requested_colors.items():
+            stored_colors[color] = stored_colors.get(color, 0) + pairs
+        value = color_pairs_breakdown(stored_colors)
+        requested_pairs = sum(stored_colors.values())
+    # Nothing delivered yet means the two meanings coincide, so the shorthand the user
+    # actually typed is kept as it is — "black1s" reads better than "black6p" everywhere
+    # it is shown back to them.
 
     previous_pairs = line.allocated_quantity_pairs
     previous_colors = line.allocated_color_breakdown

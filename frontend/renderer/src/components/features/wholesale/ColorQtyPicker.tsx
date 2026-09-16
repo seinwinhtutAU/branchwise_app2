@@ -1,6 +1,6 @@
 import React from "react";
 import { cn } from "@renderer/lib/utils";
-import { formatSets, PAIRS_PER } from "./units";
+import { PAIRS_PER } from "./units";
 import { onlyDigits } from "./shared";
 import { type ColorPairs } from "./stock";
 
@@ -101,7 +101,6 @@ export function ColorQtyPicker({
           const currentTotal = value[color] ?? 0;
           const currentSets = Math.floor(currentTotal / safeSetSize);
           const currentRest = currentTotal % safeSetSize;
-          const conversions = { ...PAIRS_PER, set: safeSetSize };
 
           return (
             <div
@@ -113,9 +112,6 @@ export function ColorQtyPicker({
                   {color}
                 </span>
                 <div className="flex items-center gap-2">
-                  <span className="tabular-nums text-text-muted">
-                    Available {formatSets(avail, conversions)}
-                  </span>
                   <button
                     type="button"
                     disabled={disabled || avail <= 0 || currentTotal === avail}

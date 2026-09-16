@@ -694,6 +694,79 @@ function App(): React.JSX.Element {
     setSection(WORKSPACE_NAV_ITEMS[next][0].id as Section);
   }
 
+  // Desktop Global Shortcuts (Cmd on Mac, Ctrl on Windows)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      const isModifier = e.metaKey || e.ctrlKey;
+
+      // Settings shortcut: Cmd+, or Ctrl+,
+      if (isModifier && e.key === ",") {
+        e.preventDefault();
+        setSection("settings");
+        return;
+      }
+
+      // Sidebar toggle shortcut: Cmd+B or Ctrl+B
+      if (isModifier && (e.key === "b" || e.key === "B")) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("branchwise:toggle-sidebar"));
+        return;
+      }
+
+      // Workspace toggle shortcut: Cmd+1 / Ctrl+1 (Retail), Cmd+2 / Ctrl+2 (Wholesale)
+      if (isAdmin && isModifier && e.key === "1") {
+        e.preventDefault();
+        handleWorkspaceChange("retail");
+        return;
+      }
+
+      if (isAdmin && isModifier && e.key === "2") {
+        e.preventDefault();
+        handleWorkspaceChange("wholesale");
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isAdmin]);
+
+  // Listen to native app menu commands
+  useEffect(() => {
+    const cleanup = window.api?.onMenuAction((action) => {
+      if (action === "open-settings") {
+        setSection("settings");
+      }
+    });
+    return () => cleanup?.();
+  }, []);
+
+  // Sync titleBarOverlay on Windows
+  useEffect(() => {
+    if (!window.api?.isWindows) return;
+
+    const isDark =
+      settings?.theme === "dark" ||
+      (settings?.theme === "system" &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches);
+
+    const isWholesaleActive = effectiveWorkspace === "wholesale";
+
+    let bgHex = isDark ? "#0f1117" : "#ffffff";
+    let symbolHex = isDark ? "#f9fafb" : "#111827";
+
+    if (!isDark && isWholesaleActive) {
+      bgHex = "#f7faff";
+      symbolHex = "#1e40af";
+    }
+
+    window.api.updateTitleBarOverlay({
+      color: bgHex,
+      symbolColor: symbolHex,
+    });
+  }, [settings?.theme, effectiveWorkspace]);
+
+
   const saleFilters: DataTableFilter<SaleRow>[] = useMemo(
     () => [
       {

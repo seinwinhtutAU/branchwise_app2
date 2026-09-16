@@ -193,11 +193,19 @@ const RECEIVING_LABELS: Record<ReceivingStatus, string> = {
   fully_received: "Fully received",
 };
 
-// Filled, not tinted — the same treatment the order and payment badges use.
-const RECEIVING_STYLES: Record<ReceivingStatus, string> = {
-  waiting: "bg-text-secondary text-bg-base",
-  partly_received: "bg-warning text-white",
-  fully_received: "bg-success text-white",
+const RECEIVING_STYLES: Record<ReceivingStatus, { bg: string; dot: string }> = {
+  waiting: {
+    bg: "bg-bg-raised text-text-secondary border border-border-strong",
+    dot: "bg-text-muted",
+  },
+  partly_received: {
+    bg: "bg-warning-subtle text-warning border border-warning/30",
+    dot: "bg-warning animate-pulse",
+  },
+  fully_received: {
+    bg: "bg-success-subtle text-success border border-success/30",
+    dot: "bg-success",
+  },
 };
 
 const PAYMENT_LABELS: Record<PaymentStatus, string> = {
@@ -206,43 +214,39 @@ const PAYMENT_LABELS: Record<PaymentStatus, string> = {
   paid: "Paid",
 };
 
-const PAYMENT_STYLES: Record<PaymentStatus, string> = {
-  unpaid: "bg-error text-white",
-  partial: "bg-warning text-white",
-  paid: "bg-success text-white",
+const PAYMENT_STYLES: Record<PaymentStatus, { bg: string; dot: string }> = {
+  unpaid: {
+    bg: "bg-error-subtle text-error border border-error/30",
+    dot: "bg-error",
+  },
+  partial: {
+    bg: "bg-warning-subtle text-warning border border-warning/30",
+    dot: "bg-warning",
+  },
+  paid: {
+    bg: "bg-success-subtle text-success border border-success/30",
+    dot: "bg-success",
+  },
 };
 
 const PAYMENT_STATUSES: PaymentStatus[] = ["unpaid", "partial", "paid"];
-
-function StatusPill({
-  label,
-  className,
-}: {
-  label: string;
-  className: string;
-}): React.JSX.Element {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap",
-        className,
-      )}
-    >
-      {label}
-    </span>
-  );
-}
 
 function ReceivingBadge({
   status,
 }: {
   status: ReceivingStatus;
 }): React.JSX.Element {
+  const style = RECEIVING_STYLES[status] ?? RECEIVING_STYLES.waiting;
   return (
-    <StatusPill
-      label={RECEIVING_LABELS[status]}
-      className={RECEIVING_STYLES[status]}
-    />
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap select-none",
+        style.bg,
+      )}
+    >
+      <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", style.dot)} />
+      {RECEIVING_LABELS[status]}
+    </span>
   );
 }
 
@@ -251,11 +255,17 @@ function PaymentBadge({
 }: {
   status: PaymentStatus;
 }): React.JSX.Element {
+  const style = PAYMENT_STYLES[status] ?? PAYMENT_STYLES.unpaid;
   return (
-    <StatusPill
-      label={PAYMENT_LABELS[status]}
-      className={PAYMENT_STYLES[status]}
-    />
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap select-none",
+        style.bg,
+      )}
+    >
+      <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", style.dot)} />
+      {PAYMENT_LABELS[status]}
+    </span>
   );
 }
 
@@ -685,6 +695,27 @@ function VoucherList({
   const isFiltered =
     search.trim() !== "" || receiving !== "all" || pay !== "all";
 
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const isMac = typeof window !== "undefined" && Boolean(window.api?.isMac);
+
+  // Global search focus shortcut: Press "/" or "Cmd/Ctrl + F"
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement;
+
+      if ((e.key === "/" && !isInput) || ((e.metaKey || e.ctrlKey) && (e.key === "f" || e.key === "F"))) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   function resetFilters(): void {
     setSearch("");
     setReceiving("all");
@@ -692,9 +723,15 @@ function VoucherList({
     setPage(1);
   }
 
+  function handleQuickFilter(newReceiving: ReceivingFilter, newPay: PayFilter): void {
+    setReceiving(newReceiving);
+    setPay(newPay);
+    setPage(1);
+  }
+
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
         <FigureCard
           label="Still to arrive"
           value={sets(remainingAll)}
@@ -715,7 +752,7 @@ function VoucherList({
         />
       </div>
 
-      <Panel>
+      <Panel className="shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
           <div>
             <h2 className="text-base font-semibold text-text-primary tracking-tight">
@@ -748,12 +785,93 @@ function VoucherList({
           toOrderCount={toOrderCount}
         />
 
+        {/* Quick Filter Chips Bar */}
+        <div className="flex flex-wrap items-center gap-2 px-6 py-2.5 border-b border-border bg-bg-base select-none">
+          <span className="text-xs font-semibold uppercase tracking-wider text-text-muted mr-1">
+            Quick Views:
+          </span>
+          <button
+            type="button"
+            onClick={() => handleQuickFilter("all", "all")}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 border",
+              receiving === "all" && pay === "all"
+                ? "bg-brand text-white border-brand shadow-xs"
+                : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
+            )}
+          >
+            <span>All Vouchers</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
+                receiving === "all" && pay === "all"
+                  ? "bg-white/20 text-white"
+                  : "bg-bg-raised text-text-muted",
+              )}
+            >
+              {vouchers.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleQuickFilter("waiting", "all")}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 border",
+              receiving === "waiting" && pay === "all"
+                ? "bg-warning text-white border-warning shadow-xs"
+                : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
+            )}
+          >
+            <span>Waiting to Arrive</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
+                receiving === "waiting" && pay === "all"
+                  ? "bg-white/20 text-white"
+                  : "bg-warning-subtle text-warning font-bold",
+              )}
+            >
+              {vouchers.filter((v) => receivingStatus(v) === "waiting").length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleQuickFilter("all", "unpaid")}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 border",
+              receiving === "all" && pay === "unpaid"
+                ? "bg-error text-white border-error shadow-xs"
+                : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
+            )}
+          >
+            <span>Unpaid Vouchers</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
+                receiving === "all" && pay === "unpaid"
+                  ? "bg-white/20 text-white"
+                  : "bg-error-subtle text-error font-bold",
+              )}
+            >
+              {unpaidCount}
+            </span>
+          </button>
+        </div>
+
         <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-bg-subtle">
           <div className="w-full sm:w-[28rem] lg:w-[32rem]">
             <Input
+              ref={searchInputRef}
               aria-label="Search vouchers"
-              placeholder="Search voucher no., supplier, cargo or product"
+              placeholder="Search voucher no., supplier, cargo or product (/ or ⌘F)"
               startIcon={<SearchIcon className="w-4 h-4" />}
+              endIcon={
+                <span className="text-[10px] text-text-muted/60 border border-border rounded px-1.5 py-0.5 select-none hidden sm:inline">
+                  {isMac ? "⌘F" : "Ctrl+F"}
+                </span>
+              }
               value={search}
               onChange={(event) => {
                 setSearch(event.target.value);

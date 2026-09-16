@@ -69,6 +69,7 @@ import {
   ORDER_STATUSES,
   paidPct,
   paymentStatus,
+  readyToDeliver,
   receivedPct,
   remainingQty,
   type CustomerOrder,
@@ -92,6 +93,8 @@ import {
   formatSets,
   PAIRS_PER,
   pricedAmount,
+  type Unit,
+  type UnitConversions,
 } from "@renderer/components/features/wholesale/units";
 import {
   hydrateOrders,
@@ -195,31 +198,60 @@ const PAYMENT_LABELS: Record<PaymentStatus, string> = {
   paid: "Paid",
 };
 
-const PAYMENT_STYLES: Record<PaymentStatus, string> = {
-  unpaid: "bg-error text-white",
-  partial: "bg-warning text-white",
-  paid: "bg-success text-white",
+const PAYMENT_STYLES: Record<PaymentStatus, { bg: string; dot: string }> = {
+  unpaid: {
+    bg: "bg-error-subtle text-error border border-error/30",
+    dot: "bg-error",
+  },
+  partial: {
+    bg: "bg-warning-subtle text-warning border border-warning/30",
+    dot: "bg-warning",
+  },
+  paid: {
+    bg: "bg-success-subtle text-success border border-success/30",
+    dot: "bg-success",
+  },
 };
 
 const PAYMENT_STATUSES: PaymentStatus[] = ["unpaid", "partial", "paid"];
 
-const STATUS_STYLES: Record<OrderStatus, string> = {
-  new: "bg-text-secondary text-bg-base",
-  allocating: "bg-warning text-white",
-  ready_to_deliver: "bg-brand text-white",
-  partly_delivered: "bg-warning text-white",
-  fulfilled: "bg-success text-white",
-  cancelled: "bg-error text-white",
+const STATUS_STYLES: Record<OrderStatus, { bg: string; dot: string }> = {
+  new: {
+    bg: "bg-bg-raised text-text-secondary border border-border-strong",
+    dot: "bg-text-muted",
+  },
+  allocating: {
+    bg: "bg-warning-subtle text-warning border border-warning/30",
+    dot: "bg-warning animate-pulse",
+  },
+  ready_to_deliver: {
+    bg: "bg-brand-subtle text-brand border border-brand/30",
+    dot: "bg-brand",
+  },
+  partly_delivered: {
+    bg: "bg-warning-subtle text-warning border border-warning/30",
+    dot: "bg-warning",
+  },
+  fulfilled: {
+    bg: "bg-success-subtle text-success border border-success/30",
+    dot: "bg-success",
+  },
+  cancelled: {
+    bg: "bg-error-subtle text-error border border-error/30",
+    dot: "bg-error",
+  },
 };
 
 function StatusBadge({ status }: { status: OrderStatus }): React.JSX.Element {
+  const style = STATUS_STYLES[status] ?? STATUS_STYLES.new;
   return (
     <span
       className={cn(
-        "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap",
-        STATUS_STYLES[status],
+        "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap select-none",
+        style.bg,
       )}
     >
+      <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", style.dot)} />
       {STATUS_LABELS[status]}
     </span>
   );
@@ -257,13 +289,15 @@ function PaymentBadge({
 }: {
   status: PaymentStatus;
 }): React.JSX.Element {
+  const style = PAYMENT_STYLES[status] ?? PAYMENT_STYLES.unpaid;
   return (
     <span
       className={cn(
-        "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap",
-        PAYMENT_STYLES[status],
+        "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap select-none",
+        style.bg,
       )}
     >
+      <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", style.dot)} />
       {PAYMENT_LABELS[status]}
     </span>
   );
@@ -588,6 +622,7 @@ export default function CustomerOrdersPage({
         settings={settings}
         onSave={persistOrder}
         onBack={() => setView("list")}
+        onAllocate={openAllocation}
         onWriteOff={writeOffOrderLine}
         writeOffs={writeOffs}
       />
@@ -614,6 +649,7 @@ export default function CustomerOrdersPage({
     <OrderList
       orders={orders}
       readyToAllocatePairs={readyToAllocatePairs}
+      inventoryLines={inventoryLines}
       onOpen={openOrder}
       onAllocate={openAllocation}
       onCancel={cancelOrder}
@@ -631,11 +667,45 @@ function nextOrderNo(orders: CustomerOrder[]): string {
   );
 }
 
+function orderHasAvailableStockToAllocate(
+  order: CustomerOrder,
+  orders: CustomerOrder[],
+  inventoryLines: StockLine[],
+): boolean {
+  if (order.order_status === "cancelled" || order.order_status === "fulfilled") {
+    return false;
+  }
+  return order.lines.some((line) => {
+    const unallocated = lineRemaining(line) - (line.allocated_quantity_pairs ?? 0);
+    if (unallocated <= 0) return false;
+
+    const stockColors = availableStockColors(line.stock_code, inventoryLines);
+    const reservedByOthers = allocationsFromOtherOrders(
+      orders,
+      line.stock_code,
+      order.order_id,
+    );
+    const ownColors = colorPairsForText(
+      line.allocated_color_breakdown ?? "",
+      line.unit,
+      line.unit_conversions,
+    );
+    const availableForEdit = subtractColorPairs(stockColors, reservedByOthers);
+    const availableToAllocate = subtractColorPairs(availableForEdit, ownColors);
+    const lineAvailablePairs = Object.values(availableToAllocate).reduce(
+      (acc, p) => acc + p,
+      0,
+    );
+    return lineAvailablePairs > 0;
+  });
+}
+
 // ── List ─────────────────────────────────────────────────────────────────────
 
 function OrderList({
   orders,
   readyToAllocatePairs,
+  inventoryLines,
   onOpen,
   onAllocate,
   onCancel,
@@ -645,6 +715,7 @@ function OrderList({
 }: {
   orders: CustomerOrder[];
   readyToAllocatePairs: number;
+  inventoryLines: StockLine[];
   onOpen: (orderId: string) => void;
   onAllocate: (orderId: string, tab: "allocate" | "deliver") => void;
   onCancel: (orderId: string) => void;
@@ -655,6 +726,8 @@ function OrderList({
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [pay, setPay] = useState<PayFilter>("all");
+  type QuickView = "all" | "ready_to_allocate" | "ready_to_deliver" | "unpaid";
+  const [quickView, setQuickView] = useState<QuickView>("all");
   const [page, setPage] = useState(1);
 
   // Cancelled orders are excluded from every figure: a cancelled order is not work
@@ -695,9 +768,20 @@ function OrderList({
         );
       const matchesStatus = status === "all" || order.order_status === status;
       const matchesPay = pay === "all" ? true : paymentStatus(order) === pay;
-      return matchesQuery && matchesStatus && matchesPay;
+      const matchesQuickView =
+        quickView === "all"
+          ? true
+          : quickView === "ready_to_allocate"
+            ? orderHasAvailableStockToAllocate(order, orders, inventoryLines)
+            : quickView === "ready_to_deliver"
+              ? readyToDeliver(order)
+              : quickView === "unpaid"
+                ? paymentStatus(order) === "unpaid" && order.order_status !== "cancelled"
+                : true;
+
+      return matchesQuery && matchesStatus && matchesPay && matchesQuickView;
     });
-  }, [orders, search, status, pay]);
+  }, [orders, search, status, pay, quickView, inventoryLines]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -705,19 +789,56 @@ function OrderList({
     (safePage - 1) * PAGE_SIZE,
     safePage * PAGE_SIZE,
   );
-  const isFiltered = search.trim() !== "" || status !== "all" || pay !== "all";
+  const isFiltered = search.trim() !== "" || status !== "all" || pay !== "all" || quickView !== "all";
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const isMac = typeof window !== "undefined" && Boolean(window.api?.isMac);
+
+  // Global search focus shortcut: Press "/" or "Cmd/Ctrl + F" to focus search input
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      // Ignore if user is already typing in an input/textarea
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement;
+
+      if ((e.key === "/" && !isInput) || ((e.metaKey || e.ctrlKey) && (e.key === "f" || e.key === "F"))) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Quick filter counts based on actionable operational status
+  const countAll = orders.length;
+  const countReadyToAllocate = orders.filter((o) =>
+    orderHasAvailableStockToAllocate(o, orders, inventoryLines),
+  ).length;
+  const countReadyToDeliver = orders.filter(readyToDeliver).length;
+  const countUnpaid = orders.filter((o) => paymentStatus(o) === "unpaid" && o.order_status !== "cancelled").length;
 
   function resetFilters(): void {
     setSearch("");
+    setStatus("all");
+    setPay("all");
+    setQuickView("all");
+    setPage(1);
+  }
+
+  function handleQuickFilter(view: QuickView): void {
+    setQuickView(view);
     setStatus("all");
     setPay("all");
     setPage(1);
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Each figure is a way into the list below it, not just a number to read. */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <FigureCard
           label="Open Orders"
           value={formatQty(openOrders.length)}
@@ -749,7 +870,7 @@ function OrderList({
         />
       </div>
 
-      <Panel>
+      <Panel className="shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
           <div>
             <h2 className="text-base font-semibold text-text-primary tracking-tight">
@@ -775,12 +896,116 @@ function OrderList({
           </div>
         </div>
 
+        {/* Quick Filter Chips Bar */}
+        <div className="flex flex-wrap items-center gap-2 px-6 py-2.5 border-b border-border bg-bg-base select-none">
+          <span className="text-xs font-semibold uppercase tracking-wider text-text-muted mr-1">
+            Quick Views:
+          </span>
+          <button
+            type="button"
+            onClick={() => handleQuickFilter("all")}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 border",
+              quickView === "all" && status === "all" && pay === "all"
+                ? "bg-brand text-white border-brand shadow-xs"
+                : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
+            )}
+          >
+            <span>All Orders</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
+                quickView === "all" && status === "all" && pay === "all"
+                  ? "bg-white/20 text-white"
+                  : "bg-bg-raised text-text-muted",
+              )}
+            >
+              {countAll}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleQuickFilter("ready_to_allocate")}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 border",
+              quickView === "ready_to_allocate"
+                ? "bg-warning text-white border-warning shadow-xs"
+                : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
+            )}
+          >
+            <span>Ready to Allocate</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
+                quickView === "ready_to_allocate"
+                  ? "bg-white/20 text-white"
+                  : "bg-warning-subtle text-warning font-bold",
+              )}
+            >
+              {countReadyToAllocate}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleQuickFilter("ready_to_deliver")}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 border",
+              quickView === "ready_to_deliver"
+                ? "bg-brand text-white border-brand shadow-xs"
+                : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
+            )}
+          >
+            <span>Ready to Deliver</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
+                quickView === "ready_to_deliver"
+                  ? "bg-white/20 text-white"
+                  : "bg-brand-subtle text-brand font-bold",
+              )}
+            >
+              {countReadyToDeliver}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleQuickFilter("unpaid")}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 border",
+              quickView === "unpaid"
+                ? "bg-error text-white border-error shadow-xs"
+                : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
+            )}
+          >
+            <span>Unpaid</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
+                quickView === "unpaid"
+                  ? "bg-white/20 text-white"
+                  : "bg-error-subtle text-error font-bold",
+              )}
+            >
+              {countUnpaid}
+            </span>
+          </button>
+        </div>
+
         <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-bg-subtle">
           <div className="w-full sm:w-[28rem] lg:w-[32rem]">
             <Input
+              ref={searchInputRef}
               aria-label="Search orders"
-              placeholder="Search customer, order no. or product"
+              placeholder="Search customer, order no. or product (/ or ⌘F)"
               startIcon={<SearchIcon className="w-4 h-4" />}
+              endIcon={
+                <span className="text-[10px] text-text-muted/60 border border-border rounded px-1.5 py-0.5 select-none hidden sm:inline">
+                  {isMac ? "⌘F" : "Ctrl+F"}
+                </span>
+              }
               value={search}
               onChange={(event) => {
                 setSearch(event.target.value);
@@ -794,6 +1019,7 @@ function OrderList({
               value={status}
               onChange={(event) => {
                 setStatus(event.target.value as StatusFilter);
+                setQuickView("all");
                 setPage(1);
               }}
             >
@@ -811,6 +1037,7 @@ function OrderList({
               value={pay}
               onChange={(event) => {
                 setPay(event.target.value as PayFilter);
+                setQuickView("all");
                 setPage(1);
               }}
             >
@@ -860,17 +1087,16 @@ function OrderList({
                   <Th className="whitespace-nowrap">Order no.</Th>
                   <Th>Customer</Th>
                   <Th>Date</Th>
-                  <Th className="text-right whitespace-nowrap">Ordered qty</Th>
-                  <Th className="text-right whitespace-nowrap">
-                    Remaining qty
-                  </Th>
-                  <Th className="min-w-[11rem] whitespace-nowrap">
-                    Fulfillment progress
+                  <Th className="min-w-[17.5rem] whitespace-nowrap">
+                    Fulfillment qty
+                    <span className="block text-[10px] font-normal text-text-muted">
+                      delivered / total
+                    </span>
                   </Th>
                   <Th className="whitespace-nowrap">Order status</Th>
                   <Th className="whitespace-nowrap">Payment status</Th>
                   <Th className="w-28 whitespace-nowrap">Action</Th>
-                  <Th className="w-12" aria-label="Actions" />
+                  <Th className="w-16" aria-label="Actions" />
                 </Tr>
               </Thead>
               <Tbody>
@@ -905,17 +1131,29 @@ function OrderList({
                       <Td className="text-text-muted whitespace-nowrap">
                         {formatDate(order.order_date)}
                       </Td>
-                      <Td className="text-right tabular-nums font-medium">
-                        {sets(order.total_quantity_pairs)}
-                      </Td>
-                      <Td className="text-right tabular-nums font-semibold text-error">
-                        {sets(remaining)}
-                      </Td>
-                      <Td>
-                        <RowProgress
-                          pct={receivedPct(order)}
-                          label={`Fulfillment progress for ${order.order_no}`}
-                        />
+                      <Td className="whitespace-nowrap">
+                        <div className="flex flex-col gap-1.5 w-full min-w-[16.5rem] max-w-[21rem]">
+                          <div className="flex items-center justify-between gap-4 text-xs font-mono">
+                            <span className="font-semibold text-text-primary whitespace-nowrap shrink-0">
+                              {sets(order.delivered_quantity_pairs)}
+                              <span className="text-text-muted/60 font-normal"> / </span>
+                              <span className="text-text-secondary font-normal">{sets(order.total_quantity_pairs)}</span>
+                            </span>
+                            {remaining > 0 ? (
+                              <span className="text-error text-[11px] font-sans font-medium whitespace-nowrap shrink-0">
+                                {sets(remaining)} left
+                              </span>
+                            ) : (
+                              <span className="text-success text-[11px] font-sans font-medium whitespace-nowrap shrink-0">
+                                Fulfilled
+                              </span>
+                            )}
+                          </div>
+                          <RowProgress
+                            pct={receivedPct(order)}
+                            label={`Fulfillment progress for ${order.order_no}`}
+                          />
+                        </div>
                       </Td>
                       <Td>
                         <StatusBadge status={order.order_status} />
@@ -1094,9 +1332,13 @@ function allocationsFromOtherOrders(
             (result, line) =>
               mergeColorPairs(
                 result,
+                // That line's own conversion, not the default six: a product whose set
+                // is twelve pairs would otherwise read as half the stock it really
+                // holds back, and this order would be free to take what is spoken for.
                 colorPairsForText(
                   line.allocated_color_breakdown ?? "",
                   line.unit,
+                  line.unit_conversions,
                 ),
               ),
             colors,
@@ -1105,13 +1347,24 @@ function allocationsFromOtherOrders(
     );
 }
 
-function formatColorPairs(colorPairs: ColorPairs): string {
+function formatColorPairs(
+  colorPairs: ColorPairs,
+  conversions: UnitConversions = PAIRS_PER,
+): string {
   return Object.entries(colorPairs)
     .filter(([, pairs]) => pairs > 0)
-    .map(([color, pairs]) =>
-      pairs % 6 === 0 ? `${color}${pairs / 6}s` : `${color}${pairs}p`,
-    )
+    .map(([color, pairs]) => `${color} ${formatSets(pairs, conversions)}`)
     .join(", ");
+}
+
+function formatColorBreakdown(
+  breakdown: string | null | undefined,
+  unit: Unit = "set",
+  conversions: UnitConversions = PAIRS_PER,
+): string {
+  if (!breakdown || breakdown.trim() === "") return "";
+  const pairs = colorPairsForText(breakdown, unit, conversions);
+  return formatColorPairs(pairs, conversions);
 }
 
 function AllocationLineRow({
@@ -1200,27 +1453,54 @@ function AllocationLineRow({
           <span className="text-xs text-text-secondary">
             <span className="font-semibold text-text-primary">Colors:</span>{" "}
             <span className="font-bold text-brand">
-              {line.color_breakdown || "—"}
+              {formatColorBreakdown(line.color_breakdown, line.unit, line.unit_conversions) || line.color_breakdown || "—"}
             </span>
           </span>
         </div>
       </Td>
       <Td className="whitespace-nowrap text-right tabular-nums">
-        {formatIn(line.quantity_pairs, line.unit, line.unit_conversions)}
-      </Td>
-      <Td className="whitespace-nowrap text-right tabular-nums text-success">
-        {formatIn(
-          line.delivered_quantity_pairs,
-          line.unit,
-          line.unit_conversions,
-        )}
-      </Td>
-      <Td className="whitespace-nowrap text-right tabular-nums font-semibold text-error">
-        {formatIn(lineRemaining(line), line.unit, line.unit_conversions)}
+        <div className="flex flex-col items-end gap-0.5">
+          <div className="flex items-center gap-1.5 font-mono">
+            <span
+              className={cn(
+                "font-semibold",
+                lineRemaining(line) === 0 && line.quantity_pairs > 0
+                  ? "text-success"
+                  : line.delivered_quantity_pairs > 0
+                    ? "text-text-primary"
+                    : "text-text-muted",
+              )}
+            >
+              {formatIn(
+                line.delivered_quantity_pairs,
+                line.unit,
+                line.unit_conversions,
+              )}
+            </span>
+            <span className="text-text-muted/50 font-normal">/</span>
+            <span className="text-text-secondary font-medium">
+              {formatIn(line.quantity_pairs, line.unit, line.unit_conversions)}
+            </span>
+          </div>
+          <div className="text-[11px]">
+            {lineRemaining(line) > 0 ? (
+              <span className="text-error font-medium">
+                {formatIn(
+                  lineRemaining(line),
+                  line.unit,
+                  line.unit_conversions,
+                )}{" "}
+                left
+              </span>
+            ) : (
+              <span className="text-success text-[10px] font-medium">Done</span>
+            )}
+          </div>
+        </div>
       </Td>
       <Td>
         <span className="font-bold text-brand">
-          {line.allocated_color_breakdown || "Not allocated"}
+          {formatColorBreakdown(line.allocated_color_breakdown, line.unit, line.unit_conversions) || "Not allocated"}
         </span>
       </Td>
       <Td>
@@ -1232,19 +1512,31 @@ function AllocationLineRow({
             {!inventoryLoading && (
               <span
                 className={cn(
-                  "rounded-full px-1.5 py-0.5 text-xs font-semibold",
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border",
                   hasAvailableStock
-                    ? "bg-success-subtle text-success"
+                    ? "bg-success-subtle text-success border-success/20"
                     : hasCurrentAllocation
-                      ? "bg-brand-subtle text-brand"
-                      : "bg-error-subtle text-error",
+                      ? "bg-brand-subtle text-brand border-brand/20"
+                      : "bg-error-subtle text-error border-error/20",
                 )}
               >
-                {hasAvailableStock
-                  ? "Available"
-                  : hasCurrentAllocation
-                    ? "Fully allocated"
-                    : "Not available"}
+                <span
+                  className={cn(
+                    "w-1.5 h-1.5 rounded-full",
+                    hasAvailableStock
+                      ? "bg-success"
+                      : hasCurrentAllocation
+                        ? "bg-brand"
+                        : "bg-error",
+                  )}
+                />
+                <span>
+                  {hasAvailableStock
+                    ? "Available"
+                    : hasCurrentAllocation
+                      ? "Fully allocated"
+                      : "Not available"}
+                </span>
               </span>
             )}
           </div>
@@ -1252,7 +1544,7 @@ function AllocationLineRow({
             {inventoryLoading
               ? "Checking stock…"
               : hasAvailableStock
-                ? `Available to allocate: ${formatColorPairs(availableToAllocate)}`
+                ? formatColorPairs(availableToAllocate, { ...PAIRS_PER, set: setSize })
                 : hasCurrentAllocation
                   ? "No stock remains for another allocation."
                   : "No stock is available for this item."}
@@ -1376,9 +1668,12 @@ function AllocationTable({
         <Thead className="top-0">
           <Tr>
             <Th className="min-w-[12rem]">Product</Th>
-            <Th className="text-right whitespace-nowrap">Ordered qty</Th>
-            <Th className="text-right whitespace-nowrap">Delivered qty</Th>
-            <Th className="text-right whitespace-nowrap">Remaining qty</Th>
+            <Th className="text-right whitespace-nowrap min-w-[11rem]">
+              Fulfillment qty
+              <span className="block text-[10px] font-normal text-text-muted">
+                delivered / ordered
+              </span>
+            </Th>
             <Th className="min-w-[13rem]">Allocated colors</Th>
             <Th className="min-w-[12rem]">Available to allocate</Th>
             <Th className="min-w-[21rem]">Allocate colors</Th>
@@ -1405,17 +1700,40 @@ function AllocationTable({
         </Tbody>
       </TableContainer>
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between border-t border-border pt-3">
+        <p className="text-xs text-text-muted">
+          {changedLines.length > 0
+            ? `${changedLines.length} product allocation${changedLines.length === 1 ? "" : "s"} modified`
+            : "No unsaved allocation changes"}
+        </p>
         <Button
           onClick={() => void handleSaveAllocations()}
           loading={saving}
           disabled={!canSave}
+          size="sm"
         >
           Save allocations
         </Button>
       </div>
     </div>
   );
+}
+
+/** What is still owed of each colour on one line: what was ordered less what has already
+ *  gone out. The per-colour ceiling for a delivery — the line total alone would let one
+ *  colour be over-delivered while another stayed short. */
+function stillOwedColors(line: CustomerOrderLine): ColorPairs {
+  const ordered = colorPairsForText(
+    line.color_breakdown,
+    line.unit,
+    line.unit_conversions,
+  );
+  const delivered = colorPairsForText(
+    line.delivered_color_breakdown ?? "",
+    line.unit,
+    line.unit_conversions,
+  );
+  return subtractColorPairs(ordered, delivered);
 }
 
 function deliveryLocationsForLine(
@@ -1456,10 +1774,20 @@ function availableDeliveryColors(
   );
 }
 
+/** The same three rules the server applies to a delivery: the colour has to be on the
+ *  order, the line cannot pass what the customer is still owed, and the stock has to be
+ *  free at this place once other orders' reservations are held back.
+ *
+ *  Allocation is deliberately NOT one of them. Reserving stock is a planning step, not a
+ *  gate — the server has always let unallocated stock go out first-come-first-served, and
+ *  a customer standing at the counter should not be turned away because an internal step
+ *  was skipped. The screen used to cap delivery at what had been allocated, which blocked
+ *  handovers the server would have accepted.
+ */
 function deliveryValidationMessage(
   line: CustomerOrderLine,
   draft: string,
-  allocatedColors: ColorPairs,
+  owedColors: ColorPairs,
   availableColors: ColorPairs,
   inventoryLoading: boolean,
 ): string | null {
@@ -1478,8 +1806,10 @@ function deliveryValidationMessage(
   if (requestedPairs > lineRemaining(line))
     return `Delivery cannot exceed ${formatIn(lineRemaining(line), line.unit, line.unit_conversions)}.`;
   for (const [color, pairs] of Object.entries(requestedColors)) {
-    if (pairs > (allocatedColors[color] ?? 0))
-      return `Only ${formatSets(allocatedColors[color] ?? 0)} of ${color} is allocated for delivery.`;
+    if ((owedColors[color] ?? 0) <= 0)
+      return `${color} is not still owed on this order.`;
+    if (pairs > (owedColors[color] ?? 0))
+      return `Only ${formatSets(owedColors[color] ?? 0)} of ${color} is still owed.`;
     if (pairs > (availableColors[color] ?? 0))
       return `Only ${formatSets(availableColors[color] ?? 0)} of ${color} is available at this location.`;
   }
@@ -1522,6 +1852,9 @@ function DeliveryView({
   ];
   const selectedLocation = fromLocation || locationOptions[0] || "";
   const rows = order.lines.map((line) => {
+    const owedColors = stillOwedColors(line);
+    // Shown, not enforced: what has been set aside for this customer is worth knowing
+    // while handing goods over, but it no longer decides what may go out.
     const allocatedColors = colorPairsForText(
       line.allocated_color_breakdown ?? "",
       line.unit,
@@ -1543,12 +1876,13 @@ function DeliveryView({
       draftPairs,
       pairs,
       serialized,
+      owedColors,
       allocatedColors,
       availableColors,
       problem: deliveryValidationMessage(
         line,
         serialized,
-        allocatedColors,
+        owedColors,
         availableColors,
         inventoryLoading,
       ),
@@ -1593,20 +1927,31 @@ function DeliveryView({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border-strong pb-4">
-        <div>
-          <h3 className="text-base font-semibold text-text-primary">
-            Delivery details
-          </h3>
-          <p className="mt-1 text-sm text-text-secondary">
-            Record the stock handed to this customer.
-          </p>
+      <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 mb-3 border-b border-border">
+          <div>
+            <h3 className="text-sm font-semibold text-text-primary">
+              Delivery parameters
+            </h3>
+            <p className="text-xs text-text-muted">
+              Select stock location, dispatch date, and destination address.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-text-muted">To deliver:</span>
+            <span
+              className={cn(
+                "font-mono text-xs font-semibold px-2.5 py-0.5 rounded-full border",
+                selectedRows.length > 0
+                  ? "bg-brand-subtle text-brand border-brand/20"
+                  : "bg-bg-subtle text-text-muted border-border",
+              )}
+            >
+              {formatSets(selectedRows.reduce((sum, row) => sum + row.pairs, 0))} selected
+            </span>
+          </div>
         </div>
-        <span className="text-sm font-semibold tabular-nums text-brand">
-          {formatSets(selectedRows.reduce((sum, row) => sum + row.pairs, 0))}{" "}
-          selected
-        </span>
-        <div className="grid w-full gap-3 sm:grid-cols-4">
+        <div className="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Select
             label="From location"
             value={selectedLocation}
@@ -1648,7 +1993,12 @@ function DeliveryView({
         <Thead className="top-0">
           <Tr>
             <Th className="min-w-[12rem]">Product</Th>
-            <Th className="text-right whitespace-nowrap">Remaining</Th>
+            <Th className="text-right whitespace-nowrap">
+              Fulfillment qty
+              <span className="block text-[10px] font-normal normal-case tracking-normal text-text-muted">
+                Delivered / Ordered
+              </span>
+            </Th>
             <Th className="min-w-[13rem]">Allocated colors</Th>
             <Th className="min-w-[13rem]">Available to deliver</Th>
             <Th className="min-w-[21rem]">Deliver colors</Th>
@@ -1657,7 +2007,7 @@ function DeliveryView({
         <Tbody>
           {rows.map((row) => {
             const deliverableColors = Object.entries(
-              row.allocatedColors,
+              row.owedColors,
             ).reduce<ColorPairs>((colors, [color, pairs]) => {
               const deliverablePairs = Math.min(
                 pairs,
@@ -1683,16 +2033,40 @@ function DeliveryView({
                     </span>
                   </div>
                 </Td>
-                <Td className="whitespace-nowrap text-right font-semibold tabular-nums text-error">
-                  {formatIn(
-                    lineRemaining(row.line),
-                    row.line.unit,
-                    row.line.unit_conversions,
+                <Td className="whitespace-nowrap text-right tabular-nums">
+                  {/* Progress reads better than a lone shortfall: how much has gone out,
+                      against how much was asked for, and only then what is still owed. */}
+                  <div>
+                    <span className="font-bold text-text-primary">
+                      {formatIn(
+                        row.line.delivered_quantity_pairs,
+                        row.line.unit,
+                        row.line.unit_conversions,
+                      )}
+                    </span>
+                    <span className="text-text-muted"> / </span>
+                    <span className="text-text-secondary">
+                      {formatIn(
+                        row.line.quantity_pairs,
+                        row.line.unit,
+                        row.line.unit_conversions,
+                      )}
+                    </span>
+                  </div>
+                  {lineRemaining(row.line) > 0 && (
+                    <div className="mt-0.5 text-xs font-semibold text-error">
+                      {formatIn(
+                        lineRemaining(row.line),
+                        row.line.unit,
+                        row.line.unit_conversions,
+                      )}{" "}
+                      left
+                    </div>
                   )}
                 </Td>
                 <Td>
                   <span className="font-bold text-brand">
-                    {formatColorPairs(row.allocatedColors) || "No allocation"}
+                    {formatColorPairs(row.allocatedColors, { ...PAIRS_PER, set: setSize }) || "No allocation"}
                   </span>
                 </Td>
                 <Td>
@@ -1705,8 +2079,8 @@ function DeliveryView({
                     <div className="mt-0.5 text-xs text-text-secondary">
                       {inventoryLoading
                         ? "Checking stock…"
-                        : formatColorPairs(deliverableColors) ||
-                          "No allocated colors available."}
+                        : formatColorPairs(deliverableColors, { ...PAIRS_PER, set: setSize }) ||
+                          "Nothing on this order is in stock here."}
                     </div>
                   </div>
                 </Td>
@@ -1744,11 +2118,17 @@ function DeliveryView({
         </Tbody>
       </TableContainer>
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between border-t border-border pt-3">
+        <p className="text-xs text-text-muted">
+          {selectedRows.length > 0
+            ? `${selectedRows.length} item${selectedRows.length === 1 ? "" : "s"} ready for dispatch`
+            : "Select quantities to deliver above"}
+        </p>
         <Button
           onClick={() => void saveDelivery()}
           loading={saving}
           disabled={!canSave}
+          size="sm"
         >
           Record delivery
         </Button>
@@ -1783,6 +2163,10 @@ function AllocateAndDeliveryView({
     (sum, line) => sum + (line.allocated_quantity_pairs ?? 0),
     0,
   );
+  // What this order could still set aside — not what the warehouse holds. The three
+  // caps are the same three AllocationLineRow enforces below, so the figure on the tab
+  // and the rule inside the row can never disagree: a colour has to be on the order, it
+  // has to be free stock, and the line's total cannot pass what is still owed.
   const availableToAllocatePairs = order.lines.reduce((sum, line) => {
     const stockColors = availableStockColors(line.stock_code, inventoryLines);
     const reservedByOthers = allocationsFromOtherOrders(
@@ -1795,20 +2179,29 @@ function AllocateAndDeliveryView({
       line.unit,
       line.unit_conversions,
     );
-    const availableForEdit = subtractColorPairs(stockColors, reservedByOthers);
-    const availableToAllocate = subtractColorPairs(availableForEdit, ownColors);
-    const lineAvailablePairs = Object.values(availableToAllocate).reduce(
-      (acc, p) => acc + p,
-      0,
-    );
-    return sum + lineAvailablePairs;
-  }, 0);
-  const availableToDeliverPairs = order.lines.reduce((sum, line) => {
-    const allocatedColors = colorPairsForText(
-      line.allocated_color_breakdown ?? "",
+    const orderColors = colorPairsForText(
+      line.color_breakdown,
       line.unit,
       line.unit_conversions,
     );
+    const freeStock = subtractColorPairs(
+      subtractColorPairs(stockColors, reservedByOthers),
+      ownColors,
+    );
+    const stillWanted = subtractColorPairs(orderColors, ownColors);
+    const takeable = Object.entries(stillWanted).reduce(
+      (acc, [color, wanted]) => acc + Math.min(wanted, freeStock[color] ?? 0),
+      0,
+    );
+    const ownPairs = Object.values(ownColors).reduce((acc, p) => acc + p, 0);
+    const roomLeft = Math.max(0, lineRemaining(line) - ownPairs);
+    return sum + Math.min(takeable, roomLeft);
+  }, 0);
+  // What could actually be handed over now: on the order, free at a place, and within
+  // what the customer is still owed. Same three rules deliveryValidationMessage applies,
+  // so the badge and the rows below never disagree.
+  const availableToDeliverPairs = order.lines.reduce((sum, line) => {
+    const owedColors = stillOwedColors(line);
     const stockColors = availableStockColors(line.stock_code, inventoryLines);
     const reservedByOthers = allocationsFromOtherOrders(
       orders,
@@ -1816,12 +2209,12 @@ function AllocateAndDeliveryView({
       order.order_id,
     );
     const availableStock = subtractColorPairs(stockColors, reservedByOthers);
-    const lineDeliverablePairs = Object.entries(allocatedColors).reduce(
-      (acc, [color, allocated]) =>
-        acc + Math.min(allocated, availableStock[color] ?? 0),
+    const deliverable = Object.entries(owedColors).reduce(
+      (acc, [color, wanted]) =>
+        acc + Math.min(wanted, availableStock[color] ?? 0),
       0,
     );
-    return sum + lineDeliverablePairs;
+    return sum + Math.min(deliverable, lineRemaining(line));
   }, 0);
 
   useEffect(() => {
@@ -1830,53 +2223,40 @@ function AllocateAndDeliveryView({
 
   return (
     <div className="flex flex-col gap-3">
-      <Button variant="ghost" size="sm" onClick={onBack} className="self-start">
-        <ChevronLeftIcon className="w-4 h-4" />
-        Back to orders
-      </Button>
-      <Panel className="border-border-strong">
-        <div className="border-b border-border-strong px-5 py-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-text-muted hover:text-text-primary rounded-md hover:bg-bg-subtle transition-colors border border-transparent hover:border-border"
+        >
+          <ChevronLeftIcon className="w-3.5 h-3.5" />
+          <span>Back to orders</span>
+        </button>
+      </div>
+      <Panel className="border-border shadow-sm">
+        <div className="border-b border-border px-5 py-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-semibold tracking-tight text-text-primary">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h2 className="text-lg font-semibold tracking-tight text-text-primary">
                   Fulfill order
                 </h2>
+                <span className="font-mono text-xs px-2 py-0.5 rounded bg-bg-subtle border border-border text-text-secondary font-medium">
+                  {order.order_no}
+                </span>
                 <StatusBadge status={order.order_status} />
               </div>
-              <p className="mt-1 text-sm text-text-muted">
-                {order.order_no} · {order.customer_name} ·{" "}
-                {formatDate(order.order_date)}
+              <p className="mt-1 text-xs text-text-muted flex items-center gap-2">
+                <span className="font-medium text-text-secondary">{order.customer_name}</span>
+                <span>•</span>
+                <span>{formatDate(order.order_date)}</span>
               </p>
             </div>
-          </div>
-          <div className="mt-3 grid gap-3 grid-cols-1 sm:grid-cols-3">
-            <FigureCard
-              label="Delivered qty"
-              value={sets(order.delivered_quantity_pairs)}
-              sub="sent to customer"
-              tone={order.delivered_quantity_pairs > 0 ? "success" : "neutral"}
-              className="border-border-strong"
-            />
-            <FigureCard
-              label="Allocated qty"
-              value={sets(allocatedPairs)}
-              sub="reserved from stock"
-              tone={allocatedPairs > 0 ? "brand" : "neutral"}
-              className="border-border-strong"
-            />
-            <FigureCard
-              label="Remaining qty"
-              value={sets(remainingQty(order))}
-              sub="waiting to fulfill"
-              tone={remainingQty(order) > 0 ? "error" : "success"}
-              className="border-border-strong"
-            />
           </div>
           <div
             role="tablist"
             aria-label="Fulfill order tab"
-            className="mt-4 inline-flex w-full sm:w-auto items-center gap-1.5 rounded-lg bg-bg-subtle p-1 border border-border"
+            className="mt-4 inline-flex w-full sm:w-auto items-center gap-1 rounded-lg bg-bg-subtle p-1 border border-border"
           >
             <button
               type="button"
@@ -1884,21 +2264,21 @@ function AllocateAndDeliveryView({
               aria-selected={tab === "allocate"}
               onClick={() => setTab("allocate")}
               className={cn(
-                "flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-150",
+                "flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-medium transition-all duration-150",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
                 tab === "allocate"
                   ? "bg-brand text-white shadow-sm font-semibold"
                   : "text-text-muted hover:text-text-primary hover:bg-bg-base/60",
               )}
             >
-              <ClipboardIcon className="w-4 h-4 shrink-0" />
+              <ClipboardIcon className="w-3.5 h-3.5 shrink-0" />
               <span>Allocate stock</span>
               <span
                 className={cn(
-                  "ml-1 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
+                  "ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-none",
                   tab === "allocate"
-                    ? "bg-success text-white"
-                    : "bg-success-subtle text-success",
+                    ? "bg-white/20 text-white"
+                    : "bg-success-subtle text-success border border-success/20",
                 )}
               >
                 {inventoryLoading ? "—" : sets(availableToAllocatePairs)}
@@ -1910,21 +2290,21 @@ function AllocateAndDeliveryView({
               aria-selected={tab === "deliver"}
               onClick={() => setTab("deliver")}
               className={cn(
-                "flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-150",
+                "flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-medium transition-all duration-150",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
                 tab === "deliver"
                   ? "bg-brand text-white shadow-sm font-semibold"
                   : "text-text-muted hover:text-text-primary hover:bg-bg-base/60",
               )}
             >
-              <TruckIcon className="w-4 h-4 shrink-0" />
+              <TruckIcon className="w-3.5 h-3.5 shrink-0" />
               <span>Deliver to customer</span>
               <span
                 className={cn(
-                  "ml-1 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
+                  "ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-none",
                   tab === "deliver"
-                    ? "bg-success text-white"
-                    : "bg-success-subtle text-success",
+                    ? "bg-white/20 text-white"
+                    : "bg-success-subtle text-success border border-success/20",
                 )}
               >
                 {inventoryLoading ? "—" : sets(availableToDeliverPairs)}
@@ -2036,6 +2416,7 @@ function OrderDetail({
   settings,
   onSave,
   onBack,
+  onAllocate,
   onWriteOff,
   writeOffs,
 }: {
@@ -2043,6 +2424,7 @@ function OrderDetail({
   settings: AppSettings | null;
   onSave: (order: CustomerOrder, originalOrder: CustomerOrder) => Promise<void>;
   onBack: () => void;
+  onAllocate?: (orderId: string, tab?: "allocate" | "deliver") => void;
   onWriteOff: (
     lineId: string,
     quantity: number,
@@ -2252,51 +2634,92 @@ function OrderDetail({
   const paid = paidAmount(order);
   const paidShare = paidPct(order);
   const hasChanges = isDirty;
+  const allocatedPairs = order.lines.reduce(
+    (sum, line) => sum + (line.allocated_quantity_pairs ?? 0),
+    0,
+  );
+  const remainingToAllocate = Math.max(0, order.total_quantity_pairs - allocatedPairs);
+  const allocatedPct = order.total_quantity_pairs > 0
+    ? Math.round((allocatedPairs / order.total_quantity_pairs) * 100)
+    : 0;
+
+  function handleBack(): void {
+    if (hasChanges) {
+      const confirmed = window.confirm(
+        "You have unsaved changes. Discard them?",
+      );
+      if (!confirmed) return;
+    }
+    onBack();
+  }
 
   return (
     <>
-      <div className="flex flex-col gap-5">
-        <div>
-          <Button variant="ghost" size="sm" onClick={onBack}>
-            <ChevronLeftIcon className="w-4 h-4" />
-            Back to orders
-          </Button>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={handleBack}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-text-muted hover:text-text-primary rounded-md hover:bg-bg-subtle transition-colors border border-transparent hover:border-border"
+          >
+            <ChevronLeftIcon className="w-3.5 h-3.5" />
+            <span>Back to orders</span>
+          </button>
         </div>
 
-        <Panel>
+        <Panel className="border-border shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-lg font-semibold text-text-primary tracking-tight">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h2 className="text-lg font-semibold text-text-primary tracking-tight font-mono">
                   {order.order_no}
                 </h2>
                 <StatusBadge status={order.order_status} />
                 <PaymentBadge status={paymentStatus(order)} />
               </div>
-              <p className="mt-0.5 truncate text-sm text-text-muted">
-                {order.customer_name} · {formatDate(order.order_date)}
+              <p className="mt-1 text-xs text-text-muted flex items-center gap-2">
+                <span className="font-medium text-text-secondary">{order.customer_name}</span>
+                <span>•</span>
+                <span>{formatDate(order.order_date)}</span>
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
+              {onAllocate && order.order_status !== "cancelled" && order.order_status !== "fulfilled" && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => onAllocate(order.order_id, "allocate")}
+                >
+                  <ClipboardIcon className="w-3.5 h-3.5 mr-1" />
+                  Allocate stock
+                </Button>
+              )}
+              {hasChanges && (
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-500 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  <span>Unsaved changes</span>
+                </span>
+              )}
               <Button
                 size="sm"
                 onClick={() => void handleSubmit(saveChanges)()}
                 loading={saving}
                 disabled={!hasChanges}
               >
-                <CheckIcon className="w-4 h-4" />
+                <CheckIcon className="w-3.5 h-3.5 mr-1" />
                 Save changes
               </Button>
             </div>
           </div>
 
-          <div className="px-6 py-6 flex flex-col gap-10">
+
+          <div className="px-6 py-6 flex flex-col gap-8">
             <section>
               <SectionLabel>Order information</SectionLabel>
-              <div className="grid gap-4 lg:grid-cols-2">
+              <div className="grid gap-4 lg:grid-cols-2 mt-2">
                 <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-text-primary">
-                    Customer
+                  <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">
+                    Customer details
                   </h3>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Controller
@@ -2327,7 +2750,7 @@ function OrderDetail({
                       )}
                     />
                     <div className="sm:col-span-2">
-                      <label className="mb-1.5 block text-sm font-medium text-text-secondary">
+                      <label className="mb-1.5 block text-xs font-medium text-text-secondary">
                         Address
                       </label>
                       <Controller
@@ -2347,8 +2770,8 @@ function OrderDetail({
                   </div>
                 </div>
                 <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-text-primary">
-                    Order
+                  <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">
+                    Order parameters
                   </h3>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <ReadOnlyField
@@ -2377,17 +2800,21 @@ function OrderDetail({
             </section>
 
             <section>
-              <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-                <SectionLabel>Products</SectionLabel>
+              <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <SectionLabel>Product Line Items</SectionLabel>
+                  <p className="text-xs text-text-muted -mt-0.5">
+                    Ordered items, allocated stock, pricing, and fulfillment progress per line.
+                  </p>
+                </div>
                 <div className="w-full sm:w-80 md:w-96">
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="font-medium text-text-secondary">
-                      Delivery
+                  <div className="flex items-center justify-between text-xs mb-1.5">
+                    <span className="text-text-secondary font-medium">
+                      Fulfillment progress
                     </span>
-                    <span className="tabular-nums font-semibold text-text-primary">
-                      {sets(order.delivered_quantity_pairs)} /{" "}
-                      {sets(order.total_quantity_pairs)} ({pct}
-                      %)
+                    <span className="tabular-nums font-mono text-[11px] text-text-muted">
+                      {sets(order.delivered_quantity_pairs)} / {sets(order.total_quantity_pairs)}
+                      <span className="ml-1.5 text-text-secondary font-semibold">({pct}%)</span>
                     </span>
                   </div>
                   <div
@@ -2396,13 +2823,14 @@ function OrderDetail({
                     aria-valuemin={0}
                     aria-valuemax={100}
                     aria-label="Fulfillment progress"
-                    className="h-2 rounded-full bg-bg-raised overflow-hidden"
+                    className="h-2 rounded-full bg-bg-subtle border border-border overflow-hidden relative"
                   >
                     <div
-                      className={cn(
-                        "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
-                        pct === 100 ? "bg-success" : "bg-brand",
-                      )}
+                      className="absolute inset-y-0 left-0 bg-brand/35 transition-[width] duration-300 motion-reduce:transition-none"
+                      style={{ width: String(allocatedPct) + "%" }}
+                    />
+                    <div
+                      className="absolute inset-y-0 left-0 bg-success transition-[width] duration-300 motion-reduce:transition-none"
                       style={{ width: String(pct) + "%" }}
                     />
                   </div>
@@ -2416,18 +2844,15 @@ function OrderDetail({
                     </Th>
                     <Th className="min-w-[18rem]">Product</Th>
                     <Th className="min-w-[11rem]">Colors</Th>
-                    <Th className="text-right whitespace-nowrap">
-                      Ordered qty
-                    </Th>
-                    <Th className="text-right whitespace-nowrap">
-                      Delivered qty
-                    </Th>
-                    <Th className="text-right whitespace-nowrap">
-                      Remaining qty
+                    <Th className="text-right whitespace-nowrap min-w-[12.5rem]">
+                      Fulfillment qty
+                      <span className="block text-[10px] font-normal text-text-muted">
+                        delivered / ordered
+                      </span>
                     </Th>
                     <Th className="text-right min-w-[10rem]">
                       Selling price
-                      <span className="block text-xs font-normal text-text-muted">
+                      <span className="block text-[10px] font-normal text-text-muted">
                         per set
                       </span>
                     </Th>
@@ -2542,39 +2967,58 @@ function OrderDetail({
                             )}
                           />
                         </Td>
-                        <Td className="text-right tabular-nums">
-                          {sets(line.quantity_pairs)}
-                        </Td>
-                        <Td className="text-right tabular-nums font-medium text-success">
-                          {sets(line.delivered_quantity_pairs)}
-                        </Td>
-                        <Td className="text-right tabular-nums font-semibold text-error">
-                          <div className="flex flex-col items-end gap-1">
-                            <span
-                              className={
-                                (line.lost_quantity_pairs ?? 0) > 0
-                                  ? "text-warning"
-                                  : undefined
-                              }
-                            >
-                              {sets(lineRemaining(line))}
-                              {(line.lost_quantity_pairs ?? 0) > 0 &&
-                                !explanation && (
-                                  <span className="ml-1 text-xs font-medium text-warning">
-                                    (
-                                    {sets(line.lost_quantity_pairs ?? 0)}{" "}
-                                    written off)
-                                  </span>
-                                )}
-                            </span>
-                            {explanation && (
+                        <Td className="text-right tabular-nums whitespace-nowrap">
+                          <div className="flex flex-col items-end gap-0.5">
+                            <div className="flex items-center gap-1.5 font-mono">
                               <span
-                                className="text-[10px] font-medium text-warning"
+                                className={cn(
+                                  "font-semibold",
+                                  lineRemaining(line) === 0 && line.quantity_pairs > 0
+                                    ? "text-success"
+                                    : line.delivered_quantity_pairs > 0
+                                      ? "text-text-primary"
+                                      : "text-text-muted",
+                                )}
+                              >
+                                {sets(line.delivered_quantity_pairs)}
+                              </span>
+                              <span className="text-text-muted/50 font-normal">/</span>
+                              <span className="text-text-secondary font-medium">
+                                {sets(line.quantity_pairs)}
+                              </span>
+                            </div>
+                            <div className="text-[11px]">
+                              {lineRemaining(line) > 0 ? (
+                                <span className="text-error font-medium">
+                                  {sets(lineRemaining(line))} left
+                                </span>
+                              ) : (
+                                <span className="text-success text-[10px] font-medium">
+                                  Done
+                                </span>
+                              )}
+                              {(line.lost_quantity_pairs ?? 0) > 0 && !explanation && (
+                                <span className="text-warning text-[10px] ml-1">
+                                  ({sets(line.lost_quantity_pairs ?? 0)} lost)
+                                </span>
+                              )}
+                            </div>
+                            {(line.allocated_quantity_pairs ?? 0) > 0 && (
+                              <div
+                                className="text-[11px] text-brand font-medium"
                                 title={
-                                  explanation
-                                    ? mismatchDescription(explanation)
+                                  line.allocated_color_breakdown
+                                    ? `Allocated: ${formatColorBreakdown(line.allocated_color_breakdown, line.unit, line.unit_conversions)}`
                                     : undefined
                                 }
+                              >
+                                {sets(line.allocated_quantity_pairs ?? 0)} allocated
+                              </div>
+                            )}
+                            {explanation && (
+                              <span
+                                className="text-[10px] font-medium text-warning mt-0.5"
+                                title={mismatchDescription(explanation)}
                               >
                                 {mismatchDescription(explanation)}
                               </span>
@@ -2732,14 +3176,39 @@ function OrderDetail({
                     <Td className="font-semibold" colSpan={3}>
                       Total
                     </Td>
-                    <Td className="text-right tabular-nums font-semibold">
-                      {sets(order.total_quantity_pairs)}
-                    </Td>
-                    <Td className="text-right tabular-nums font-semibold text-success">
-                      {sets(order.delivered_quantity_pairs)}
-                    </Td>
-                    <Td className="text-right tabular-nums font-semibold text-error">
-                      {sets(remainingQty(order))}
+                    <Td className="text-right tabular-nums whitespace-nowrap">
+                      <div className="flex flex-col items-end gap-0.5">
+                        <div className="flex items-center gap-1.5 font-mono font-semibold">
+                          <span
+                            className={
+                              order.delivered_quantity_pairs === order.total_quantity_pairs &&
+                              order.total_quantity_pairs > 0
+                                ? "text-success"
+                                : "text-text-primary"
+                            }
+                          >
+                            {sets(order.delivered_quantity_pairs)}
+                          </span>
+                          <span className="text-text-muted/50 font-normal">/</span>
+                          <span>{sets(order.total_quantity_pairs)}</span>
+                        </div>
+                        <div className="text-[11px] font-sans font-normal">
+                          {remainingQty(order) > 0 ? (
+                            <span className="text-error font-medium">
+                              {sets(remainingQty(order))} left
+                            </span>
+                          ) : (
+                            <span className="text-success font-medium">
+                              Done
+                            </span>
+                          )}
+                        </div>
+                        {allocatedPairs > 0 && (
+                          <div className="text-[11px] font-sans text-brand font-medium">
+                            {sets(allocatedPairs)} allocated
+                          </div>
+                        )}
+                      </div>
                     </Td>
                     <Td />
                     <Td className="text-right tabular-nums font-semibold text-brand">
@@ -2749,17 +3218,27 @@ function OrderDetail({
                   </Tr>
                 </Tbody>
               </TableContainer>
-              <div className="mt-3">
-                <Button size="sm" onClick={addLine}>
-                  <PlusIcon className="w-4 h-4" />
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button variant="secondary" size="sm" onClick={addLine}>
+                  <PlusIcon className="w-4 h-4 mr-1" />
                   Add product
                 </Button>
+                {onAllocate && remainingToAllocate > 0 && order.order_status !== "cancelled" && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onAllocate(order.order_id, "allocate")}
+                  >
+                    <ClipboardIcon className="w-3.5 h-3.5 mr-1" />
+                    Allocate stock ({sets(remainingToAllocate)} unallocated)
+                  </Button>
+                )}
                 {addingLineId && (
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={cancelAddLine}
-                    className={cn(SOFT_RED, "ml-2")}
+                    className={cn(SOFT_RED)}
                   >
                     Cancel
                   </Button>
@@ -2768,14 +3247,19 @@ function OrderDetail({
             </section>
 
             <section>
-              <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-                <SectionLabel>Payment</SectionLabel>
+              <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <SectionLabel>Payment Records</SectionLabel>
+                  <p className="text-xs text-text-muted -mt-0.5">
+                    Customer receipts, installments, and outstanding balance.
+                  </p>
+                </div>
                 <div className="w-full sm:w-80 md:w-96">
-                  <div className="flex items-center justify-between text-xs mb-1">
+                  <div className="flex items-center justify-between text-xs mb-1.5">
                     <span className="font-medium text-text-secondary">
-                      Paid so far
+                      Paid progress
                     </span>
-                    <span className="tabular-nums font-semibold text-text-primary">
+                    <span className="tabular-nums font-mono font-semibold text-text-primary">
                       {formatKyat(paid)} / {formatKyat(amount)} ({paidShare}%)
                     </span>
                   </div>
@@ -2785,7 +3269,7 @@ function OrderDetail({
                     aria-valuemin={0}
                     aria-valuemax={100}
                     aria-label="Paid so far"
-                    className="h-2 rounded-full bg-bg-raised overflow-hidden"
+                    className="h-2 rounded-full bg-bg-subtle border border-border overflow-hidden"
                   >
                     <div
                       className={cn(
@@ -3334,31 +3818,48 @@ function NewOrderForm({
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <Button
-          variant="ghost"
-          size="sm"
-          title={isDirty ? "This new order has unsaved changes." : undefined}
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
           onClick={onCancel}
+          title={isDirty ? "This new order has unsaved changes." : undefined}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-text-muted hover:text-text-primary rounded-md hover:bg-bg-subtle transition-colors border border-transparent hover:border-border"
         >
-          <ChevronLeftIcon className="w-4 h-4" />
-          Back to orders
-        </Button>
+          <ChevronLeftIcon className="w-3.5 h-3.5" />
+          <span>Back to orders</span>
+        </button>
       </div>
 
-      <Panel>
-        <div className="px-6 py-5 border-b border-border">
-          <h2 className="text-lg font-semibold text-text-primary tracking-tight mb-5">
-            New customer order
-          </h2>
+      <Panel className="border-border shadow-sm">
+        <div className="px-6 py-4 border-b border-border">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div>
+              <div className="flex items-center gap-2.5">
+                <h2 className="text-lg font-semibold text-text-primary tracking-tight">
+                  New customer order
+                </h2>
+                <span className="font-mono text-xs px-2 py-0.5 rounded bg-brand-subtle text-brand border border-brand/20 font-semibold">
+                  {orderNo}
+                </span>
+              </div>
+              <p className="text-xs text-text-muted mt-0.5">
+                Draft a new wholesale sales order and specify color breakdowns.
+              </p>
+            </div>
+          </div>
           <StepBar steps={STEPS} step={step} />
         </div>
 
         {step === 0 && (
-          <div className="px-6 py-6 flex flex-col gap-5">
-            <SectionLabel>Step 1 — customer information</SectionLabel>
-            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
+          <div className="px-6 py-5 flex flex-col gap-4">
+            <div>
+              <SectionLabel>Step 1 — Customer Information</SectionLabel>
+              <p className="text-xs text-text-muted -mt-0.5">
+                Select or type a customer name. Contact details are automatically populated for recognized customers.
+              </p>
+            </div>
+            <div className="grid gap-3.5 grid-cols-1 sm:grid-cols-2">
               <Input
                 label="Order date"
                 type="date"
@@ -3393,24 +3894,39 @@ function NewOrderForm({
                 {...register("customer_address")}
               />
             </div>
-            <div className="flex justify-end">
-              <Button onClick={() => void moveToProducts()}>
-                Next: products
-                <ChevronRightIcon className="w-4 h-4" />
+            <div className="flex justify-end border-t border-border pt-4">
+              <Button size="sm" onClick={() => void moveToProducts()}>
+                Next: Products
+                <ChevronRightIcon className="w-3.5 h-3.5 ml-1" />
               </Button>
             </div>
           </div>
         )}
 
         {step === 1 && (
-          <div className="px-6 py-6 flex flex-col gap-5">
-            <div>
-              <SectionLabel>Step 2 — products</SectionLabel>
-              <p className="text-sm text-text-muted -mt-1">
-                One row per stock code. Write the colors together with their
-                counts and unit — black10s,pink2p — and the qty works
-                itself out.
-              </p>
+          <div className="px-6 py-5 flex flex-col gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <SectionLabel>Step 2 — Products</SectionLabel>
+                <p className="text-xs text-text-muted -mt-0.5">
+                  One row per stock code. Specify colors with units (e.g. black10s, pink2p) and prices.
+                </p>
+              </div>
+
+              {/* Real-time Summary Badge Strip */}
+              <div className="flex items-center gap-2.5 px-3 py-1.5 bg-bg-subtle rounded-lg border border-border text-xs">
+                <span className="text-text-muted">
+                  Items: <strong className="font-mono text-text-primary">{filledLines.length}</strong>
+                </span>
+                <span className="text-border">|</span>
+                <span className="text-text-muted">
+                  Total Qty: <strong className="font-mono text-brand font-semibold">{sets(totalQty)}</strong>
+                </span>
+                <span className="text-border">|</span>
+                <span className="text-text-muted">
+                  Total Amount: <strong className="font-mono text-brand font-semibold">{formatKyat(totalAmount)}</strong>
+                </span>
+              </div>
             </div>
 
             <TableContainer>
@@ -3419,7 +3935,7 @@ function NewOrderForm({
                   <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[13rem]">Colors</Th>
                   <Th className="text-right whitespace-nowrap">Ordered qty</Th>
-                  <Th className="text-right min-w-[8rem]">Selling price<span className="block text-xs font-normal text-text-muted">per set</span></Th>
+                  <Th className="text-right min-w-[8rem]">Selling price<span className="block text-[10px] font-normal text-text-muted">per set</span></Th>
                   <Th className="text-right min-w-[8rem]">Amount</Th>
                 </Tr>
               </Thead>
@@ -3654,35 +4170,41 @@ function NewOrderForm({
             <div>
               <Button
                 variant="secondary"
+                size="sm"
                 className={SOFT_BLUE}
                 onClick={() => append({ ...EMPTY_LINE })}
               >
-                <PlusIcon className="w-4 h-4" />
+                <PlusIcon className="w-4 h-4 mr-1" />
                 Add another product
               </Button>
             </div>
 
-            <div className="flex justify-between">
+            <div className="flex items-center justify-between border-t border-border pt-4">
               <Button
                 variant="secondary"
-                className={SOFT_BLUE}
+                size="sm"
                 onClick={() => setStep(0)}
               >
-                <ChevronLeftIcon className="w-4 h-4" />
-                Back
+                <ChevronLeftIcon className="w-3.5 h-3.5" />
+                Back to customer
               </Button>
-              <Button onClick={() => void moveToReview()}>
-                Next: review
-                <ChevronRightIcon className="w-4 h-4" />
+              <Button size="sm" onClick={() => void moveToReview()}>
+                Next: Review
+                <ChevronRightIcon className="w-3.5 h-3.5 ml-1" />
               </Button>
             </div>
           </div>
         )}
 
         {step === 2 && (
-          <div className="px-6 py-6 flex flex-col gap-5">
-            <SectionLabel>Step 3 — review &amp; confirm</SectionLabel>
-            <dl className="grid gap-4 grid-cols-1 sm:grid-cols-4 bg-bg-subtle border border-border rounded-lg p-4">
+          <div className="px-6 py-5 flex flex-col gap-4">
+            <div>
+              <SectionLabel>Step 3 — Review &amp; Confirm</SectionLabel>
+              <p className="text-xs text-text-muted -mt-0.5">
+                Verify customer details and ordered quantities before generating the order record.
+              </p>
+            </div>
+            <dl className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 bg-bg-subtle border border-border rounded-lg p-3.5 text-xs">
               <ReviewFact label="Order no." value={orderNo} />
               <ReviewFact label="Order date" value={formatDate(orderDate)} />
               <ReviewFact label="Customer" value={customerName || "—"} />
@@ -3690,7 +4212,7 @@ function NewOrderForm({
               <ReviewFact
                 label="Address"
                 value={customerAddress || "—"}
-                className="sm:col-span-4"
+                className="sm:col-span-2 lg:col-span-4"
               />
             </dl>
             <TableContainer>
@@ -3700,7 +4222,7 @@ function NewOrderForm({
                   <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[13rem]">Colors</Th>
                   <Th className="text-right whitespace-nowrap">Ordered qty</Th>
-                  <Th className="text-right min-w-[8rem]">Selling price<span className="block text-xs font-normal text-text-muted">per set</span></Th>
+                  <Th className="text-right min-w-[8rem]">Selling price<span className="block text-[10px] font-normal text-text-muted">per set</span></Th>
                   <Th className="text-right min-w-[8rem]">Amount</Th>
                 </Tr>
               </Thead>
@@ -3772,18 +4294,18 @@ function NewOrderForm({
                 </Tr>
               </Tbody>
             </TableContainer>
-            <div className="flex justify-between">
+            <div className="flex items-center justify-between border-t border-border pt-4">
               <Button
                 variant="secondary"
-                className={SOFT_BLUE}
+                size="sm"
                 onClick={() => setStep(1)}
               >
-                <ChevronLeftIcon className="w-4 h-4" />
-                Back
+                <ChevronLeftIcon className="w-3.5 h-3.5" />
+                Back to products
               </Button>
-              <Button onClick={handleSubmit(submit)}>
-                <CheckIcon className="w-4 h-4" />
-                Confirm order
+              <Button size="sm" onClick={handleSubmit(submit)}>
+                <CheckIcon className="w-3.5 h-3.5 mr-1" />
+                Confirm &amp; Create order
               </Button>
             </div>
           </div>

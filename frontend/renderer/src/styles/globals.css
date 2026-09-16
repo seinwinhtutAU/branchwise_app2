@@ -50,7 +50,8 @@
 
   /* Typography */
   --font-sans:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, sans-serif;
+    -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
+    system-ui, Roboto, "Helvetica Neue", sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
 
   /* Radius */
@@ -206,6 +207,66 @@ body {
   font-family: var(--font-sans);
   /* Business software is read in volume — a size down means several more rows a screen. */
   font-size: 13px;
+  /* Prevent default browser selection drag on empty areas */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Prevent accidental text selection across UI chrome (desktop feel) */
+button,
+nav,
+aside,
+header,
+[role="tab"],
+[role="button"],
+th,
+.ui-chrome {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Keep inputs, table data cells, numbers, and readable text explicitly selectable */
+input,
+textarea,
+td,
+p,
+code,
+pre,
+.selectable-text {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Desktop native window dragging */
+.app-drag-region {
+  -webkit-app-region: drag;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Desktop overlay scrollbar (replaces chunky browser scrollbars on Windows & Mac) */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* A number field the reader types a whole figure into — a price, a quantity — rather
@@ -221,3 +282,4 @@ body {
   -webkit-appearance: none;
   margin: 0;
 }
+

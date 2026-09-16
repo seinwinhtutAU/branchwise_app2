@@ -73,7 +73,7 @@ export const Tr = forwardRef<
   <tr
     ref={ref}
     className={cn(
-      "transition-colors duration-150 hover:bg-bg-subtle",
+      "transition-colors duration-150 hover:bg-brand-subtle/30 group",
       className,
     )}
     {...props}
@@ -92,8 +92,8 @@ export function Th({
   return (
     <th
       className={cn(
-        "text-left font-medium text-text-muted text-xs uppercase tracking-wide px-4 py-3 whitespace-nowrap",
-        "border-b border-r border-border",
+        "text-left font-semibold text-text-muted text-[11px] uppercase tracking-wider px-4 py-3 whitespace-nowrap",
+        "border-b border-r border-border select-none",
         className,
       )}
       {...props}

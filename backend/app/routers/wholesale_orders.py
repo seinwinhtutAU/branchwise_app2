@@ -58,7 +58,6 @@ def _out(
 ) -> dict:
     delivered_by_stock = delivered_by_stock or {}
     delivered_colors_by_stock = delivered_colors_by_stock or {}
-    remaining_deliveries = dict(delivered_by_stock)
     lines = []
     for line in order.lines:
         effective_colors = effective_allocated_color_pairs(
@@ -83,13 +82,21 @@ def _out(
                 else color_pairs_breakdown(effective_colors)
             ),
             "delivered_quantity_pairs": min(
-                remaining_deliveries.get(line.stock_code, 0), line.quantity_pairs
+                delivered_by_stock.get(line.stock_code, 0), line.quantity_pairs
+            ),
+            # What has gone out, by colour. The screen needs this to know how much of a
+            # single colour is still owed — the ordered colours alone only give it the
+            # line total, which let a per-colour over-delivery be typed and then refused
+            # by the server. A stock code can only appear on one line of an order, so
+            # this maps to exactly this line.
+            "delivered_color_breakdown": color_pairs_breakdown(
+                delivered_colors_by_stock.get(line.stock_code) or {}
             ),
             "lost_quantity_pairs": line.lost_quantity_pairs,
             "remaining_quantity_pairs": max(
                 0,
                 line.quantity_pairs
-                - min(remaining_deliveries.get(line.stock_code, 0), line.quantity_pairs)
+                - min(delivered_by_stock.get(line.stock_code, 0), line.quantity_pairs)
                 - line.lost_quantity_pairs,
             ),
             "selling_price": float(line.selling_price),
@@ -97,10 +104,6 @@ def _out(
             "original_selling_price": float(line.original_selling_price) if line.original_selling_price is not None else None,
             "exchange_rate": float(line.exchange_rate) if line.exchange_rate is not None else None,
         })
-    for line in lines:
-        remaining_deliveries[line["stock_code"]] = max(
-            0, remaining_deliveries.get(line["stock_code"], 0) - line["delivered_quantity_pairs"]
-        )
     payments = [
         {
             "payment_id": payment.id,

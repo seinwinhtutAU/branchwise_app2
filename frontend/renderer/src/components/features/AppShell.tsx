@@ -1,9 +1,8 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@renderer/lib/utils";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
 import {
-  MenuIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   LogOutIcon,
@@ -87,7 +86,10 @@ export function AppShell({
   debugAction,
   debugResult,
 }: AppShellProps): React.JSX.Element {
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const isMac = typeof window !== "undefined" && Boolean(window.api?.isMac);
+  const isWindows =
+    typeof window !== "undefined" && Boolean(window.api?.isWindows);
+
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
       return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true";
@@ -108,52 +110,70 @@ export function AppShell({
     });
   }
 
-  function renderSidebar(
-    isCollapsed: boolean,
-    isMobile = false,
-  ): React.JSX.Element {
+  // Listen to menu actions and custom shortcut triggers
+  useEffect(() => {
+    const handleToggle = (): void => {
+      handleToggleCollapse();
+    };
+
+    window.addEventListener("branchwise:toggle-sidebar", handleToggle);
+
+    const cleanupMenu = window.api?.onMenuAction((action) => {
+      if (action === "toggle-sidebar") {
+        handleToggle();
+      }
+    });
+
+    return () => {
+      window.removeEventListener("branchwise:toggle-sidebar", handleToggle);
+      cleanupMenu?.();
+    };
+  }, []);
+
+  function renderSidebar(isCollapsed: boolean): React.JSX.Element {
     return (
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col h-full select-none">
+        {/* macOS Traffic Lights spacer on desktop */}
+        {isMac && <div className="h-9 shrink-0 app-drag-region" />}
+
         {/* Header row */}
         <div
           className={cn(
-            "flex items-center h-16 shrink-0 border-b border-border",
+            "flex items-center h-14 shrink-0 border-b border-border app-drag-region",
             isCollapsed
               ? "justify-center px-2 relative"
-              : "justify-between px-5",
+              : "justify-between px-4",
           )}
         >
           {isCollapsed ? (
-            <div className="flex items-center justify-center">
+            <div className="flex items-center justify-center app-no-drag">
               <LogoChip />
             </div>
           ) : (
-            <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0 app-no-drag">
               <LogoChip />
               <LogoWordmark />
             </div>
           )}
 
-          {!isMobile && (
-            <button
-              type="button"
-              onClick={handleToggleCollapse}
-              aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              aria-expanded={!isCollapsed}
-              className={cn(
-                "rounded-md flex items-center justify-center text-text-secondary hover:bg-bg-raised hover:text-text-primary transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
-                isCollapsed
-                  ? "absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-bg-base border border-border shadow-xs z-10"
-                  : "w-7 h-7",
-              )}
-            >
-              {isCollapsed ? (
-                <ChevronRightIcon className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronLeftIcon className="w-4 h-4" />
-              )}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleToggleCollapse}
+            aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!isCollapsed}
+            className={cn(
+              "rounded-md flex items-center justify-center text-text-secondary hover:bg-bg-raised hover:text-text-primary transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand app-no-drag",
+              isCollapsed
+                ? "absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-bg-base border border-border shadow-xs z-10"
+                : "w-7 h-7",
+            )}
+          >
+            {isCollapsed ? (
+              <ChevronRightIcon className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronLeftIcon className="w-4 h-4" />
+            )}
+          </button>
         </div>
 
         {/* Workspace switcher */}
@@ -167,9 +187,11 @@ export function AppShell({
             {isCollapsed ? (
               (() => {
                 const currentWs =
-                  workspaces.find((w) => w.id === activeWorkspace) ?? workspaces[0];
+                  workspaces.find((w) => w.id === activeWorkspace) ??
+                  workspaces[0];
                 const nextWs =
-                  workspaces.find((w) => w.id !== activeWorkspace) ?? workspaces[0];
+                  workspaces.find((w) => w.id !== activeWorkspace) ??
+                  workspaces[0];
                 const icon =
                   currentWs.icon ??
                   (currentWs.id === "retail" ? (
@@ -182,12 +204,11 @@ export function AppShell({
                     type="button"
                     onClick={() => {
                       onWorkspaceChange?.(nextWs.id);
-                      setMobileOpen(false);
                     }}
                     aria-label={`Current workspace: ${currentWs.label}. Click to switch to ${nextWs.label}`}
                     title={`${currentWs.label} (Click to switch to ${nextWs.label})`}
                     className={cn(
-                      "w-10 h-10 rounded-lg flex items-center justify-center relative transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base shadow-xs",
+                      "w-10 h-10 rounded-lg flex items-center justify-center relative transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base shadow-xs app-no-drag",
                       currentWs.color
                         ? workspaceActiveClasses[currentWs.color]
                         : "bg-bg-base text-text-primary border border-border/60 hover:border-border",
@@ -203,7 +224,7 @@ export function AppShell({
                 );
               })()
             ) : (
-              <div className="flex bg-bg-subtle rounded-lg p-0.5 gap-1">
+              <div className="flex bg-bg-subtle rounded-lg p-0.5 gap-1 app-no-drag">
                 {workspaces.map((ws) => {
                   const active = ws.id === activeWorkspace;
                   return (
@@ -212,7 +233,6 @@ export function AppShell({
                       type="button"
                       onClick={() => {
                         onWorkspaceChange?.(ws.id);
-                        setMobileOpen(false);
                       }}
                       aria-current={active ? "page" : undefined}
                       aria-label={ws.label}
@@ -262,13 +282,12 @@ export function AppShell({
                 type="button"
                 onClick={() => {
                   onSectionChange(item.id);
-                  setMobileOpen(false);
                 }}
                 aria-current={active ? "page" : undefined}
                 aria-label={item.label}
                 title={item.label}
                 className={cn(
-                  "relative rounded-lg font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base",
+                  "relative rounded-lg font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base app-no-drag",
                   isCollapsed
                     ? "flex flex-col items-center justify-center h-14 w-full px-1 text-center"
                     : "flex items-center gap-3 h-10 px-3 text-sm",
@@ -361,13 +380,12 @@ export function AppShell({
                     type="button"
                     onClick={() => {
                       onSectionChange(item.id);
-                      setMobileOpen(false);
                     }}
                     aria-current={active ? "page" : undefined}
                     aria-label={item.label}
                     title={item.label}
                     className={cn(
-                      "w-9 h-9 rounded-md flex items-center justify-center transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base",
+                      "w-9 h-9 rounded-md flex items-center justify-center transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base app-no-drag",
                       active
                         ? "bg-bg-raised text-brand shadow-xs"
                         : "text-text-secondary hover:bg-bg-raised hover:text-text-primary",
@@ -386,7 +404,7 @@ export function AppShell({
               onClick={onSignOut}
               aria-label="Sign out"
               title="Sign out"
-              className="w-9 h-9 rounded-md flex items-center justify-center text-text-secondary hover:bg-bg-raised hover:text-text-primary transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base"
+              className="w-9 h-9 rounded-md flex items-center justify-center text-text-secondary hover:bg-bg-raised hover:text-text-primary transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base app-no-drag"
             >
               <LogOutIcon className="w-5 h-5" />
             </button>
@@ -395,14 +413,14 @@ export function AppShell({
               variant="secondary"
               size="sm"
               onClick={onSignOut}
-              className="w-full"
+              className="w-full app-no-drag"
             >
               Sign out
             </Button>
           )}
 
           {!isCollapsed && debugAction && (
-            <details className="text-xs text-text-muted">
+            <details className="text-xs text-text-muted app-no-drag">
               <summary className="cursor-pointer select-none hover:text-text-secondary">
                 Debug
               </summary>
@@ -430,7 +448,7 @@ export function AppShell({
   return (
     <div
       className={cn(
-        "min-h-screen bg-bg-base lg:flex",
+        "min-h-screen bg-bg-base flex",
         // Wholesale repaints the shared tokens blue for everything inside it — see
         // globals.css's .workspace-wholesale block.
         activeWorkspace === "wholesale" && "workspace-wholesale",
@@ -439,56 +457,57 @@ export function AppShell({
       {/* Desktop sidebar */}
       <aside
         className={cn(
-          "hidden lg:block shrink-0 border-r border-border bg-bg-base transition-[width] duration-200",
+          "shrink-0 border-r border-border bg-bg-base transition-[width] duration-200 select-none",
           collapsed ? "w-[4.5rem]" : "w-64",
         )}
       >
         <div
           className={cn(
-            "fixed h-screen transition-[width] duration-200",
+            "fixed h-screen transition-[width] duration-200 z-30",
             collapsed ? "w-[4.5rem]" : "w-64",
           )}
         >
-          {renderSidebar(collapsed, false)}
+          {renderSidebar(collapsed)}
         </div>
       </aside>
 
-      {/* Mobile top bar */}
-      <div className="lg:hidden sticky top-0 z-20 bg-bg-base/80 backdrop-blur-xl border-b border-border h-14 flex items-center px-4 gap-3">
-        <button
-          type="button"
-          onClick={() => setMobileOpen(true)}
-          aria-label="Open menu"
-          className="w-9 h-9 rounded-md flex items-center justify-center text-text-secondary hover:bg-bg-raised transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-        >
-          <MenuIcon />
-        </button>
-        <LogoChip className="w-7 h-7 rounded-md" markClassName="w-4 h-4" />
-        <LogoWordmark />
-      </div>
-
-      {/* Mobile drawer */}
-      {mobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-30">
+      <div className="flex-1 min-w-0 flex flex-col">
+        {/* Window Drag Titlebar for Desktop (macOS & Windows) */}
+        {(isMac || isWindows) && (
           <div
-            className="absolute inset-0 bg-black/30 animate-fade-in motion-reduce:animate-none"
-            onClick={() => setMobileOpen(false)}
-          />
-          <aside className="absolute left-0 top-0 h-full w-64 bg-bg-base shadow-xl animate-slide-up motion-reduce:animate-none">
-            {renderSidebar(false, true)}
-          </aside>
-        </div>
-      )}
+            className={cn(
+              "h-9 shrink-0 flex items-center justify-between px-4 app-drag-region border-b border-border/60 text-xs text-text-muted select-none bg-bg-base",
+              isWindows && "pr-[140px]",
+            )}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-medium text-text-secondary truncate">
+                BranchWise
+              </span>
+              <span className="text-border">/</span>
+              <span className="capitalize text-text-muted">
+                {activeWorkspace ?? "workspace"}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 app-no-drag">
+              <span className="text-[11px] text-text-muted/70 hidden sm:inline-block">
+                {isMac
+                  ? "⌘B Sidebar · ⌘, Settings"
+                  : "Ctrl+B Sidebar · Ctrl+, Settings"}
+              </span>
+            </div>
+          </div>
+        )}
 
-      <div className="flex-1 min-w-0">
         {/* Above the content rather than inside it, so it is the same one line whichever
             page is open — and so no page has to know about the network to explain itself. */}
         <ConnectionBanner />
-        <main className="w-full px-4 sm:px-5 py-5 flex flex-col gap-5">
+        <main className="w-full px-4 sm:px-5 py-5 flex flex-col gap-5 flex-1">
           {children}
         </main>
       </div>
     </div>
   );
 }
+
 
