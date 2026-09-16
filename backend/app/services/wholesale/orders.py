@@ -157,7 +157,24 @@ def update_order(db: Session, order_id: str, branch_id: str | None, payload) -> 
 
 
 def cancel_order(db: Session, order_id: str, branch_id: str | None) -> CustomerOrder:
+    """Cancelling releases whatever stock the order was holding, which is the whole point
+    of it — but it cannot un-hand goods that have already gone out. An order with
+    deliveries against it would end up marked cancelled while its stock movements stood,
+    so the shelves and the order would disagree with nobody able to reconcile them. The
+    way back from that is to take the delivery back first, which leaves a record.
+
+    Payments are deliberately not a blocker: a deposit taken on an order that is then
+    cancelled is an ordinary thing that ends in a refund, and the payment rows stay where
+    they are to be settled.
+    """
     order = _load(db, order_id, branch_id)
+    delivered = delivered_pairs_by_order(db, [order.id], branch_id).get(order.id, {})
+    if any(pairs > 0 for pairs in delivered.values()):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Some of this order has already gone out to the customer. "
+            "Take those deliveries back before cancelling it.",
+        )
     order.cancelled = True
     db.commit()
     return _load(db, order_id, branch_id)

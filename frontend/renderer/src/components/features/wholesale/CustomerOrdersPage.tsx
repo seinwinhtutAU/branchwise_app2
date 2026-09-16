@@ -1126,10 +1126,16 @@ function RowMenu({
   onCancel?: () => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
+  // Two presses, matching the delete menus on the other wholesale screens: cancelling
+  // releases the order's stock and there is no undo behind it.
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setConfirmingCancel(false);
+      return;
+    }
     function handlePointer(event: MouseEvent): void {
       if (ref.current && !ref.current.contains(event.target as Node))
         setOpen(false);
@@ -1185,17 +1191,35 @@ function RowMenu({
               }}
             />
           )}
-          {onCancel && (
-            <MenuItem
-              icon={<CloseIcon className="w-4 h-4" />}
-              label="Cancel order"
-              danger
-              onClick={() => {
-                setOpen(false);
-                onCancel();
-              }}
-            />
-          )}
+          {onCancel &&
+            (confirmingCancel ? (
+              <>
+                <p className="px-3.5 py-2 text-xs text-text-muted">
+                  Cancel this order? Any stock set aside for it goes back on the shelf.
+                </p>
+                <MenuItem
+                  icon={<CloseIcon className="w-4 h-4" />}
+                  label="Cancel it"
+                  danger
+                  onClick={() => {
+                    setOpen(false);
+                    setConfirmingCancel(false);
+                    onCancel();
+                  }}
+                />
+                <MenuItem
+                  label="Keep it"
+                  onClick={() => setConfirmingCancel(false)}
+                />
+              </>
+            ) : (
+              <MenuItem
+                icon={<CloseIcon className="w-4 h-4" />}
+                label="Cancel order"
+                danger
+                onClick={() => setConfirmingCancel(true)}
+              />
+            ))}
         </FloatingLayer>
       )}
     </div>

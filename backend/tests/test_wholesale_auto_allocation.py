@@ -90,3 +90,46 @@ def test_auto_allocation_never_passes_what_a_line_is_owed(
 
     after = authed_client.get(f"/api/wholesale/orders/{order['order_id']}").json()
     assert after["lines"][0]["allocated_quantity_pairs"] == 6
+
+
+def test_an_order_with_deliveries_cannot_be_cancelled(
+    authed_client: TestClient, db_session: Session
+) -> None:
+    """Cancelling releases reserved stock, which is the point of it — but it cannot
+    un-hand goods that have already gone out."""
+    branch = _make_branch(db_session)
+    _make_user(db_session, UserRole.WHOLESALE, branch.id)
+    order = _order(authed_client, "black2s", "2026-09-10", "Daw May")
+    receiving = _create_receiving(authed_client)
+    _open_package(authed_client, receiving, "black2s", 2)
+
+    delivery = authed_client.post("/api/wholesale/inventory/deliveries/batch", json={
+        "order_id": order["order_id"], "delivered_on": "2026-09-12",
+        "delivery_address": "Yangon", "note": "",
+        "lines": [{"stock_code": "A1001", "location": "Bogyoke Rd, Mawlamyine",
+                   "color_breakdown": "black1s", "unit": "set"}],
+    })
+    assert delivery.status_code == 201, delivery.text
+
+    refused = authed_client.post(f"/api/wholesale/orders/{order['order_id']}/cancel")
+    assert refused.status_code == 422
+    assert "already gone out" in refused.json()["detail"]
+
+
+def test_an_untouched_order_can_still_be_cancelled(
+    authed_client: TestClient, db_session: Session
+) -> None:
+    branch = _make_branch(db_session)
+    _make_user(db_session, UserRole.WHOLESALE, branch.id)
+    order = _order(authed_client, "black2s", "2026-09-10", "Daw May")
+    receiving = _create_receiving(authed_client)
+    _open_package(authed_client, receiving, "black2s", 2)
+
+    # Stock is set aside, but nothing has gone out — cancelling releases it.
+    assert authed_client.get(
+        f"/api/wholesale/orders/{order['order_id']}"
+    ).json()["lines"][0]["allocated_quantity_pairs"] == 12
+
+    cancelled = authed_client.post(f"/api/wholesale/orders/{order['order_id']}/cancel")
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["order_status"] == "cancelled"
