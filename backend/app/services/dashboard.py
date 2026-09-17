@@ -2,7 +2,7 @@
 
 One branch at a time, never a cross-branch rollup, for every tab except Inventory's
 stock-health figures — the caller resolves which branch first (see
-app/routers/dashboard.py), and every query here is scoped to that one branch_id
+app/retail/routers/dashboard.py), and every query here is scoped to that one branch_id
 directly rather than reusing the nullable-branch_id pattern the row-level list
 endpoints (GET /api/sales etc.) use for admin's "every branch" view, since that view
 doesn't apply to a period-scoped tab like Revenue or Cost. compute_stock_health is the
@@ -20,17 +20,17 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
-from app.models.product import Product
-from app.models.sale import Sale, SaleLine
-from app.models.stock_level import StockLevel
-from app.services import data_quality
-from app.services.pricing import sale_line_pricer
+from app.retail.models.product import Product
+from app.retail.models.sale import Sale, SaleLine
+from app.retail.models.stock_level import StockLevel
+from app.retail.services import data_quality
+from app.retail.services.pricing import sale_line_pricer
 from app.services.settings import (
     get_purchase_warning_window_days,
     get_sale_warning_window_days,
 )
-from app.services.stock import latest_stock_query
-from app.services.reporting import each_day, kpi_value
+from app.retail.services.stock import latest_stock_query
+from app.retail.services.reporting import each_day, kpi_value
 
 PeriodKey = Literal["today", "yesterday", "7d", "30d"]
 VALID_PERIODS: frozenset[str] = frozenset({"today", "yesterday", "7d", "30d"})
@@ -66,7 +66,7 @@ DEAD_STOCK_ITEMS_LIMIT = 50
 # call for different responses (reorder more, versus reorder sooner).
 BASELINE_VELOCITY_WINDOW_DAYS = DEAD_STOCK_WINDOW_DAYS - STOCK_VELOCITY_WINDOW_DAYS
 
-# sale_time is free text (see app/models/sale.py) — whatever the POS export happened
+# sale_time is free text (see app/retail/models/sale.py) — whatever the POS export happened
 # to print, not a validated time type — so parsing is best-effort: try common shapes,
 # and a row that doesn't match any of them is simply left out of the heatmap rather
 # than raising, the same tolerant-parsing stance the rest of the import pipeline takes.
@@ -301,14 +301,14 @@ def _cost_totals_and_products(
 ) -> tuple[float, float, float, int, list[dict], list[dict]]:
     """One pass over the period's sale lines that produces both the branch-wide
     COGS/revenue totals and the per-product cost breakdown, reusing the exact same
-    point-in-time cost lookup (app/services/pricing.py) the Sale tab and Warning page
+    point-in-time cost lookup (app/retail/services/pricing.py) the Sale tab and Warning page
     already use — rather than a second, differently-computed cost figure.
 
     Returns (net_revenue, cogs, priced_net_revenue, transaction_count, products, trend).
     `priced_net_revenue` is the slice of net_revenue whose line actually had a cost
     estimate — the denominator for "how much of this margin figure is real," which the
     branch health score needs before it will score Profit at all (see
-    app/services/branch_health.py). COGS alone can't answer that: a small COGS means
+    app/retail/services/branch_health.py). COGS alone can't answer that: a small COGS means
     either genuinely cheap goods or mostly-unpriced lines, and those are opposite facts.
     """
     rows = (
@@ -655,7 +655,7 @@ def compute_stock_health(db: Session, branch_id: str | None) -> tuple[list[dict]
 def _stock_summary(db: Session, branch_id: str) -> dict:
     """Everything the Inventory tab reports about current stock, minus the
     data-quality warnings — split out so the branch health score (see
-    app/services/branch_health.py) can read the exact same SKU/dead-stock/low-stock
+    app/retail/services/branch_health.py) can read the exact same SKU/dead-stock/low-stock
     figures the tab shows without also paying for a second warnings pass over a
     window it doesn't want. If Overview and the Inventory tab ever disagreed on the
     dead-stock count the whole score would lose its credibility, so there is

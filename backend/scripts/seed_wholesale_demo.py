@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.branch import Branch  # noqa: E402
 from app.models.user import User  # noqa: E402
-from app.models.wholesale import (  # noqa: E402
+from app.wholesale.models.entities import (  # noqa: E402
     ProductGroup,
     CustomerOrder,
     CustomerOrderLine,
@@ -44,8 +44,8 @@ from app.models.wholesale import (  # noqa: E402
     WholesaleStockMovement,
     WholesaleUnit,
 )
-from app.services.wholesale.colors import colors_as_json  # noqa: E402
-from app.services.wholesale.units import to_pairs  # noqa: E402
+from app.wholesale.services.colors import colors_as_json  # noqa: E402
+from app.wholesale.services.units import to_pairs  # noqa: E402
 
 DATA_FILE = Path(__file__).parent / "data" / "wholesale_demo.json"
 

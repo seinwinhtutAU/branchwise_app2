@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.db.session import SessionLocal  # noqa: E402
 from app.models import Product  # noqa: E402
-from app.services.import_common import title_case  # noqa: E402
+from app.retail.services.import_common import title_case  # noqa: E402
 
 
 def main() -> None:

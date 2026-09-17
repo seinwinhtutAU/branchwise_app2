@@ -1,9 +1,9 @@
 import pandas as pd
 
-from app.services.import_common import validate_rows
-from app.services.inventory_import import VALIDATION_RULES as INVENTORY_RULES
-from app.services.pos_import import VALIDATION_RULES as SALES_RULES
-from app.services.purchase_import import VALIDATION_RULES as PURCHASE_RULES
+from app.retail.services.import_common import validate_rows
+from app.retail.services.inventory_import import VALIDATION_RULES as INVENTORY_RULES
+from app.retail.services.pos_import import VALIDATION_RULES as SALES_RULES
+from app.retail.services.purchase_import import VALIDATION_RULES as PURCHASE_RULES
 
 
 def test_valid_row_has_no_issues():

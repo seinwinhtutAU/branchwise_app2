@@ -1,6 +1,6 @@
 import pytest
 
-from app.services import early_warning, explanation
+from app.retail.services import early_warning, explanation
 from tests.test_early_warning import _by_id, _snapshot
 
 

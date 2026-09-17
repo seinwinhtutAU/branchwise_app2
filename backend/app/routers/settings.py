@@ -9,7 +9,7 @@ from app.core.security import get_current_app_user
 from app.db.session import get_db
 from app.models.user import User, UserRole
 from app.services.settings import get_all_settings, get_setting, set_setting
-from app.services.wholesale.currency import DEFAULT_CURRENCY, SUPPORTED_CURRENCIES
+from app.wholesale.services.currency import DEFAULT_CURRENCY, SUPPORTED_CURRENCIES
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -77,7 +77,7 @@ class AppSettingsUpdate(BaseModel):
     # current rate to prefill a new order/voucher line or receiving cost with, though
     # one can still be saved with a hand-typed rate. Values are decimal strings, not
     # floats, so a precise rate survives the round trip exactly — see
-    # app/services/wholesale/currency.py for where a line's own saved rate is used
+    # app/wholesale/services/currency.py for where a line's own saved rate is used
     # instead of this "current" one once the line exists.
     today_exchange_rates: dict[str, str] | None = None
 

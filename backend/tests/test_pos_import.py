@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from app.services.pos_import import OUTPUT_COLUMNS, parse_pos_sale_export, parse_pos_sale_upload
+from app.retail.services.pos_import import OUTPUT_COLUMNS, parse_pos_sale_export, parse_pos_sale_upload
 
 SAMPLE = (
     "﻿Printed : 8/21/2026  7:10:05PM,Aung Thit Sar,,,,,,,,,,\r\n"

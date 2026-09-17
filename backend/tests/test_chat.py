@@ -3,8 +3,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.user import User, UserRole
-from app.routers import chat as chat_router
-from app.services.chat import ChatNotConfigured
+from app.retail.routers import chat as chat_router
+from app.retail.services.chat import ChatNotConfigured
 
 
 def _make_user(db_session: Session, *, role: UserRole) -> None:

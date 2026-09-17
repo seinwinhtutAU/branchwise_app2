@@ -5,8 +5,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
-from app.models.import_batch import ImportBatch, ImportBatchStatus
-from app.models.sale import Sale, SaleLine
+from app.retail.models.import_batch import ImportBatch, ImportBatchStatus
+from app.retail.models.sale import Sale, SaleLine
 from app.models.user import User, UserRole
 
 SALE_CSV = (

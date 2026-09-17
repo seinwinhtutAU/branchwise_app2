@@ -5,12 +5,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
-from app.models.product import Product
-from app.models.sale import Sale, SaleLine
-from app.models.stock_level import StockLevel
+from app.retail.models.product import Product
+from app.retail.models.sale import Sale, SaleLine
+from app.retail.models.stock_level import StockLevel
 from app.models.user import User, UserRole
-from app.services import early_warning
-from app.services.branch_health import DIMENSIONS, BranchSnapshot
+from app.retail.services import early_warning
+from app.retail.services.branch_health import DIMENSIONS, BranchSnapshot
 
 
 def _snapshot(**overrides) -> BranchSnapshot:
@@ -576,7 +576,7 @@ def test_every_alert_names_a_measure_that_exists():
     """The Overview branch page shows an alert inside the row of the measure it is about,
     so a typo here would silently hide it — and this is the only thing that would catch
     it, since a wrong key looks exactly like a branch with no alerts."""
-    from app.services.branch_health import DIMENSIONS
+    from app.retail.services.branch_health import DIMENSIONS
 
     measure_keys = {measure.key for dimension in DIMENSIONS for measure in dimension.sub_metrics}
     alerts = early_warning.evaluate(

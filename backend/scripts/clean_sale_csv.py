@@ -2,7 +2,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from app.services.pos_import import parse_pos_sale_export
+from app.retail.services.pos_import import parse_pos_sale_export
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 

@@ -1,4 +1,4 @@
-"""Checks the server's colour grammar (app/services/wholesale/colors.py) against the
+"""Checks the server's colour grammar (app/wholesale/services/colors.py) against the
 fixture shared with the front-end's copy of the same rules
 (frontend/renderer/src/components/features/wholesale/shared.ts). Both copies must
 produce the same messages and the same parse — see the fixture's own comment."""
@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from app.models.wholesale import WholesaleUnit
-from app.services.wholesale.colors import color_qty_pairs, color_qty_problem, parse_color_qty
+from app.wholesale.models.entities import WholesaleUnit
+from app.wholesale.services.colors import color_qty_pairs, color_qty_problem, parse_color_qty
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "color_qty_cases.json").read_text())
 

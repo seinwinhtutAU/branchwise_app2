@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
 from app.models.user import User, UserRole
-from app.models.wholesale import Receiving, WholesaleAuditLog
-from app.models.wholesale_master_data import WholesaleProduct
+from app.wholesale.models.entities import Receiving, WholesaleAuditLog
+from app.wholesale.models.master_data import WholesaleProduct
 
 
 def _make_branch(db_session: Session, name: str = "Wholesale") -> Branch:

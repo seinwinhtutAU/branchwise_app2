@@ -2,9 +2,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models.wholesale import WholesaleUnit
-from app.services.wholesale.money import order_totals, voucher_totals
-from app.services.wholesale.units import priced_amount
+from app.wholesale.models.entities import WholesaleUnit
+from app.wholesale.services.money import order_totals, voucher_totals
+from app.wholesale.services.units import priced_amount
 
 
 @pytest.mark.parametrize(

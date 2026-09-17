@@ -1,30 +1,29 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import (
-    auth,
-    branches,
+from app.routers import auth, branches, health, settings
+from app.retail.routers import (
     chat,
     dashboard,
     data_overview,
-    health,
     import_health,
     imports,
     inventory,
     purchases,
     sales,
-    settings,
     warnings,
-    wholesale_receivings,
-    wholesale_shipments,
-    wholesale_supplier_vouchers,
-    wholesale_orders,
-    wholesale_inventory,
-    wholesale_master_data,
-    wholesale_monitoring,
-    wholesale_finance,
-    wholesale_write_offs,
-    wholesale_reports,
+)
+from app.wholesale.routers import (
+    finance as wholesale_finance,
+    inventory as wholesale_inventory,
+    master_data as wholesale_master_data,
+    monitoring as wholesale_monitoring,
+    orders as wholesale_orders,
+    receivings as wholesale_receivings,
+    reports as wholesale_reports,
+    shipments as wholesale_shipments,
+    supplier_vouchers as wholesale_supplier_vouchers,
+    write_offs as wholesale_write_offs,
 )
 
 

@@ -2,9 +2,9 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
-from app.models.product import Product
-from app.models.sale import Sale, SaleLine
-from app.services.sales_persist import persist_sales
+from app.retail.models.product import Product
+from app.retail.models.sale import Sale, SaleLine
+from app.retail.services.sales_persist import persist_sales
 
 SALE_DF = pd.DataFrame(
     [

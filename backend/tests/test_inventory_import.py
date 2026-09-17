@@ -1,7 +1,7 @@
 import datetime as dt
 from pathlib import Path
 
-from app.services.inventory_import import OUTPUT_COLUMNS, parse_inventory_export
+from app.retail.services.inventory_import import OUTPUT_COLUMNS, parse_inventory_export
 
 HEADER = (
     'Stk. Code,Other Code,Description,Location,Bin,Category,Group,Brand,"On Hand \n'

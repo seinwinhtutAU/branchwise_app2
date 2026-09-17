@@ -75,7 +75,7 @@ Every row references a `Product`, upserted by `stock_code` (see [database-schema
 
 ## Import history & revert
 
-Every confirmed import (any of the three types) creates one `ImportBatch` row (`app/models/import_batch.py`), and every `Sale`/`Purchase`/`StockLevel` it creates is linked to it via `import_batch_id`. This is what makes two things possible:
+Every confirmed import (any of the three types) creates one `ImportBatch` row (`app/retail/models/import_batch.py`), and every `Sale`/`Purchase`/`StockLevel` it creates is linked to it via `import_batch_id`. This is what makes two things possible:
 
 - **`GET /api/imports/history`** — lists past imports (type, filename, branch, uploader, status, summary, timestamps). No longer includes the summary breakdown inline — see the detail endpoint below. Non-admin accounts only see their own branch's history; an account with no branch (admin) sees all — same visibility rule as branch resolution on confirm.
 - **`GET /api/imports/history/{batch_id}`** — the same metadata as one row of the list, plus `summary` and the `origin`/`clean` grids (same shape as the preview endpoints), read back from the batch's `preview_data` column. Backs the "click a history row to see what was imported" detail page in the frontend — same Cleaned/Original tabs and row highlighting as the review screen, just read-only (no branch picker, no Confirm/Cancel). Same visibility rule and 404 behavior as the list/revert endpoints.

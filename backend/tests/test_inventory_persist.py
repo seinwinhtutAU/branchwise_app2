@@ -3,9 +3,9 @@ import datetime as dt
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from app.models.product import Product
-from app.models.stock_level import StockLevel
-from app.services.inventory_persist import persist_inventory
+from app.retail.models.product import Product
+from app.retail.models.stock_level import StockLevel
+from app.retail.services.inventory_persist import persist_inventory
 
 INVENTORY_DF = pd.DataFrame(
     [

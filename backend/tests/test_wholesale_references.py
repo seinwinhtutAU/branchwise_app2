@@ -1,9 +1,9 @@
-"""app/services/wholesale/references.py — the PREFIX-YYMMDD-NNNN numbering, scoped per
+"""app/wholesale/services/references.py — the PREFIX-YYMMDD-NNNN numbering, scoped per
 branch and per day."""
 
 from datetime import date
 
-from app.services.wholesale.references import next_reference
+from app.wholesale.services.references import next_reference
 
 
 def test_the_first_reference_of_the_day_is_0001() -> None:

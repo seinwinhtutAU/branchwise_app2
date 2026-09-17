@@ -1,4 +1,4 @@
-from app.services.import_common import clean_description, title_case
+from app.retail.services.import_common import clean_description, title_case
 
 
 def test_title_case_normalizes_product_descriptions():

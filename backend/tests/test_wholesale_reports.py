@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
-from app.models.wholesale import (
+from app.wholesale.models.entities import (
     CustomerOrder,
     CustomerOrderLine,
     ProductGroup,
@@ -14,7 +14,7 @@ from app.models.wholesale import (
     WholesaleStockMovement,
     WholesaleUnit,
 )
-from app.services.wholesale.reports import (
+from app.wholesale.services.reports import (
     _buying_price,
     _price_history,
     cost_report,

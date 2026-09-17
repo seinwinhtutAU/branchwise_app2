@@ -1,8 +1,8 @@
-"""app/services/wholesale/receivings.py — the derived figures a receiving is judged
+"""app/wholesale/services/receivings.py — the derived figures a receiving is judged
 by: how much has been opened, what it adds up to, and whether that agrees with what the
 voucher promised."""
 
-from app.services.wholesale.receivings import (
+from app.wholesale.services.receivings import (
     ItemLike,
     PackageLike,
     checked_pct,

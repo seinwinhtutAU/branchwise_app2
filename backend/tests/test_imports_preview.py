@@ -41,7 +41,7 @@ INVENTORY_CSV = (
 def _make_retail_user(db_session: Session) -> None:
     # Preview for Sale/Inventory now needs an app-level user profile (to resolve the
     # uploader's branch for its date-format setting), not just a valid JWT — see
-    # app.routers.imports._resolve_branch_for_preview.
+    # app.retail.routers.imports._resolve_branch_for_preview.
     branch = Branch(name="Retail 1", phone_number="000", address="TBD")
     db_session.add(branch)
     db_session.flush()

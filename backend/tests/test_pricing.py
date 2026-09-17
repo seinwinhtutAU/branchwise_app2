@@ -1,6 +1,6 @@
 from datetime import date
 
-from app.services.pricing import point_in_time_buying_price
+from app.retail.services.pricing import point_in_time_buying_price
 
 PRODUCT_ID = "product-1"
 

@@ -4,9 +4,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
-from app.models.purchase import Purchase
-from app.models.sale import Sale
-from app.models.stock_level import StockLevel
+from app.retail.models.purchase import Purchase
+from app.retail.models.sale import Sale
+from app.retail.models.stock_level import StockLevel
 from app.models.user import User, UserRole
 
 SALE_CSV = (

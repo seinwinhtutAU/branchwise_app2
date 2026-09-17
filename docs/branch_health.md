@@ -8,9 +8,9 @@ dimension plus one overall score, so a manager reads `Inventory 54 — critical`
 clicks straight through to the Inventory tab for the evidence, instead of opening four
 tabs and interpreting them by hand.
 
-Backed by `GET /api/dashboard/overview` (`app/routers/dashboard.py`), computed in
-`app/services/branch_health.py` (the score), `app/services/early_warning.py` (the
-alerts) and `app/services/explanation.py` (why each alert happened), rendered by
+Backed by `GET /api/dashboard/overview` (`app/retail/routers/dashboard.py`), computed in
+`app/retail/services/branch_health.py` (the score), `app/retail/services/early_warning.py` (the
+alerts) and `app/retail/services/explanation.py` (why each alert happened), rendered by
 `frontend/renderer/src/components/features/dashboard/OverviewTab.tsx`.
 
 ## Two rules the whole design rests on
@@ -18,7 +18,7 @@ alerts) and `app/services/explanation.py` (why each alert happened), rendered by
 **1. Nothing is measured twice.** Every raw number comes from the helper that the
 matching dashboard tab itself uses — `_revenue_totals`, `_cost_totals_and_products`,
 `_stock_summary`, `_basket_stats` in `app/services/dashboard.py`, and
-`build_warning_sections` in `app/services/data_quality.py`. Overview is a second
+`build_warning_sections` in `app/retail/services/data_quality.py`. Overview is a second
 _reading_ of the pillars' figures, never a second _computation_ of them. If a red
 Inventory score sent a manager to an Inventory tab that reported a different dead-stock
 count, neither number would ever be trusted again. `test_overview_reports_the_same_figures_as_the_tabs_it_links_to`
@@ -99,7 +99,7 @@ Status bands, used identically by the gauge, the dimension bars and (later) the 
   import; 40 across 200 is a broken one. The denominator (`records_checked`) is the
   period's sale lines + purchase lines + the branch's current SKU count.
 - **Profit is gated on cost coverage.** Costs are _estimates_ from
-  `app/services/pricing.py`'s point-in-time buying price, and a product with no cost
+  `app/retail/services/pricing.py`'s point-in-time buying price, and a product with no cost
   estimate is simply not costed. Below `MIN_COST_COVERAGE_PCT` (50%) of period revenue
   having any cost estimate at all, the margin figure describes a minority of the
   business and is not worth a quarter of the score, so the dimension is dropped with a
@@ -108,7 +108,7 @@ Status bands, used identically by the gauge, the dimension bars and (later) the 
 
 ## The Early Warning engine
 
-The score says _which part_ of a branch is unhealthy. `app/services/early_warning.py`
+The score says _which part_ of a branch is unhealthy. `app/retail/services/early_warning.py`
 answers the next question — **what specifically is wrong, and what should I do about
 it** — as a severity-ranked list of named problems on the same payload.
 
@@ -184,7 +184,7 @@ from the snapshot. Nothing in this engine asks a model what it thinks.
 
 ## Why it happened
 
-`app/services/explanation.py`. An alert saying "revenue is down 11.3%" tells a manager
+`app/retail/services/explanation.py`. An alert saying "revenue is down 11.3%" tells a manager
 something they could read off a chart. The next sentence is the one that changes what
 they do: _fewer people came in, and the ones who did spent more_ calls for marketing,
 opening hours or staffing; _the same people bought less each_ calls for pricing,
@@ -599,7 +599,7 @@ Revenue opens on 30 days unless the user changes it.
 
 ## Not yet built
 
-- **Early Warning engine** (`app/services/early_warning.py`) — declarative rules over
+- **Early Warning engine** (`app/retail/services/early_warning.py`) — declarative rules over
   the same `BranchSnapshot`, producing severity-ranked alerts. The data-integrity rules
   will delegate to `data_quality.py` rather than reimplement it.
 

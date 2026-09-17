@@ -17,8 +17,8 @@ already lists those row by row with the tools to fix them.
 
 This doc is the plain-language companion to [`branch_health.md`](./branch_health.md),
 which covers the engine's design and the 0–100 health score. The rules themselves live
-in `backend/app/services/early_warning.py`, and the "why it happened" arithmetic in
-`backend/app/services/explanation.py`.
+in `backend/app/retail/services/early_warning.py`, and the "why it happened" arithmetic in
+`backend/app/retail/services/explanation.py`.
 
 ---
 
@@ -188,7 +188,7 @@ pricing and placement problem rather than a footfall one.
 Two conditions, one rule, whichever is worse.
 
 **Gate first: cost coverage ≥ 50%.** The margin rests on estimated costs (the
-point-in-time buying price, `app/services/pricing.py`). If under half of the period's
+point-in-time buying price, `app/retail/services/pricing.py`). If under half of the period's
 revenue has any cost estimate behind it, the rule stays silent rather than raising an
 alarm on a figure describing a minority of the business.
 

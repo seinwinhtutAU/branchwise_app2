@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.models.branch import Branch
 from app.models.user import User, UserRole
-from app.models.wholesale import CustomerOrder, WholesaleAuditLog
-from app.models.wholesale_master_data import WholesaleProduct
+from app.wholesale.models.entities import CustomerOrder, WholesaleAuditLog
+from app.wholesale.models.master_data import WholesaleProduct
 
 
 def _branch(db: Session, name: str = "Wholesale") -> Branch:
@@ -519,7 +519,7 @@ def test_retail_account_cannot_write_customer_orders(authed_client: TestClient, 
 def test_editing_an_order_with_a_stale_version_raises_instead_of_silently_overwriting(
     db_session: Session,
 ) -> None:
-    """CustomerOrder is mapped with version_id_col (see app/models/wholesale.py), so two
+    """CustomerOrder is mapped with version_id_col (see app/wholesale/models/entities.py), so two
     edits loaded from the same starting version must not both succeed - the second
     commit has to fail loudly rather than quietly discard the first save."""
     branch = _branch(db_session)

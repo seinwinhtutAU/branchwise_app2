@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.services.purchase_import import OUTPUT_COLUMNS, parse_purchase_export
+from app.retail.services.purchase_import import OUTPUT_COLUMNS, parse_purchase_export
 
 SAMPLE = (
     "Stock Code,Description,Location,Bin,Quantity,UOM,Unit Cost\r\n"

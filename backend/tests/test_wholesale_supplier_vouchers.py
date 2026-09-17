@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
 from app.models.user import User, UserRole
-from app.models.wholesale_master_data import WholesaleProduct
+from app.wholesale.models.master_data import WholesaleProduct
 
 
 def _user(db: Session, role: UserRole, branch_id: str | None) -> None:
@@ -157,7 +157,7 @@ def test_voucher_delete_guard_blocked_with_payments(authed_client: TestClient, d
 
 def test_voucher_delete_guard_blocked_with_shipments(authed_client: TestClient, db_session: Session) -> None:
     from datetime import date
-    from app.models.wholesale import Shipment
+    from app.wholesale.models.entities import Shipment
     branch = _branch(db_session)
     _user(db_session, UserRole.WHOLESALE, branch.id)
     created = authed_client.post("/api/wholesale/supplier-vouchers", json=_payload())
@@ -189,7 +189,7 @@ def test_voucher_delete_guard_blocked_with_shipments(authed_client: TestClient, 
 
 def test_voucher_line_quantity_reduction_guard(authed_client: TestClient, db_session: Session) -> None:
     from datetime import date
-    from app.models.wholesale import Receiving, ReceivingPackage, ReceivingItem, Shipment
+    from app.wholesale.models.entities import Receiving, ReceivingPackage, ReceivingItem, Shipment
     branch = _branch(db_session)
     _user(db_session, UserRole.WHOLESALE, branch.id)
     created = authed_client.post("/api/wholesale/supplier-vouchers", json=_payload())
@@ -243,7 +243,7 @@ def test_voucher_line_quantity_reduction_guard(authed_client: TestClient, db_ses
 
 
 def test_voucher_audit_log_recorded(authed_client: TestClient, db_session: Session) -> None:
-    from app.models.wholesale import WholesaleAuditLog
+    from app.wholesale.models.entities import WholesaleAuditLog
     branch = _branch(db_session)
     _user(db_session, UserRole.WHOLESALE, branch.id)
 

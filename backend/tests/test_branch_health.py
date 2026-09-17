@@ -5,12 +5,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
-from app.models.product import Product
-from app.models.purchase import Purchase, PurchaseLine
-from app.models.sale import Sale, SaleLine
-from app.models.stock_level import StockLevel
+from app.retail.models.product import Product
+from app.retail.models.purchase import Purchase, PurchaseLine
+from app.retail.models.sale import Sale, SaleLine
+from app.retail.models.stock_level import StockLevel
 from app.models.user import User, UserRole
-from app.services import branch_health
+from app.retail.services import branch_health
 
 
 # --- fixtures ------------------------------------------------------------------------

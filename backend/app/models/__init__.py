@@ -1,12 +1,12 @@
 from app.models.app_settings import AppSetting
 from app.models.branch import Branch
-from app.models.import_batch import ImportBatch, ImportBatchStatus, ImportType
-from app.models.product import Product
-from app.models.purchase import Purchase, PurchaseLine
-from app.models.sale import Sale, SaleLine
-from app.models.stock_level import StockLevel
+from app.retail.models.import_batch import ImportBatch, ImportBatchStatus, ImportType
+from app.retail.models.product import Product
+from app.retail.models.purchase import Purchase, PurchaseLine
+from app.retail.models.sale import Sale, SaleLine
+from app.retail.models.stock_level import StockLevel
 from app.models.user import User, UserRole
-from app.models.wholesale_master_data import (
+from app.wholesale.models.master_data import (
     WholesaleCargoCompany,
     WholesaleCarrier,
     WholesaleCustomer,
@@ -15,7 +15,7 @@ from app.models.wholesale_master_data import (
     WholesaleReceivingGate,
     WholesaleSupplier,
 )
-from app.models.wholesale import (
+from app.wholesale.models.entities import (
     AllocationEvent,
     ProductGroup,
     CustomerOrder,

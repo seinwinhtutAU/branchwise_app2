@@ -4,13 +4,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
-from app.models.import_batch import ImportBatch, ImportType
-from app.models.product import Product
-from app.models.purchase import Purchase, PurchaseLine
-from app.models.sale import Sale, SaleLine
-from app.models.stock_level import StockLevel
+from app.retail.models.import_batch import ImportBatch, ImportType
+from app.retail.models.product import Product
+from app.retail.models.purchase import Purchase, PurchaseLine
+from app.retail.models.sale import Sale, SaleLine
+from app.retail.models.stock_level import StockLevel
 from app.models.user import User, UserRole
-from app.services import data_quality
+from app.retail.services import data_quality
 
 
 def _make_branch_and_user(db_session: Session, name: str = "Retail 1") -> tuple[Branch, User]:

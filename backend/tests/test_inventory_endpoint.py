@@ -4,8 +4,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
-from app.models.product import Product
-from app.models.stock_level import StockLevel
+from app.retail.models.product import Product
+from app.retail.models.stock_level import StockLevel
 from app.models.user import User, UserRole
 
 

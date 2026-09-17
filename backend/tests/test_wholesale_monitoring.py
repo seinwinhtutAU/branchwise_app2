@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
 from app.models.user import User, UserRole
-from app.models.wholesale import (
+from app.wholesale.models.entities import (
     CustomerOrder,
     CustomerOrderLine,
     ProductGroup,
@@ -19,7 +19,7 @@ from app.models.wholesale import (
     WholesaleStockMovement,
     WholesaleUnit,
 )
-from app.models.wholesale_master_data import WholesaleProduct
+from app.wholesale.models.master_data import WholesaleProduct
 
 
 def test_monitoring_surfaces_only_needs_attention_rows_and_admin_sees_all_branches(

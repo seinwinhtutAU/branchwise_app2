@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
 from app.models.user import User, UserRole
-from app.models.wholesale import ProductGroup, WholesaleStockMovement
+from app.wholesale.models.entities import ProductGroup, WholesaleStockMovement
 
 
 def _branch(db: Session) -> Branch:

@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
-from app.models.import_batch import ImportBatch, ImportBatchStatus, ImportType
+from app.retail.models.import_batch import ImportBatch, ImportBatchStatus, ImportType
 from app.models.user import User, UserRole
 
 

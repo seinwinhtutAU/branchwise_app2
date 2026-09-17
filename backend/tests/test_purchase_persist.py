@@ -3,9 +3,9 @@ import datetime
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from app.models.product import Product
-from app.models.purchase import Purchase, PurchaseLine
-from app.services.purchase_persist import persist_purchases
+from app.retail.models.product import Product
+from app.retail.models.purchase import Purchase, PurchaseLine
+from app.retail.services.purchase_persist import persist_purchases
 
 PURCHASE_DF = pd.DataFrame(
     [

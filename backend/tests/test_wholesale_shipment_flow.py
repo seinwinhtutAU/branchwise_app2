@@ -1,8 +1,8 @@
-"""app/services/wholesale/shipments.py's normalise_flow — the rule that keeps a
+"""app/wholesale/services/shipments.py's normalise_flow — the rule that keeps a
 shipment's journey physically possible after any edit: a leg can never hold more than
 the stop before it actually sent."""
 
-from app.services.wholesale.shipments import LegInput, leg_remaining, max_for_leg, normalise_flow
+from app.wholesale.services.shipments import LegInput, leg_remaining, max_for_leg, normalise_flow
 
 
 def test_a_leg_that_received_more_than_was_sent_to_it_is_trimmed() -> None:
