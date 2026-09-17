@@ -14,8 +14,8 @@ import {
   type WholesaleCustomerWire,
   type WholesaleNamedEntityWire,
   type WholesaleProductWire,
-} from "./api";
-import { type Product } from "./products";
+} from "../shared/api";
+import { type Product } from "../shared/products";
 
 export interface MasterDataCustomer {
   name: string;

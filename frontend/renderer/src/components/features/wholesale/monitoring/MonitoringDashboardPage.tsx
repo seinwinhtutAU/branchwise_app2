@@ -15,8 +15,8 @@ import {
   formatDate,
   formatKyat,
   formatQty,
-} from "@renderer/components/features/wholesale/shared";
-import { FigureCard, Panel } from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/shared";
+import { FigureCard, Panel } from "@renderer/components/features/wholesale/shared/ui";
 import {
   WHOLESALE_MONITORING_URL,
   type MonitoringActivityRow,
@@ -25,7 +25,7 @@ import {
   type MonitoringShipmentRow,
   type MonitoringSnapshot,
   type MonitoringVoucherRow,
-} from "@renderer/components/features/wholesale/api";
+} from "@renderer/components/features/wholesale/shared/api";
 
 const MONITORING_QUERY_KEY = ["wholesale", "monitoring"] as const;
 const VISIBLE_ROWS = 3;

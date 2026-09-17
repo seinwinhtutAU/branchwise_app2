@@ -4,11 +4,11 @@ import { CheckIcon } from "@renderer/components/ui/icons";
 import {
   Required,
   SuggestInput,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import {
   CARRIER_NAMES,
   DESTINATION_NAMES,
-} from "@renderer/components/features/wholesale/masterData";
+} from "@renderer/components/features/wholesale/masterData/masterData";
 
 /** The strip under the tracking table, used both for adding a destination and for
  *  renaming one. Both names can be picked from what has been used before or simply

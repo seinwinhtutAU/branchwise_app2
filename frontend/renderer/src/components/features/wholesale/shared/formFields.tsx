@@ -6,17 +6,17 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@renderer/lib/utils";
 import { Input } from "@renderer/components/ui/Input";
 import { Textarea } from "@renderer/components/ui/Textarea";
-import { onlyDigits } from "@renderer/components/features/wholesale/shared";
-import { CURRENCY_CODES, type CurrencyCode } from "@renderer/components/features/wholesale/currency";
+import { onlyDigits } from "@renderer/components/features/wholesale/shared/shared";
+import { CURRENCY_CODES, type CurrencyCode } from "@renderer/components/features/wholesale/shared/currency";
 import {
   GROUP_LABELS,
   PRODUCT_GROUPS,
   type ProductGroup,
-} from "@renderer/components/features/wholesale/products";
+} from "@renderer/components/features/wholesale/shared/products";
 import {
   UNIT_LABELS,
   type Unit,
-} from "@renderer/components/features/wholesale/units";
+} from "@renderer/components/features/wholesale/shared/units";
 import { CopyButton, EDITABLE, FloatingLayer } from "./ui";
 
 /** Picks a product's product_group inside a table cell. */

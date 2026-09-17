@@ -13,19 +13,19 @@ import {
   CellInput,
   CurrencySelect,
   SuggestInput,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import {
   DEFAULT_CURRENCY,
   isForeignCurrency,
   type CurrencyCode,
-} from "@renderer/components/features/wholesale/currency";
+} from "@renderer/components/features/wholesale/shared/currency";
 import {
   COST_KINDS,
   type Receiving,
   type ReceivingCost,
-} from "@renderer/components/features/wholesale/receivings";
-import { formatKyat } from "@renderer/components/features/wholesale/shared";
-import { formatSets } from "@renderer/components/features/wholesale/units";
+} from "@renderer/components/features/wholesale/receiving/receivings";
+import { formatKyat } from "@renderer/components/features/wholesale/shared/shared";
+import { formatSets } from "@renderer/components/features/wholesale/shared/units";
 
 export function ReceivingCostsView({
   receiving,

@@ -2,10 +2,10 @@
 // to a line, a line write-off, edits, deletion, and payments.
 
 import { apiBaseUrl, type Session } from "@renderer/lib/auth";
-import { request } from "./apiClient";
+import { request } from "../shared/apiClient";
 import { type AllocationEvent, type CustomerOrder } from "./customerOrders";
-import { type WriteOffInput, type WriteOffWire } from "./shipmentsApi";
-import { PAIRS_PER } from "./units";
+import { type WriteOffInput, type WriteOffWire } from "../delivery/shipmentsApi";
+import { PAIRS_PER } from "../shared/units";
 
 export const CUSTOMER_ORDERS_URL = `${apiBaseUrl}/api/wholesale/orders`;
 export const WHOLESALE_FINANCE_CUSTOMERS_URL = `${apiBaseUrl}/api/wholesale/finance/customers`;

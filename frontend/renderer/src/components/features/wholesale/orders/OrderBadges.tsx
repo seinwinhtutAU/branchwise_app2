@@ -1,6 +1,6 @@
 import { cn } from "@renderer/lib/utils";
-import { DotPill, FloatingLayer, MenuItem } from "@renderer/components/features/wholesale/ui";
-import { useDismissableMenu } from "@renderer/components/features/wholesale/useDismissableMenu";
+import { DotPill, FloatingLayer, MenuItem } from "@renderer/components/features/wholesale/shared/ui";
+import { useDismissableMenu } from "@renderer/components/features/wholesale/shared/useDismissableMenu";
 import {
   ClipboardIcon,
   CloseIcon,
@@ -8,13 +8,13 @@ import {
   MoreIcon,
   PencilIcon,
 } from "@renderer/components/ui/icons";
-import { type OrderStatus } from "@renderer/components/features/wholesale/customerOrders";
-import { type PaymentStatus } from "@renderer/components/features/wholesale/shared";
+import { type OrderStatus } from "@renderer/components/features/wholesale/orders/customerOrders";
+import { type PaymentStatus } from "@renderer/components/features/wholesale/shared/shared";
 import {
   formatOriginalAmount,
   formatRate,
   isForeignCurrency,
-} from "@renderer/components/features/wholesale/currency";
+} from "@renderer/components/features/wholesale/shared/currency";
 import {
   PAYMENT_LABELS,
   PAYMENT_STYLES,

@@ -1,20 +1,20 @@
 import { z } from "zod";
-import { type OrderStatus } from "@renderer/components/features/wholesale/customerOrders";
+import { type OrderStatus } from "@renderer/components/features/wholesale/orders/customerOrders";
 import {
   colorQtyPairs,
   nextReference,
   type PaymentStatus,
-} from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/shared/shared";
 import {
   formatSets,
   PAIRS_PER,
-} from "@renderer/components/features/wholesale/units";
-import { type ProductGroup } from "@renderer/components/features/wholesale/products";
+} from "@renderer/components/features/wholesale/shared/units";
+import { type ProductGroup } from "@renderer/components/features/wholesale/shared/products";
 import {
   DEFAULT_CURRENCY,
   type CurrencyCode,
-} from "@renderer/components/features/wholesale/currency";
-import { type CustomerOrder } from "@renderer/components/features/wholesale/customerOrders";
+} from "@renderer/components/features/wholesale/shared/currency";
+import { type CustomerOrder } from "@renderer/components/features/wholesale/orders/customerOrders";
 
 /** An aggregate may combine products quoted in different units, so it is stored in pairs
  * and shown the way the business reads a quantity: sets, with any leftover pairs.

@@ -8,9 +8,9 @@ import {
   DotPill,
   FloatingLayer,
   MenuItem,
-} from "@renderer/components/features/wholesale/ui";
-import { formatSets } from "@renderer/components/features/wholesale/units";
-import { type StockRecord } from "@renderer/components/features/wholesale/stock";
+} from "@renderer/components/features/wholesale/shared/ui";
+import { formatSets } from "@renderer/components/features/wholesale/shared/units";
+import { type StockRecord } from "@renderer/components/features/wholesale/inventory/stock";
 import {
   HEALTH_STYLES,
   MOVEMENT_LABELS,

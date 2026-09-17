@@ -1,7 +1,7 @@
 import React from "react";
 import { cn } from "@renderer/lib/utils";
-import { FloatingLayer, MenuItem, StatusPill } from "@renderer/components/features/wholesale/ui";
-import { useDismissableMenu } from "@renderer/components/features/wholesale/useDismissableMenu";
+import { FloatingLayer, MenuItem, StatusPill } from "@renderer/components/features/wholesale/shared/ui";
+import { useDismissableMenu } from "@renderer/components/features/wholesale/shared/useDismissableMenu";
 import { Switch } from "@renderer/components/ui/Switch";
 import {
   CheckIcon,
@@ -12,9 +12,9 @@ import {
   TruckIcon,
   WarningIcon,
 } from "@renderer/components/ui/icons";
-import { type ReceivingStatus } from "@renderer/components/features/wholesale/receivings";
-import { formatIn, type Unit } from "@renderer/components/features/wholesale/units";
-import { formatQty } from "@renderer/components/features/wholesale/shared";
+import { type ReceivingStatus } from "@renderer/components/features/wholesale/receiving/receivings";
+import { formatIn, type Unit } from "@renderer/components/features/wholesale/shared/units";
+import { formatQty } from "@renderer/components/features/wholesale/shared/shared";
 import { STATUS_LABELS, STATUS_STYLES } from "./types";
 
 export function StatusBadge({

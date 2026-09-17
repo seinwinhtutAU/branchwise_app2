@@ -21,21 +21,21 @@ import {
   SectionLabel,
   StepBar,
   SuggestInput,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import {
   formatDate,
   formatKyat,
   formatQty,
   onlyDigits,
   todayIso,
-} from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/shared/shared";
 import {
   formatIn,
   toPairs,
-} from "@renderer/components/features/wholesale/units";
-import { useWholesale } from "@renderer/components/features/wholesale/store";
-import { RECEIVING_GATES } from "@renderer/components/features/wholesale/masterData";
-import { type NewReceivingInput } from "@renderer/components/features/wholesale/api";
+} from "@renderer/components/features/wholesale/shared/units";
+import { useWholesale } from "@renderer/components/features/wholesale/shared/store";
+import { RECEIVING_GATES } from "@renderer/components/features/wholesale/masterData/masterData";
+import { type NewReceivingInput } from "@renderer/components/features/wholesale/shared/api";
 import {
   STEPS,
   receivingFormSchema,

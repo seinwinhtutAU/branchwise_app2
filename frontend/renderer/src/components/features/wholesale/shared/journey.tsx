@@ -3,7 +3,7 @@ import {
   JourneyArrow,
   JourneyCard,
   JourneyRow,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import {
   cargoRemaining,
   finalRemaining,
@@ -11,14 +11,14 @@ import {
   maxForLeg,
   shipmentPairs,
   type Shipment,
-} from "@renderer/components/features/wholesale/shipments";
+} from "@renderer/components/features/wholesale/delivery/shipments";
 import {
   countedPairs,
   openedCount,
   type Receiving,
-} from "@renderer/components/features/wholesale/receivings";
-import { formatQty } from "@renderer/components/features/wholesale/shared";
-import { formatIn, type Unit } from "@renderer/components/features/wholesale/units";
+} from "@renderer/components/features/wholesale/receiving/receivings";
+import { formatQty } from "@renderer/components/features/wholesale/shared/shared";
+import { formatIn, type Unit } from "@renderer/components/features/wholesale/shared/units";
 
 // One journey, drawn once. A customer order, a supplier voucher and a shipment are three
 // views of the same goods moving, so they show the same cards with the same figures — not

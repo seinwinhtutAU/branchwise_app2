@@ -17,8 +17,8 @@ import {
   formatDate,
   formatKyat,
   todayIso,
-} from "@renderer/components/features/wholesale/shared";
-import { type Payment } from "@renderer/components/features/wholesale/customerOrders";
+} from "@renderer/components/features/wholesale/shared/shared";
+import { type Payment } from "@renderer/components/features/wholesale/orders/customerOrders";
 import { CellInput } from "./formFields";
 import { SOFT_RED } from "./ui";
 

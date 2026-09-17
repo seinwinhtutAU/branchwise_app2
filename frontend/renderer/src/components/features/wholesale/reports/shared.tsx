@@ -19,9 +19,9 @@ import {
   formatDate,
   formatKyat,
   formatQty,
-} from "@renderer/components/features/wholesale/shared";
-import { formatSets } from "@renderer/components/features/wholesale/units";
-import { WHOLESALE_REPORTS_URL } from "@renderer/components/features/wholesale/api";
+} from "@renderer/components/features/wholesale/shared/shared";
+import { formatSets } from "@renderer/components/features/wholesale/shared/units";
+import { WHOLESALE_REPORTS_URL } from "@renderer/components/features/wholesale/shared/api";
 import {
   periodQueryParams,
   previousPeriodLabel,

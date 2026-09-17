@@ -4,8 +4,8 @@ import {
   legRemaining,
   type Shipment,
   type ShipmentStatus,
-} from "@renderer/components/features/wholesale/shipments";
-import { type Unit } from "@renderer/components/features/wholesale/units";
+} from "@renderer/components/features/wholesale/delivery/shipments";
+import { type Unit } from "@renderer/components/features/wholesale/shared/units";
 
 export const SHIPMENTS_QUERY_KEY = ["wholesale", "shipments"] as const;
 

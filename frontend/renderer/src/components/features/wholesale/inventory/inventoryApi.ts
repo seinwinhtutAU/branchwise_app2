@@ -3,9 +3,9 @@
 // names so a stale response cannot crash the stock or delivery views.
 
 import { apiBaseUrl, type Session } from "@renderer/lib/auth";
-import { request } from "./apiClient";
+import { request } from "../shared/apiClient";
 import { type StockMovement, type StockRecord } from "./stock";
-import { type Unit } from "./units";
+import { type Unit } from "../shared/units";
 
 export const WHOLESALE_INVENTORY_URL = `${apiBaseUrl}/api/wholesale/inventory`;
 export const WHOLESALE_STOCK_URL = `${apiBaseUrl}/api/wholesale/inventory/stock`;

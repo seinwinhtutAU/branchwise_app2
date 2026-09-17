@@ -2,13 +2,13 @@
 // replacing its staged costs, and deleting it.
 
 import { apiBaseUrl, type Session } from "@renderer/lib/auth";
-import { request } from "./apiClient";
+import { request } from "../shared/apiClient";
 import {
   type Receiving,
   type ReceivingCost,
   type ReceivingPackage,
 } from "./receivings";
-import { fromPairs, PAIRS_PER, type UnitConversions } from "./units";
+import { fromPairs, PAIRS_PER, type UnitConversions } from "../shared/units";
 
 
 interface ReceivingItemWire {

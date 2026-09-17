@@ -1,11 +1,11 @@
 // InventorySummaryCards — overview panel showing physical + pipeline stock.
 
 import { TruckIcon, WarehouseIcon } from "@renderer/components/ui/icons";
-import { Panel } from "@renderer/components/features/wholesale/ui";
-import { formatSets } from "@renderer/components/features/wholesale/units";
-import { formatQty } from "@renderer/components/features/wholesale/shared";
+import { Panel } from "@renderer/components/features/wholesale/shared/ui";
+import { formatSets } from "@renderer/components/features/wholesale/shared/units";
+import { formatQty } from "@renderer/components/features/wholesale/shared/shared";
 import { cn } from "@renderer/lib/utils";
-import { type StockRecord } from "@renderer/components/features/wholesale/stock";
+import { type StockRecord } from "@renderer/components/features/wholesale/inventory/stock";
 import { inventoryHealth } from "./inventoryUtils";
 import { type InventorySummaryRow, HEALTH_STYLES, type InventoryHealth } from "./types";
 

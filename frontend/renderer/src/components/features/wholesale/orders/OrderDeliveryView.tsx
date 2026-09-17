@@ -14,25 +14,25 @@ import {
 import {
   ColorQtyPicker,
   ColorQtySummary,
-} from "@renderer/components/features/wholesale/ColorQtyPicker";
-import { GROUP_LABELS } from "@renderer/components/features/wholesale/products";
-import { todayIso } from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/shared/ColorQtyPicker";
+import { GROUP_LABELS } from "@renderer/components/features/wholesale/shared/products";
+import { todayIso } from "@renderer/components/features/wholesale/shared/shared";
 import {
   formatIn,
   formatSets,
   PAIRS_PER,
-} from "@renderer/components/features/wholesale/units";
+} from "@renderer/components/features/wholesale/shared/units";
 import {
   colorPairsForText,
   serializeColorPairs,
   type ColorPairs,
   type StockLine,
-} from "@renderer/components/features/wholesale/stock";
+} from "@renderer/components/features/wholesale/inventory/stock";
 import {
   lineRemaining,
   type CustomerOrder,
-} from "@renderer/components/features/wholesale/customerOrders";
-import { type CustomerDeliveryBatchInput } from "@renderer/components/features/wholesale/api";
+} from "@renderer/components/features/wholesale/orders/customerOrders";
+import { type CustomerDeliveryBatchInput } from "@renderer/components/features/wholesale/shared/api";
 import {
   availableDeliveryColors,
   deliveryLocationsForLine,

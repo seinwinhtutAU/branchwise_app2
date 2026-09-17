@@ -29,20 +29,20 @@ import {
   SUPPLIER_VOUCHERS_URL,
   WHOLESALE_FINANCE_CUSTOMERS_URL,
   type ReceivingWire,
-} from "@renderer/components/features/wholesale/api";
-import { DotPill } from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/api";
+import { DotPill } from "@renderer/components/features/wholesale/shared/ui";
 import {
   formatDate,
   formatKyat,
   todayIso,
-} from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/shared/shared";
 import {
   paidAmount as paidVoucherAmount,
   paymentStatus as voucherPaymentStatus,
   voucherBalance,
   type SupplierVoucher,
-} from "@renderer/components/features/wholesale/supplierVouchers";
-import { pricedAmount } from "@renderer/components/features/wholesale/units";
+} from "@renderer/components/features/wholesale/vouchers/supplierVouchers";
+import { pricedAmount } from "@renderer/components/features/wholesale/shared/units";
 
 interface FinanceCustomerRow {
   order_id: string;

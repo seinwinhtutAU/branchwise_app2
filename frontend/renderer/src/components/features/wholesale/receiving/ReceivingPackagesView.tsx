@@ -19,15 +19,15 @@ import {
 import {
   CellInput,
   SuggestInput,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import {
   packagePairs,
   type Receiving,
   type ReceivingPackage,
-} from "@renderer/components/features/wholesale/receivings";
-import { formatSets } from "@renderer/components/features/wholesale/units";
-import { STOCK_CODES } from "@renderer/components/features/wholesale/masterData";
-import { colorQtyProblem } from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/receiving/receivings";
+import { formatSets } from "@renderer/components/features/wholesale/shared/units";
+import { STOCK_CODES } from "@renderer/components/features/wholesale/masterData/masterData";
+import { colorQtyProblem } from "@renderer/components/features/wholesale/shared/shared";
 import { OpenedToggle } from "./ReceivingBadges";
 import {
   formatStoredQuantity,

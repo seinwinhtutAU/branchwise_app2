@@ -23,7 +23,7 @@ import {
   Panel,
   Reference,
   RowProgress,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import {
   RECEIVING_STATUSES,
   receivingStatus,
@@ -33,14 +33,14 @@ import {
   pairsDifference,
   type Receiving,
   type ReceivingStatus,
-} from "@renderer/components/features/wholesale/receivings";
+} from "@renderer/components/features/wholesale/receiving/receivings";
 import {
   formatDate,
   formatQty,
   sharePct,
-} from "@renderer/components/features/wholesale/shared";
-import { formatSets } from "@renderer/components/features/wholesale/units";
-import { useWholesale } from "@renderer/components/features/wholesale/store";
+} from "@renderer/components/features/wholesale/shared/shared";
+import { formatSets } from "@renderer/components/features/wholesale/shared/units";
+import { useWholesale } from "@renderer/components/features/wholesale/shared/store";
 import { STATUS_LABELS, type StatusFilter } from "./types";
 import { ReceivingRowMenu, StatusBadge } from "./ReceivingBadges";
 

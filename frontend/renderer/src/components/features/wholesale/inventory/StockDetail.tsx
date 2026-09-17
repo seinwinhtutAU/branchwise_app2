@@ -17,16 +17,16 @@ import {
   ReadOnlyField,
   Reference,
   SectionLabel,
-} from "@renderer/components/features/wholesale/ui";
-import { formatDate } from "@renderer/components/features/wholesale/shared";
-import { formatSets } from "@renderer/components/features/wholesale/units";
-import { GROUP_LABELS } from "@renderer/components/features/wholesale/products";
+} from "@renderer/components/features/wholesale/shared/ui";
+import { formatDate } from "@renderer/components/features/wholesale/shared/shared";
+import { formatSets } from "@renderer/components/features/wholesale/shared/units";
+import { GROUP_LABELS } from "@renderer/components/features/wholesale/shared/products";
 import { cn } from "@renderer/lib/utils";
 import {
   type StockRecord,
   type StockMovement,
-} from "@renderer/components/features/wholesale/stock";
-import { type CustomerOrder } from "@renderer/components/features/wholesale/customerOrders";
+} from "@renderer/components/features/wholesale/inventory/stock";
+import { type CustomerOrder } from "@renderer/components/features/wholesale/orders/customerOrders";
 import {
   relatedOrdersFor,
   colorAvailabilityForOrder,

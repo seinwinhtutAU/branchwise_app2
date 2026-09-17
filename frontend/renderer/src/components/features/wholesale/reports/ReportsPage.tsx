@@ -6,10 +6,10 @@ import { Button } from "@renderer/components/ui/Button";
 import { CardHeader } from "@renderer/components/ui/Card";
 import { PeriodControls } from "@renderer/components/features/dashboard/shared";
 import { usePeriodRange } from "@renderer/components/features/dashboard/usePeriodRange";
-import { RevenueTab } from "./reports/RevenueTab";
-import { CostTab } from "./reports/CostTab";
-import { InventoryTab } from "./reports/InventoryTab";
-import { CustomerTab } from "./reports/CustomerTab";
+import { RevenueTab } from "./RevenueTab";
+import { CostTab } from "./CostTab";
+import { InventoryTab } from "./InventoryTab";
+import { CustomerTab } from "./CustomerTab";
 
 type ReportTab = "revenue" | "cost" | "inventory" | "customer";
 

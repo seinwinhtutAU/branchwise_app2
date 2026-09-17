@@ -6,9 +6,9 @@ import { useToast } from "@renderer/lib/useToast";
 import { Button } from "@renderer/components/ui/Button";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { TruckIcon } from "@renderer/components/ui/icons";
-import { type Shipment } from "@renderer/components/features/wholesale/shipments";
-import { useHydrateMasterData } from "@renderer/components/features/wholesale/masterData";
-import { hydrateShipments } from "@renderer/components/features/wholesale/store";
+import { type Shipment } from "@renderer/components/features/wholesale/delivery/shipments";
+import { useHydrateMasterData } from "@renderer/components/features/wholesale/masterData/masterData";
+import { hydrateShipments } from "@renderer/components/features/wholesale/shared/store";
 import {
   SHIPMENTS_URL,
   WHOLESALE_WRITE_OFFS_URL,
@@ -23,7 +23,7 @@ import {
   type NewShipmentInput,
   type ShipmentWire,
   type WriteOffWire,
-} from "@renderer/components/features/wholesale/api";
+} from "@renderer/components/features/wholesale/shared/api";
 import { SHIPMENTS_QUERY_KEY, type View } from "./types";
 import { ShipmentList } from "./ShipmentList";
 import { ShipmentDetail } from "./ShipmentDetail";

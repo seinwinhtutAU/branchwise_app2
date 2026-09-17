@@ -2,15 +2,15 @@ import {
   lineRemaining,
   remainingQty as orderRemaining,
   type CustomerOrder,
-} from "@renderer/components/features/wholesale/customerOrders";
-import { type SupplierVoucher } from "@renderer/components/features/wholesale/supplierVouchers";
-import { colorQtyPairs } from "@renderer/components/features/wholesale/shared";
-import { PAIRS_PER } from "@renderer/components/features/wholesale/units";
+} from "@renderer/components/features/wholesale/orders/customerOrders";
+import { type SupplierVoucher } from "@renderer/components/features/wholesale/vouchers/supplierVouchers";
+import { colorQtyPairs } from "@renderer/components/features/wholesale/shared/shared";
+import { PAIRS_PER } from "@renderer/components/features/wholesale/shared/units";
 import {
   colorPairsForText,
   type ColorPairs,
-} from "@renderer/components/features/wholesale/stock";
-import { DEFAULT_CURRENCY } from "@renderer/components/features/wholesale/currency";
+} from "@renderer/components/features/wholesale/inventory/stock";
+import { DEFAULT_CURRENCY } from "@renderer/components/features/wholesale/shared/currency";
 import {
   EMPTY_LINE,
   UNASSIGNED_SUPPLIER,

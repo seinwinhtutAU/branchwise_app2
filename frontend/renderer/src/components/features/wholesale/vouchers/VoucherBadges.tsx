@@ -1,7 +1,7 @@
 import React from "react";
 import { cn } from "@renderer/lib/utils";
-import { DotPill, FloatingLayer, MenuItem } from "@renderer/components/features/wholesale/ui";
-import { useDismissableMenu } from "@renderer/components/features/wholesale/useDismissableMenu";
+import { DotPill, FloatingLayer, MenuItem } from "@renderer/components/features/wholesale/shared/ui";
+import { useDismissableMenu } from "@renderer/components/features/wholesale/shared/useDismissableMenu";
 import {
   DollarIcon,
   MoreVerticalIcon,
@@ -10,8 +10,8 @@ import {
 } from "@renderer/components/ui/icons";
 import {
   type ReceivingStatus,
-} from "@renderer/components/features/wholesale/supplierVouchers";
-import { type PaymentStatus } from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/vouchers/supplierVouchers";
+import { type PaymentStatus } from "@renderer/components/features/wholesale/shared/shared";
 import {
   RECEIVING_LABELS,
   RECEIVING_STYLES,

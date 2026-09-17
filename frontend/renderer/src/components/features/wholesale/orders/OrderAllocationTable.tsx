@@ -13,25 +13,25 @@ import {
 import {
   ColorQtyPicker,
   ColorQtySummary,
-} from "@renderer/components/features/wholesale/ColorQtyPicker";
-import { GROUP_LABELS } from "@renderer/components/features/wholesale/products";
-import { colorQtyProblem } from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/shared/ColorQtyPicker";
+import { GROUP_LABELS } from "@renderer/components/features/wholesale/shared/products";
+import { colorQtyProblem } from "@renderer/components/features/wholesale/shared/shared";
 import {
   formatIn,
   formatSets,
   PAIRS_PER,
-} from "@renderer/components/features/wholesale/units";
+} from "@renderer/components/features/wholesale/shared/units";
 import {
   colorPairsForText,
   serializeColorPairs,
   type ColorPairs,
   type StockLine,
-} from "@renderer/components/features/wholesale/stock";
+} from "@renderer/components/features/wholesale/inventory/stock";
 import {
   lineRemaining,
   type CustomerOrder,
   type CustomerOrderLine,
-} from "@renderer/components/features/wholesale/customerOrders";
+} from "@renderer/components/features/wholesale/orders/customerOrders";
 import {
   allocationsFromOtherOrders,
   availableStockColors,

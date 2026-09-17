@@ -44,12 +44,12 @@ import {
   type WholesaleCustomerWire,
   type WholesaleNamedEntityWire,
   type WholesaleProductWire,
-} from "./api";
-import { GROUP_LABELS, PRODUCT_GROUPS, type ProductGroup } from "./products";
-import { DotPill } from "./ui";
+} from "../shared/api";
+import { GROUP_LABELS, PRODUCT_GROUPS, type ProductGroup } from "../shared/products";
+import { DotPill } from "../shared/ui";
 // Quantities are entered in sets everywhere, so a product no longer carries a unit of
 // its own — only how many pairs make up one of its sets or dozens.
-import { type Unit } from "./units";
+import { type Unit } from "../shared/units";
 
 type MasterDataTab =
   | "products"

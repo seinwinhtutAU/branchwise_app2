@@ -1,4 +1,4 @@
-import type { WholesaleInventoryReport } from "@renderer/components/features/wholesale/api";
+import type { WholesaleInventoryReport } from "@renderer/components/features/wholesale/shared/api";
 import {
   ReportError,
   ReportLoading,

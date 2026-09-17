@@ -31,11 +31,11 @@ import {
   SEED_ORDERS,
   type CustomerOrder,
   type Payment,
-} from "./customerOrders";
-import { SEED_VOUCHERS, type SupplierVoucher } from "./supplierVouchers";
-import { SEED_SHIPMENTS, type Shipment } from "./shipments";
-import { SEED_RECEIVINGS, type Receiving } from "./receivings";
-import { SEED_OUTGOING, type StockMovement } from "./stock";
+} from "../orders/customerOrders";
+import { SEED_VOUCHERS, type SupplierVoucher } from "../vouchers/supplierVouchers";
+import { SEED_SHIPMENTS, type Shipment } from "../delivery/shipments";
+import { SEED_RECEIVINGS, type Receiving } from "../receiving/receivings";
+import { SEED_OUTGOING, type StockMovement } from "../inventory/stock";
 
 export interface WholesaleState {
   orders: CustomerOrder[];

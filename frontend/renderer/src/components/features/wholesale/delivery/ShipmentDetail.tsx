@@ -26,13 +26,13 @@ import {
   Reference,
   SectionLabel,
   SuggestInput,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import {
   formatQty,
-} from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/shared/shared";
 import {
   formatSets,
-} from "@renderer/components/features/wholesale/units";
+} from "@renderer/components/features/wholesale/shared/units";
 import {
   arrivedPct,
   cargoRemaining,
@@ -45,21 +45,21 @@ import {
   shipmentStatus,
   type Shipment,
   type ShipmentLeg,
-} from "@renderer/components/features/wholesale/shipments";
-import { DeliveryJourney } from "@renderer/components/features/wholesale/journey";
+} from "@renderer/components/features/wholesale/delivery/shipments";
+import { DeliveryJourney } from "@renderer/components/features/wholesale/shared/journey";
 import {
   CARGO_NAMES,
   CARRIER_NAMES,
   DESTINATION_NAMES,
   RECEIVING_GATES,
-} from "@renderer/components/features/wholesale/masterData";
-import { useWholesale } from "@renderer/components/features/wholesale/store";
+} from "@renderer/components/features/wholesale/masterData/masterData";
+import { useWholesale } from "@renderer/components/features/wholesale/shared/store";
 import {
   type WriteOffReason,
   type WriteOffWire,
-} from "@renderer/components/features/wholesale/api";
-import { WriteOffModal } from "@renderer/components/features/wholesale/WriteOffModal";
-import { SplitShipmentPage } from "@renderer/components/features/wholesale/SplitShipmentPage";
+} from "@renderer/components/features/wholesale/shared/api";
+import { WriteOffModal } from "@renderer/components/features/wholesale/shared/WriteOffModal";
+import { SplitShipmentPage } from "@renderer/components/features/wholesale/delivery/SplitShipmentPage";
 import {
   ArrowCell,
   ArrowHead,

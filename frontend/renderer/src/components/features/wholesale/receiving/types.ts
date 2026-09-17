@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { type Unit } from "@renderer/components/features/wholesale/units";
-import { type Receiving, type ReceivingStatus } from "@renderer/components/features/wholesale/receivings";
-import { nextReference } from "@renderer/components/features/wholesale/shared";
+import { type Unit } from "@renderer/components/features/wholesale/shared/units";
+import { type Receiving, type ReceivingStatus } from "@renderer/components/features/wholesale/receiving/receivings";
+import { nextReference } from "@renderer/components/features/wholesale/shared/shared";
 
 export const RECEIVINGS_QUERY_KEY = ["wholesale", "receivings"] as const;
 export const SHIPMENTS_QUERY_KEY = ["wholesale", "shipments"] as const;

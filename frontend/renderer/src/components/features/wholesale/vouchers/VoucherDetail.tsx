@@ -32,7 +32,7 @@ import {
   SOFT_RED,
   SuggestInput,
   CopyButton,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import type { AppSettings } from "@renderer/lib/appSettings";
 import {
   DEFAULT_CURRENCY,
@@ -41,19 +41,19 @@ import {
   isForeignCurrency,
   previewKyatAmount,
   type CurrencyCode,
-} from "@renderer/components/features/wholesale/currency";
+} from "@renderer/components/features/wholesale/shared/currency";
 import {
   formatKyat,
   colorQtyPairs,
   colorQtyProblem,
   duplicateStockCodeProblem,
   mismatchDescription,
-} from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/shared/shared";
 import {
   formatIn,
   PAIRS_PER,
   pricedAmount,
-} from "@renderer/components/features/wholesale/units";
+} from "@renderer/components/features/wholesale/shared/units";
 import {
   paidPct,
   paymentStatus,
@@ -65,15 +65,15 @@ import {
   voucherBalance,
   type SupplierVoucher,
   type SupplierVoucherLine,
-} from "@renderer/components/features/wholesale/supplierVouchers";
+} from "@renderer/components/features/wholesale/vouchers/supplierVouchers";
 import {
   CARGO_NAMES,
   STOCK_CODES,
   SUPPLIER_NAMES,
   productOf,
-} from "@renderer/components/features/wholesale/masterData";
-import { WriteOffModal } from "@renderer/components/features/wholesale/WriteOffModal";
-import { type WriteOffReason, type WriteOffWire } from "@renderer/components/features/wholesale/api";
+} from "@renderer/components/features/wholesale/masterData/masterData";
+import { WriteOffModal } from "@renderer/components/features/wholesale/shared/WriteOffModal";
+import { type WriteOffReason, type WriteOffWire } from "@renderer/components/features/wholesale/shared/api";
 import {
   sets,
   lineReceivedQty,

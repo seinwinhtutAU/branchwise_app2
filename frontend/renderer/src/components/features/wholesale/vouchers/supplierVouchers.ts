@@ -5,10 +5,10 @@
 // Front-end only: no backend, so these rows are in-memory seed data and anything added
 // lives until the window reloads. Formatting and colour shorthand come from ./shared.
 
-import { paymentStatusOf, sharePct, type PaymentStatus } from "./shared";
-import { type Payment } from "./customerOrders";
-import { pricedAmount, type Unit, type UnitConversions } from "./units";
-import { type ProductGroup } from "./products";
+import { paymentStatusOf, sharePct, type PaymentStatus } from "../shared/shared";
+import { type Payment } from "../orders/customerOrders";
+import { pricedAmount, type Unit, type UnitConversions } from "../shared/units";
+import { type ProductGroup } from "../shared/products";
 
 /** The ERD's supplier_voucher.receiving_status. Worked out from the quantities rather
  *  than stored, so it can never disagree with the numbers beside it. */

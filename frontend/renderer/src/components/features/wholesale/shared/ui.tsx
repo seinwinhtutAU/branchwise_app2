@@ -15,7 +15,7 @@ import { CheckIcon, CopyIcon } from "@renderer/components/ui/icons";
 import {
   GROUP_LABELS,
   type ProductGroup,
-} from "@renderer/components/features/wholesale/products";
+} from "@renderer/components/features/wholesale/shared/products";
 
 // The pieces every wholesale screen is built from. They lived in four copies, one per
 // page, which is exactly how the four screens kept drifting apart: a fix to one never

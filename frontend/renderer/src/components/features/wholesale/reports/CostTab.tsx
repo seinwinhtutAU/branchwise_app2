@@ -2,7 +2,7 @@ import {
   StatTile,
   TwoLineTrendChart,
 } from "@renderer/components/features/dashboard/shared";
-import type { WholesaleCostReport } from "@renderer/components/features/wholesale/api";
+import type { WholesaleCostReport } from "@renderer/components/features/wholesale/shared/api";
 import {
   ReportError,
   ReportKpiNote,

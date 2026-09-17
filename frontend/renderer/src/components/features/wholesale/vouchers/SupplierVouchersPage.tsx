@@ -6,17 +6,17 @@ import { useToast } from "@renderer/lib/useToast";
 import type { AppSettings } from "@renderer/lib/appSettings";
 import {
   type SupplierVoucher,
-} from "@renderer/components/features/wholesale/supplierVouchers";
+} from "@renderer/components/features/wholesale/vouchers/supplierVouchers";
 import {
   type CustomerOrder,
-} from "@renderer/components/features/wholesale/customerOrders";
+} from "@renderer/components/features/wholesale/orders/customerOrders";
 import {
   hydrateVouchers,
   hydrateOrders,
   saveOrders,
   saveVouchers,
   useWholesale,
-} from "@renderer/components/features/wholesale/store";
+} from "@renderer/components/features/wholesale/shared/store";
 import {
   CUSTOMER_ORDERS_URL,
   SUPPLIER_VOUCHERS_URL,
@@ -35,8 +35,8 @@ import {
   vouchersFromWire,
   type NewSupplierVoucherInput,
   type SupplierVoucherWire,
-} from "@renderer/components/features/wholesale/api";
-import { useHydrateMasterData } from "@renderer/components/features/wholesale/masterData";
+} from "@renderer/components/features/wholesale/shared/api";
+import { useHydrateMasterData } from "@renderer/components/features/wholesale/masterData/masterData";
 import {
   VOUCHERS_QUERY_KEY,
   ORDERS_QUERY_KEY,

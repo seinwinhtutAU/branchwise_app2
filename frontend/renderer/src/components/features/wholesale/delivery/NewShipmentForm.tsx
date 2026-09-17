@@ -27,27 +27,27 @@ import {
   SOFT_BLUE,
   SOFT_RED,
   type JourneyStage,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import {
   formatDate,
   formatQty,
   onlyDigits,
   todayIso,
-} from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/shared/shared";
 import {
   formatIn,
   formatSets,
   toPairs,
   PAIRS_PER,
-} from "@renderer/components/features/wholesale/units";
+} from "@renderer/components/features/wholesale/shared/units";
 import {
   CARGO_NAMES,
   CARRIER_NAMES,
   DESTINATION_NAMES,
   RECEIVING_GATES,
-} from "@renderer/components/features/wholesale/masterData";
-import { useWholesale } from "@renderer/components/features/wholesale/store";
-import { type NewShipmentInput } from "@renderer/components/features/wholesale/api";
+} from "@renderer/components/features/wholesale/masterData/masterData";
+import { useWholesale } from "@renderer/components/features/wholesale/shared/store";
+import { type NewShipmentInput } from "@renderer/components/features/wholesale/shared/api";
 import {
   EMPTY_STOP,
   shipmentFormSchema,

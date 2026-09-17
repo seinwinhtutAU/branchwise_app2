@@ -13,12 +13,12 @@ import {
   CellInput,
   Reference,
   SuggestInput,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import {
   DEFAULT_CURRENCY,
   previewKyatAmount,
   type CurrencyCode,
-} from "@renderer/components/features/wholesale/currency";
+} from "@renderer/components/features/wholesale/shared/currency";
 import {
   countedPairs,
   emptyCost,
@@ -32,17 +32,17 @@ import {
   type ReceivingCost,
   type ReceivingItem,
   type ReceivingPackage,
-} from "@renderer/components/features/wholesale/receivings";
+} from "@renderer/components/features/wholesale/receiving/receivings";
 import {
   formatKyat,
   quantityFromColors,
-} from "@renderer/components/features/wholesale/shared";
-import { PAIRS_PER } from "@renderer/components/features/wholesale/units";
-import { useWholesale } from "@renderer/components/features/wholesale/store";
+} from "@renderer/components/features/wholesale/shared/shared";
+import { PAIRS_PER } from "@renderer/components/features/wholesale/shared/units";
+import { useWholesale } from "@renderer/components/features/wholesale/shared/store";
 import {
   RECEIVING_GATES,
   productOf,
-} from "@renderer/components/features/wholesale/masterData";
+} from "@renderer/components/features/wholesale/masterData/masterData";
 import {
   receivingDetailSchema,
   type ReceivingDetailFormValues,

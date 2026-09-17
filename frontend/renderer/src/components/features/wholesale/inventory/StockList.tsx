@@ -12,14 +12,14 @@ import {
 import { InventoryIcon, SearchIcon } from "@renderer/components/ui/icons";
 import {
   CopyButton, PAGE_SIZE, Panel,
-} from "@renderer/components/features/wholesale/ui";
-import { formatSets } from "@renderer/components/features/wholesale/units";
-import { GROUP_LABELS } from "@renderer/components/features/wholesale/products";
+} from "@renderer/components/features/wholesale/shared/ui";
+import { formatSets } from "@renderer/components/features/wholesale/shared/units";
+import { GROUP_LABELS } from "@renderer/components/features/wholesale/shared/products";
 import { cn } from "@renderer/lib/utils";
 import {
   type StockRecord,
   type StockMovement,
-} from "@renderer/components/features/wholesale/stock";
+} from "@renderer/components/features/wholesale/inventory/stock";
 import { inventoryHealth, stockPlaces } from "./inventoryUtils";
 import {
   InventorySectionTabs,

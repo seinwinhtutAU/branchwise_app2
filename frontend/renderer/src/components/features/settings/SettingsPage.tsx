@@ -23,7 +23,7 @@ import {
 } from "@renderer/components/ui/Table";
 import { ThemeSwitcher } from "@renderer/components/ui/ThemeSwitcher";
 import type { Profile } from "@renderer/components/features/types";
-import { FOREIGN_CURRENCIES } from "@renderer/components/features/wholesale/currency";
+import { FOREIGN_CURRENCIES } from "@renderer/components/features/wholesale/shared/currency";
 
 interface Props {
   session: Session;

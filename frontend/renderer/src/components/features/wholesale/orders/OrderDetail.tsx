@@ -16,7 +16,7 @@ import {
   SOFT_RED,
   SectionLabel,
   SuggestInput,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import { Button } from "@renderer/components/ui/Button";
 import { Input } from "@renderer/components/ui/Input";
 import {
@@ -44,36 +44,36 @@ import {
   remainingQty,
   type CustomerOrder,
   type CustomerOrderLine,
-} from "@renderer/components/features/wholesale/customerOrders";
+} from "@renderer/components/features/wholesale/orders/customerOrders";
 import {
   STOCK_CODES,
   SUPPLIER_NAMES,
   productOf,
-} from "@renderer/components/features/wholesale/masterData";
+} from "@renderer/components/features/wholesale/masterData/masterData";
 import {
   PAIRS_PER,
   pricedAmount,
-} from "@renderer/components/features/wholesale/units";
+} from "@renderer/components/features/wholesale/shared/units";
 import {
   colorQtyPairs,
   colorQtyProblem,
   duplicateStockCodeProblem,
   formatKyat,
   mismatchDescription,
-} from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/shared/shared";
 import {
   DEFAULT_CURRENCY,
   isForeignCurrency,
   previewKyatAmount,
   type CurrencyCode,
-} from "@renderer/components/features/wholesale/currency";
-import { type StockLine } from "@renderer/components/features/wholesale/stock";
+} from "@renderer/components/features/wholesale/shared/currency";
+import { type StockLine } from "@renderer/components/features/wholesale/inventory/stock";
 import {
   type CustomerDeliveryBatchInput,
   type WriteOffReason,
   type WriteOffWire,
-} from "@renderer/components/features/wholesale/api";
-import { WriteOffModal } from "@renderer/components/features/wholesale/WriteOffModal";
+} from "@renderer/components/features/wholesale/shared/api";
+import { WriteOffModal } from "@renderer/components/features/wholesale/shared/WriteOffModal";
 import {
   customerOrderDetailSchema,
   sets,

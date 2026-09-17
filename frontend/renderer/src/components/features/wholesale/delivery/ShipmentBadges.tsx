@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@renderer/lib/utils";
-import { FloatingLayer, MenuItem, EDITABLE } from "@renderer/components/features/wholesale/ui";
+import { FloatingLayer, MenuItem, EDITABLE } from "@renderer/components/features/wholesale/shared/ui";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -13,13 +13,13 @@ import {
   formatQty,
   onlyDigits,
   mismatchDescription,
-} from "@renderer/components/features/wholesale/shared";
-import { formatIn, type Unit } from "@renderer/components/features/wholesale/units";
-import { type WriteOffWire } from "@renderer/components/features/wholesale/api";
+} from "@renderer/components/features/wholesale/shared/shared";
+import { formatIn, type Unit } from "@renderer/components/features/wholesale/shared/units";
+import { type WriteOffWire } from "@renderer/components/features/wholesale/shared/api";
 import {
   type Shipment,
   type ShipmentStatus,
-} from "@renderer/components/features/wholesale/shipments";
+} from "@renderer/components/features/wholesale/delivery/shipments";
 import { STATUS_LABELS, STATUS_STYLES } from "./types";
 
 export function StatusBadge({

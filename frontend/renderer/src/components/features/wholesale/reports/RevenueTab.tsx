@@ -6,7 +6,7 @@ import {
   TwoLineTrendChart,
   type ChartView,
 } from "@renderer/components/features/dashboard/shared";
-import type { WholesaleRevenueReport } from "@renderer/components/features/wholesale/api";
+import type { WholesaleRevenueReport } from "@renderer/components/features/wholesale/shared/api";
 import { formatPercent } from "@renderer/components/features/dashboard/helpers";
 import {
   ReportError,

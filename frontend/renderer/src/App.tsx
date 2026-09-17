@@ -112,16 +112,16 @@ const WholesaleInventoryPage = lazy(
 );
 const WholesaleMonitoringPage = lazy(
   () =>
-    import("@renderer/components/features/wholesale/MonitoringDashboardPage"),
+    import("@renderer/components/features/wholesale/monitoring/MonitoringDashboardPage"),
 );
 const FinancePage = lazy(
-  () => import("@renderer/components/features/wholesale/FinancePage"),
+  () => import("@renderer/components/features/wholesale/finance/FinancePage"),
 );
 const WholesaleReportsPage = lazy(
-  () => import("@renderer/components/features/wholesale/ReportsPage"),
+  () => import("@renderer/components/features/wholesale/reports/ReportsPage"),
 );
 const WholesaleMasterDataPage = lazy(
-  () => import("@renderer/components/features/wholesale/MasterDataPage"),
+  () => import("@renderer/components/features/wholesale/masterData/MasterDataPage"),
 );
 const WarningsPage = lazy(
   () => import("@renderer/components/features/retail/WarningsPage"),

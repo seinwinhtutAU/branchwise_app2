@@ -24,12 +24,12 @@ import {
   PAGE_SIZE,
   Reference,
   RowProgress,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import {
   formatDate,
   formatKyat,
   formatQty,
-} from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/shared/shared";
 import {
   paymentStatus,
   receivedPct,
@@ -37,7 +37,7 @@ import {
   remainingQty,
   voucherBalance,
   type SupplierVoucher,
-} from "@renderer/components/features/wholesale/supplierVouchers";
+} from "@renderer/components/features/wholesale/vouchers/supplierVouchers";
 import {
   sets,
   RECEIVING_STATUSES,

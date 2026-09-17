@@ -9,12 +9,12 @@ import {
 import {
   lineRemaining,
   type CustomerOrder,
-} from "@renderer/components/features/wholesale/customerOrders";
-import { type CustomerDeliveryBatchInput } from "@renderer/components/features/wholesale/api";
+} from "@renderer/components/features/wholesale/orders/customerOrders";
+import { type CustomerDeliveryBatchInput } from "@renderer/components/features/wholesale/shared/api";
 import {
   colorPairsForText,
   type StockLine,
-} from "@renderer/components/features/wholesale/stock";
+} from "@renderer/components/features/wholesale/inventory/stock";
 import {
   allocationsFromOtherOrders,
   availableStockColors,

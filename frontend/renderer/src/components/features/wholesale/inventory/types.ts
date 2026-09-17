@@ -105,13 +105,13 @@ export interface InventorySummaryRow {
 }
 
 export interface RelatedOrderRow {
-  order: import("@renderer/components/features/wholesale/customerOrders").CustomerOrder;
+  order: import("@renderer/components/features/wholesale/orders/customerOrders").CustomerOrder;
   ordered: number;
   received: number;
   remaining: number;
 }
 
 export interface ColorAvailability {
-  missing: import("@renderer/components/features/wholesale/stock").ColorPairs;
-  remaining: import("@renderer/components/features/wholesale/stock").ColorPairs;
+  missing: import("@renderer/components/features/wholesale/inventory/stock").ColorPairs;
+  remaining: import("@renderer/components/features/wholesale/inventory/stock").ColorPairs;
 }

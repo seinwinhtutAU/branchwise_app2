@@ -4,9 +4,9 @@
 // allocations are hydrated from the backend whenever the relevant screen is opened. The
 // formatting and colour-shorthand helpers live in ./shared, shared with factory vouchers.
 
-import { paymentStatusOf, sharePct, type PaymentStatus } from "./shared";
-import { pricedAmount, type Unit, type UnitConversions } from "./units";
-import { type ProductGroup } from "./products";
+import { paymentStatusOf, sharePct, type PaymentStatus } from "../shared/shared";
+import { pricedAmount, type Unit, type UnitConversions } from "../shared/units";
+import { type ProductGroup } from "../shared/products";
 
 /** waiting_for_stock → ready_to_deliver → partly_delivered → fulfilled, or cancelled at
  *  any point. Status follows the stock reserved and delivered for the order. */

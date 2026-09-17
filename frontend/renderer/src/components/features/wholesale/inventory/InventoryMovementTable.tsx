@@ -10,16 +10,16 @@ import {
   TableContainer, Tbody, Td, Th, Thead, Tr,
 } from "@renderer/components/ui/Table";
 import { InventoryIcon, SearchIcon } from "@renderer/components/ui/icons";
-import { PAGE_SIZE, Panel } from "@renderer/components/features/wholesale/ui";
-import { formatDate } from "@renderer/components/features/wholesale/shared";
-import { formatSets } from "@renderer/components/features/wholesale/units";
-import { GROUP_LABELS } from "@renderer/components/features/wholesale/products";
+import { PAGE_SIZE, Panel } from "@renderer/components/features/wholesale/shared/ui";
+import { formatDate } from "@renderer/components/features/wholesale/shared/shared";
+import { formatSets } from "@renderer/components/features/wholesale/shared/units";
+import { GROUP_LABELS } from "@renderer/components/features/wholesale/shared/products";
 import { cn } from "@renderer/lib/utils";
 import {
   type StockMovement,
   type StockRecord,
   type MovementKind,
-} from "@renderer/components/features/wholesale/stock";
+} from "@renderer/components/features/wholesale/inventory/stock";
 import { stockPlaces } from "./inventoryUtils";
 import { MovementTypeBadge, InventoryRefreshButton, StockRowMenu } from "./InventoryBadges";
 

@@ -8,10 +8,10 @@ import {
   type StockMovement,
   type StockRecord,
   type StockLine,
-} from "@renderer/components/features/wholesale/stock";
-import { lineRemaining, type CustomerOrder } from "@renderer/components/features/wholesale/customerOrders";
-import { type Shipment } from "@renderer/components/features/wholesale/shipments";
-import { remainingQty, type SupplierVoucher } from "@renderer/components/features/wholesale/supplierVouchers";
+} from "@renderer/components/features/wholesale/inventory/stock";
+import { lineRemaining, type CustomerOrder } from "@renderer/components/features/wholesale/orders/customerOrders";
+import { type Shipment } from "@renderer/components/features/wholesale/delivery/shipments";
+import { remainingQty, type SupplierVoucher } from "@renderer/components/features/wholesale/vouchers/supplierVouchers";
 import {
   IN_TRANSIT_PLACE,
   AT_SUPPLIER_PLACE,

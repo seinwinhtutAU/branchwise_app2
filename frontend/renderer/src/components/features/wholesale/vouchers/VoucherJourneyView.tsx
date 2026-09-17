@@ -1,9 +1,9 @@
 import React, { useState } from "react";
-import { CopyButton, JourneyCard, JourneyRow } from "@renderer/components/features/wholesale/ui";
-import { DeliveryJourney } from "@renderer/components/features/wholesale/journey";
-import { formatDate } from "@renderer/components/features/wholesale/shared";
-import { useWholesale } from "@renderer/components/features/wholesale/store";
-import { type SupplierVoucher } from "@renderer/components/features/wholesale/supplierVouchers";
+import { CopyButton, JourneyCard, JourneyRow } from "@renderer/components/features/wholesale/shared/ui";
+import { DeliveryJourney } from "@renderer/components/features/wholesale/shared/journey";
+import { formatDate } from "@renderer/components/features/wholesale/shared/shared";
+import { useWholesale } from "@renderer/components/features/wholesale/shared/store";
+import { type SupplierVoucher } from "@renderer/components/features/wholesale/vouchers/supplierVouchers";
 import { sets } from "./types";
 import { customersWaitingFor } from "./voucherOrderUtils";
 

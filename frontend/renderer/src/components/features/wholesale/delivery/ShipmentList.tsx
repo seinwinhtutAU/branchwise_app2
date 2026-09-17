@@ -5,7 +5,7 @@ import {
   Panel,
   Reference,
   RowProgress,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import { Button } from "@renderer/components/ui/Button";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
@@ -28,14 +28,14 @@ import {
 import {
   formatDate,
   formatQty,
-} from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/shared/shared";
 import {
   arrivedPct,
   shipmentStatus,
   SHIPMENT_STATUSES,
   type Shipment,
   type ShipmentStatus,
-} from "@renderer/components/features/wholesale/shipments";
+} from "@renderer/components/features/wholesale/delivery/shipments";
 import { StatusBadge, RowMenu } from "./ShipmentBadges";
 import {
   STATUS_LABELS,

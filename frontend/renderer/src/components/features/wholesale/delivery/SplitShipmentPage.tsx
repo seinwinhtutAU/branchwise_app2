@@ -4,8 +4,8 @@ import { Button } from "@renderer/components/ui/Button";
 import { Input } from "@renderer/components/ui/Input";
 import { ArrowRightIcon } from "@renderer/components/ui/icons";
 import { cn } from "@renderer/lib/utils";
-import { WholesaleApiError } from "./api";
-import { formatQty, onlyDigits } from "./shared";
+import { WholesaleApiError } from "../shared/api";
+import { formatQty, onlyDigits } from "../shared/shared";
 import {
   cargoRemaining,
   legRemaining,
@@ -13,8 +13,8 @@ import {
   shipmentPairs,
   type Shipment,
 } from "./shipments";
-import { EDITABLE, JourneyArrow, JourneyCard, JourneyRow, QuantityInput, Required, SectionLabel, SuggestInput } from "./ui";
-import { formatIn, toPairs, type Unit } from "./units";
+import { EDITABLE, JourneyArrow, JourneyCard, JourneyRow, QuantityInput, Required, SectionLabel, SuggestInput } from "../shared/ui";
+import { formatIn, toPairs, type Unit } from "../shared/units";
 
 /**
  * The Split shipment tab — the shipment's real journey (the same row the Shipment tab

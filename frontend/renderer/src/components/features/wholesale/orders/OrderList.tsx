@@ -25,12 +25,12 @@ import {
   Panel,
   Reference,
   RowProgress,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import {
   formatDate,
   formatKyat,
   formatQty,
-} from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/shared/shared";
 import {
   ORDER_STATUSES,
   lineRemaining,
@@ -41,8 +41,8 @@ import {
   receivedPct,
   remainingQty,
   type CustomerOrder,
-} from "@renderer/components/features/wholesale/customerOrders";
-import { type StockLine } from "@renderer/components/features/wholesale/stock";
+} from "@renderer/components/features/wholesale/orders/customerOrders";
+import { type StockLine } from "@renderer/components/features/wholesale/inventory/stock";
 import {
   PAYMENT_LABELS,
   PAYMENT_STATUSES,

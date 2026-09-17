@@ -5,7 +5,7 @@ import {
   TrendChart,
   type ChartView,
 } from "@renderer/components/features/dashboard/shared";
-import type { WholesaleCustomerReport } from "@renderer/components/features/wholesale/api";
+import type { WholesaleCustomerReport } from "@renderer/components/features/wholesale/shared/api";
 import {
   ReportError,
   ReportKpiNote,

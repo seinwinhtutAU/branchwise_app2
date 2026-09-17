@@ -19,7 +19,7 @@ import {
   SectionLabel,
   StepBar,
   SuggestInput,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import { Button } from "@renderer/components/ui/Button";
 import { Input } from "@renderer/components/ui/Input";
 import {
@@ -40,30 +40,30 @@ import {
 import {
   type CustomerOrder,
   type CustomerOrderLine,
-} from "@renderer/components/features/wholesale/customerOrders";
+} from "@renderer/components/features/wholesale/orders/customerOrders";
 import {
   KNOWN_CUSTOMERS,
   STOCK_CODES,
   productOf,
-} from "@renderer/components/features/wholesale/masterData";
+} from "@renderer/components/features/wholesale/masterData/masterData";
 import {
   DEFAULT_CURRENCY,
   isForeignCurrency,
   previewKyatAmount,
   type CurrencyCode,
-} from "@renderer/components/features/wholesale/currency";
+} from "@renderer/components/features/wholesale/shared/currency";
 import {
   PAIRS_PER,
   formatIn,
   pricedAmount,
-} from "@renderer/components/features/wholesale/units";
+} from "@renderer/components/features/wholesale/shared/units";
 import {
   colorQtyProblem,
   duplicateStockCodeProblem,
   formatDate,
   formatKyat,
   todayIso,
-} from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/shared/shared";
 import {
   EMPTY_LINE,
   STEPS,

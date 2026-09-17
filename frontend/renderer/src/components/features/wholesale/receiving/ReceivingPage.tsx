@@ -7,13 +7,13 @@ import type { AppSettings } from "@renderer/lib/appSettings";
 import { Button } from "@renderer/components/ui/Button";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { ReceivingIcon } from "@renderer/components/ui/icons";
-import { type Receiving } from "@renderer/components/features/wholesale/receivings";
+import { type Receiving } from "@renderer/components/features/wholesale/receiving/receivings";
 import {
   hydrateReceivings,
   hydrateShipments,
   saveReceivings,
   useWholesale,
-} from "@renderer/components/features/wholesale/store";
+} from "@renderer/components/features/wholesale/shared/store";
 import {
   RECEIVINGS_URL,
   SHIPMENTS_URL,
@@ -31,8 +31,8 @@ import {
   type ReceivingWire,
   type ShipmentWire,
   type StockRecordWire,
-} from "@renderer/components/features/wholesale/api";
-import { useHydrateMasterData } from "@renderer/components/features/wholesale/masterData";
+} from "@renderer/components/features/wholesale/shared/api";
+import { useHydrateMasterData } from "@renderer/components/features/wholesale/masterData/masterData";
 import {
   RECEIVINGS_QUERY_KEY,
   SHIPMENTS_QUERY_KEY,

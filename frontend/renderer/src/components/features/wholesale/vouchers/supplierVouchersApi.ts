@@ -2,10 +2,10 @@
 // payments, and deletion.
 
 import { apiBaseUrl, type Session } from "@renderer/lib/auth";
-import { request } from "./apiClient";
-import { type WriteOffInput, type WriteOffWire } from "./shipmentsApi";
+import { request } from "../shared/apiClient";
+import { type WriteOffInput, type WriteOffWire } from "../delivery/shipmentsApi";
 import { type SupplierVoucher } from "./supplierVouchers";
-import { PAIRS_PER, type UnitConversions } from "./units";
+import { PAIRS_PER, type UnitConversions } from "../shared/units";
 
 export interface SupplierVoucherWire extends SupplierVoucher {}
 export const SUPPLIER_VOUCHERS_URL = `${apiBaseUrl}/api/wholesale/supplier-vouchers`;

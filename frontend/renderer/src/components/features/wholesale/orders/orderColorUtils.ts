@@ -2,20 +2,20 @@ import {
   type CustomerOrder,
   type CustomerOrderLine,
   lineRemaining,
-} from "@renderer/components/features/wholesale/customerOrders";
-import { colorQtyProblem } from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/orders/customerOrders";
+import { colorQtyProblem } from "@renderer/components/features/wholesale/shared/shared";
 import {
   formatIn,
   formatSets,
   PAIRS_PER,
   type Unit,
   type UnitConversions,
-} from "@renderer/components/features/wholesale/units";
+} from "@renderer/components/features/wholesale/shared/units";
 import {
   colorPairsForText,
   type ColorPairs,
   type StockLine,
-} from "@renderer/components/features/wholesale/stock";
+} from "@renderer/components/features/wholesale/inventory/stock";
 
 export function mergeColorPairs(target: ColorPairs, source: ColorPairs): ColorPairs {
   for (const [color, pairs] of Object.entries(source)) {

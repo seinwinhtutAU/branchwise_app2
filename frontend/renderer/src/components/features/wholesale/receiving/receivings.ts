@@ -11,9 +11,9 @@
 // The Receiving page now reads and writes the authoritative API. The seed rows remain
 // only as a fallback for the wholesale screens that have not yet moved off the store.
 
-import { sharePct } from "./shared";
-import { PAIRS_PER, toPairs, type Unit, type UnitConversions } from "./units";
-import { type ProductGroup } from "./products";
+import { sharePct } from "../shared/shared";
+import { PAIRS_PER, toPairs, type Unit, type UnitConversions } from "../shared/units";
+import { type ProductGroup } from "../shared/products";
 
 export type ReceivingStatus = "recorded" | "checking" | "checked" | "issue";
 

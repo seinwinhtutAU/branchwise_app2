@@ -11,11 +11,11 @@ import {
   stockLines,
   type StockMovement,
   type StockRecord,
-} from "@renderer/components/features/wholesale/stock";
-import { type CustomerOrder } from "@renderer/components/features/wholesale/customerOrders";
-import { type Shipment } from "@renderer/components/features/wholesale/shipments";
-import { type SupplierVoucher } from "@renderer/components/features/wholesale/supplierVouchers";
-import { hydrateOrders, useWholesale } from "@renderer/components/features/wholesale/store";
+} from "@renderer/components/features/wholesale/inventory/stock";
+import { type CustomerOrder } from "@renderer/components/features/wholesale/orders/customerOrders";
+import { type Shipment } from "@renderer/components/features/wholesale/delivery/shipments";
+import { type SupplierVoucher } from "@renderer/components/features/wholesale/vouchers/supplierVouchers";
+import { hydrateOrders, useWholesale } from "@renderer/components/features/wholesale/shared/store";
 import {
   CUSTOMER_ORDERS_URL,
   WHOLESALE_INVENTORY_URL,
@@ -25,7 +25,7 @@ import {
   stockRecordsFromWire,
   type InventoryMovementWire,
   type StockRecordWire,
-} from "@renderer/components/features/wholesale/api";
+} from "@renderer/components/features/wholesale/shared/api";
 import {
   INVENTORY_QUERY_KEY,
   ORDERS_QUERY_KEY,
@@ -37,7 +37,7 @@ import {
 } from "./inventoryUtils";
 import { StockList } from "./StockList";
 import { StockDetail } from "./StockDetail";
-import { lineRemaining } from "@renderer/components/features/wholesale/customerOrders";
+import { lineRemaining } from "@renderer/components/features/wholesale/orders/customerOrders";
 
 // ── Legacy fallback stock record builder ──────────────────────────────────────
 

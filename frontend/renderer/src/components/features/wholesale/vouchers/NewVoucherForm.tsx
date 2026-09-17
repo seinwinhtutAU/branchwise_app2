@@ -37,7 +37,7 @@ import {
   SuggestInput,
   CopyButton,
   Reference,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import type { AppSettings } from "@renderer/lib/appSettings";
 import {
   DEFAULT_CURRENCY,
@@ -46,7 +46,7 @@ import {
   isForeignCurrency,
   previewKyatAmount,
   type CurrencyCode,
-} from "@renderer/components/features/wholesale/currency";
+} from "@renderer/components/features/wholesale/shared/currency";
 import {
   colorQtyProblem,
   duplicateStockCodeProblem,
@@ -55,24 +55,24 @@ import {
   formatQty,
   onlyDigits,
   todayIso,
-} from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/shared/shared";
 import {
   formatIn,
   PAIRS_PER,
   pricedAmount,
-} from "@renderer/components/features/wholesale/units";
+} from "@renderer/components/features/wholesale/shared/units";
 import {
   CARGO_NAMES,
   STOCK_CODES,
   SUPPLIER_NAMES,
   productOf,
-} from "@renderer/components/features/wholesale/masterData";
-import { GROUP_LABELS } from "@renderer/components/features/wholesale/products";
-import { useWholesale } from "@renderer/components/features/wholesale/store";
-import { type NewSupplierVoucherInput } from "@renderer/components/features/wholesale/api";
+} from "@renderer/components/features/wholesale/masterData/masterData";
+import { GROUP_LABELS } from "@renderer/components/features/wholesale/shared/products";
+import { useWholesale } from "@renderer/components/features/wholesale/shared/store";
+import { type NewSupplierVoucherInput } from "@renderer/components/features/wholesale/shared/api";
 import {
   type SupplierVoucherLine,
-} from "@renderer/components/features/wholesale/supplierVouchers";
+} from "@renderer/components/features/wholesale/vouchers/supplierVouchers";
 import {
   sets,
   EMPTY_LINE,

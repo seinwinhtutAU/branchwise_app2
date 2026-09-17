@@ -2,9 +2,9 @@
 // small "just a name" entities (cargo companies, carriers, destinations, receiving gates).
 
 import { apiBaseUrl, type Session } from "@renderer/lib/auth";
-import { request } from "./apiClient";
-import { type Product } from "./products";
-import { type Unit, type UnitConversions } from "./units";
+import { request } from "../shared/apiClient";
+import { type Product } from "../shared/products";
+import { type Unit, type UnitConversions } from "../shared/units";
 
 
 export interface WholesaleProductWire {

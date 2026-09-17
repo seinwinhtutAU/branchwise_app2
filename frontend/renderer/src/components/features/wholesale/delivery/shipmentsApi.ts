@@ -2,9 +2,9 @@
 // write-off, and splitting cargo onto a second shipment.
 
 import { apiBaseUrl, type Session } from "@renderer/lib/auth";
-import { request } from "./apiClient";
+import { request } from "../shared/apiClient";
 import { type Shipment, type ShipmentLeg } from "./shipments";
-import { fromPairs, toPairs, type UnitConversions } from "./units";
+import { fromPairs, toPairs, type UnitConversions } from "../shared/units";
 
 // ── Shipments ──────────────────────────────────────────────────────────────
 

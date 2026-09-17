@@ -4,12 +4,12 @@ import { type Session } from "@renderer/lib/auth";
 import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
 import { type AppSettings } from "@renderer/lib/appSettings";
-import { type CustomerOrder } from "@renderer/components/features/wholesale/customerOrders";
+import { type CustomerOrder } from "@renderer/components/features/wholesale/orders/customerOrders";
 import {
   hydrateOrders,
   saveOrders,
   useWholesale,
-} from "@renderer/components/features/wholesale/store";
+} from "@renderer/components/features/wholesale/shared/store";
 import {
   CUSTOMER_ORDERS_URL,
   WHOLESALE_INVENTORY_URL,
@@ -30,12 +30,12 @@ import {
   type NewCustomerOrderInput,
   type WriteOffReason,
   type WriteOffWire,
-} from "@renderer/components/features/wholesale/api";
+} from "@renderer/components/features/wholesale/shared/api";
 import {
   stockLines,
   type StockLine,
-} from "@renderer/components/features/wholesale/stock";
-import { useHydrateMasterData } from "@renderer/components/features/wholesale/masterData";
+} from "@renderer/components/features/wholesale/inventory/stock";
+import { useHydrateMasterData } from "@renderer/components/features/wholesale/masterData/masterData";
 import {
   ORDERS_QUERY_KEY,
   STOCK_QUERY_KEY,

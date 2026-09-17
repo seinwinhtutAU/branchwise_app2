@@ -8,7 +8,7 @@ import {
   Reference,
   SuggestInput,
   CopyButton,
-} from "@renderer/components/features/wholesale/ui";
+} from "@renderer/components/features/wholesale/shared/ui";
 import {
   TableContainer,
   Thead,
@@ -26,13 +26,13 @@ import {
 } from "@renderer/components/ui/icons";
 import {
   GROUP_LABELS,
-} from "@renderer/components/features/wholesale/products";
+} from "@renderer/components/features/wholesale/shared/products";
 import {
   SUPPLIER_NAMES,
-} from "@renderer/components/features/wholesale/masterData";
-import { formatQty } from "@renderer/components/features/wholesale/shared";
-import { type CustomerOrder } from "@renderer/components/features/wholesale/customerOrders";
-import { type SupplierVoucher } from "@renderer/components/features/wholesale/supplierVouchers";
+} from "@renderer/components/features/wholesale/masterData/masterData";
+import { formatQty } from "@renderer/components/features/wholesale/shared/shared";
+import { type CustomerOrder } from "@renderer/components/features/wholesale/orders/customerOrders";
+import { type SupplierVoucher } from "@renderer/components/features/wholesale/vouchers/supplierVouchers";
 import {
   UNASSIGNED_SUPPLIER,
   sets,

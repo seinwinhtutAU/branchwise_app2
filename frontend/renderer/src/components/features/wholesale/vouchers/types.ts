@@ -2,21 +2,21 @@ import { z } from "zod";
 import {
   DEFAULT_CURRENCY,
   type CurrencyCode,
-} from "@renderer/components/features/wholesale/currency";
-import { type ProductGroup } from "@renderer/components/features/wholesale/products";
+} from "@renderer/components/features/wholesale/shared/currency";
+import { type ProductGroup } from "@renderer/components/features/wholesale/shared/products";
 import {
   type PaymentStatus,
   nextReference,
-} from "@renderer/components/features/wholesale/shared";
+} from "@renderer/components/features/wholesale/shared/shared";
 import {
   type SupplierVoucher,
   type SupplierVoucherLine,
   type ReceivingStatus,
   RECEIVING_STATUSES,
-} from "@renderer/components/features/wholesale/supplierVouchers";
+} from "@renderer/components/features/wholesale/vouchers/supplierVouchers";
 
 export { RECEIVING_STATUSES };
-import { formatSets, PAIRS_PER } from "@renderer/components/features/wholesale/units";
+import { formatSets, PAIRS_PER } from "@renderer/components/features/wholesale/shared/units";
 
 export const VOUCHERS_QUERY_KEY = ["wholesale", "supplier-vouchers"] as const;
 export const ORDERS_QUERY_KEY = ["wholesale", "orders"] as const;

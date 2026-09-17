@@ -3,7 +3,7 @@ import { cn } from "@renderer/lib/utils";
 import { formatSets, PAIRS_PER } from "./units";
 import { onlyDigits } from "./shared";
 import { PencilIcon } from "@renderer/components/ui/icons";
-import { type ColorPairs } from "./stock";
+import { type ColorPairs } from "../inventory/stock";
 
 export interface ColorQtyPickerProps {
   available: ColorPairs;

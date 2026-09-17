@@ -14,15 +14,15 @@
 // The movement helpers remain as the Movement tab's compatibility layer and as the
 // weak-connection fallback while the server-computed Stock Records response loads.
 
-import { parseColorQty } from "./shared";
+import { parseColorQty } from "../shared/shared";
 import {
   lineRemaining,
   type CustomerOrder,
   type CustomerOrderLine,
-} from "./customerOrders";
-import { type Receiving } from "./receivings";
-import { PAIRS_PER, toPairs, type Unit, type UnitConversions } from "./units";
-import { type ProductGroup } from "./products";
+} from "../orders/customerOrders";
+import { type Receiving } from "../receiving/receivings";
+import { PAIRS_PER, toPairs, type Unit, type UnitConversions } from "../shared/units";
+import { type ProductGroup } from "../shared/products";
 
 export type MovementKind = "in" | "out" | "allocated";
 

@@ -13,8 +13,8 @@
 // instant before DeliveryPage's own fetch resolves and replaces it with the real rows;
 // it is not what anyone edits any more.
 
-import { sharePct } from "./shared";
-import { toPairs, type Unit } from "./units";
+import { sharePct } from "../shared/shared";
+import { toPairs, type Unit } from "../shared/units";
 
 export type ShipmentStatus =
   "waiting_at_cargo" | "in_transit" | "partly_delivered" | "completed";

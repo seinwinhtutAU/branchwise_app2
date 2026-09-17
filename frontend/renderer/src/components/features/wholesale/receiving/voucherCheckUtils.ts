@@ -1,7 +1,7 @@
-import { formatIn, toPairs, type Unit } from "@renderer/components/features/wholesale/units";
-import { type Receiving } from "@renderer/components/features/wholesale/receivings";
-import { type SupplierVoucher } from "@renderer/components/features/wholesale/supplierVouchers";
-import { colorPairsForText } from "@renderer/components/features/wholesale/stock";
+import { formatIn, toPairs, type Unit } from "@renderer/components/features/wholesale/shared/units";
+import { type Receiving } from "@renderer/components/features/wholesale/receiving/receivings";
+import { type SupplierVoucher } from "@renderer/components/features/wholesale/vouchers/supplierVouchers";
+import { colorPairsForText } from "@renderer/components/features/wholesale/inventory/stock";
 
 export function formatStoredQuantity(quantity: number, unit: Unit): string {
   return formatIn(toPairs(quantity, unit), unit);
