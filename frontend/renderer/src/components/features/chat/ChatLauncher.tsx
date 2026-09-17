@@ -15,7 +15,7 @@ import type { Profile } from "@renderer/components/features/types";
 // mid-conversation doesn't throw the thread away: chat history lives in component state,
 // since there is no server-side session store yet (see ChatPanel).
 
-const ChatPanel = lazy(() => import("@renderer/components/features/ChatPanel"));
+const ChatPanel = lazy(() => import("@renderer/components/features/chat/ChatPanel"));
 
 interface Props {
   session: Session;

@@ -5,7 +5,7 @@ import { useToast } from "@renderer/lib/useToast";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Spinner } from "@renderer/components/ui/Spinner";
 import { ImportDataView } from "./ImportDataView";
-import type { ImportHistoryDetail } from "./types";
+import type { ImportHistoryDetail } from "../types";
 
 interface Props {
   session: Session;

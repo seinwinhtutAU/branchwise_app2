@@ -113,7 +113,7 @@ everything if anyone imported in the meantime. Sign-out clears both, since the n
 account may be scoped to a different branch.
 
 **The state of the connection is said once, plainly** (`lib/connection.ts`,
-`components/features/ConnectionBanner.tsx`). Status is inferred from the app's own
+`components/features/shell/ConnectionBanner.tsx`). Status is inferred from the app's own
 requests rather than from `navigator.onLine`, which is useless here: the backend is on
 this machine, so it is always "online", and a slow-but-connected link reports fine. A
 request that comes back marks the connection `online` (or `slow` past six seconds); one

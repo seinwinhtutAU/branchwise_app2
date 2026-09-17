@@ -10,7 +10,7 @@ import {
   dashboardUrl,
   type OverviewData,
 } from "@renderer/components/features/dashboard/helpers";
-import { ChatLauncher } from "@renderer/components/features/ChatLauncher";
+import { ChatLauncher } from "@renderer/components/features/chat/ChatLauncher";
 import {
   apiBaseUrl,
   installAuthRetry,
@@ -28,13 +28,13 @@ import {
 } from "@renderer/lib/lastKnown";
 import { installNetworkResilience } from "@renderer/lib/network";
 import { useToast } from "@renderer/lib/useToast";
-import { AuthScreen } from "@renderer/components/features/AuthScreen";
+import { AuthScreen } from "@renderer/components/features/shell/AuthScreen";
 import {
   AppShell,
   type NavItem,
   type WorkspaceTab,
-} from "@renderer/components/features/AppShell";
-import FileImportCard from "@renderer/components/features/FileImportCard";
+} from "@renderer/components/features/shell/AppShell";
+import FileImportCard from "@renderer/components/features/retail/FileImportCard";
 import {
   SimpleDataTable,
   type DataTableColumn,
@@ -44,7 +44,7 @@ import type {
   PendingImport,
   Profile,
 } from "@renderer/components/features/types";
-import type { InventorySubTab } from "@renderer/components/features/InventoryPage";
+import type { InventorySubTab } from "@renderer/components/features/retail/InventoryPage";
 import { useBranches, useRetailBranchOptions } from "@renderer/lib/useBranches";
 import { formatBuyingPriceSource } from "@renderer/lib/buyingPriceSource";
 import { useAppSettings } from "@renderer/lib/appSettings";
@@ -78,22 +78,22 @@ import {
 // overview/warnings code, and vice versa (see the Wholesale doc section in CLAUDE.md).
 // Rendered inside the <Suspense> boundary below.
 const ImportReviewPage = lazy(
-  () => import("@renderer/components/features/ImportReviewPage"),
+  () => import("@renderer/components/features/retail/ImportReviewPage"),
 );
 const ImportHistoryTable = lazy(
-  () => import("@renderer/components/features/ImportHistoryTable"),
+  () => import("@renderer/components/features/retail/ImportHistoryTable"),
 );
 const ImportHistoryDetailPage = lazy(
-  () => import("@renderer/components/features/ImportHistoryDetailPage"),
+  () => import("@renderer/components/features/retail/ImportHistoryDetailPage"),
 );
 const ImportOverviewPage = lazy(
-  () => import("@renderer/components/features/ImportOverviewPage"),
+  () => import("@renderer/components/features/retail/ImportOverviewPage"),
 );
 const DataOverviewTable = lazy(
-  () => import("@renderer/components/features/DataOverviewTable"),
+  () => import("@renderer/components/features/retail/DataOverviewTable"),
 );
 const InventoryPage = lazy(
-  () => import("@renderer/components/features/InventoryPage"),
+  () => import("@renderer/components/features/retail/InventoryPage"),
 );
 const CustomerOrdersPage = lazy(
   () => import("@renderer/components/features/wholesale/CustomerOrdersPage"),
@@ -124,16 +124,16 @@ const WholesaleMasterDataPage = lazy(
   () => import("@renderer/components/features/wholesale/MasterDataPage"),
 );
 const WarningsPage = lazy(
-  () => import("@renderer/components/features/WarningsPage"),
+  () => import("@renderer/components/features/retail/WarningsPage"),
 );
 const DashboardPage = lazy(
-  () => import("@renderer/components/features/DashboardPage"),
+  () => import("@renderer/components/features/retail/DashboardPage"),
 );
 const BusinessAlertsPage = lazy(
-  () => import("@renderer/components/features/BusinessAlertsPage"),
+  () => import("@renderer/components/features/retail/BusinessAlertsPage"),
 );
 const SettingsPage = lazy(
-  () => import("@renderer/components/features/SettingsPage"),
+  () => import("@renderer/components/features/settings/SettingsPage"),
 );
 
 type Section =

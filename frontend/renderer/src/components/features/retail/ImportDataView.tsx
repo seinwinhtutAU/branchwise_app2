@@ -13,7 +13,7 @@ import { ChevronUpIcon, ChevronDownIcon } from "@renderer/components/ui/icons";
 import { cn } from "@renderer/lib/utils";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 import { usePagination } from "@renderer/lib/usePagination";
-import type { CleanResult, RowIssue } from "./types";
+import type { CleanResult, RowIssue } from "../types";
 
 interface Props {
   clean: CleanResult;

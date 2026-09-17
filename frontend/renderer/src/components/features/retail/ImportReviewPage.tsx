@@ -10,7 +10,7 @@ import { Input } from "@renderer/components/ui/Input";
 import { ProgressBar } from "@renderer/components/ui/ProgressBar";
 import { Select } from "@renderer/components/ui/Select";
 import { ImportDataView } from "./ImportDataView";
-import type { ImportPreviewResult, PendingImport, Profile } from "./types";
+import type { ImportPreviewResult, PendingImport, Profile } from "../types";
 
 interface BranchOption {
   id: string;

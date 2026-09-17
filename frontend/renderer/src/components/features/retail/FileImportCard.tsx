@@ -5,7 +5,7 @@ import { useToast } from "@renderer/lib/useToast";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { ProgressBar } from "@renderer/components/ui/ProgressBar";
 import { UploadIcon } from "@renderer/components/ui/icons";
-import type { ImportPreviewResult, PendingImport } from "./types";
+import type { ImportPreviewResult, PendingImport } from "../types";
 
 interface Props {
   session: Session;

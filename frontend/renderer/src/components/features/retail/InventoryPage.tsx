@@ -7,7 +7,7 @@ import {
   SimpleDataTable,
   type DataTableColumn,
   type DataTableFilter,
-} from "./SimpleDataTable";
+} from "../SimpleDataTable";
 
 export type InventorySubTab = "imported" | "lowStock" | "deadStock";
 

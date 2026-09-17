@@ -13,7 +13,7 @@ import {
 } from "@renderer/components/ui/icons";
 import { LogoChip, LogoWordmark } from "@renderer/components/ui/Logo";
 import type { Profile } from "@renderer/components/features/types";
-import { ConnectionBanner } from "@renderer/components/features/ConnectionBanner";
+import { ConnectionBanner } from "@renderer/components/features/shell/ConnectionBanner";
 
 export interface NavItem {
   id: string;
