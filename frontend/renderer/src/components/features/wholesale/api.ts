@@ -358,10 +358,17 @@ export async function writeOffShipment(
 
 export interface SplitShipmentInput {
   packages: number;
-  /** Real pairs, already converted — same convention as NewShipmentInput.total_quantity_pairs. */
-  quantity_pairs: number;
+  /** Real pairs, already converted — same convention as NewShipmentInput.total_quantity_pairs.
+   *  Optional: what's actually inside a box isn't known for certain until it's opened
+   *  and counted at the receiving gate, so a split doesn't have to guess at it. Left
+   *  out, the new shipment starts at 0 and the original's own total is untouched. */
+  quantity_pairs?: number;
   final_destination: string;
   carrier_name: string;
+  /** Which stop the split is carved out of: undefined means the cargo company's own
+   *  still-undispatched packages; a 1-based leg_order instead names a stop further
+   *  along the route whose own leftover is being redirected. */
+  split_leg_order?: number;
 }
 
 export interface SplitShipmentResult {

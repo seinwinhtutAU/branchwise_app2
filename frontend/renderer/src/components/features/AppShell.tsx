@@ -8,6 +8,7 @@ import {
   LogOutIcon,
   StoreIcon,
   FactoryIcon,
+  SwapIcon,
 } from "@renderer/components/ui/icons";
 import { LogoChip, LogoWordmark } from "@renderer/components/ui/Logo";
 import type { Profile } from "@renderer/components/features/types";
@@ -207,19 +208,15 @@ export function AppShell({
                     }}
                     aria-label={`Current workspace: ${currentWs.label}. Click to switch to ${nextWs.label}`}
                     title={`${currentWs.label} (Click to switch to ${nextWs.label})`}
-                    className={cn(
-                      "w-10 h-10 rounded-lg flex items-center justify-center relative transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base shadow-xs app-no-drag",
-                      currentWs.color
-                        ? workspaceActiveClasses[currentWs.color]
-                        : "bg-bg-base text-text-primary border border-border/60 hover:border-border",
-                    )}
+                    className="w-10 h-10 rounded-lg flex items-center justify-center relative transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base border border-brand/40 bg-bg-base text-brand hover:border-brand hover:bg-brand-subtle/30 active:bg-brand-subtle/50 shadow-xs group app-no-drag"
                   >
                     <div className="relative shrink-0 flex items-center justify-center">
                       {icon}
-                      {workspaces.some((w) => !!w.badgeCount) && (
-                        <span className="absolute -top-1 -right-1.5 w-2 h-2 rounded-full bg-error" />
-                      )}
                     </div>
+                    {/* Floating Swap Badge at bottom-right */}
+                    <span className="absolute -bottom-1 -right-1 flex items-center justify-center w-4 h-4 rounded-full bg-bg-base border border-brand/50 text-brand shadow-xs transition-colors group-hover:bg-brand-subtle group-hover:border-brand">
+                      <SwapIcon className="w-2.5 h-2.5" />
+                    </span>
                   </button>
                 );
               })()

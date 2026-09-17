@@ -1163,3 +1163,21 @@ export function LogOutIcon({
   );
 }
 
+export function SwapIcon({
+  className = "w-3.5 h-3.5",
+}: {
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path
+        d="M7.5 7.5h9m0 0l-3-3m3 3l-3 3M16.5 16.5h-9m0 0l3 3m-3-3l3-3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+

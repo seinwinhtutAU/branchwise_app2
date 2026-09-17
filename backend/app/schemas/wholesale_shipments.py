@@ -30,11 +30,21 @@ class ShipmentSplitIn(BaseModel):
     rest for Mandalay. See app/services/wholesale_shipments.py::split_shipment."""
 
     packages: int = Field(gt=0)
-    quantity_pairs: int = Field(gt=0)
+    # Optional: what is actually inside a box isn't known for certain until it's opened
+    # and counted at the receiving gate, so a split doesn't have to guess at it up
+    # front. Left unset, the new shipment starts at 0 and the original's own total is
+    # untouched — either side can be corrected once a receiving settles the real count.
+    quantity_pairs: int | None = Field(default=None, ge=0)
     final_destination: str = Field(min_length=1, max_length=255)
     # Defaults to the original shipment's own carrier when left blank — the split-off
     # portion often travels with a different driver/agent, but doesn't have to.
     carrier_name: str = ""
+    # Which stop the split is carved out of: None (the default) means the cargo
+    # company's own still-undispatched packages, matching the original behaviour. A
+    # 1-based leg_order instead carves out packages that have arrived at that stop but
+    # not yet been sent on from it — see split_shipment's docstring for how the new
+    # shipment inherits the legs already travelled.
+    split_leg_order: int | None = Field(default=None, ge=1)
 
 
 class ShipmentCreate(BaseModel):

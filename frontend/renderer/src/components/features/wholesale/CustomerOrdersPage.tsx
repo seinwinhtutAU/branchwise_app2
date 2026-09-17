@@ -52,6 +52,7 @@ import {
   ChevronRightIcon,
   ClipboardIcon,
   CloseIcon,
+  DollarIcon,
   MoreIcon,
   PencilIcon,
   PlusIcon,
@@ -429,6 +430,7 @@ export default function CustomerOrdersPage({
 
   const [view, setView] = useState<View>("list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailFocus, setDetailFocus] = useState<"payment" | undefined>();
   const [fulfillTab, setFulfillTab] = useState<"allocate" | "deliver">("allocate");
 
   const selected =
@@ -439,13 +441,19 @@ export default function CustomerOrdersPage({
     const target = orders.find((order) => order.order_id === initialOrderId);
     if (!target) return;
     setSelectedId(target.order_id);
+    setDetailFocus(undefined);
     setView("detail");
     onInitialOrderOpened?.();
   }, [initialOrderId, onInitialOrderOpened, orders]);
 
-  function openOrder(orderId: string): void {
+  function openOrder(orderId: string, focus?: "payment"): void {
     setSelectedId(orderId);
+    setDetailFocus(focus);
     setView("detail");
+  }
+
+  function openOrderWithPay(orderId: string): void {
+    openOrder(orderId, "payment");
   }
 
   function openAllocation(
@@ -590,6 +598,7 @@ export default function CustomerOrdersPage({
       <OrderDetail
         order={selected}
         settings={settings}
+        focus={detailFocus}
         onSave={persistOrder}
         onBack={() => setView("list")}
         onAllocate={openAllocation}
@@ -620,6 +629,7 @@ export default function CustomerOrdersPage({
       orders={orders}
       inventoryLines={inventoryLines}
       onOpen={openOrder}
+      onPay={openOrderWithPay}
       onAllocate={openAllocation}
       onCancel={cancelOrder}
       onNew={() => setView("new")}
@@ -642,6 +652,7 @@ function OrderList({
   orders,
   inventoryLines,
   onOpen,
+  onPay,
   onAllocate,
   onCancel,
   onNew,
@@ -651,6 +662,7 @@ function OrderList({
   orders: CustomerOrder[];
   inventoryLines: StockLine[];
   onOpen: (orderId: string) => void;
+  onPay: (orderId: string) => void;
   onAllocate: (orderId: string, tab: "allocate" | "deliver") => void;
   onCancel: (orderId: string) => void;
   onNew: () => void;
@@ -1074,6 +1086,11 @@ function OrderList({
                       <Td className="text-right">
                         <RowMenu
                           onOpen={() => onOpen(order.order_id)}
+                          onPay={
+                            order.order_status === "cancelled"
+                              ? undefined
+                              : () => onPay(order.order_id)
+                          }
                           onAllocate={
                             order.order_status === "cancelled" ||
                             order.order_status === "fulfilled"
@@ -1115,10 +1132,12 @@ function OrderList({
  *  something with no backend behind them. */
 function RowMenu({
   onOpen,
+  onPay,
   onAllocate,
   onCancel,
 }: {
   onOpen: () => void;
+  onPay?: () => void;
   /** Reaching the allocation screen. It lives in the menu rather than beside Deliver
    *  because stock allocates itself on arrival now — coming here is the exception, and a
    *  second button next to the daily one would say otherwise. */
@@ -1173,29 +1192,46 @@ function RowMenu({
           align="right"
           className="min-w-44 bg-bg-base border border-border rounded-lg shadow-lg py-1 animate-fade-in"
         >
-          <MenuItem
-            icon={<PencilIcon className="w-4 h-4" />}
-            label="Open order"
-            onClick={() => {
-              setOpen(false);
-              onOpen();
-            }}
-          />
-          {onAllocate && (
-            <MenuItem
-              icon={<ClipboardIcon className="w-4 h-4" />}
-              label="Allocate stock"
-              onClick={() => {
-                setOpen(false);
-                onAllocate();
-              }}
-            />
+          {/* A question with other choices still sitting above it is not really a
+              question. While the cancel confirmation is up, it is the only thing in the
+              menu — answer it or back out. */}
+          {!confirmingCancel && (
+            <>
+              <MenuItem
+                icon={<PencilIcon className="w-4 h-4" />}
+                label="Open order"
+                onClick={() => {
+                  setOpen(false);
+                  onOpen();
+                }}
+              />
+              {onPay && (
+                <MenuItem
+                  icon={<DollarIcon className="w-4 h-4" />}
+                  label="Pay order"
+                  onClick={() => {
+                    setOpen(false);
+                    onPay();
+                  }}
+                />
+              )}
+              {onAllocate && (
+                <MenuItem
+                  icon={<ClipboardIcon className="w-4 h-4" />}
+                  label="Allocate stock"
+                  onClick={() => {
+                    setOpen(false);
+                    onAllocate();
+                  }}
+                />
+              )}
+            </>
           )}
           {onCancel &&
             (confirmingCancel ? (
               <>
                 <p className="px-3.5 py-2 text-xs text-text-muted">
-                  Cancel this order? Any stock set aside for it goes back on the shelf.
+                  Cancel this order?
                 </p>
                 <MenuItem
                   icon={<CloseIcon className="w-4 h-4" />}
@@ -2415,6 +2451,7 @@ interface CustomerOrderDetailFormValues {
 function OrderDetail({
   order: initialOrder,
   settings,
+  focus,
   onSave,
   onBack,
   onAllocate,
@@ -2423,6 +2460,7 @@ function OrderDetail({
 }: {
   order: CustomerOrder;
   settings: AppSettings | null;
+  focus?: "payment";
   onSave: (order: CustomerOrder, originalOrder: CustomerOrder) => Promise<void>;
   onBack: () => void;
   onAllocate?: (orderId: string, tab?: "allocate" | "deliver") => void;
@@ -2442,6 +2480,13 @@ function OrderDetail({
   const [writeOffLine, setWriteOffLine] = useState<CustomerOrderLine | null>(
     null,
   );
+  const paymentSectionRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (focus === "payment") {
+      paymentSectionRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [focus]);
   const {
     control,
     getValues,
@@ -2820,7 +2865,7 @@ function OrderDetail({
             <section>
               <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                 <div>
-                  <SectionLabel>Product Line Items</SectionLabel>
+                  <SectionLabel>Products</SectionLabel>
                   <p className="text-xs text-text-muted -mt-0.5">
                     Ordered items, allocated stock, pricing, and fulfillment progress per line.
                   </p>
@@ -3296,7 +3341,7 @@ function OrderDetail({
               </div>
             </section>
 
-            <section>
+            <section ref={paymentSectionRef}>
               <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <SectionLabel>Payment Records</SectionLabel>

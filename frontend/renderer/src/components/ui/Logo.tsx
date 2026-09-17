@@ -1,15 +1,11 @@
 // The BranchWise logo, as components.
 //
-// The mark is one head office (the dot at the bottom) feeding branches that step
-// upward — the shape of the business itself. `brand/branchwise-mark.svg` holds the same
-// geometry for print and slides; if one changes, change the other.
+// The mark is a modern interlocking "BW" (Branch + Wise) monogram mark.
 //
-// Two variants, because the mark is used two ways:
+// Two variants:
 //   'mono'  — one colour (inherits `currentColor`), for a white mark inside the brand
 //             chip, which is how it appears in the sidebar and on the sign-in screen.
-//             The three branch tips are drawn at different opacities so the stepped
-//             shape still reads when everything is the same colour.
-//   'color' — the full indigo palette, for standalone use on a plain background.
+//   'color' — standalone brand blue (#2563eb).
 
 interface LogoMarkProps {
   className?: string;
@@ -20,19 +16,8 @@ export function LogoMark({
   className = "w-6 h-6",
   variant = "mono",
 }: LogoMarkProps): React.JSX.Element {
-  const mono = variant === "mono";
-  const stroke = mono ? "currentColor" : "#6366f1";
-  const tips = mono
-    ? [
-        { fill: "currentColor", opacity: 0.6 },
-        { fill: "currentColor", opacity: 0.8 },
-        { fill: "currentColor", opacity: 1 },
-      ]
-    : [
-        { fill: "#a5b4fc", opacity: 1 },
-        { fill: "#818cf8", opacity: 1 },
-        { fill: "#4f46e5", opacity: 1 },
-      ];
+  const isMono = variant === "mono";
+  const strokeColor = isMono ? "currentColor" : "#2563eb";
 
   return (
     <svg
@@ -41,28 +26,29 @@ export function LogoMark({
       className={className}
       aria-hidden="true"
     >
+      {/* B spine */}
       <path
-        d="M32 35 V 47"
-        stroke={stroke}
-        strokeWidth="4.5"
+        d="M14 13V51"
+        stroke={strokeColor}
+        strokeWidth="5"
         strokeLinecap="round"
       />
+      {/* B upper loop */}
       <path
-        d="M13 35 H 51"
-        stroke={stroke}
-        strokeWidth="4.5"
+        d="M14 13H30C35.5 13 39 16.5 39 22C39 27.5 35.5 31 30 31H14"
+        stroke={strokeColor}
+        strokeWidth="5"
         strokeLinecap="round"
+        strokeLinejoin="round"
       />
+      {/* W monogram interlock */}
       <path
-        d="M13 35 V 27 M32 35 V 23 M51 35 V 19"
-        stroke={stroke}
-        strokeWidth="4.5"
+        d="M18 31L28 51L38 16L47 51L55 20"
+        stroke={strokeColor}
+        strokeWidth="5"
         strokeLinecap="round"
+        strokeLinejoin="round"
       />
-      <circle cx="32" cy="51" r="6" fill={mono ? "currentColor" : "#4338ca"} />
-      <rect x="7" y="15" width="12" height="12" rx="3.5" {...tips[0]} />
-      <rect x="26" y="11" width="12" height="12" rx="3.5" {...tips[1]} />
-      <rect x="45" y="7" width="12" height="12" rx="3.5" {...tips[2]} />
     </svg>
   );
 }

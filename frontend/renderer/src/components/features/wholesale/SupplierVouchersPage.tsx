@@ -27,6 +27,7 @@ import {
   Required,
   Reference,
   ReviewFact,
+  RowProgress,
   SOFT_BLUE,
   SOFT_RED,
   SectionLabel,
@@ -62,7 +63,7 @@ import {
   ChevronRightIcon,
   ClipboardIcon,
   CloseIcon,
-  EyeIcon,
+  DollarIcon,
   MoreVerticalIcon,
   FactoryIcon,
   PencilIcon,
@@ -599,7 +600,6 @@ export default function SupplierVouchersPage({
       vouchers={vouchers}
       toOrderCount={toOrderCount}
       onOpen={openVoucher}
-      onEdit={(voucherId) => openVoucher(voucherId)}
       onPay={openVoucherWithPay}
       onDelete={deleteVoucher}
       onNew={() => startNewVoucher()}
@@ -624,7 +624,6 @@ function VoucherList({
   toOrderCount,
   onToOrder,
   onOpen,
-  onEdit,
   onPay,
   onDelete,
   onNew,
@@ -635,7 +634,6 @@ function VoucherList({
   toOrderCount?: number;
   onToOrder: () => void;
   onOpen: (voucherId: string) => void;
-  onEdit: (voucherId: string) => void;
   onPay: (voucherId: string) => void;
   onDelete: (voucherId: string) => void;
   onNew: () => void;
@@ -655,9 +653,13 @@ function VoucherList({
     (sum, voucher) => sum + remainingQty(voucher),
     0,
   );
-  const waitingCount = vouchers.filter(
+  const openVouchers = vouchers.filter(
     (voucher) => receivingStatus(voucher) !== "fully_received",
-  ).length;
+  );
+  const waitingVouchers = vouchers.filter(
+    (voucher) => receivingStatus(voucher) === "waiting",
+  );
+  const countWaiting = waitingVouchers.length;
   const unpaid = vouchers.reduce(
     (sum, voucher) => sum + voucherBalance(voucher),
     0,
@@ -682,6 +684,7 @@ function VoucherList({
       const matchesReceiving =
         receiving === "all" || receivingStatus(voucher) === receiving;
       const matchesPay = pay === "all" || paymentStatus(voucher) === pay;
+
       return matchesQuery && matchesReceiving && matchesPay;
     });
   }, [vouchers, search, receiving, pay]);
@@ -723,29 +726,28 @@ function VoucherList({
     setPage(1);
   }
 
-  function handleQuickFilter(newReceiving: ReceivingFilter, newPay: PayFilter): void {
-    setReceiving(newReceiving);
-    setPay(newPay);
-    setPage(1);
-  }
-
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <FigureCard
-          label="Still to arrive"
+          label="Open Vouchers"
+          value={formatQty(openVouchers.length)}
+          sub="in transit or partly received"
+        />
+        <FigureCard
+          label="Waiting to Arrive"
+          value={formatQty(countWaiting)}
+          sub="factory dispatched, on the way"
+          tone={countWaiting > 0 ? "warning" : "success"}
+        />
+        <FigureCard
+          label="Qty Remaining to Arrive"
           value={sets(remainingAll)}
-          sub={`of ${sets(totalQty)} not received yet`}
+          sub={`of ${sets(totalQty)} ordered`}
           tone={remainingAll > 0 ? "error" : "success"}
         />
         <FigureCard
-          label="Vouchers not complete"
-          value={formatQty(waitingCount)}
-          sub={`of ${formatQty(vouchers.length)} still coming`}
-          tone={waitingCount > 0 ? "warning" : "success"}
-        />
-        <FigureCard
-          label="Unpaid amount"
+          label="Unpaid to Suppliers"
           value={formatKyat(unpaid)}
           sub={`${unpaidCount} voucher${unpaidCount === 1 ? "" : "s"} not fully paid`}
           tone={unpaid > 0 ? "error" : "success"}
@@ -785,80 +787,7 @@ function VoucherList({
           toOrderCount={toOrderCount}
         />
 
-        {/* Quick Filter Chips Bar */}
-        <div className="flex flex-wrap items-center gap-2 px-6 py-2.5 border-b border-border bg-bg-base select-none">
-          <span className="text-xs font-semibold uppercase tracking-wider text-text-muted mr-1">
-            Quick Views:
-          </span>
-          <button
-            type="button"
-            onClick={() => handleQuickFilter("all", "all")}
-            className={cn(
-              "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 border",
-              receiving === "all" && pay === "all"
-                ? "bg-brand text-white border-brand shadow-xs"
-                : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
-            )}
-          >
-            <span>All Vouchers</span>
-            <span
-              className={cn(
-                "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
-                receiving === "all" && pay === "all"
-                  ? "bg-white/20 text-white"
-                  : "bg-bg-raised text-text-muted",
-              )}
-            >
-              {vouchers.length}
-            </span>
-          </button>
 
-          <button
-            type="button"
-            onClick={() => handleQuickFilter("waiting", "all")}
-            className={cn(
-              "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 border",
-              receiving === "waiting" && pay === "all"
-                ? "bg-warning text-white border-warning shadow-xs"
-                : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
-            )}
-          >
-            <span>Waiting to Arrive</span>
-            <span
-              className={cn(
-                "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
-                receiving === "waiting" && pay === "all"
-                  ? "bg-white/20 text-white"
-                  : "bg-warning-subtle text-warning font-bold",
-              )}
-            >
-              {vouchers.filter((v) => receivingStatus(v) === "waiting").length}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleQuickFilter("all", "unpaid")}
-            className={cn(
-              "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 border",
-              receiving === "all" && pay === "unpaid"
-                ? "bg-error text-white border-error shadow-xs"
-                : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
-            )}
-          >
-            <span>Unpaid Vouchers</span>
-            <span
-              className={cn(
-                "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
-                receiving === "all" && pay === "unpaid"
-                  ? "bg-white/20 text-white"
-                  : "bg-error-subtle text-error font-bold",
-              )}
-            >
-              {unpaidCount}
-            </span>
-          </button>
-        </div>
 
         <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-bg-subtle">
           <div className="w-full sm:w-[28rem] lg:w-[32rem]">
@@ -948,24 +877,25 @@ function VoucherList({
             <TableContainer className="border-0 rounded-none">
               <Thead>
                 <Tr>
-                  <Th className="whitespace-nowrap">Voucher no.</Th>
-                  <Th className="whitespace-nowrap">Supplier / Factory</Th>
+                  <Th className="whitespace-nowrap min-w-[10rem]">Voucher no.</Th>
+                  <Th className="whitespace-nowrap min-w-[12rem]">Supplier / Factory</Th>
                   <Th className="whitespace-nowrap">Date</Th>
-                  <Th className="text-right whitespace-nowrap">
-                    Ordered qty
-                  </Th>
-                  <Th className="text-right whitespace-nowrap">
-                    Remaining qty
+                  <Th className="min-w-[17.5rem] whitespace-nowrap">
+                    Receiving qty
+                    <span className="block text-[10px] font-normal text-text-muted">
+                      received / ordered
+                    </span>
                   </Th>
                   <Th className="whitespace-nowrap">Receiving status</Th>
                   <Th className="whitespace-nowrap">Payment status</Th>
-                  <Th className="whitespace-nowrap">Action</Th>
-                  <Th className="w-12" aria-label="Actions" />
+                  <Th className="w-12 text-right" aria-label="Actions" />
                 </Tr>
               </Thead>
               <Tbody>
                 {visible.map((voucher) => {
                   const remaining = remainingQty(voucher);
+                  const receivedPairs = voucher.received_quantity_pairs ?? 0;
+                  const orderedPairs = voucher.total_quantity_pairs;
                   const hasBalance = voucherBalance(voucher) > 0;
                   return (
                     <Tr key={voucher.voucher_id}>
@@ -977,16 +907,50 @@ function VoucherList({
                         />
                       </Td>
                       <Td className="font-medium whitespace-nowrap">
-                        {voucher.supplier_name}
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-semibold text-text-primary">
+                            {voucher.supplier_name}
+                          </span>
+                          {voucher.carrier_name && (
+                            <span className="text-[11px] text-text-muted">
+                              {voucher.carrier_name}
+                              {voucher.total_packages ? (
+                                <span className="text-brand font-medium">
+                                  {" "}({voucher.total_packages} {voucher.total_packages === 1 ? "package" : "packages"})
+                                </span>
+                              ) : (
+                                ""
+                              )}
+                            </span>
+                          )}
+                        </div>
                       </Td>
                       <Td className="text-text-muted whitespace-nowrap">
                         {formatDate(voucher.voucher_date)}
                       </Td>
-                      <Td className="text-right tabular-nums font-medium">
-                        {sets(voucher.total_quantity_pairs)}
-                      </Td>
-                      <Td className="text-right tabular-nums font-semibold text-error">
-                        {sets(remaining)}
+                      <Td className="whitespace-nowrap">
+                        <div className="flex flex-col gap-1.5 w-full min-w-[16.5rem] max-w-[21rem]">
+                          <div className="flex items-center justify-between gap-4 text-xs font-mono">
+                            <span className="font-semibold text-text-primary whitespace-nowrap shrink-0">
+                              {sets(receivedPairs)}
+                              <span className="text-text-muted/60 font-normal"> / </span>
+                              <span className="text-text-secondary font-normal">{sets(orderedPairs)}</span>
+                            </span>
+                            {remaining > 0 ? (
+                              <span className="text-error text-[11px] font-sans font-medium whitespace-nowrap shrink-0">
+                                {sets(remaining)} left
+                              </span>
+                            ) : (
+                              <span className="text-success text-[11px] font-sans font-medium whitespace-nowrap shrink-0">
+                                Done
+                              </span>
+                            )}
+                          </div>
+                          <RowProgress
+                            pct={receivedPct(voucher)}
+                            label={`Receiving progress for ${voucher.voucher_no}`}
+                          />
+                        </div>
                       </Td>
                       <Td>
                         <ReceivingBadge status={receivingStatus(voucher)} />
@@ -994,22 +958,14 @@ function VoucherList({
                       <Td>
                         <PaymentBadge status={paymentStatus(voucher)} />
                       </Td>
-                      <Td className="whitespace-nowrap">
-                        {hasBalance ? (
-                          <Button
-                            size="sm"
-                            onClick={() => onPay(voucher.voucher_id)}
-                          >
-                            Pay
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-text-muted">—</span>
-                        )}
-                      </Td>
-                      <Td className="text-center">
+                      <Td className="text-right">
                         <RowMenu
                           onOpen={() => onOpen(voucher.voucher_id)}
-                          onEdit={() => onEdit(voucher.voucher_id)}
+                          onPay={
+                            hasBalance
+                              ? () => onPay(voucher.voucher_id)
+                              : () => onPay(voucher.voucher_id)
+                          }
                           onDelete={() => onDelete(voucher.voucher_id)}
                         />
                       </Td>
@@ -1731,11 +1687,11 @@ function draftLinesFromOpenOrderLines(rows: OpenOrderLine[]): DraftLine[] {
  *  undo behind it. */
 function RowMenu({
   onOpen,
-  onEdit,
+  onPay,
   onDelete,
 }: {
   onOpen: () => void;
-  onEdit: () => void;
+  onPay?: () => void;
   onDelete: () => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -1809,21 +1765,23 @@ function RowMenu({
           ) : (
             <>
               <MenuItem
-                icon={<EyeIcon className="w-4 h-4" />}
-                label="View details"
+                icon={<PencilIcon className="w-4 h-4" />}
+                label="Open voucher"
                 onClick={() => {
                   setOpen(false);
                   onOpen();
                 }}
               />
-              <MenuItem
-                icon={<PencilIcon className="w-4 h-4" />}
-                label="Edit voucher"
-                onClick={() => {
-                  setOpen(false);
-                  onEdit();
-                }}
-              />
+              {onPay && (
+                <MenuItem
+                  icon={<DollarIcon className="w-4 h-4" />}
+                  label="Pay voucher"
+                  onClick={() => {
+                    setOpen(false);
+                    onPay();
+                  }}
+                />
+              )}
               <MenuItem
                 icon={<TrashIcon className="w-4 h-4" />}
                 label="Delete voucher"
@@ -1940,6 +1898,22 @@ function VoucherDetail({
   const [writeOffLine, setWriteOffLine] = useState<SupplierVoucherLine | null>(
     null,
   );
+  const showToast = useToast();
+  /** The line whose removal is waiting for a second press. */
+  const [confirmingRemoval, setConfirmingRemoval] = useState<string | null>(null);
+
+  /** A line goods have already arrived against, or that has been written off, is not the
+   *  kind of thing to take off a voucher with one click: the receiving records would then
+   *  name a product the voucher no longer lists. Explain the receiving away first. */
+  function lineLockedReason(line: SupplierVoucherLine): string | null {
+    if (lineReceivedQty(line) > 0) {
+      return "Some of this has already arrived — sort the receiving out first.";
+    }
+    if ((line.lost_quantity_pairs ?? 0) > 0) {
+      return "This line has a write-off against it.";
+    }
+    return null;
+  }
 
   useEffect(() => {
     if (focus === "payment") {
@@ -2074,6 +2048,7 @@ function VoucherDetail({
   }
 
   function removeLine(index: number): void {
+    setConfirmingRemoval(null);
     if (voucher.lines[index]?.voucher_line_id === addingLineId) {
       setAddingLineId(null);
     }
@@ -2150,36 +2125,54 @@ function VoucherDetail({
 
   return (
     <>
-      <div className="flex flex-col gap-5">
-        <div>
-          <Button variant="ghost" size="sm" onClick={handleBack}>
-            <ChevronLeftIcon className="w-4 h-4" />
-            Back to vouchers
-          </Button>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={handleBack}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-text-muted hover:text-text-primary rounded-md hover:bg-bg-subtle transition-colors border border-transparent hover:border-border"
+          >
+            <ChevronLeftIcon className="w-3.5 h-3.5" />
+            <span>Back to vouchers</span>
+          </button>
         </div>
 
-        <Panel>
+        <Panel className="border-border shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-lg font-semibold text-text-primary tracking-tight">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h2 className="text-lg font-semibold text-text-primary tracking-tight font-mono">
                   {voucher.voucher_no}
                 </h2>
                 <ReceivingBadge status={receivingStatus(voucher)} />
                 <PaymentBadge status={paymentStatus(voucher)} />
               </div>
-              <p className="mt-0.5 truncate text-sm text-text-muted">
-                {voucher.supplier_name} · {formatDate(voucher.voucher_date)}
+              <p className="mt-1 text-xs text-text-muted flex items-center gap-2">
+                <span className="font-medium text-text-secondary">{voucher.supplier_name}</span>
+                <span>•</span>
+                <span>{formatDate(voucher.voucher_date)}</span>
+                {voucher.carrier_name && (
+                  <>
+                    <span>•</span>
+                    <span>Cargo: {voucher.carrier_name}</span>
+                  </>
+                )}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
+              {hasChanges && (
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-500 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  <span>Unsaved changes</span>
+                </span>
+              )}
               <Button
                 size="sm"
                 onClick={() => void handleSubmit(saveChanges)()}
                 loading={saving}
                 disabled={!hasChanges}
               >
-                <CheckIcon className="w-4 h-4" />
+                <CheckIcon className="w-3.5 h-3.5 mr-1" />
                 Save changes
               </Button>
             </div>
@@ -2188,11 +2181,8 @@ function VoucherDetail({
           <div className="px-6 py-6 flex flex-col gap-10">
             <section>
               <SectionLabel>Voucher information</SectionLabel>
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-text-primary">
-                    Supplier
-                  </h3>
+              <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <Controller
                     control={control}
                     name="voucher.supplier_name"
@@ -2207,71 +2197,83 @@ function VoucherDetail({
                       />
                     )}
                   />
-                </div>
-                <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-text-primary">
-                    Voucher
-                  </h3>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <ReadOnlyField
-                      label="Voucher no."
-                      value={voucher.voucher_no}
-                      copyable
-                    />
-                    <Controller
-                      control={control}
-                      name="voucher.voucher_date"
-                      render={({ field }) => (
-                        <Input
-                          label="Date"
-                          type="date"
-                          className={EDITABLE}
-                          value={field.value}
-                          onChange={field.onChange}
-                          onBlur={field.onBlur}
-                          error={errors.voucher?.voucher_date?.message}
-                        />
-                      )}
-                    />
-                    <Controller
-                      control={control}
-                      name="voucher.carrier_name"
-                      render={({ field }) => (
-                        <SuggestInput
-                          label="Cargo"
-                          placeholder="Shwe Moe Cargo"
-                          suggestions={CARGO_NAMES}
-                          value={field.value}
-                          onChange={field.onChange}
-                        />
-                      )}
-                    />
-                    <Controller
-                      control={control}
-                      name="voucher.total_packages"
-                      render={({ field }) => (
-                        <CountField
-                          label="Packages"
-                          value={field.value}
-                          onChange={field.onChange}
-                        />
-                      )}
-                    />
-                  </div>
+                  <ReadOnlyField
+                    label="Voucher no."
+                    value={voucher.voucher_no}
+                    copyable
+                  />
+                  <Controller
+                    control={control}
+                    name="voucher.voucher_date"
+                    render={({ field }) => (
+                      <Input
+                        label="Date"
+                        type="date"
+                        className={EDITABLE}
+                        value={field.value}
+                        onChange={field.onChange}
+                        onBlur={field.onBlur}
+                        error={errors.voucher?.voucher_date?.message}
+                      />
+                    )}
+                  />
+                  <Controller
+                    control={control}
+                    name="voucher.carrier_name"
+                    render={({ field }) => (
+                      <SuggestInput
+                        label="Cargo"
+                        placeholder="Shwe Moe Cargo"
+                        suggestions={CARGO_NAMES}
+                        value={field.value}
+                        onChange={field.onChange}
+                      />
+                    )}
+                  />
+                  <Controller
+                    control={control}
+                    name="voucher.total_packages"
+                    render={({ field }) => (
+                      <CountField
+                        label="Packages"
+                        value={field.value}
+                        onChange={field.onChange}
+                      />
+                    )}
+                  />
                 </div>
               </div>
             </section>
 
             <section>
-              <div className="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-                <h3 className="pt-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
-                  Products
-                </h3>
-                <InlineProgress
-                  label="Receiving"
-                  value={`${sets(voucher.received_quantity_pairs)} / ${sets(voucher.total_quantity_pairs)} (${pct}%)`}
-                  pct={pct}
-                />
+              <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <SectionLabel>Products</SectionLabel>
+                </div>
+                <div className="w-full sm:w-80 md:w-96">
+                  <div className="flex items-center justify-between text-xs mb-1.5">
+                    <span className="text-text-secondary font-medium">
+                      Receiving progress
+                    </span>
+                    <span className="tabular-nums font-mono text-[11px] text-text-muted">
+                      {sets(voucher.received_quantity_pairs)} / {sets(voucher.total_quantity_pairs)}
+                      <span className="ml-1.5 text-text-secondary font-semibold">({pct}%)</span>
+                    </span>
+                  </div>
+                  <div
+                    role="progressbar"
+                    aria-valuenow={pct}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label="Receiving progress"
+                    className="h-2 rounded-full bg-bg-subtle border border-border overflow-hidden relative"
+                  >
+                    <div
+                      className="absolute inset-y-0 left-0 bg-success transition-[width] duration-300 motion-reduce:transition-none"
+                      style={{ width: String(pct) + "%" }}
+                    />
+                  </div>
+                </div>
               </div>
 
               <TableContainer>
@@ -2279,22 +2281,21 @@ function VoucherDetail({
                   <Tr>
                     <Th className="min-w-[18rem]">Product</Th>
                     <Th className="min-w-[11rem]">Colors</Th>
-                    <Th className="text-right whitespace-nowrap">
-                      Ordered qty
-                    </Th>
-                    <Th className="text-right whitespace-nowrap">
-                      Remaining qty
+                    <Th className="text-right whitespace-nowrap min-w-[12.5rem]">
+                      Receiving qty
+                      <span className="block text-[10px] font-normal text-text-muted">
+                        received / ordered
+                      </span>
                     </Th>
                     <Th className="text-right min-w-[7rem]">
                       Buying price
-                      <span className="block text-xs font-normal text-text-muted">
+                      <span className="block text-[10px] font-normal text-text-muted">
                         per set
                       </span>
                     </Th>
                     <Th className="text-right">Amount</Th>
                     <Th>Customers</Th>
                     <Th className="text-center">Mismatch</Th>
-                    <Th className="w-10" aria-label="Remove" />
                   </Tr>
                 </Thead>
                 <Tbody>
@@ -2386,33 +2387,63 @@ function VoucherDetail({
                             )}
                           />
                         </Td>
-                        <Td className="text-right tabular-nums font-medium">
-                          {sets(line.quantity_pairs)}
-                        </Td>
-                        <Td className="text-right tabular-nums">
-                          <div className="flex flex-col items-end gap-1">
-                            <span
-                              className={cn(
-                                "font-medium",
-                                remainingLine > 0 && "text-error",
-                                line.lost_quantity_pairs ? "text-warning" : undefined,
-                              )}
-                            >
-                              {sets(remainingLine)}
-                              {(line.lost_quantity_pairs ?? 0) > 0 && !explanation && (
-                                <span className="ml-1 text-xs font-medium text-warning">
-                                  ({sets(line.lost_quantity_pairs ?? 0)} written off)
+                        <Td className="whitespace-nowrap text-right tabular-nums">
+                          <div className="flex flex-col items-end gap-0.5">
+                            <div className="flex items-center gap-1.5 font-mono">
+                              <span
+                                className={cn(
+                                  "font-semibold",
+                                  remainingLine === 0 && line.quantity_pairs > 0
+                                    ? "text-success"
+                                    : lineReceivedQty(line) > 0
+                                      ? "text-text-primary"
+                                      : "text-text-muted",
+                                )}
+                              >
+                                {formatIn(
+                                  lineReceivedQty(line),
+                                  line.unit,
+                                  line.unit_conversions,
+                                )}
+                              </span>
+                              <span className="text-text-muted/50 font-normal">/</span>
+                              <span className="text-text-secondary font-medium">
+                                {formatIn(
+                                  line.quantity_pairs,
+                                  line.unit,
+                                  line.unit_conversions,
+                                )}
+                              </span>
+                            </div>
+                            <div className="text-[11px]">
+                              {remainingLine > 0 ? (
+                                <span className="text-error font-medium">
+                                  {formatIn(
+                                    remainingLine,
+                                    line.unit,
+                                    line.unit_conversions,
+                                  )}{" "}
+                                  left
+                                </span>
+                              ) : (
+                                <span className="text-success text-[10px] font-medium">
+                                  Done
                                 </span>
                               )}
-                            </span>
-                            {explanation && (
-                              <span
-                                className="text-[10px] font-medium text-warning"
-                                title={mismatchDescription(explanation)}
-                              >
-                                {mismatchDescription(explanation)}
-                              </span>
-                            )}
+                              {(line.lost_quantity_pairs ?? 0) > 0 && !explanation && (
+                                <span className="text-warning text-[10px] ml-1">
+                                  ({sets(line.lost_quantity_pairs ?? 0)} lost)
+                                </span>
+                              )}
+                              {explanation && (
+                                <span
+                                  className="text-[10px] font-medium text-warning ml-1"
+                                  title={mismatchDescription(explanation)}
+                                >
+                                  ({mismatchDescription(explanation)})
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </Td>
                         <Td>
@@ -2524,27 +2555,68 @@ function VoucherDetail({
                             voucherQty={line.quantity_pairs}
                           />
                         </Td>
+                        {/* Both of the row's icon actions in one column: the remove
+                            button had a column to itself with a blank heading, which on a
+                            table this wide simply scrolled out of sight. */}
                         <Td className="text-center">
-                          <MismatchIconButton
-                            explained={Boolean(explanation)}
-                            disabled={remainingLine <= 0}
-                            onClick={() => setWriteOffLine(line)}
-                          />
-                        </Td>
-                        <Td className="text-center">
-                          <button
-                            type="button"
-                            onClick={() => removeLine(index)}
-                            title="Remove this product"
-                            aria-label={`Remove product ${index + 1}`}
-                            className={cn(
-                              "p-1 rounded-md align-middle transition-colors duration-150",
-                              SOFT_RED,
-                              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
-                            )}
-                          >
-                            <TrashIcon className="w-4 h-4" />
-                          </button>
+                          <div className="flex flex-col items-center gap-1">
+                            <MismatchIconButton
+                              explained={Boolean(explanation)}
+                              disabled={remainingLine <= 0}
+                              onClick={() => setWriteOffLine(line)}
+                            />
+                            {(() => {
+                              const locked = lineLockedReason(line);
+                              if (locked) {
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => showToast("info", locked)}
+                                    title={locked}
+                                    aria-label={`Cannot remove product ${index + 1}. ${locked}`}
+                                    className="p-1 rounded-md text-text-disabled transition-colors hover:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                  >
+                                    <TrashIcon className="w-4 h-4" />
+                                  </button>
+                                );
+                              }
+                              if (confirmingRemoval === line.voucher_line_id) {
+                                return (
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => removeLine(index)}
+                                      className="rounded-md bg-error px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                                    >
+                                      Remove
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmingRemoval(null)}
+                                      className="rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium text-text-secondary"
+                                    >
+                                      Keep
+                                    </button>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmingRemoval(line.voucher_line_id)}
+                                  title="Remove this product"
+                                  aria-label={`Remove product ${index + 1}`}
+                                  className={cn(
+                                    "p-1 rounded-md transition-colors duration-150",
+                                    SOFT_RED,
+                                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
+                                  )}
+                                >
+                                  <TrashIcon className="w-4 h-4" />
+                                </button>
+                              );
+                            })()}
+                          </div>
                         </Td>
                       </Tr>
                     );
@@ -2553,17 +2625,27 @@ function VoucherDetail({
                     <Td className="font-semibold" colSpan={2}>
                       Total
                     </Td>
-                    <Td className="text-right tabular-nums font-semibold">
-                      {sets(voucher.total_quantity_pairs)}
-                    </Td>
-                    <Td className="text-right tabular-nums font-semibold text-error">
-                      {sets(remaining)}
+                    {/* One cell per column: the quantity columns were merged into a
+                        single "Receiving qty" earlier and this row kept its old separate
+                        cells, so the totals had been sitting under the wrong headings. */}
+                    <Td className="text-right tabular-nums font-semibold whitespace-nowrap">
+                      <div>
+                        {sets(voucher.received_quantity_pairs)}
+                        <span className="text-text-muted font-normal"> / </span>
+                        <span className="text-text-secondary font-normal">
+                          {sets(voucher.total_quantity_pairs)}
+                        </span>
+                      </div>
+                      {remaining > 0 && (
+                        <div className="text-[11px] font-medium text-error">
+                          {sets(remaining)} to come
+                        </div>
+                      )}
                     </Td>
                     <Td />
                     <Td className="text-right tabular-nums font-semibold text-brand">
                       {formatKyat(amount)}
                     </Td>
-                    <Td />
                     <Td />
                     <Td />
                   </Tr>
@@ -3308,24 +3390,39 @@ function NewVoucherForm({
               </div>
             </div>
 
-            <div className="flex justify-end">
-              <Button onClick={() => void moveToProducts()}>
-                Next: products
-                <ChevronRightIcon className="w-4 h-4" />
+            <div className="flex justify-end border-t border-border pt-4">
+              <Button size="sm" onClick={() => void moveToProducts()}>
+                Next: Products
+                <ChevronRightIcon className="w-3.5 h-3.5 ml-1" />
               </Button>
             </div>
           </div>
         )}
 
         {step === 1 && (
-          <div className="px-6 py-6 flex flex-col gap-5">
-            <div>
-              <SectionLabel>Step 2 — products</SectionLabel>
-              <p className="text-sm text-text-muted -mt-1">
-                One row per stock code. Write the colors together with their
-                counts and unit — black10s,pink2p — and the quantity works
-                itself out.
-              </p>
+          <div className="px-6 py-5 flex flex-col gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <SectionLabel>Step 2 — Products</SectionLabel>
+                <p className="text-xs text-text-muted -mt-0.5">
+                  One row per stock code. Specify colors with units (e.g. black10s, pink2p) and buying prices.
+                </p>
+              </div>
+
+              {/* Real-time Summary Badge Strip */}
+              <div className="flex items-center gap-2.5 px-3 py-1.5 bg-bg-subtle rounded-lg border border-border text-xs">
+                <span className="text-text-muted">
+                  Items: <strong className="font-mono text-text-primary">{filledLines.length}</strong>
+                </span>
+                <span className="text-border">|</span>
+                <span className="text-text-muted">
+                  Total Qty: <strong className="font-mono text-brand font-semibold">{sets(totalQty)}</strong>
+                </span>
+                <span className="text-border">|</span>
+                <span className="text-text-muted">
+                  Total Amount: <strong className="font-mono text-brand font-semibold">{formatKyat(totalAmount)}</strong>
+                </span>
+              </div>
             </div>
 
             <div className="overflow-hidden rounded-lg border border-border">
@@ -3632,35 +3729,42 @@ function NewVoucherForm({
             <div>
               <Button
                 variant="secondary"
+                size="sm"
                 className={SOFT_BLUE}
                 onClick={() => append({ ...EMPTY_LINE })}
               >
-                <PlusIcon className="w-4 h-4" />
+                <PlusIcon className="w-4 h-4 mr-1" />
                 Add another product
               </Button>
             </div>
 
-            <div className="flex justify-between">
+            <div className="flex items-center justify-between border-t border-border pt-4">
               <Button
                 variant="secondary"
+                size="sm"
                 className={SOFT_BLUE}
                 onClick={() => setStep(0)}
               >
-                <ChevronLeftIcon className="w-4 h-4" />
-                Back
+                <ChevronLeftIcon className="w-3.5 h-3.5" />
+                Back to details
               </Button>
-              <Button onClick={() => void moveToReview()}>
-                Next: review
-                <ChevronRightIcon className="w-4 h-4" />
+              <Button size="sm" onClick={() => void moveToReview()}>
+                Next: Review
+                <ChevronRightIcon className="w-3.5 h-3.5 ml-1" />
               </Button>
             </div>
           </div>
         )}
 
         {step === 2 && (
-          <div className="px-6 py-6 flex flex-col gap-5">
-            <SectionLabel>Step 3 — review &amp; confirm</SectionLabel>
-            <dl className="grid gap-4 grid-cols-1 sm:grid-cols-4 bg-bg-subtle border border-border rounded-lg p-4">
+          <div className="px-6 py-5 flex flex-col gap-4">
+            <div>
+              <SectionLabel>Step 3 — Review &amp; Confirm</SectionLabel>
+              <p className="text-xs text-text-muted -mt-0.5">
+                Verify voucher details and product quantities before generating the voucher record.
+              </p>
+            </div>
+            <dl className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 bg-bg-subtle border border-border rounded-lg p-3.5 text-xs">
               <ReviewFact label="Voucher no." value={voucherNo} />
               <ReviewFact label="Date" value={formatDate(voucherDate)} />
               <ReviewFact
@@ -3668,7 +3772,14 @@ function NewVoucherForm({
                 value={supplierName || "—"}
               />
               <ReviewFact label="Cargo" value={cargoName || "—"} />
-              <ReviewFact label="Packages" value={packages || "—"} />
+              <ReviewFact
+                label="Packages"
+                value={
+                  packages
+                    ? `${packages} ${Number(packages) === 1 ? "package" : "packages"}`
+                    : "—"
+                }
+              />
             </dl>
             <TableContainer>
               <Thead className="top-0">
@@ -3680,7 +3791,7 @@ function NewVoucherForm({
                   </Th>
                   <Th className="text-right min-w-[8rem] whitespace-nowrap">
                     Buying price
-                    <span className="block text-xs font-normal text-text-muted">
+                    <span className="block text-[10px] font-normal text-text-muted">
                       per set
                     </span>
                   </Th>
@@ -3746,18 +3857,19 @@ function NewVoucherForm({
                 </Tr>
               </Tbody>
             </TableContainer>
-            <div className="flex justify-between">
+            <div className="flex items-center justify-between border-t border-border pt-4">
               <Button
                 variant="secondary"
+                size="sm"
                 className={SOFT_BLUE}
                 onClick={() => setStep(1)}
               >
-                <ChevronLeftIcon className="w-4 h-4" />
-                Back
+                <ChevronLeftIcon className="w-3.5 h-3.5" />
+                Back to products
               </Button>
-              <Button onClick={handleSubmit(submit)}>
-                <CheckIcon className="w-4 h-4" />
-                Confirm voucher
+              <Button size="sm" onClick={handleSubmit(submit)}>
+                <CheckIcon className="w-3.5 h-3.5 mr-1" />
+                Confirm &amp; Create voucher
               </Button>
             </div>
           </div>

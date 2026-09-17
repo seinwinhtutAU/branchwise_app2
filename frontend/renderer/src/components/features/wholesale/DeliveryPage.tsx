@@ -114,7 +114,7 @@ import {
   type Unit,
 } from "@renderer/components/features/wholesale/units";
 import { WriteOffModal } from "@renderer/components/features/wholesale/WriteOffModal";
-import { SplitShipmentModal } from "@renderer/components/features/wholesale/SplitShipmentModal";
+import { SplitShipmentPage } from "@renderer/components/features/wholesale/SplitShipmentPage";
 
 // The wholesale Delivery screen — where a supplier voucher's packages are while they are
 // on the road. Same shape as the other two wholesale screens (figure cards, one panel
@@ -131,7 +131,7 @@ import { SplitShipmentModal } from "@renderer/components/features/wholesale/Spli
 
 const SHIPMENTS_QUERY_KEY = ["wholesale", "shipments"] as const;
 
-type View = "list" | "detail" | "new";
+type View = "list" | "detail" | "new" | "split";
 type StatusFilter = ShipmentStatus | "all";
 
 const STATUS_LABELS: Record<ShipmentStatus, string> = {
@@ -275,15 +275,17 @@ export default function DeliveryPage({
   async function splitShipment(
     shipmentId: string,
     packages: number,
-    quantityPairs: number,
+    quantityPairs: number | undefined,
     finalDestination: string,
     carrierName: string,
+    splitLegOrder: number | undefined,
   ): Promise<void> {
     const { newShipment } = await apiSplitShipment(session, shipmentId, {
       packages,
       quantity_pairs: quantityPairs,
       final_destination: finalDestination,
       carrier_name: carrierName,
+      split_leg_order: splitLegOrder,
     });
     await reload();
     setSelectedId(newShipment.shipment_id);
@@ -330,6 +332,27 @@ export default function DeliveryPage({
     );
   }
 
+  if (view === "split" && selected) {
+    return (
+      <SplitShipmentPage
+        shipment={selected}
+        destinationSuggestions={[...RECEIVING_GATES, ...DESTINATION_NAMES]}
+        carrierSuggestions={CARRIER_NAMES}
+        onCancel={() => setView("detail")}
+        onSubmit={(packages, quantity, finalDestination, carrierName, splitLegOrder) =>
+          splitShipment(
+            selected.shipment_id,
+            packages,
+            quantity === undefined ? undefined : toPairs(quantity, selected.total_unit),
+            finalDestination,
+            carrierName,
+            splitLegOrder,
+          )
+        }
+      />
+    );
+  }
+
   if (view === "detail" && selected) {
     return (
       <ShipmentDetail
@@ -342,7 +365,7 @@ export default function DeliveryPage({
         onSave={persistShipment}
         onDelete={() => deleteShipment(selected.shipment_id)}
         onWriteOff={writeOffShipment}
-        onSplit={splitShipment}
+        onSplitRequested={() => setView("split")}
         writeOffs={writeOffs}
       />
     );
@@ -817,7 +840,7 @@ function ShipmentDetail({
   onSave,
   onDelete,
   onWriteOff,
-  onSplit,
+  onSplitRequested,
 }: {
   shipment: Shipment;
   writeOffs: WriteOffWire[];
@@ -832,13 +855,7 @@ function ShipmentDetail({
     reason: WriteOffReason,
     note: string,
   ) => Promise<void>;
-  onSplit: (
-    shipmentId: string,
-    packages: number,
-    quantityPairs: number,
-    finalDestination: string,
-    carrierName: string,
-  ) => Promise<void>;
+  onSplitRequested: () => void;
 }): React.JSX.Element {
   // Edits stay in this local draft until the user explicitly presses Save changes.
   const [saving, setSaving] = useState(false);
@@ -894,6 +911,11 @@ function ShipmentDetail({
 
   const pct = arrivedPct(shipment);
   const heading = intoFinal(shipment);
+  // Whether there is anywhere left to split from — the cargo company's own
+  // undispatched packages, or any stop still holding some back from the next leg.
+  const canSplit =
+    cargoRemaining(shipment) > 0 ||
+    shipment.legs.some((_, index) => legRemaining(shipment, index) > 0);
   // Which gap in the tracking table a new destination is going into. Null while nothing
   // is being added, so the strip below the table only appears once a place is chosen.
   const [insertAt, setInsertAt] = useState<number | null>(null);
@@ -902,7 +924,6 @@ function ShipmentDetail({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [writeOffTarget, setWriteOffTarget] =
     useState<ShipmentMismatchTarget | null>(null);
-  const [splitOpen, setSplitOpen] = useState(false);
 
   function latestMismatch(subjectId: string): WriteOffWire | undefined {
     return writeOffs.find((entry) => entry.subject_id === subjectId);
@@ -1008,11 +1029,11 @@ function ShipmentDetail({
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => setSplitOpen(true)}
-                disabled={finalRemaining(shipment) <= 0}
+                onClick={onSplitRequested}
+                disabled={!canSplit}
                 title={
-                  finalRemaining(shipment) <= 0
-                    ? "All packages have already arrived — there is nothing left to split."
+                  !canSplit
+                    ? "Everything has already been sent on from every stop — nothing left to move."
                     : undefined
                 }
               >
@@ -1609,25 +1630,6 @@ function ShipmentDetail({
             quantity,
             reason,
             note,
-          )
-        }
-      />
-      <SplitShipmentModal
-        open={splitOpen}
-        shipmentNo={shipment.shipment_no}
-        availablePackages={finalRemaining(shipment)}
-        availableQuantity={shipment.total_quantity_pairs}
-        unit={shipment.total_unit}
-        destinationSuggestions={[...RECEIVING_GATES, ...DESTINATION_NAMES]}
-        carrierSuggestions={CARRIER_NAMES}
-        onClose={() => setSplitOpen(false)}
-        onSubmit={(packages, quantity, finalDestination, carrierName) =>
-          onSplit(
-            serverShipment.shipment_id,
-            packages,
-            toPairs(quantity, shipment.total_unit),
-            finalDestination,
-            carrierName,
           )
         }
       />

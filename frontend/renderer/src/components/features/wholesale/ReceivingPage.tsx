@@ -8,7 +8,6 @@ import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
 import {
   CellInput,
-  CountField,
   CurrencySelect,
   EDITABLE,
   FigureCard,
@@ -16,7 +15,6 @@ import {
   MenuItem,
   PAGE_SIZE,
   Panel,
-  QuantityField,
   QuantityInput,
   ReadOnlyField,
   Required,
@@ -24,7 +22,6 @@ import {
   ReviewFact,
   RowProgress,
   SOFT_BLUE,
-  SOFT_RED,
   SectionLabel,
   StepBar,
   SuggestInput,
@@ -55,12 +52,14 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CopyIcon,
   EyeIcon,
   MoreVerticalIcon,
   ReceivingIcon,
   PlusIcon,
   SearchIcon,
   TrashIcon,
+  TruckIcon,
   WarningIcon,
 } from "@renderer/components/ui/icons";
 import {
@@ -233,8 +232,8 @@ function receivedColorProblem(
 
 /** How many pairs of each colour have actually been logged for one stock code, summed
  *  across every package in this receiving — not just the item being typed into, since
- *  the same product often arrives split across several boxes and a colour's full count
- *  only exists once every box holding it is added up. */
+ *  the same product often arrives split across several packages and a colour's full count
+ *  only exists once every package holding it is added up. */
 function receivedColorPairs(
   receiving: Receiving,
   stockCode: string,
@@ -257,7 +256,7 @@ function receivedColorPairs(
 /** A colour's own name can be right while its count still isn't — 20 sets of black
  *  logged against a voucher that only ever asked for 15 is wrong the moment it happens,
  *  whatever else is still unopened. Falling short is not flagged the same way: more of a
- *  colour can still be sitting in a box nobody has opened yet. */
+ *  colour can still be sitting in a package nobody has opened yet. */
 function receivedColorQuantityProblem(
   stockCode: string,
   receiving: Receiving,
@@ -329,7 +328,7 @@ export default function ReceivingGatePage({
   });
   useLoadErrorToast(shipmentsFailed, "shipments for receivings");
   // What the gate has already put on the shelf. Read here only to answer the question
-  // this screen leaves hanging: the boxes are counted, so what happens next?
+  // this screen leaves hanging: the packages are counted, so what happens next?
   const { data: stockWire } = useQuery({
     queryKey: STOCK_QUERY_KEY,
     queryFn: () => fetchJson<StockRecordWire[]>(WHOLESALE_STOCK_URL, session),
@@ -560,8 +559,8 @@ function ReceivingList({
   function statusOf(receiving: Receiving): ReceivingStatus {
     return receivingStatus(receiving, expectedPackagesFor(receiving));
   }
-  // Every box added so far being open still doesn't make the count final while the
-  // shipment says more boxes are coming and this receiving simply hasn't caught up yet.
+  // Every package added so far being open still doesn't make the count final while the
+  // shipment says more packages are coming and this receiving simply hasn't caught up yet.
   function packagesCompleteFor(receiving: Receiving): boolean {
     const expected = expectedPackagesFor(receiving);
     return expected === undefined || receiving.total_packages >= expected;
@@ -616,7 +615,7 @@ function ReceivingList({
             <p className="mt-0.5 text-sm text-text-secondary">
               {owedToCustomersPairs > 0
                 ? `Customers are still waiting for ${formatSets(owedToCustomersPairs)}.`
-                : "Counting the boxes is only half the job — the stock still has to be shared out."}
+                : "Counting the packages is only half the job — the stock still has to be shared out."}
             </p>
           </div>
           <Button size="sm" onClick={onOpenOrders}>
@@ -733,8 +732,8 @@ function ReceivingList({
                   <Th className="whitespace-nowrap">Shipment no.</Th>
                   <Th className="whitespace-nowrap">Date</Th>
                   <Th className="whitespace-nowrap">Supplier / Factory</Th>
-                  <Th className="whitespace-nowrap">Packages opened</Th>
-                  <Th className="text-right">Difference</Th>
+                  <Th className="whitespace-nowrap">Packages</Th>
+                  <Th className="text-right whitespace-nowrap">Received</Th>
                   <Th>Status</Th>
                   <Th className="w-12" aria-label="Actions" />
                 </Tr>
@@ -748,12 +747,20 @@ function ReceivingList({
                   const allOpened =
                     openedCount(receiving) === receiving.packages.length &&
                     packagesCompleteFor(receiving);
-                  const moreComing =
+                  const stillToCome =
                     !packagesCompleteFor(receiving) &&
                     expectedPackages !== undefined &&
                     expectedPackages > receiving.total_packages
                       ? expectedPackages - receiving.total_packages
                       : 0;
+                  // Measured against what the shipment sent, not against the packages
+                  // logged so far. Using the logged count read as "3 of 3 opened ·
+                  // 1 still to come", which contradicts itself: the first half claims
+                  // the job is finished while the second says a package is missing.
+                  const packagesTarget =
+                    expectedPackages !== undefined
+                      ? Math.max(expectedPackages, receiving.total_packages)
+                      : receiving.total_packages;
                   return (
                     <Tr key={receiving.receiving_id}>
                       <Td className="whitespace-nowrap">
@@ -777,38 +784,49 @@ function ReceivingList({
                       <Td className="font-medium whitespace-nowrap">
                         {receiving.supplier_name}
                       </Td>
-                      <Td className="min-w-[16rem] whitespace-nowrap">
-                        <div className="flex flex-col gap-1.5">
+                      {/* Packages only, and only as words. The bar that used to sit
+                          here measured sets, not packages, under a heading that said
+                          packages — so the column read as two unrelated things
+                          stacked. */}
+                      <Td className="whitespace-nowrap">
+                        <div className="flex flex-col gap-0.5">
                           <span className="tabular-nums">
-                            {openedCount(receiving)} of{" "}
-                            {receiving.total_packages} opened
-                            {moreComing > 0 && ` · ${moreComing} more coming`}
+                            {openedCount(receiving)} of {packagesTarget} opened
                           </span>
-                          <div className="flex flex-col gap-1">
+                          {stillToCome > 0 && (
                             <span className="text-xs text-text-muted tabular-nums">
-                              Received sets: {formatSets(counted)} /{" "}
-                              {formatSets(expectedQuantity)}
+                              {stillToCome} still to come
                             </span>
-                            <RowProgress
-                              pct={sharePct(counted, expectedQuantity)}
-                              label={`Received sets progress for ${receiving.receiving_no}`}
-                            />
-                          </div>
+                          )}
                         </div>
                       </Td>
-                      <Td
-                        className={cn(
-                          "text-right tabular-nums font-semibold",
-                          !allOpened
-                            ? "text-text-muted"
-                            : difference === 0
-                              ? "text-success"
-                              : "text-error",
-                        )}
-                      >
-                        {allOpened
-                          ? formatDifference(difference, receiving.total_unit)
-                          : "—"}
+                      {/* What was counted against what the voucher says, rather than
+                          the gap between them. A Difference column could only speak
+                          once every package was open, so it read "—" on most rows,
+                          and when it did speak the Status badge was already saying
+                          the same thing in words. By how much is a question the
+                          receiving itself answers. The bar belongs here, beside the
+                          two quantities it is actually measuring. */}
+                      <Td className="min-w-[13rem]">
+                        <div className="flex flex-col gap-1 items-end">
+                          <span
+                            className={cn(
+                              "tabular-nums whitespace-nowrap",
+                              allOpened && difference !== 0
+                                ? "text-error font-semibold"
+                                : "text-text-secondary",
+                            )}
+                          >
+                            {formatSets(counted)}{" "}
+                            <span className="text-text-muted">
+                              / {formatSets(expectedQuantity)}
+                            </span>
+                          </span>
+                          <RowProgress
+                            pct={sharePct(counted, expectedQuantity)}
+                            label={`Received quantity for ${receiving.receiving_no}`}
+                          />
+                        </div>
                       </Td>
                       <Td>
                         <StatusBadge status={statusOf(receiving)} />
@@ -843,14 +861,6 @@ function ReceivingList({
       </Panel>
     </div>
   );
-}
-
-/** A difference reads better with its sign: 2 short, 1 over, or nothing. */
-function formatDifference(difference: number, unit: Unit): string {
-  if (difference === 0) return "0";
-  return difference > 0
-    ? `+${formatIn(difference, unit)}`
-    : `−${formatIn(-difference, unit)}`;
 }
 
 function RowMenu({
@@ -1034,16 +1044,24 @@ function ReceivingDetail({
   onSave: (receiving: Receiving) => Promise<void>;
   onDelete: () => void;
 }): React.JSX.Element {
+  const [activeTab, setActiveTab] = useState<"packages" | "costs">(
+    focus === "packages" ? "packages" : "packages",
+  );
+  const [selectedPackageIndex, setSelectedPackageIndex] = useState(0);
+  const [packageSearch, setPackageSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [addingCostId, setAddingCostId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const packagesSectionRef = useRef<HTMLElement>(null);
+  /** Set while the last package holds counted products and undoing it needs a second
+   *  click — taking it back would throw that counting away. */
+  const [confirmUndoArrival, setConfirmUndoArrival] = useState(false);
+
   const {
     control,
     handleSubmit,
     reset,
     setValue,
-    formState: { errors, isDirty },
+    formState: { isDirty },
   } = useForm<ReceivingDetailFormValues>({
     resolver: zodResolver(receivingDetailSchema),
     defaultValues: { receiving: initialReceiving },
@@ -1063,13 +1081,14 @@ function ReceivingDetail({
   useEffect(() => {
     reset({ receiving: initialReceiving });
     setAddingCostId(null);
+    setConfirmUndoArrival(false);
   }, [initialReceiving, reset]);
 
+  // An armed "discard this package" must not survive being left behind: walking to
+  // another package and back should not find the destructive button still waiting.
   useEffect(() => {
-    if (focus === "packages") {
-      packagesSectionRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [focus]);
+    setConfirmUndoArrival(false);
+  }, [selectedPackageIndex]);
 
   const hasChanges = isDirty;
 
@@ -1101,19 +1120,49 @@ function ReceivingDetail({
   const voucher = vouchers.find(
     (entry) => entry.voucher_no === receiving.voucher_no,
   );
-  const expected = voucherExpectations(voucher);
-  const stages = [
-    ...(shipment ? [shipment.carrier_name] : []),
-    ...(shipment ? shipment.legs.map((leg) => leg.stop_name) : []),
-    receiving.gate,
-  ].filter((stage) => stage.trim() !== "");
-  const carriers = [
-    ...(shipment ? [shipment.carrier_name] : []),
-    ...(shipment ? shipment.legs.map((leg) => leg.carrier_name) : []),
-  ].filter((name) => name.trim() !== "" && name !== "—");
+  const expected = useMemo(() => voucherExpectations(voucher), [voucher]);
+  const stages = useMemo(
+    () =>
+      [
+        ...(shipment ? [shipment.carrier_name] : []),
+        ...(shipment ? shipment.legs.map((leg) => leg.stop_name) : []),
+        receiving.gate,
+      ].filter((stage) => stage.trim() !== ""),
+    [shipment, receiving.gate],
+  );
+  const carriers = useMemo(
+    () =>
+      [
+        ...(shipment ? [shipment.carrier_name] : []),
+        ...(shipment ? shipment.legs.map((leg) => leg.carrier_name) : []),
+      ].filter((name) => name.trim() !== "" && name !== "—"),
+    [shipment],
+  );
 
   const opened = openedCount(receiving);
   const counted = countedPairs(receiving);
+  const expectedTotalPairs = expectedPairs(receiving);
+  const totalCostAmount = totalCost(receiving);
+  const costPerPackage =
+    receiving.total_packages > 0
+      ? Math.round(totalCostAmount / receiving.total_packages)
+      : 0;
+  const costPerPair = counted > 0 ? Math.round(totalCostAmount / counted) : 0;
+
+  const safePackageIndex = Math.min(
+    Math.max(0, selectedPackageIndex),
+    Math.max(0, receiving.packages.length - 1),
+  );
+  const activePackage = receiving.packages[safePackageIndex] as
+    ReceivingPackage | undefined;
+  const isLastPackage = safePackageIndex === receiving.packages.length - 1;
+  /** Whether anything has actually been counted into the open package — an untouched
+   *  package still carries one blank item row, which is not a count. */
+  const activePackageHasCount = Boolean(
+    activePackage?.items.some(
+      (item) => item.stock_code.trim() !== "" || item.quantity > 0,
+    ),
+  );
 
   function setPackage(index: number, patch: Partial<ReceivingPackage>): void {
     apply({
@@ -1123,21 +1172,55 @@ function ReceivingDetail({
     });
   }
 
-  /** Opening a box gives it one empty product row, since there is always at least one
-   *  thing inside; shutting it again leaves what was counted alone. */
   function toggleOpened(index: number): void {
     const entry = receiving.packages[index];
-    const opened = !entry.opened;
+    if (!entry) return;
+    const nextOpened = !entry.opened;
     setPackage(index, {
-      opened,
+      opened: nextOpened,
       received_on:
-        opened && entry.received_on === ""
+        nextOpened && entry.received_on === ""
           ? receiving.received_on
           : entry.received_on,
       items:
-        opened && entry.items.length === 0
+        nextOpened && entry.items.length === 0
           ? [emptyItem(entry.package_id)]
           : entry.items,
+    });
+  }
+
+  function markAllOpened(): void {
+    apply({
+      packages: receiving.packages.map((entry) => ({
+        ...entry,
+        opened: true,
+        received_on:
+          entry.received_on === "" ? receiving.received_on : entry.received_on,
+        items:
+          entry.items.length === 0
+            ? [emptyItem(entry.package_id)]
+            : entry.items,
+      })),
+    });
+  }
+
+  function duplicatePreviousPackage(targetIndex: number): void {
+    if (targetIndex <= 0) return;
+    const prev = receiving.packages[targetIndex - 1];
+    if (!prev || prev.items.length === 0) return;
+    const current = receiving.packages[targetIndex];
+    if (!current) return;
+
+    const clonedItems: ReceivingItem[] = prev.items.map((item, i) => ({
+      ...item,
+      item_id: `cloned-${current.package_id}-${i}-${Date.now()}`,
+      package_id: current.package_id,
+    }));
+
+    setPackage(targetIndex, {
+      opened: true,
+      received_on: current.received_on || receiving.received_on,
+      items: clonedItems,
     });
   }
 
@@ -1149,10 +1232,6 @@ function ReceivingDetail({
     });
   }
 
-  /** Switching a cost's currency. Back to MMK drops the foreign-currency snapshot so a
-   *  resubmit can't send stale original_amount/exchange_rate; switching to a foreign
-   *  currency prefills today's rate from Settings, but only as a starting point — it
-   *  stays editable, and a rate already on the row is never overwritten. */
   function setCostCurrency(index: number, code: CurrencyCode): void {
     const cost = receiving.costs[index];
     if (code === DEFAULT_CURRENCY) {
@@ -1212,20 +1291,13 @@ function ReceivingDetail({
     });
   }
 
-  function cancelAddCost(): void {
-    if (!addingCostId) return;
-    apply({
-      costs: receiving.costs.filter((cost) => cost.cost_id !== addingCostId),
-    });
-    setAddingCostId(null);
-  }
-
   function setItem(
     packageIndex: number,
     itemIndex: number,
     patch: Partial<ReceivingItem>,
   ): void {
     const entry = receiving.packages[packageIndex];
+    if (!entry) return;
     setPackage(packageIndex, {
       items: entry.items.map((item, position) =>
         position === itemIndex ? { ...item, ...patch } : item,
@@ -1238,7 +1310,8 @@ function ReceivingDetail({
     itemIndex: number,
     colorQty: string,
   ): void {
-    const item = receiving.packages[packageIndex].items[itemIndex];
+    const item = receiving.packages[packageIndex]?.items[itemIndex];
+    if (!item) return;
     const quantity = quantityFromColors(colorQty, item.unit);
     setItem(packageIndex, itemIndex, {
       color_breakdown: colorQty,
@@ -1247,8 +1320,6 @@ function ReceivingDetail({
     });
   }
 
-  // A code we have seen before brings its own description and product_group with it, so counting
-  // a package is typing a code and a quantity, not retyping the product every time.
   function setStockCode(
     packageIndex: number,
     itemIndex: number,
@@ -1272,577 +1343,1058 @@ function ReceivingDetail({
 
   function addItem(packageIndex: number): void {
     const entry = receiving.packages[packageIndex];
+    if (!entry) return;
     setPackage(packageIndex, {
+      opened: true,
       items: [...entry.items, emptyItem(entry.package_id)],
     });
   }
 
   function removeItem(packageIndex: number, itemIndex: number): void {
     const entry = receiving.packages[packageIndex];
+    if (!entry) return;
     const items = entry.items.filter((_, position) => position !== itemIndex);
     setPackage(packageIndex, {
       items: items.length > 0 ? items : [emptyItem(entry.package_id)],
     });
   }
 
-  // Changing how many packages came off the truck changes how many rows there are to
-  // count into — the two must not be allowed to disagree.
   function setPackageCount(count: number): void {
+    const safeCount = Math.max(1, count);
     apply({
-      total_packages: count,
+      total_packages: safeCount,
       packages: resizePackages(
         receiving.packages,
-        count,
+        safeCount,
         receiving.receiving_id,
       ),
     });
   }
 
-  return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          <ChevronLeftIcon className="w-4 h-4" />
-          Back to receiving
-        </Button>
-      </div>
+  /** A package that was still to come has turned up at the gate. Clicking slot #n
+   *  brings in everything up to and including it, so two arriving together is one
+   *  click on the later one rather than two clicks in order. */
+  function markPackageArrived(packageNo: number): void {
+    if (packageNo <= receiving.packages.length) return;
+    setPackageCount(packageNo);
+    setSelectedPackageIndex(packageNo - 1);
+  }
 
-      <Panel>
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-semibold text-text-primary tracking-tight">
+  /** Undo for a mis-click. Only the newest package can be taken back — packages are a
+   *  sequential run and dropping one from the middle would renumber the rest — which
+   *  is also the only one a stray click could have created. */
+  function undoLastArrival(): void {
+    const last = receiving.packages.length;
+    if (last <= 1) return;
+    setPackageCount(last - 1);
+    setSelectedPackageIndex(Math.min(safePackageIndex, last - 2));
+    setConfirmUndoArrival(false);
+  }
+
+  // Save is the one keyboard shortcut this page keeps. Everything else — switching
+  // packages, opening a package, adding a line — is a button you can see, so there is no
+  // hidden key combination to remember while counting.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent): void {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+        if (hasChanges && !saving) {
+          void handleSubmit(saveChanges)();
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasChanges, saving, handleSubmit]);
+
+  // Filter packages for explorer
+  const filteredPackagesWithIndex = useMemo(() => {
+    const q = packageSearch.trim().toLowerCase();
+    return receiving.packages
+      .map((pkg, originalIndex) => ({ pkg, originalIndex }))
+      .filter(({ pkg }) => {
+        if (!q) return true;
+        return (
+          String(pkg.package_no).toLowerCase().includes(q) ||
+          pkg.items.some((it) => it.stock_code.toLowerCase().includes(q))
+        );
+      });
+  }, [receiving.packages, packageSearch]);
+
+  /** Package numbers the shipment says went out that this receiving has no row for.
+   *  They are listed as greyed-out slots alongside the real packages so a package
+   *  that never turned up is a visible gap in the list, rather than something the
+   *  reader has to notice by comparing two numbers. */
+  const missingPackageNos = useMemo(() => {
+    if (!shipment) return [];
+    const short = shipment.total_packages - receiving.packages.length;
+    if (short <= 0) return [];
+    const highest = receiving.packages.reduce(
+      (max, pkg) => Math.max(max, pkg.package_no),
+      0,
+    );
+    return Array.from({ length: short }, (_, i) => highest + i + 1);
+  }, [shipment, receiving.packages]);
+
+  const filteredMissingNos = useMemo(() => {
+    const q = packageSearch.trim();
+    if (!q) return missingPackageNos;
+    return missingPackageNos.filter((no) => String(no).includes(q));
+  }, [missingPackageNos, packageSearch]);
+
+  // Problem summary across entire batch
+  const allProblems = useMemo(() => {
+    const problems: string[] = [];
+    for (const pkg of receiving.packages) {
+      for (const it of pkg.items) {
+        const codeProb = receivedStockCodeProblem(it.stock_code, expected);
+        if (codeProb && !problems.includes(codeProb)) {
+          problems.push(`[#${pkg.package_no}] ${it.stock_code}: ${codeProb}`);
+        }
+        const colorProb = receivedColorProblem(
+          it.stock_code,
+          it.color_breakdown,
+          expected,
+        );
+        if (colorProb && !problems.includes(colorProb)) {
+          problems.push(`[#${pkg.package_no}] ${it.stock_code}: ${colorProb}`);
+        }
+      }
+    }
+    return problems;
+  }, [receiving.packages, expected]);
+
+  return (
+    <div className="flex flex-col gap-3 min-h-[calc(100vh-5.5rem)]">
+      {/* One panel, not three stacked cards. The identity row, the details being
+          edited and the arrival notice are all "what this receiving is", so they sit
+          in a single bordered block divided by hairlines rather than floating apart
+          with gaps between them. */}
+      <div className="rounded-xl border border-border bg-bg-surface overflow-hidden divide-y divide-border">
+        {/* ── Identity row ──────────────────────────────────────────────── */}
+        <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+          <div className="flex items-center gap-3 min-w-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onBack}
+              className="text-text-muted hover:text-text-primary gap-1.5"
+              title="Back to receiving list (Esc)"
+            >
+              <ChevronLeftIcon className="w-4 h-4" />
+              <span className="hidden sm:inline">Back</span>
+            </Button>
+
+            <div className="h-5 w-px bg-border" />
+
+            <div className="min-w-0 flex items-center gap-2.5">
+              <h2 className="text-base font-bold text-text-primary tracking-tight truncate">
                 {receiving.receiving_no}
               </h2>
               <StatusBadge
                 status={receivingStatus(receiving, shipment?.total_packages)}
               />
+              <span className="hidden md:inline text-xs text-text-muted truncate">
+                {receiving.supplier_name}
+              </span>
             </div>
-            <p className="mt-0.5 truncate text-sm text-text-muted">
-              {receiving.supplier_name} · {formatDate(receiving.received_on)}
-            </p>
           </div>
+
+          {/* Workspace Tabs. The selected side is filled, not merely tinted: this
+            project's shadows cast nothing (--shadow-xs is none) and bg-subtle sits a
+            hair away from bg-surface, so a raised-pill treatment left both halves
+            looking like plain text nobody could tell was clickable. */}
+          <div
+            role="tablist"
+            aria-label="Receiving sections"
+            className="flex items-center gap-1 bg-bg-raised p-1 rounded-lg border border-border"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "packages"}
+              onClick={() => setActiveTab("packages")}
+              className={cn(
+                "px-3.5 py-1 rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5",
+                activeTab === "packages"
+                  ? "bg-brand text-white"
+                  : "text-text-secondary hover:bg-bg-surface hover:text-text-primary",
+              )}
+              title="Switch to package counting"
+            >
+              <span>Packages</span>
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-0.2 text-[11px] font-mono",
+                  activeTab === "packages"
+                    ? "bg-white/25 text-white"
+                    : "bg-brand/10 text-brand",
+                )}
+              >
+                {opened}/{receiving.packages.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "costs"}
+              onClick={() => setActiveTab("costs")}
+              className={cn(
+                "px-3.5 py-1 rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5",
+                activeTab === "costs"
+                  ? "bg-brand text-white"
+                  : "text-text-secondary hover:bg-bg-surface hover:text-text-primary",
+              )}
+              title="Switch to costs"
+            >
+              <span>Costs</span>
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-0.2 text-[11px] font-mono",
+                  activeTab === "costs"
+                    ? "bg-white/25 text-white"
+                    : "bg-success/10 text-success",
+                )}
+              >
+                {formatKyat(totalCostAmount)}
+              </span>
+            </button>
+          </div>
+
+          {/* Action Controls */}
           <div className="flex items-center gap-2">
+            {/* One quiet dot is all the "you have unsaved work" signal this page needs —
+              the old bottom status bar said the same thing a second time. */}
+            {hasChanges && (
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-warning"
+                title="Unsaved changes"
+              />
+            )}
+
             <Button
               size="sm"
               onClick={() => void handleSubmit(saveChanges)()}
               loading={saving}
               disabled={!hasChanges}
+              className="font-medium gap-1.5 shadow-xs"
+              title="Save changes (Ctrl+S)"
             >
               <CheckIcon className="w-4 h-4" />
-              Save changes
+              <span>Save</span>
             </Button>
+
             {confirmDelete ? (
-              <>
-                <Button variant="destructive" size="sm" onClick={onDelete}>
-                  <TrashIcon className="w-4 h-4" />
-                  Delete for good
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={onDelete}
+                  className="gap-1 text-xs"
+                >
+                  <TrashIcon className="w-3.5 h-3.5" />
+                  Confirm
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setConfirmDelete(false)}
+                  className="text-xs"
                 >
-                  Keep
+                  Cancel
                 </Button>
-              </>
+              </div>
             ) : (
               <Button
                 variant="destructive"
                 size="sm"
                 onClick={() => setConfirmDelete(true)}
+                className="gap-1.5 text-xs"
+                title="Delete this receiving"
               >
-                <TrashIcon className="w-4 h-4" />
+                <TrashIcon className="w-3.5 h-3.5" />
                 Delete receiving
               </Button>
             )}
           </div>
-        </div>
+        </header>
 
-        <div className="px-6 py-6 flex flex-col gap-8">
-          <section>
-            <SectionLabel>Receiving Information</SectionLabel>
-            <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 items-start">
-                <div>
-                  <span className="block text-xs font-medium text-text-muted mb-1">
-                    Shipment & voucher
-                  </span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Reference
-                      value={receiving.shipment_no}
-                      what="shipment no."
-                      singleLine
-                    />
-                    <span className="text-text-muted">·</span>
-                    <Reference
-                      value={receiving.voucher_no}
-                      what="voucher no."
-                      singleLine
-                    />
-                  </div>
-                  <p className="mt-0.5 text-xs text-text-muted">
-                    {receiving.supplier_name}
-                  </p>
-                </div>
-                <Controller
-                  control={control}
-                  name="receiving.gate"
-                  render={({ field }) => (
-                    <SuggestInput
-                      label="Gate"
-                      placeholder="Bogyoke Rd, Mawlamyine"
-                      suggestions={RECEIVING_GATES}
-                      value={field.value}
-                      onChange={(next) => {
-                        field.onChange(next);
-                        apply({ gate: next });
-                      }}
-                      error={errors.receiving?.gate?.message}
-                    />
-                  )}
-                />
-                <Controller
-                  control={control}
-                  name="receiving.received_on"
-                  render={({ field }) => (
-                    <Input
-                      label="Received date"
-                      type="date"
-                      className={EDITABLE}
-                      value={field.value}
-                      onChange={field.onChange}
-                      onBlur={field.onBlur}
-                      error={errors.receiving?.received_on?.message}
-                    />
-                  )}
-                />
-                <Controller
-                  control={control}
-                  name="receiving.total_packages"
-                  render={({ field }) => (
-                    <CountField
-                      label="Received packages"
-                      value={field.value}
-                      onChange={setPackageCount}
-                    />
-                  )}
-                />
-                <ReadOnlyField
-                  label="Packages on the shipment"
-                  value={shipment ? formatQty(shipment.total_packages) : "—"}
-                />
-                <Controller
-                  control={control}
-                  name="receiving.total_quantity_pairs"
-                  render={({ field }) => (
-                    <QuantityField
-                      label="Quantity"
-                      value={field.value}
-                      unit={receiving.total_unit}
-                      hint={formatIn(expectedPairs(receiving), receiving.total_unit)}
-                      onChange={field.onChange}
-                    />
-                  )}
+        {/* ── Details row: the fields actually being edited ──────────────── */}
+        {activeTab === "packages" && (
+          <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-xs">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-text-muted font-medium">Gate:</span>
+                <SuggestInput
+                  label="Gate location"
+                  suggestions={RECEIVING_GATES}
+                  value={receiving.gate}
+                  onChange={(next) => apply({ gate: next })}
+                  bare
+                  placeholder="Select Gate"
                 />
               </div>
-            </div>
-          </section>
 
-          <section>
-            <SectionLabel>Costs</SectionLabel>
-            <TableContainer>
-              <Thead className="top-0">
-                <Tr>
-                  <Th>Location</Th>
-                  <Th className="w-36">Date</Th>
-                  <Th>Carrier</Th>
-                  <Th>Cost type</Th>
-                  <Th className="w-24">Currency</Th>
-                  <Th className="text-right w-48">Amount</Th>
-                  <Th>Note</Th>
-                  <Th className="w-10" aria-label="Remove cost" />
-                </Tr>
-              </Thead>
-              <Tbody>
-                {receiving.costs.map((cost, index) => (
-                  <Tr key={cost.cost_id}>
-                    <Td>
-                      <SuggestInput
-                        label={`Where cost ${index + 1} was spent`}
-                        placeholder="Shwe Moe Cargo"
-                        suggestions={stages}
-                        value={cost.stage}
-                        onChange={(next) => setCost(index, { stage: next })}
-                        bare
-                      />
-                    </Td>
-                    <Td>
-                      <CellInput
-                        label={`Date of cost ${index + 1}`}
-                        placeholder="YYYY-MM-DD"
-                        type="date"
-                        value={cost.cost_date}
-                        onChange={(cost_date) =>
-                          setCost(index, { cost_date })
-                        }
-                      />
-                    </Td>
-                    <Td>
-                      <SuggestInput
-                        label={`Who was paid for cost ${index + 1}`}
-                        placeholder="Nobody in particular"
-                        suggestions={carriers}
-                        value={cost.carrier}
-                        onChange={(next) =>
-                          setCost(index, { carrier: next })
-                        }
-                        bare
-                      />
-                    </Td>
-                    <Td>
-                      <SuggestInput
-                        label={`What cost ${index + 1} was for`}
-                        placeholder="Carrier fee"
-                        suggestions={COST_KINDS}
-                        value={cost.kind}
-                        onChange={(next) => setCost(index, { kind: next })}
-                        bare
-                      />
-                    </Td>
-                    <Td>
-                      <CurrencySelect
-                        label={`Currency of cost ${index + 1}`}
-                        value={(cost.currency_code as CurrencyCode) || DEFAULT_CURRENCY}
-                        onChange={(code) => setCostCurrency(index, code)}
-                      />
-                    </Td>
-                    <Td className="text-right">
-                      {cost.currency_code && isForeignCurrency(cost.currency_code) ? (
-                        <div className="flex flex-col gap-1">
-                          <CellInput
-                            label={`Original amount of cost ${index + 1}`}
-                            placeholder="Original amount"
-                            className="text-right"
-                            value={String(cost.original_amount ?? "")}
-                            onChange={(next) =>
-                              setCostOriginalAmount(index, Number(next) || 0)
-                            }
-                          />
-                          <CellInput
-                            label={`Exchange rate of cost ${index + 1}`}
-                            placeholder="Exchange rate"
-                            className="text-right"
-                            value={String(cost.exchange_rate ?? "")}
-                            onChange={(next) =>
-                              setCostExchangeRate(index, Number(next) || 0)
-                            }
-                          />
-                          <span className="text-xs text-text-muted tabular-nums">
-                            = {formatKyat(cost.amount)}
-                          </span>
-                        </div>
-                      ) : (
-                        <CellInput
-                          label={`Amount of cost ${index + 1}`}
-                          placeholder="0"
-                          numeric
-                          className="text-right"
-                          value={String(cost.amount)}
-                          onChange={(next) =>
-                            setCost(index, { amount: Number(next) || 0 })
-                          }
-                        />
-                      )}
-                    </Td>
-                    <Td>
-                      <CellInput
-                        label={`Note on cost ${index + 1}`}
-                        placeholder="Take a note"
-                        value={cost.note}
-                        onChange={(next) => setCost(index, { note: next })}
-                      />
-                    </Td>
-                    <Td className="text-center">
-                      <button
-                        type="button"
-                        onClick={() => removeCost(index)}
-                        title="Remove this cost"
-                        aria-label={`Remove cost ${index + 1}`}
-                        className={cn(
-                          "p-1 rounded-md text-text-muted",
-                          "transition-colors duration-150",
-                          "hover:bg-error-subtle hover:text-error",
-                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
-                        )}
-                      >
-                        <TrashIcon className="w-4 h-4" />
-                      </button>
-                    </Td>
-                  </Tr>
-                ))}
-                {receiving.costs.length === 0 && (
-                  <Tr>
-                    <Td className="text-text-muted text-sm" colSpan={8}>
-                      Nothing charged for this delivery yet.
-                    </Td>
-                  </Tr>
-                )}
-                <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-                  <Td className="font-semibold" colSpan={5}>
-                    Total
-                  </Td>
-                  <Td className="text-right tabular-nums font-semibold text-brand">
-                    {formatKyat(totalCost(receiving))}
-                  </Td>
-                  <Td colSpan={2} />
-                </Tr>
-              </Tbody>
-            </TableContainer>
-            <div className="mt-3">
-              <Button size="sm" onClick={addCost}>
-                <PlusIcon className="w-4 h-4" />
-                Add a cost
+              <div className="h-4 w-px bg-border" />
+
+              <div className="flex items-center gap-2">
+                <span className="text-text-muted font-medium">Date:</span>
+                <CellInput
+                  label="Received Date"
+                  placeholder="YYYY-MM-DD"
+                  type="date"
+                  value={receiving.received_on}
+                  onChange={(received_on) => apply({ received_on })}
+                  className="w-32 text-xs font-mono"
+                />
+              </div>
+
+              <div className="h-4 w-px bg-border" />
+
+              {/* A figure now, not a field. Typing this number was the one place on
+                  the screen where a slip destroyed work: lowering it ran
+                  resizePackages, which slices packages off the end and takes whatever
+                  was already counted inside them with it. The count is now whatever
+                  the package list holds, and packages join that list by being marked
+                  arrived — the same act the person at the gate is performing anyway. */}
+              <div className="flex items-center gap-2">
+                <span className="text-text-secondary font-semibold">
+                  Total received packages:
+                </span>
+                <span className="whitespace-nowrap">
+                  <strong className="font-mono font-bold text-base text-text-primary">
+                    {receiving.packages.length}
+                  </strong>
+                  {shipment && (
+                    <span className="text-xs text-text-muted">
+                      {" of "}
+                      <strong className="font-mono font-bold text-sm text-text-secondary">
+                        {shipment.total_packages}
+                      </strong>{" "}
+                      sent
+                    </span>
+                  )}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* "Add Package" used to live here. It now sits quietly at the foot of
+                  the package list, because adding a package by hand is the exception:
+                  the ordinary way a package joins this receiving is by being marked
+                  arrived in that list. */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={markAllOpened}
+                className="text-xs h-7 text-text-secondary hover:text-brand"
+                title="Mark all packages as opened"
+              >
+                ✓ Mark all opened
               </Button>
-              {addingCostId && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={cancelAddCost}
-                  className={cn(SOFT_RED, "ml-2")}
-                >
-                  Cancel
-                </Button>
-              )}
             </div>
-          </section>
+          </div>
+        )}
 
-          <section ref={packagesSectionRef}>
-            <SectionLabel>What we counted</SectionLabel>
-            <CountCheck
-              counted={counted}
-              expected={expectedPairs(receiving)}
-              opened={opened}
-              total={receiving.packages.length}
-              expectedPackages={shipment?.total_packages}
-              unit="set"
-            />
-            {receiving.packages.length === 0 ? (
-              <p className="text-sm text-text-muted">
-                No packages recorded yet. Put the number of received
-                packages above and a row appears for each one.
+        {/* ── Arrival notice: the panel's bottom strip ────────────────────
+            Renders nothing at all when there is nothing to say, so the panel
+            simply ends one row earlier rather than leaving an empty band. */}
+        {activeTab === "packages" && (
+          <CountCheck
+            counted={counted}
+            expected={expectedTotalPairs}
+            opened={opened}
+            total={receiving.packages.length}
+            expectedPackages={shipment?.total_packages}
+            unit="set"
+          />
+        )}
+      </div>
+
+      {/* ── TAB 1: Package Inspection Split-Pane Workbench ──────────────── */}
+      {activeTab === "packages" && (
+        <div className="flex flex-col gap-2.5 flex-1 min-h-0">
+          {allProblems.length > 0 && (
+            <div className="rounded-lg border border-warning/40 bg-warning-subtle/60 px-4 py-2.5">
+              <span className="text-xs font-bold text-warning flex items-center gap-1.5">
+                <WarningIcon className="w-3.5 h-3.5" />
+                Does not match the voucher ({allProblems.length})
+              </span>
+              <ul className="mt-1.5 text-[11px] text-text-secondary grid gap-x-6 gap-y-1 sm:grid-cols-2 lg:grid-cols-3 max-h-24 overflow-y-auto">
+                {allProblems.map((prob, i) => (
+                  <li key={i} className="leading-tight">
+                    • {prob}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Main 2-Column Cockpit */}
+          <div className="flex-1 min-h-[540px] flex border border-border rounded-xl bg-bg-surface overflow-hidden shadow-xs">
+            {/* ── Left Column: Packages list ─────────────────────────────── */}
+            <aside className="w-64 sm:w-72 shrink-0 border-r border-border flex flex-col bg-bg-subtle/40">
+              <div className="p-3 border-b border-border/80 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold uppercase tracking-wider text-text-secondary">
+                    Packages
+                  </span>
+                  <span className="rounded-full bg-border px-1.5 py-0.2 text-[10px] font-mono text-text-muted">
+                    {receiving.packages.length}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-2 border-b border-border/60">
+                <Input
+                  placeholder="Filter package #..."
+                  value={packageSearch}
+                  onChange={(e) => setPackageSearch(e.target.value)}
+                  className="h-7 text-xs bg-bg-surface"
+                />
+              </div>
+
+              <div className="flex-1 overflow-y-auto divide-y divide-border/40 p-1.5 space-y-1">
+                {filteredPackagesWithIndex.map(({ pkg, originalIndex }) => {
+                  const isSelected = originalIndex === safePackageIndex;
+                  const pairs = packagePairs(pkg);
+                  return (
+                    <div
+                      key={pkg.package_id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedPackageIndex(originalIndex)}
+                      className={cn(
+                        "w-full text-left px-3 py-2 rounded-lg cursor-pointer transition-all flex items-center justify-between gap-2 select-none",
+                        isSelected
+                          ? "bg-brand text-white shadow-xs font-semibold"
+                          : "hover:bg-bg-surface text-text-primary bg-transparent",
+                      )}
+                    >
+                      <div className="min-w-0 flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "w-2 h-2 rounded-full shrink-0",
+                            pkg.opened
+                              ? isSelected
+                                ? "bg-white"
+                                : "bg-success"
+                              : isSelected
+                                ? "bg-white/50"
+                                : "bg-text-muted/40",
+                          )}
+                        />
+                        <span className="font-mono text-sm tracking-tight truncate">
+                          #{pkg.package_no}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0 text-xs">
+                        <span
+                          className={cn(
+                            "font-mono text-[11px]",
+                            isSelected ? "text-white/90" : "text-text-muted",
+                          )}
+                        >
+                          {pkg.opened
+                            ? `${pkg.items.length} ${pkg.items.length === 1 ? "product" : "products"} · ${formatSets(pairs)}`
+                            : "Unopened"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Slots for packages the shipment sent that are not here, and the way
+                    they are brought in: click the slot when the package turns up and it
+                    becomes a real package ready to open. Kept grey rather than amber —
+                    one shipment's packages often arrive in more than one trip, so this
+                    is a normal in-progress state, not a fault. */}
+                {filteredMissingNos.map((no) => (
+                  // The dashed box lives on an inner element on purpose. This list's
+                  // container uses `divide-y`, which sets border-bottom-width:0 and
+                  // its own border-color on every child after the first — that was
+                  // rubbing out the bottom edge of the dashed outline and washing out
+                  // the other three sides. A plain wrapper takes the divide rules so
+                  // the box inside keeps all four of its own borders.
+                  <div key={`missing-${no}`}>
+                    <button
+                      type="button"
+                      onClick={() => markPackageArrived(no)}
+                      className="group w-full text-left px-3 py-2 rounded-lg flex items-center justify-between gap-2 select-none border border-dashed border-border-strong bg-transparent transition-colors hover:border-solid hover:border-brand hover:bg-brand-subtle"
+                      title={
+                        no === receiving.packages.length + 1
+                          ? `Package #${no} has arrived — click to receive it`
+                          : `Packages #${receiving.packages.length + 1}–#${no} have arrived — click to receive them`
+                      }
+                    >
+                      <div className="min-w-0 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full shrink-0 border border-text-muted/50 group-hover:border-brand" />
+                        <span className="font-mono text-sm tracking-tight truncate text-text-muted group-hover:text-brand">
+                          #{no}
+                        </span>
+                      </div>
+                      <span className="font-mono text-[11px] text-text-muted group-hover:hidden">
+                        Still to come
+                      </span>
+                      <span className="hidden font-mono text-[11px] font-semibold text-brand group-hover:inline">
+                        It's here →
+                      </span>
+                    </button>
+                  </div>
+                ))}
+
+                {filteredPackagesWithIndex.length === 0 &&
+                  filteredMissingNos.length === 0 && (
+                    <p className="p-4 text-center text-xs text-text-muted">
+                      No packages match filter.
+                    </p>
+                  )}
+
+                {/* The exception, kept quiet. Every package the shipment announced has
+                    a slot of its own above; this is for the ones it did not — an extra
+                    package that turned up, or a receiving with no shipment behind it to
+                    say how many to expect. */}
+                {packageSearch.trim() === "" && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      markPackageArrived(receiving.packages.length + 1)
+                    }
+                    className="w-full px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs text-text-muted hover:text-brand hover:bg-bg-surface transition-colors"
+                    title="Record a package the shipment did not list"
+                  >
+                    <PlusIcon className="w-3.5 h-3.5" />
+                    Extra package arrived
+                  </button>
+                )}
+              </div>
+
+              <div className="p-2.5 border-t border-border/80 bg-bg-surface flex items-center justify-between text-xs text-text-muted">
+                <span>
+                  Opened: {opened}/{receiving.packages.length}
+                </span>
+                <span className="font-semibold text-text-primary font-mono">
+                  {formatSets(counted)}
+                </span>
+              </div>
+            </aside>
+
+            {/* ── Middle Column: Active Package Workbench ───────────────────── */}
+            <main className="flex-1 min-w-0 flex flex-col bg-bg-surface">
+              {activePackage ? (
+                <>
+                  {/* Active Package Top Bar */}
+                  <div className="px-5 py-3 border-b border-border flex flex-wrap items-center justify-between gap-3 bg-bg-subtle/20">
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-bold text-text-primary tracking-tight font-mono">
+                          Package #{activePackage.package_no}
+                        </h3>
+                        <OpenedToggle
+                          opened={activePackage.opened}
+                          onToggle={() => toggleOpened(safePackageIndex)}
+                        />
+                      </div>
+
+                      <div className="h-4 w-px bg-border" />
+
+                      <div className="flex items-center gap-1.5 text-xs text-text-muted">
+                        <span>Date:</span>
+                        <CellInput
+                          label="Package received date"
+                          placeholder="YYYY-MM-DD"
+                          type="date"
+                          value={activePackage.received_on}
+                          onChange={(received_on) =>
+                            setPackage(safePackageIndex, { received_on })
+                          }
+                          className="w-28 text-xs font-mono"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-1.5 text-xs text-text-muted">
+                        <span>Note:</span>
+                        <CellInput
+                          label="Package note"
+                          placeholder="Optional note"
+                          value={activePackage.note}
+                          onChange={(note) =>
+                            setPackage(safePackageIndex, { note })
+                          }
+                          className="w-36 text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {safePackageIndex > 0 && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() =>
+                            duplicatePreviousPackage(safePackageIndex)
+                          }
+                          className="h-7 text-xs gap-1"
+                          title="Copy products & colors from previous package"
+                        >
+                          <CopyIcon className="w-3.5 h-3.5" />
+                          <span>Copy Prev</span>
+                        </Button>
+                      )}
+
+                      <Button
+                        size="sm"
+                        onClick={() => addItem(safePackageIndex)}
+                        className="h-7 text-xs gap-1"
+                        title="Add product to this package"
+                      >
+                        <PlusIcon className="w-3.5 h-3.5" />
+                        <span>Add Product</span>
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Active Package Products Table */}
+                  <div className="flex-1 overflow-y-auto p-4">
+                    {!activePackage.opened ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center p-8 border-2 border-dashed border-border/80 rounded-xl bg-bg-subtle/20">
+                        <p className="text-sm font-semibold text-text-primary">
+                          Package #{activePackage.package_no} is currently
+                          unopened.
+                        </p>
+                        <p className="mt-1 text-xs text-text-muted max-w-sm">
+                          Open the package to physically count and record shoes
+                          inside.
+                        </p>
+                        <Button
+                          size="sm"
+                          onClick={() => toggleOpened(safePackageIndex)}
+                          className="mt-4 gap-1.5"
+                        >
+                          <span>Open Package</span>
+                        </Button>
+
+                        {/* The way back from a mis-click on a "still to come" slot,
+                            beside the action it was meant to be. Offered only on the
+                            newest package, which is the only one such a click can have
+                            created, and asks twice once something has been counted into
+                            it so the counting is never thrown away silently. */}
+                        {isLastPackage &&
+                          receiving.packages.length > 1 &&
+                          (confirmUndoArrival ? (
+                            <div className="mt-4 flex items-center gap-2">
+                              <span className="text-xs text-text-muted">
+                                This package already has products counted in it.
+                              </span>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={undoLastArrival}
+                                className="h-7 text-xs"
+                              >
+                                Discard count
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setConfirmUndoArrival(false)}
+                                className="h-7 text-xs"
+                              >
+                                Keep
+                              </Button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                activePackageHasCount
+                                  ? setConfirmUndoArrival(true)
+                                  : undoLastArrival()
+                              }
+                              className="mt-3 text-xs text-text-muted underline underline-offset-2 hover:text-error"
+                              title="This package has not arrived — take it back off this receiving"
+                            >
+                              Undo arrival
+                            </button>
+                          ))}
+                      </div>
+                    ) : activePackage.items.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                        <p className="text-sm text-text-muted">
+                          No shoes recorded in Package #
+                          {activePackage.package_no} yet.
+                        </p>
+                        <Button
+                          size="sm"
+                          onClick={() => addItem(safePackageIndex)}
+                          className="mt-3 gap-1.5"
+                        >
+                          <PlusIcon className="w-3.5 h-3.5" />
+                          Add First Product
+                        </Button>
+                      </div>
+                    ) : (
+                      <TableContainer className="rounded-lg border border-border">
+                        <Thead>
+                          <Tr>
+                            <Th className="w-12 text-center">#</Th>
+                            <Th className="min-w-[14rem]">Stock Code</Th>
+                            <Th className="min-w-[16rem]">Color & Qty</Th>
+                            <Th className="w-36 text-right">Received</Th>
+                            <Th className="w-12" aria-label="Actions" />
+                          </Tr>
+                        </Thead>
+                        <Tbody>
+                          {activePackage.items.map((item, itemIndex) => {
+                            const codeProblem = receivedStockCodeProblem(
+                              item.stock_code,
+                              expected,
+                            );
+                            const colorProblem =
+                              colorQtyProblem(item.color_breakdown) ??
+                              receivedColorProblem(
+                                item.stock_code,
+                                item.color_breakdown,
+                                expected,
+                              ) ??
+                              receivedColorQuantityProblem(
+                                item.stock_code,
+                                receiving,
+                                expected,
+                              );
+
+                            return (
+                              <Tr key={item.item_id}>
+                                <Td className="text-center text-xs font-mono text-text-muted">
+                                  {itemIndex + 1}
+                                </Td>
+                                <Td className="align-top">
+                                  <SuggestInput
+                                    label={`Stock code ${itemIndex + 1}`}
+                                    placeholder="e.g. A1001"
+                                    suggestions={STOCK_CODES}
+                                    bare
+                                    value={item.stock_code}
+                                    onChange={(code) =>
+                                      setStockCode(
+                                        safePackageIndex,
+                                        itemIndex,
+                                        code,
+                                      )
+                                    }
+                                    error={codeProblem ?? undefined}
+                                  />
+                                </Td>
+                                <Td className="align-top">
+                                  <CellInput
+                                    label={`Colors for ${item.stock_code || "product"}`}
+                                    placeholder="e.g. black10s, pink2p"
+                                    multiline
+                                    value={item.color_breakdown}
+                                    onChange={(breakdown) =>
+                                      setColorQty(
+                                        safePackageIndex,
+                                        itemIndex,
+                                        breakdown,
+                                      )
+                                    }
+                                    error={colorProblem ?? undefined}
+                                  />
+                                </Td>
+                                <Td className="align-top text-right">
+                                  <div className="min-h-9 px-3 flex items-center justify-end rounded-md bg-bg-subtle/80 text-sm font-bold font-mono text-text-primary">
+                                    {formatStoredQuantity(
+                                      item.quantity,
+                                      item.unit,
+                                    )}
+                                  </div>
+                                </Td>
+                                <Td className="align-top text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      removeItem(safePackageIndex, itemIndex)
+                                    }
+                                    className="p-1.5 rounded text-text-muted hover:text-error hover:bg-error-subtle transition-colors"
+                                    title="Remove this product line"
+                                  >
+                                    <TrashIcon className="w-4 h-4" />
+                                  </button>
+                                </Td>
+                              </Tr>
+                            );
+                          })}
+                        </Tbody>
+                      </TableContainer>
+                    )}
+                  </div>
+
+                  {/* Active Package Footer */}
+                  <div className="px-5 py-2.5 border-t border-border bg-bg-subtle/40 flex items-center justify-between text-xs">
+                    <span className="text-text-muted">
+                      Package #{activePackage.package_no} Subtotal:{" "}
+                      <strong className="text-text-primary">
+                        {activePackage.items.length}{" "}
+                        {activePackage.items.length === 1
+                          ? "product"
+                          : "products"}
+                      </strong>
+                    </span>
+                    <span className="font-bold font-mono text-success text-sm">
+                      {formatSets(packagePairs(activePackage))}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div className="h-full flex items-center justify-center text-text-muted text-sm">
+                  Select a package from the list on the left.
+                </div>
+              )}
+            </main>
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB 2: Costs ─────────────────────────────────────────────── */}
+      {activeTab === "costs" && (
+        <div className="flex flex-col gap-3 flex-1 min-h-0">
+          {/* Only the two figures you cannot read off the table itself. The total is
+              already on the tab and again under the table, and the "Add cost" button
+              already sits in the table header, so neither needs a card of its own. */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl border border-border bg-bg-surface p-4 shadow-xs">
+              <span className="text-xs font-medium text-text-muted">
+                Cost Per Package
+              </span>
+              <p className="text-xl font-bold font-mono text-text-primary mt-1">
+                {formatKyat(costPerPackage)}
               </p>
-            ) : (
-              <TableContainer>
+              <p className="text-[11px] text-text-muted mt-0.5">
+                Across {receiving.total_packages} total packages
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-border bg-bg-surface p-4 shadow-xs">
+              <span className="text-xs font-medium text-text-muted">
+                Cost / Pair
+              </span>
+              <p className="text-xl font-bold font-mono text-success mt-1">
+                +{formatKyat(costPerPair)}
+              </p>
+              <p className="text-[11px] text-text-muted mt-0.5">
+                Based on {formatSets(counted)} counted
+              </p>
+            </div>
+          </div>
+
+          {/* Costs table */}
+          <div className="flex-1 min-h-[440px] border border-border rounded-xl bg-bg-surface overflow-hidden flex flex-col shadow-xs">
+            <div className="px-5 py-3 border-b border-border flex items-center justify-between bg-bg-subtle/30">
+              <div>
+                <h3 className="text-sm font-bold text-text-primary">Costs</h3>
+                <p className="text-xs text-text-muted">
+                  Record what was spent stage by stage to see the true cost per
+                  shoe.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={addCost}
+                className="h-7 text-xs gap-1 shadow-xs"
+              >
+                <PlusIcon className="w-3.5 h-3.5" />
+                Add Cost
+              </Button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4">
+              <TableContainer className="rounded-lg border border-border">
                 <Thead>
                   <Tr>
-                    <Th>Package</Th>
-                    <Th>Received date</Th>
-                    <Th>Stock code</Th>
-                    <Th>Colors</Th>
-                    <Th className="text-right">Received quantity</Th>
-                    <Th>Note</Th>
+                    <Th className="min-w-[11rem]">Stage / Location</Th>
+                    <Th className="w-32">Date</Th>
+                    <Th className="min-w-[11rem]">Paid To</Th>
+                    <Th className="min-w-[10rem]">Fee Type</Th>
+                    <Th className="w-48 text-right">Amount</Th>
+                    <Th className="min-w-[12rem]">Note</Th>
+                    <Th className="w-10" aria-label="Remove" />
                   </Tr>
                 </Thead>
                 <Tbody>
-                  {receiving.packages.flatMap((entry, index) => {
-                    const rowCount = Math.max(entry.items.length, 1);
-                    const packageCell = (
-                      <Td rowSpan={rowCount} className="align-top">
-                        <div className="flex min-w-[9rem] flex-col items-start gap-2">
-                          <span className="font-semibold text-brand">
-                            #{entry.package_no}
-                          </span>
-                          <OpenedToggle
-                            opened={entry.opened}
-                            onToggle={() => toggleOpened(index)}
-                          />
-                        </div>
+                  {receiving.costs.map((cost, index) => (
+                    <Tr key={cost.cost_id}>
+                      <Td>
+                        <SuggestInput
+                          label={`Where cost ${index + 1} was spent`}
+                          placeholder="e.g. Mawlamyine Cargo"
+                          suggestions={stages}
+                          value={cost.stage}
+                          onChange={(next) => setCost(index, { stage: next })}
+                          bare
+                        />
                       </Td>
-                    );
-                    const receivedDateCell = (
-                      <Td rowSpan={rowCount} className="align-top">
+                      <Td>
                         <CellInput
-                          label={`Received date for package ${entry.package_no}`}
+                          label={`Date of cost ${index + 1}`}
                           placeholder="YYYY-MM-DD"
                           type="date"
-                          value={entry.received_on}
-                          onChange={(received_on) =>
-                            setPackage(index, { received_on })
+                          value={cost.cost_date}
+                          onChange={(cost_date) =>
+                            setCost(index, { cost_date })
                           }
+                          className="font-mono text-xs"
                         />
                       </Td>
-                    );
-                    const noteCell = (
-                      <Td rowSpan={rowCount} className="align-top">
-                        <CellInput
-                          label={`Note on package ${entry.package_no}`}
-                          placeholder="Optional note"
-                          value={entry.note}
-                          onChange={(note) => setPackage(index, { note })}
+                      <Td>
+                        <SuggestInput
+                          label={`Who was paid for cost ${index + 1}`}
+                          placeholder="Carrier/Driver/Porter"
+                          suggestions={carriers}
+                          value={cost.carrier}
+                          onChange={(next) => setCost(index, { carrier: next })}
+                          bare
                         />
                       </Td>
-                    );
-                    const packageTotalRow = (
-                      <Tr
-                        key={`${entry.package_id}-total`}
-                        className="bg-bg-subtle hover:bg-bg-subtle"
-                      >
-                        <Td colSpan={2} className="font-semibold">
-                          Total
-                        </Td>
-                        <Td className="font-semibold tabular-nums">
-                          <span className="mr-2 text-xs font-medium text-text-muted">
-                            Products
-                          </span>
-                          {formatQty(entry.items.length)}
-                        </Td>
-                        <Td />
-                        <Td className="text-right font-semibold tabular-nums text-success">
-                          {formatSets(packagePairs(entry))}
-                        </Td>
-                        <Td className="text-right">
-                          {entry.opened ? (
-                            <Button
-                              size="sm"
-                              onClick={() => addItem(index)}
-                            >
-                              <PlusIcon className="h-4 w-4" />
-                              Add product
-                            </Button>
-                          ) : (
-                            <span className="text-xs text-text-muted">
-                              Open package first
-                            </span>
-                          )}
-                        </Td>
-                      </Tr>
-                    );
+                      <Td>
+                        <SuggestInput
+                          label={`What cost ${index + 1} was for`}
+                          placeholder="Fee type"
+                          suggestions={COST_KINDS}
+                          value={cost.kind}
+                          onChange={(next) => setCost(index, { kind: next })}
+                          bare
+                        />
+                      </Td>
+                      {/* Currency sits inside the amount cell rather than in a column
+                          of its own — it is part of writing the amount, and almost
+                          every line is in Kyat anyway. */}
+                      <Td className="text-right">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1">
+                            <CurrencySelect
+                              label={`Currency ${index + 1}`}
+                              value={
+                                (cost.currency_code as CurrencyCode) ||
+                                DEFAULT_CURRENCY
+                              }
+                              onChange={(code) => setCostCurrency(index, code)}
+                              className="shrink-0 text-xs px-1"
+                            />
+                            {cost.currency_code &&
+                            isForeignCurrency(cost.currency_code) ? (
+                              <CellInput
+                                label={`Original amount ${index + 1}`}
+                                placeholder="Original"
+                                className="flex-1 text-right font-mono"
+                                value={String(cost.original_amount ?? "")}
+                                onChange={(next) =>
+                                  setCostOriginalAmount(
+                                    index,
+                                    Number(next) || 0,
+                                  )
+                                }
+                              />
+                            ) : (
+                              <CellInput
+                                label={`Amount ${index + 1}`}
+                                placeholder="0"
+                                numeric
+                                className="flex-1 text-right font-mono font-semibold"
+                                value={String(cost.amount || "")}
+                                onChange={(next) =>
+                                  setCost(index, { amount: Number(next) || 0 })
+                                }
+                              />
+                            )}
+                          </div>
 
-                    if (!entry.opened || entry.items.length === 0) {
-                      return [
-                        <Tr key={entry.package_id}>
-                          {packageCell}
-                          {receivedDateCell}
-                          <Td
-                            colSpan={3}
-                            className="text-sm text-text-muted"
-                          >
-                            {entry.opened
-                              ? "Add a product to record what was received"
-                              : "Open package to record products"}
-                          </Td>
-                          {noteCell}
-                        </Tr>,
-                        packageTotalRow,
-                      ];
-                    }
-
-                    return [
-                      ...entry.items.map((item, itemIndex) => (
-                        <Tr key={item.item_id}>
-                          {itemIndex === 0 && packageCell}
-                          {itemIndex === 0 && receivedDateCell}
-                          <Td className="align-top">
-                            <div className="min-w-[12rem] flex items-start gap-2">
-                              <div className="min-w-0 flex-1">
-                                <SuggestInput
-                                  label={`Stock code for product ${itemIndex + 1} in package ${entry.package_no}`}
-                                  placeholder="A1001"
-                                  suggestions={STOCK_CODES}
-                                  bare
-                                  value={item.stock_code}
+                          {cost.currency_code &&
+                            isForeignCurrency(cost.currency_code) && (
+                              <>
+                                <CellInput
+                                  label={`Exchange rate ${index + 1}`}
+                                  placeholder="Rate"
+                                  className="text-right font-mono text-xs"
+                                  value={String(cost.exchange_rate ?? "")}
                                   onChange={(next) =>
-                                    setStockCode(index, itemIndex, next)
-                                  }
-                                  error={
-                                    receivedStockCodeProblem(
-                                      item.stock_code,
-                                      expected,
-                                    ) ?? undefined
+                                    setCostExchangeRate(
+                                      index,
+                                      Number(next) || 0,
+                                    )
                                   }
                                 />
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  removeItem(index, itemIndex)
-                                }
-                                title="Remove this product"
-                                aria-label={`Remove product ${itemIndex + 1} from package ${entry.package_no}`}
-                                className={cn(
-                                  "mt-1 rounded-md p-1 text-text-muted",
-                                  "transition-colors duration-150",
-                                  "hover:bg-error-subtle hover:text-error",
-                                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
-                                )}
-                              >
-                                <TrashIcon className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </Td>
-                          <Td className="align-top">
-                            <CellInput
-                              label={`Colors for product ${itemIndex + 1} in package ${entry.package_no}`}
-                              placeholder="black10s, pink2p"
-                              multiline
-                              error={
-                                colorQtyProblem(item.color_breakdown) ??
-                                receivedColorProblem(
-                                  item.stock_code,
-                                  item.color_breakdown,
-                                  expected,
-                                ) ??
-                                receivedColorQuantityProblem(
-                                  item.stock_code,
-                                  receiving,
-                                  expected,
-                                ) ??
-                                undefined
-                              }
-                              value={item.color_breakdown}
-                              onChange={(color_breakdown) =>
-                                setColorQty(index, itemIndex, color_breakdown)
-                              }
-                            />
-                          </Td>
-                          <Td className="align-top text-right">
-                            <div className="min-h-9 px-2 flex items-center justify-end rounded-md bg-bg-subtle text-sm font-semibold tabular-nums text-text-primary">
-                              {formatStoredQuantity(item.quantity, item.unit)}
-                            </div>
-                          </Td>
-                          {itemIndex === 0 && noteCell}
-                        </Tr>
-                      )),
-                      packageTotalRow,
-                    ];
-                  })}
-                  <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-                    <Td colSpan={4} className="font-semibold">
-                      Packages opened {formatQty(opened)} /{" "}
-                      {formatQty(receiving.packages.length)}
-                    </Td>
-                    <Td
-                      colSpan={2}
-                      className="text-right font-semibold text-success"
-                    >
-                      {formatIn(counted, receiving.total_unit)} /{" "}
-                      {formatIn(expectedPairs(receiving), receiving.total_unit)} received
-                    </Td>
-                  </Tr>
+                                <span className="text-xs font-bold font-mono text-brand tabular-nums">
+                                  = {formatKyat(cost.amount)}
+                                </span>
+                              </>
+                            )}
+                        </div>
+                      </Td>
+                      <Td>
+                        <CellInput
+                          label={`Note on cost ${index + 1}`}
+                          placeholder="Take a note..."
+                          value={cost.note}
+                          onChange={(next) => setCost(index, { note: next })}
+                        />
+                      </Td>
+                      <Td className="text-center">
+                        <button
+                          type="button"
+                          onClick={() => removeCost(index)}
+                          className="p-1.5 rounded text-text-muted hover:text-error hover:bg-error-subtle transition-colors"
+                          title="Remove cost line"
+                        >
+                          <TrashIcon className="w-4 h-4" />
+                        </button>
+                      </Td>
+                    </Tr>
+                  ))}
+
+                  {receiving.costs.length === 0 && (
+                    <Tr>
+                      <Td
+                        colSpan={7}
+                        className="text-center py-8 text-text-muted text-xs"
+                      >
+                        No expenses logged for this arrival yet. Click "Add
+                        Cost" above.
+                      </Td>
+                    </Tr>
+                  )}
                 </Tbody>
               </TableContainer>
-            )}
-          </section>
+            </div>
+
+            <div className="px-5 py-3 border-t border-border bg-bg-subtle/50 flex items-center justify-between text-sm">
+              <span className="font-semibold text-text-secondary">
+                Total Cost ({receiving.costs.length} lines)
+              </span>
+              <span className="font-bold font-mono text-brand text-base">
+                {formatKyat(totalCostAmount)}
+              </span>
+            </div>
+          </div>
         </div>
-      </Panel>
+      )}
     </div>
   );
 }
 
 /** The check the whole page exists for: what was counted against what the supplier's
- *  voucher says is coming. Quiet while the counting is still going on — a shortfall
- *  halfway through only means the rest of the boxes are still shut. */
+ *  voucher says is coming, and whether every package the shipment sent is actually
+ *  here. Quiet about the *quantity* while the counting is still going on — a shortfall
+ *  halfway through only means the rest of the packages are still shut — but never
+ *  quiet about a whole package being absent, which is true regardless of how far the
+ *  counting has got. */
 function CountCheck({
   counted,
   expected,
@@ -1861,16 +2413,17 @@ function CountCheck({
   unit: Unit;
 }): React.JSX.Element {
   const difference = counted - expected;
-  // Every box added so far being open still doesn't make the count final while the
-  // shipment says more boxes are coming and this receiving simply hasn't added them yet.
-  const packagesComplete =
-    expectedPackages === undefined || total >= expectedPackages;
-  const allOpened = opened === total && total > 0 && packagesComplete;
+  // Packages the shipment says went out that this receiving has no record of at all.
+  // Every package added so far being open still doesn't make the count final while
+  // some of them have not turned up yet.
+  const packagesMissing =
+    expectedPackages === undefined ? 0 : Math.max(0, expectedPackages - total);
+  const allOpened = opened === total && total > 0 && packagesMissing === 0;
 
   if (allOpened) {
     if (difference === 0) {
       return (
-        <div className="flex items-center gap-2 mb-3 rounded-lg border border-success/30 bg-success-subtle px-4 py-2.5 text-sm text-success">
+        <div className="flex items-center gap-2 bg-success-subtle px-5 py-2.5 text-sm text-success">
           <CheckIcon className="w-4 h-4 shrink-0" />
           <span>
             All {formatQty(total)} packages received, and the{" "}
@@ -1881,7 +2434,7 @@ function CountCheck({
     }
 
     return (
-      <div className="flex items-start gap-2 mb-3 rounded-lg border border-error/30 bg-error-subtle px-4 py-2.5 text-sm text-error">
+      <div className="flex items-start gap-2 bg-error-subtle px-5 py-2.5 text-sm text-error">
         <WarningIcon className="w-4 h-4 shrink-0 mt-0.5" />
         <span>
           <strong className="font-semibold">
@@ -1897,11 +2450,52 @@ function CountCheck({
     );
   }
 
-  // Falling short while boxes are still unopened is just the normal in-progress state —
-  // more could still be inside one nobody has opened yet, so it says nothing. Already
-  // matching or exceeding the voucher's total this early is not normal: it means
-  // everything the voucher named has been counted into too few of the boxes, which is
-  // usually a sign the same goods got logged twice, or a whole box was skipped.
+  // Packages still to come is said in every state, but how loudly depends on what it
+  // means. One shipment's packages do not always travel together, so most of the time
+  // this is simply a delivery still in progress and gets a plain, quiet note.
+  if (packagesMissing > 0) {
+    const one = packagesMissing === 1;
+    const headline = `${formatQty(packagesMissing)} of the ${formatQty(
+      expectedPackages ?? 0,
+    )} packages sent ${one ? "is" : "are"} still to come.`;
+
+    // The exception worth an amber warning: the voucher's entire quantity has already
+    // been counted out of fewer packages than were sent. Goods cannot all be here
+    // while a package is still on the road, so something was almost certainly
+    // recorded twice.
+    if (difference >= 0) {
+      return (
+        <div className="flex items-start gap-2 bg-warning-subtle px-5 py-2.5 text-sm text-warning">
+          <WarningIcon className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>
+            <strong className="font-semibold">{headline}</strong> Even so,
+            everything the voucher lists has already been counted out of the{" "}
+            {formatQty(total)} that did arrive. Check whether the same products
+            were counted twice before completing receiving.
+          </span>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex items-start gap-2 bg-bg-subtle px-5 py-2.5 text-sm text-text-secondary">
+        <TruckIcon className="w-4 h-4 shrink-0 mt-0.5 text-text-muted" />
+        <span>
+          <strong className="font-semibold text-text-primary">
+            {headline}
+          </strong>{" "}
+          Packages from one shipment do not always arrive together. Add{" "}
+          {one ? "it" : "them"} when {one ? "it turns up" : "they turn up"}.
+        </span>
+      </div>
+    );
+  }
+
+  // Every package sent is here, but some are still shut. Falling short on quantity now
+  // is just the normal in-progress state — more could still be inside one nobody has
+  // opened, so it says nothing. Already matching or exceeding the voucher's total this
+  // early is not normal: it means everything the voucher named has been counted out of
+  // too few packages, usually because the same products got logged twice.
   if (opened > 0 && difference >= 0) {
     const unopenedAdded = total - opened;
     const headline =
@@ -1909,27 +2503,13 @@ function CountCheck({
         ? `Received ${formatIn(difference, unit)} more than the voucher.`
         : "Received quantity matches the voucher.";
     return (
-      <div className="flex items-start gap-2 mb-3 rounded-lg border border-warning/30 bg-warning-subtle px-4 py-2.5 text-sm text-warning">
+      <div className="flex items-start gap-2 bg-warning-subtle px-5 py-2.5 text-sm text-warning">
         <WarningIcon className="w-4 h-4 shrink-0 mt-0.5" />
         <span>
           <strong className="font-semibold">{headline}</strong>{" "}
-          {unopenedAdded > 0 ? (
-            <>
-              {formatQty(unopenedAdded)} of the packages already added{" "}
-              {unopenedAdded === 1 ? "is" : "are"} still unopened. Check them
-              before completing receiving.
-            </>
-          ) : (
-            // unopenedAdded is 0 here, so allOpened above must have been false because
-            // packagesComplete was false: the shipment still has more packages than
-            // this receiving has added yet.
-            <>
-              Only {formatQty(total)} of {formatQty(expectedPackages ?? total)}
-              expected packages have been added. Check the remaining{" "}
-              {formatQty(Math.max(0, (expectedPackages ?? total) - total))}{" "}
-              packages before completing receiving.
-            </>
-          )}
+          {formatQty(unopenedAdded)} of the packages{" "}
+          {unopenedAdded === 1 ? "is" : "are"} still unopened. Check{" "}
+          {unopenedAdded === 1 ? "it" : "them"} before completing receiving.
         </span>
       </div>
     );
@@ -2056,7 +2636,9 @@ function NewReceivingForm({
     );
     // The figure and unit travel together. Copying only the number would turn a
     // shipment counted in pairs into the same number of sets.
-    setValue("sets", String(picked.total_quantity_pairs), { shouldDirty: true });
+    setValue("sets", String(picked.total_quantity_pairs), {
+      shouldDirty: true,
+    });
     setValue("sets_unit", picked.total_unit, { shouldDirty: true });
   }
 
@@ -2091,9 +2673,10 @@ function NewReceivingForm({
               },
             ]
           : [],
-      // An empty box means "whatever the shipment says", and that figure carries the
+      // An empty field means "whatever the shipment says", and that figure carries the
       // shipment's unit, not the one left sitting in the form.
-      total_quantity_pairs: Number(values.sets) || shipment.total_quantity_pairs,
+      total_quantity_pairs:
+        Number(values.sets) || shipment.total_quantity_pairs,
       total_unit: Number(values.sets) ? values.sets_unit : shipment.total_unit,
     });
   }
