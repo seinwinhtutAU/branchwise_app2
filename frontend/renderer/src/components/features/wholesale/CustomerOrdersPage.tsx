@@ -177,7 +177,8 @@ const sets = (qty: number): string => formatSets(qty);
 const ORDERS_QUERY_KEY = ["wholesale", "orders"] as const;
 const STOCK_QUERY_KEY = ["wholesale", "stock"] as const;
 
-type View = "list" | "detail" | "allocate" | "new";
+type View = "list" | "detail" | "new";
+type DetailTab = "products" | "payments" | "allocate";
 type StatusFilter = OrderStatus | "all";
 type PayFilter = PaymentStatus | "all";
 
@@ -363,7 +364,6 @@ export default function CustomerOrdersPage({
   }, [wire]);
   const { orders } = useWholesale();
 
-
   async function reload(): Promise<void> {
     await queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY });
     await queryClient.invalidateQueries({
@@ -430,8 +430,10 @@ export default function CustomerOrdersPage({
 
   const [view, setView] = useState<View>("list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detailFocus, setDetailFocus] = useState<"payment" | undefined>();
-  const [fulfillTab, setFulfillTab] = useState<"allocate" | "deliver">("allocate");
+  const [detailTab, setDetailTab] = useState<DetailTab>("products");
+  const [fulfillSubTab, setFulfillSubTab] = useState<"allocate" | "deliver">(
+    "allocate",
+  );
 
   const selected =
     orders.find((order) => order.order_id === selectedId) ?? null;
@@ -441,14 +443,14 @@ export default function CustomerOrdersPage({
     const target = orders.find((order) => order.order_id === initialOrderId);
     if (!target) return;
     setSelectedId(target.order_id);
-    setDetailFocus(undefined);
+    setDetailTab("products");
     setView("detail");
     onInitialOrderOpened?.();
   }, [initialOrderId, onInitialOrderOpened, orders]);
 
   function openOrder(orderId: string, focus?: "payment"): void {
     setSelectedId(orderId);
-    setDetailFocus(focus);
+    setDetailTab(focus === "payment" ? "payments" : "products");
     setView("detail");
   }
 
@@ -461,8 +463,9 @@ export default function CustomerOrdersPage({
     tab: "allocate" | "deliver" = "allocate",
   ): void {
     setSelectedId(orderId);
-    setFulfillTab(tab);
-    setView("allocate");
+    setDetailTab("allocate");
+    setFulfillSubTab(tab);
+    setView("detail");
   }
 
   function cancelOrder(orderId: string): void {
@@ -597,29 +600,19 @@ export default function CustomerOrdersPage({
     return (
       <OrderDetail
         order={selected}
-        settings={settings}
-        focus={detailFocus}
-        onSave={persistOrder}
-        onBack={() => setView("list")}
-        onAllocate={openAllocation}
-        onWriteOff={writeOffOrderLine}
-        writeOffs={writeOffs}
-      />
-    );
-  }
-
-  if (view === "allocate" && selected) {
-    return (
-      <AllocateAndDeliveryView
-        order={selected}
         orders={orders}
+        settings={settings}
+        initialTab={detailTab}
+        initialFulfillSubTab={fulfillSubTab}
         inventoryLines={inventoryLines}
         inventoryLoading={isInventoryFetching}
-        initialTab={fulfillTab}
+        onSave={persistOrder}
+        onBack={() => setView("list")}
         onSaveAllocation={saveAllocation}
         onSaveAllocationsComplete={finishAllocationSave}
         onSaveDelivery={saveDelivery}
-        onBack={() => setView("list")}
+        onWriteOff={writeOffOrderLine}
+        writeOffs={writeOffs}
       />
     );
   }
@@ -720,7 +713,8 @@ function OrderList({
           : quickView === "ready_to_deliver"
             ? readyToDeliver(order)
             : quickView === "unpaid"
-              ? paymentStatus(order) === "unpaid" && order.order_status !== "cancelled"
+              ? paymentStatus(order) === "unpaid" &&
+                order.order_status !== "cancelled"
               : true;
 
       return matchesQuery && matchesStatus && matchesPay && matchesQuickView;
@@ -733,7 +727,11 @@ function OrderList({
     (safePage - 1) * PAGE_SIZE,
     safePage * PAGE_SIZE,
   );
-  const isFiltered = search.trim() !== "" || status !== "all" || pay !== "all" || quickView !== "all";
+  const isFiltered =
+    search.trim() !== "" ||
+    status !== "all" ||
+    pay !== "all" ||
+    quickView !== "all";
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const isMac = typeof window !== "undefined" && Boolean(window.api?.isMac);
@@ -747,7 +745,10 @@ function OrderList({
         activeEl instanceof HTMLInputElement ||
         activeEl instanceof HTMLTextAreaElement;
 
-      if ((e.key === "/" && !isInput) || ((e.metaKey || e.ctrlKey) && (e.key === "f" || e.key === "F"))) {
+      if (
+        (e.key === "/" && !isInput) ||
+        ((e.metaKey || e.ctrlKey) && (e.key === "f" || e.key === "F"))
+      ) {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
@@ -760,7 +761,9 @@ function OrderList({
   // Quick filter counts based on actionable operational status
   const countAll = orders.length;
   const countReadyToDeliver = orders.filter(readyToDeliver).length;
-  const countUnpaid = orders.filter((o) => paymentStatus(o) === "unpaid" && o.order_status !== "cancelled").length;
+  const countUnpaid = orders.filter(
+    (o) => paymentStatus(o) === "unpaid" && o.order_status !== "cancelled",
+  ).length;
 
   function resetFilters(): void {
     setSearch("");
@@ -1000,10 +1003,7 @@ function OrderList({
                   <Th>Customer</Th>
                   <Th>Date</Th>
                   <Th className="min-w-[17.5rem] whitespace-nowrap">
-                    Fulfillment qty
-                    <span className="block text-[10px] font-normal text-text-muted">
-                      delivered / total
-                    </span>
+                    Delivered / Ordered
                   </Th>
                   <Th className="whitespace-nowrap">Order status</Th>
                   <Th className="whitespace-nowrap">Payment status</Th>
@@ -1020,7 +1020,9 @@ function OrderList({
                       ? "bg-brand-subtle/30 hover:bg-brand-subtle/50"
                       : undefined;
                   const firstCellBorder =
-                    action === "deliver" ? "border-l-4 border-l-brand" : undefined;
+                    action === "deliver"
+                      ? "border-l-4 border-l-brand"
+                      : undefined;
 
                   return (
                     <Tr key={order.order_id} className={rowTint}>
@@ -1042,8 +1044,13 @@ function OrderList({
                           <div className="flex items-center justify-between gap-4 text-xs font-mono">
                             <span className="font-semibold text-text-primary whitespace-nowrap shrink-0">
                               {sets(order.delivered_quantity_pairs)}
-                              <span className="text-text-muted/60 font-normal"> / </span>
-                              <span className="text-text-secondary font-normal">{sets(order.total_quantity_pairs)}</span>
+                              <span className="text-text-muted/60 font-normal">
+                                {" "}
+                                /{" "}
+                              </span>
+                              <span className="text-text-secondary font-normal">
+                                {sets(order.total_quantity_pairs)}
+                              </span>
                             </span>
                             {remaining > 0 ? (
                               <span className="text-error text-[11px] font-sans font-medium whitespace-nowrap shrink-0">
@@ -1071,7 +1078,9 @@ function OrderList({
                         {action ? (
                           <Button
                             size="sm"
-                            onClick={() => onAllocate(order.order_id, "deliver")}
+                            onClick={() =>
+                              onAllocate(order.order_id, "deliver")
+                            }
                           >
                             Deliver
                           </Button>
@@ -1109,9 +1118,7 @@ function OrderList({
                 })}
               </Tbody>
             </TableContainer>
-            <div className="border-t border-border px-6 py-2 text-xs text-text-muted">
-              Amber — waiting to be allocated. Blue — allocated, waiting to go out.
-            </div>
+
             <div className="px-6 py-3 border-t border-border">
               <Pagination
                 page={safePage}
@@ -1218,7 +1225,7 @@ function RowMenu({
               {onAllocate && (
                 <MenuItem
                   icon={<ClipboardIcon className="w-4 h-4" />}
-                  label="Allocate stock"
+                  label="Allocate & deliver"
                   onClick={() => {
                     setOpen(false);
                     onAllocate();
@@ -1438,7 +1445,13 @@ function AllocationLineRow({
           <span className="text-xs text-text-secondary">
             <span className="font-semibold text-text-primary">Colors:</span>{" "}
             <span className="font-bold text-brand">
-              {formatColorBreakdown(line.color_breakdown, line.unit, line.unit_conversions) || line.color_breakdown || "—"}
+              {formatColorBreakdown(
+                line.color_breakdown,
+                line.unit,
+                line.unit_conversions,
+              ) ||
+                line.color_breakdown ||
+                "—"}
             </span>
           </span>
         </div>
@@ -1524,7 +1537,10 @@ function AllocationLineRow({
             {inventoryLoading
               ? "Checking stock…"
               : hasAvailableStock
-                ? formatColorPairs(availableToAllocate, { ...PAIRS_PER, set: setSize })
+                ? formatColorPairs(availableToAllocate, {
+                    ...PAIRS_PER,
+                    set: setSize,
+                  })
                 : hasCurrentAllocation
                   ? "No stock remains for another allocation."
                   : "No stock is available for this item."}
@@ -1557,7 +1573,8 @@ function AllocationLineRow({
         )}
         {!validationMessage && serialized !== "" && (
           <div className="mt-1 text-xs text-text-muted">
-            {formatSets(requestedPairs, { ...PAIRS_PER, set: setSize })} selected
+            {formatSets(requestedPairs, { ...PAIRS_PER, set: setSize })}{" "}
+            selected
           </div>
         )}
       </Td>
@@ -1658,19 +1675,15 @@ function AllocationTable({
       {/* Nobody has to come here on an ordinary day, and staff who think they skipped a
           step will go looking for it. Say plainly that the work is already done. */}
       <p className="text-sm text-text-secondary">
-        Stock is set aside automatically when it arrives, oldest order first. Come here
-        only to decide who goes first when a shipment falls short, or to move stock to
-        another customer.
+        Stock is automatically allocated on arrival (oldest order first). Adjust
+        here if needed.
       </p>
       <TableContainer>
         <Thead className="top-0">
           <Tr>
             <Th className="min-w-[12rem]">Product</Th>
             <Th className="text-right whitespace-nowrap min-w-[11rem]">
-              Fulfillment qty
-              <span className="block text-[10px] font-normal text-text-muted">
-                delivered / ordered
-              </span>
+              Delivered / Ordered
             </Th>
             <Th className="min-w-[12rem]">Available to allocate</Th>
             <Th className="min-w-[21rem]">Allocate colors</Th>
@@ -1869,7 +1882,10 @@ function DeliveryView({
     );
     const draftPairs = drafts[line.order_line_id] ?? {};
     const setSize = line.unit_conversions?.set ?? PAIRS_PER.set;
-    const pairs = Object.values(draftPairs).reduce((sum, value) => sum + value, 0);
+    const pairs = Object.values(draftPairs).reduce(
+      (sum, value) => sum + value,
+      0,
+    );
     const serialized = serializeColorPairs(draftPairs, setSize);
     return {
       line,
@@ -1948,7 +1964,10 @@ function DeliveryView({
                   : "bg-bg-subtle text-text-muted border-border",
               )}
             >
-              {formatSets(selectedRows.reduce((sum, row) => sum + row.pairs, 0))} selected
+              {formatSets(
+                selectedRows.reduce((sum, row) => sum + row.pairs, 0),
+              )}{" "}
+              selected
             </span>
           </div>
         </div>
@@ -1995,10 +2014,7 @@ function DeliveryView({
           <Tr>
             <Th className="min-w-[12rem]">Product</Th>
             <Th className="text-right whitespace-nowrap">
-              Fulfillment qty
-              <span className="block text-[10px] font-normal normal-case tracking-normal text-text-muted">
-                Delivered / Ordered
-              </span>
+              Delivered / Ordered
             </Th>
             <Th className="min-w-[13rem]">Available to deliver</Th>
             <Th className="min-w-[21rem]">Deliver colors</Th>
@@ -2040,7 +2056,9 @@ function DeliveryView({
                     {/* What the customer actually asked for — context every row wants,
                         and the only place it appeared before was the allocate screen. */}
                     <span className="text-xs">
-                      <span className="font-semibold text-text-primary">Colors:</span>{" "}
+                      <span className="font-semibold text-text-primary">
+                        Colors:
+                      </span>{" "}
                       <span className="font-bold text-brand">
                         {formatColorBreakdown(
                           row.line.color_breakdown,
@@ -2085,15 +2103,15 @@ function DeliveryView({
                 <Td>
                   <div className="min-w-[13rem]">
                     <div className="font-semibold tabular-nums text-brand">
-                      {inventoryLoading
-                        ? "—"
-                        : formatSets(availablePairs)}
+                      {inventoryLoading ? "—" : formatSets(availablePairs)}
                     </div>
                     <div className="mt-0.5 text-xs text-text-secondary">
                       {inventoryLoading
                         ? "Checking stock…"
-                        : formatColorPairs(deliverableColors, { ...PAIRS_PER, set: setSize }) ||
-                          "Nothing is allocated and in stock here."}
+                        : formatColorPairs(deliverableColors, {
+                            ...PAIRS_PER,
+                            set: setSize,
+                          }) || "Nothing is allocated and in stock here."}
                     </div>
                   </div>
                 </Td>
@@ -2136,7 +2154,8 @@ function DeliveryView({
                   )}
                   {!row.problem && row.serialized !== "" && (
                     <div className="mt-1 text-xs text-text-muted">
-                      {formatSets(row.pairs, { ...PAIRS_PER, set: setSize })} selected
+                      {formatSets(row.pairs, { ...PAIRS_PER, set: setSize })}{" "}
+                      selected
                     </div>
                   )}
                 </Td>
@@ -2165,7 +2184,12 @@ function DeliveryView({
   );
 }
 
-function AllocateAndDeliveryView({
+/** The "Allocate & Deliver" tab's body — the sub-tablist choosing between setting
+ *  stock aside and handing it over, plus whichever of those two tables is active. It
+ *  used to be its own full screen with its own back button and identity header; now it
+ *  sits inside OrderDetail's third tab, which already shows the order no./status/
+ *  customer, so none of that is repeated here. */
+function FulfillmentBody({
   order,
   orders,
   inventoryLines,
@@ -2174,7 +2198,6 @@ function AllocateAndDeliveryView({
   onSaveAllocation,
   onSaveAllocationsComplete,
   onSaveDelivery,
-  onBack,
 }: {
   order: CustomerOrder;
   orders: CustomerOrder[];
@@ -2184,7 +2207,6 @@ function AllocateAndDeliveryView({
   onSaveAllocation: (lineId: string, colorBreakdown: string) => Promise<void>;
   onSaveAllocationsComplete: () => Promise<void>;
   onSaveDelivery: (input: CustomerDeliveryBatchInput) => Promise<void>;
-  onBack: () => void;
 }): React.JSX.Element {
   const [tab, setTab] = useState<"allocate" | "deliver">(initialTab);
   const allocatedPairs = order.lines.reduce(
@@ -2245,11 +2267,7 @@ function AllocateAndDeliveryView({
     const deliverable = Object.entries(allocatedColors).reduce(
       (acc, [color, allocated]) =>
         acc +
-        Math.min(
-          allocated,
-          owedColors[color] ?? 0,
-          availableStock[color] ?? 0,
-        ),
+        Math.min(allocated, owedColors[color] ?? 0, availableStock[color] ?? 0),
       0,
     );
     return sum + Math.min(deliverable, lineRemaining(line));
@@ -2260,136 +2278,104 @@ function AllocateAndDeliveryView({
   }, [initialTab]);
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-4">
+      <div
+        role="tablist"
+        aria-label="Fulfill order tab"
+        className="inline-flex w-full sm:w-auto items-center gap-1 rounded-lg bg-bg-subtle p-1 border border-border"
+      >
         <button
           type="button"
-          onClick={onBack}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-text-muted hover:text-text-primary rounded-md hover:bg-bg-subtle transition-colors border border-transparent hover:border-border"
+          role="tab"
+          aria-selected={tab === "allocate"}
+          onClick={() => setTab("allocate")}
+          className={cn(
+            "flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-medium transition-all duration-150",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+            tab === "allocate"
+              ? "bg-brand text-white shadow-sm font-semibold"
+              : "text-text-muted hover:text-text-primary hover:bg-bg-base/60",
+          )}
         >
-          <ChevronLeftIcon className="w-3.5 h-3.5" />
-          <span>Back to orders</span>
+          <ClipboardIcon className="w-3.5 h-3.5 shrink-0" />
+          <span>Allocate stock</span>
+          <span
+            className={cn(
+              "ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-none",
+              tab === "allocate"
+                ? "bg-white/20 text-white"
+                : "bg-success-subtle text-success border border-success/20",
+            )}
+          >
+            {inventoryLoading ? "—" : sets(availableToAllocatePairs)}
+          </span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "deliver"}
+          onClick={() => setTab("deliver")}
+          className={cn(
+            "flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-medium transition-all duration-150",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+            tab === "deliver"
+              ? "bg-brand text-white shadow-sm font-semibold"
+              : "text-text-muted hover:text-text-primary hover:bg-bg-base/60",
+          )}
+        >
+          <TruckIcon className="w-3.5 h-3.5 shrink-0" />
+          <span>Deliver to customer</span>
+          <span
+            className={cn(
+              "ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-none",
+              tab === "deliver"
+                ? "bg-white/20 text-white"
+                : "bg-success-subtle text-success border border-success/20",
+            )}
+          >
+            {inventoryLoading ? "—" : sets(availableToDeliverPairs)}
+          </span>
         </button>
       </div>
-      <Panel className="border-border shadow-sm">
-        <div className="border-b border-border px-5 py-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="flex flex-wrap items-center gap-2.5">
-                <h2 className="text-lg font-semibold tracking-tight text-text-primary">
-                  Fulfill order
-                </h2>
-                <span className="font-mono text-xs px-2 py-0.5 rounded bg-bg-subtle border border-border text-text-secondary font-medium">
-                  {order.order_no}
-                </span>
-                <StatusBadge status={order.order_status} />
-              </div>
-              <p className="mt-1 text-xs text-text-muted flex items-center gap-2">
-                <span className="font-medium text-text-secondary">{order.customer_name}</span>
-                <span>•</span>
-                <span>{formatDate(order.order_date)}</span>
+      <div>
+        {tab === "allocate" ? (
+          <AllocationTable
+            order={order}
+            orders={orders}
+            inventoryLines={inventoryLines}
+            inventoryLoading={inventoryLoading}
+            onSaveAllocation={onSaveAllocation}
+            onSaveAllocationsComplete={onSaveAllocationsComplete}
+          />
+        ) : allocatedPairs <= 0 ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+            <WarehouseIcon className="h-10 w-10 text-text-muted" />
+            <div className="flex flex-col gap-1">
+              <p className="text-base font-semibold text-text-primary">
+                Nothing is allocated yet
+              </p>
+              <p className="text-sm text-text-muted">
+                Allocate stock first before recording a delivery.
               </p>
             </div>
-          </div>
-          <div
-            role="tablist"
-            aria-label="Fulfill order tab"
-            className="mt-4 inline-flex w-full sm:w-auto items-center gap-1 rounded-lg bg-bg-subtle p-1 border border-border"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "allocate"}
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => setTab("allocate")}
-              className={cn(
-                "flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-medium transition-all duration-150",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
-                tab === "allocate"
-                  ? "bg-brand text-white shadow-sm font-semibold"
-                  : "text-text-muted hover:text-text-primary hover:bg-bg-base/60",
-              )}
             >
-              <ClipboardIcon className="w-3.5 h-3.5 shrink-0" />
-              <span>Allocate stock</span>
-              <span
-                className={cn(
-                  "ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-none",
-                  tab === "allocate"
-                    ? "bg-white/20 text-white"
-                    : "bg-success-subtle text-success border border-success/20",
-                )}
-              >
-                {inventoryLoading ? "—" : sets(availableToAllocatePairs)}
-              </span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "deliver"}
-              onClick={() => setTab("deliver")}
-              className={cn(
-                "flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-medium transition-all duration-150",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
-                tab === "deliver"
-                  ? "bg-brand text-white shadow-sm font-semibold"
-                  : "text-text-muted hover:text-text-primary hover:bg-bg-base/60",
-              )}
-            >
-              <TruckIcon className="w-3.5 h-3.5 shrink-0" />
-              <span>Deliver to customer</span>
-              <span
-                className={cn(
-                  "ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-none",
-                  tab === "deliver"
-                    ? "bg-white/20 text-white"
-                    : "bg-success-subtle text-success border border-success/20",
-                )}
-              >
-                {inventoryLoading ? "—" : sets(availableToDeliverPairs)}
-              </span>
-            </button>
+              Go to allocation
+            </Button>
           </div>
-        </div>
-        <div className="px-5 py-4">
-          {tab === "allocate" ? (
-            <AllocationTable
-              order={order}
-              orders={orders}
-              inventoryLines={inventoryLines}
-              inventoryLoading={inventoryLoading}
-              onSaveAllocation={onSaveAllocation}
-              onSaveAllocationsComplete={onSaveAllocationsComplete}
-            />
-          ) : allocatedPairs <= 0 ? (
-            <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-              <WarehouseIcon className="h-10 w-10 text-text-muted" />
-              <div className="flex flex-col gap-1">
-                <p className="text-base font-semibold text-text-primary">
-                  Nothing is allocated yet
-                </p>
-                <p className="text-sm text-text-muted">
-                  Allocate stock first before recording a delivery.
-                </p>
-              </div>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setTab("allocate")}
-              >
-                Go to allocation
-              </Button>
-            </div>
-          ) : (
-            <DeliveryView
-              order={order}
-              orders={orders}
-              inventoryLines={inventoryLines}
-              inventoryLoading={inventoryLoading}
-              onSaveDelivery={onSaveDelivery}
-            />
-          )}
-        </div>
-      </Panel>
+        ) : (
+          <DeliveryView
+            order={order}
+            orders={orders}
+            inventoryLines={inventoryLines}
+            inventoryLoading={inventoryLoading}
+            onSaveDelivery={onSaveDelivery}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -2450,20 +2436,32 @@ interface CustomerOrderDetailFormValues {
 
 function OrderDetail({
   order: initialOrder,
+  orders,
   settings,
-  focus,
+  initialTab = "products",
+  initialFulfillSubTab = "allocate",
+  inventoryLines,
+  inventoryLoading,
   onSave,
   onBack,
-  onAllocate,
+  onSaveAllocation,
+  onSaveAllocationsComplete,
+  onSaveDelivery,
   onWriteOff,
   writeOffs,
 }: {
   order: CustomerOrder;
+  orders: CustomerOrder[];
   settings: AppSettings | null;
-  focus?: "payment";
+  initialTab?: DetailTab;
+  initialFulfillSubTab?: "allocate" | "deliver";
+  inventoryLines: StockLine[];
+  inventoryLoading: boolean;
   onSave: (order: CustomerOrder, originalOrder: CustomerOrder) => Promise<void>;
   onBack: () => void;
-  onAllocate?: (orderId: string, tab?: "allocate" | "deliver") => void;
+  onSaveAllocation: (lineId: string, colorBreakdown: string) => Promise<void>;
+  onSaveAllocationsComplete: () => Promise<void>;
+  onSaveDelivery: (input: CustomerDeliveryBatchInput) => Promise<void>;
   onWriteOff: (
     lineId: string,
     quantity: number,
@@ -2476,17 +2474,18 @@ function OrderDetail({
   const showToast = useToast();
   const [addingLineId, setAddingLineId] = useState<string | null>(null);
   /** The line whose removal is waiting for a second click. */
-  const [confirmingRemoval, setConfirmingRemoval] = useState<string | null>(null);
+  const [confirmingRemoval, setConfirmingRemoval] = useState<string | null>(
+    null,
+  );
   const [writeOffLine, setWriteOffLine] = useState<CustomerOrderLine | null>(
     null,
   );
-  const paymentSectionRef = useRef<HTMLElement>(null);
+  const [activeTab, setActiveTab] = useState<DetailTab>(initialTab);
 
   useEffect(() => {
-    if (focus === "payment") {
-      paymentSectionRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [focus]);
+    setActiveTab(initialTab);
+  }, [initialTab]);
+
   const {
     control,
     getValues,
@@ -2526,6 +2525,26 @@ function OrderDetail({
       setSaving(false);
     }
   }
+
+  // Save is the one keyboard shortcut this page keeps — same rule as Receiving.
+  // Everything else (switching tabs, adding a line) stays a visible button.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent): void {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+        if (isDirty && !saving) {
+          void handleSubmit(saveChanges)();
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDirty, saving, handleSubmit]);
 
   const pct = receivedPct(order);
 
@@ -2702,9 +2721,10 @@ function OrderDetail({
     (sum, line) => sum + (line.allocated_quantity_pairs ?? 0),
     0,
   );
-  const allocatedPct = order.total_quantity_pairs > 0
-    ? Math.round((allocatedPairs / order.total_quantity_pairs) * 100)
-    : 0;
+  const allocatedPct =
+    order.total_quantity_pairs > 0
+      ? Math.round((allocatedPairs / order.total_quantity_pairs) * 100)
+      : 0;
 
   function handleBack(): void {
     if (hasChanges) {
@@ -2719,675 +2739,776 @@ function OrderDetail({
   return (
     <>
       <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            onClick={handleBack}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-text-muted hover:text-text-primary rounded-md hover:bg-bg-subtle transition-colors border border-transparent hover:border-border"
-          >
-            <ChevronLeftIcon className="w-3.5 h-3.5" />
-            <span>Back to orders</span>
-          </button>
-        </div>
+        {/* One panel, header + tabs + whichever tab's content is active — the same
+            command-bar shape Receiving uses, so both screens work the same way. */}
+        <div className="rounded-xl border border-border bg-bg-surface overflow-hidden divide-y divide-border">
+          <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+            <div className="flex items-center gap-3 min-w-0">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleBack}
+                className="text-text-muted hover:text-text-primary gap-1.5"
+                title="Back to orders"
+              >
+                <ChevronLeftIcon className="w-4 h-4" />
+                <span className="hidden sm:inline">Back</span>
+              </Button>
 
-        <Panel className="border-border shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2.5">
-                <h2 className="text-lg font-semibold text-text-primary tracking-tight font-mono">
+              <div className="h-5 w-px bg-border" />
+
+              <div className="min-w-0 flex items-center gap-2.5">
+                <h2 className="text-base font-bold text-text-primary tracking-tight truncate">
                   {order.order_no}
                 </h2>
                 <StatusBadge status={order.order_status} />
                 <PaymentBadge status={paymentStatus(order)} />
-              </div>
-              <p className="mt-1 text-xs text-text-muted flex items-center gap-2">
-                <span className="font-medium text-text-secondary">{order.customer_name}</span>
-                <span>•</span>
-                <span>{formatDate(order.order_date)}</span>
-              </p>
-            </div>
-            <div className="flex items-center gap-2.5">
-              {onAllocate && order.order_status !== "cancelled" && order.order_status !== "fulfilled" && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => onAllocate(order.order_id, "allocate")}
-                >
-                  <ClipboardIcon className="w-3.5 h-3.5 mr-1" />
-                  Allocate stock
-                </Button>
-              )}
-              {hasChanges && (
-                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-500 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                  <span>Unsaved changes</span>
+                <span className="hidden md:inline text-xs text-text-muted truncate">
+                  {order.customer_name}
                 </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {hasChanges && (
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-warning"
+                  title="Unsaved changes"
+                />
               )}
               <Button
                 size="sm"
                 onClick={() => void handleSubmit(saveChanges)()}
                 loading={saving}
                 disabled={!hasChanges}
+                className="font-medium gap-1.5 shadow-xs"
+                title="Save changes (Ctrl+S)"
               >
-                <CheckIcon className="w-3.5 h-3.5 mr-1" />
-                Save changes
+                <CheckIcon className="w-4 h-4" />
+                <span>Save</span>
               </Button>
             </div>
+          </header>
+
+          {/* Underline tabs on their own row, the same shape Supplier Vouchers
+              already uses for its two-tab switch — a pill-tablist felt cramped
+              here sharing a row with the order identity and Save button. */}
+          <div
+            role="tablist"
+            aria-label="Order sections"
+            className="flex items-center gap-1 px-5 pt-2.5"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "products"}
+              onClick={() => setActiveTab("products")}
+              className={cn(
+                "inline-flex items-center gap-2 border-b-2 px-3 pb-2.5 text-sm font-semibold transition-colors duration-150",
+                activeTab === "products"
+                  ? "border-brand text-brand"
+                  : "border-transparent text-text-muted hover:text-text-primary",
+              )}
+            >
+              <span>Products</span>
+              <span
+                className={cn(
+                  "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold leading-none tabular-nums",
+                  activeTab === "products"
+                    ? "bg-brand text-white"
+                    : "bg-brand-subtle text-brand border border-brand/30",
+                )}
+              >
+                {pct}%
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "payments"}
+              onClick={() => setActiveTab("payments")}
+              className={cn(
+                "inline-flex items-center gap-2 border-b-2 px-3 pb-2.5 text-sm font-semibold transition-colors duration-150",
+                activeTab === "payments"
+                  ? "border-brand text-brand"
+                  : "border-transparent text-text-muted hover:text-text-primary",
+              )}
+            >
+              <span>Payments</span>
+              <span
+                className={cn(
+                  "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold leading-none tabular-nums",
+                  activeTab === "payments"
+                    ? "bg-brand text-white"
+                    : "bg-brand-subtle text-brand border border-brand/30",
+                )}
+              >
+                {paidShare}%
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "allocate"}
+              onClick={() => setActiveTab("allocate")}
+              className={cn(
+                "inline-flex items-center gap-2 border-b-2 px-3 pb-2.5 text-sm font-semibold transition-colors duration-150",
+                activeTab === "allocate"
+                  ? "border-brand text-brand"
+                  : "border-transparent text-text-muted hover:text-text-primary",
+              )}
+            >
+              <span>Allocate &amp; Deliver</span>
+            </button>
           </div>
 
-
           <div className="px-6 py-6 flex flex-col gap-8">
-            <section>
-              <SectionLabel>Order information</SectionLabel>
-              <div className="grid gap-4 lg:grid-cols-2 mt-2">
-                <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                  <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">
-                    Customer details
-                  </h3>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Controller
-                      control={control}
-                      name="order.customer_name"
-                      render={({ field }) => (
-                        <Input
-                          label="Customer name"
-                          className={EDITABLE}
-                          value={field.value}
-                          onChange={field.onChange}
-                          onBlur={field.onBlur}
-                          error={errors.order?.customer_name?.message}
-                        />
-                      )}
-                    />
-                    <Controller
-                      control={control}
-                      name="order.customer_phone"
-                      render={({ field }) => (
-                        <Input
-                          label="Phone"
-                          className={EDITABLE}
-                          value={field.value}
-                          onChange={field.onChange}
-                          onBlur={field.onBlur}
-                        />
-                      )}
-                    />
-                    <div className="sm:col-span-2">
-                      <label className="mb-1.5 block text-xs font-medium text-text-secondary">
-                        Address
-                      </label>
+            {activeTab === "products" && (
+              <section>
+                <SectionLabel>Order information</SectionLabel>
+                <div className="grid gap-4 lg:grid-cols-2 mt-2">
+                  <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                    <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">
+                      Customer details
+                    </h3>
+                    <div className="grid gap-3 sm:grid-cols-2">
                       <Controller
                         control={control}
-                        name="order.customer_address"
+                        name="order.customer_name"
                         render={({ field }) => (
-                          <CellInput
-                            label="Address"
-                            placeholder="Customer address"
-                            multiline
+                          <Input
+                            label="Customer name"
+                            className={EDITABLE}
                             value={field.value}
                             onChange={field.onChange}
+                            onBlur={field.onBlur}
+                            error={errors.order?.customer_name?.message}
+                          />
+                        )}
+                      />
+                      <Controller
+                        control={control}
+                        name="order.customer_phone"
+                        render={({ field }) => (
+                          <Input
+                            label="Phone"
+                            className={EDITABLE}
+                            value={field.value}
+                            onChange={field.onChange}
+                            onBlur={field.onBlur}
+                          />
+                        )}
+                      />
+                      <div className="sm:col-span-2">
+                        <label className="mb-1.5 block text-xs font-medium text-text-secondary">
+                          Address
+                        </label>
+                        <Controller
+                          control={control}
+                          name="order.customer_address"
+                          render={({ field }) => (
+                            <CellInput
+                              label="Address"
+                              placeholder="Customer address"
+                              multiline
+                              value={field.value}
+                              onChange={field.onChange}
+                            />
+                          )}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                    <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">
+                      Order parameters
+                    </h3>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <ReadOnlyField
+                        label="Order no."
+                        value={order.order_no}
+                        copyable
+                      />
+                      <Controller
+                        control={control}
+                        name="order.order_date"
+                        render={({ field }) => (
+                          <Input
+                            label="Order date"
+                            type="date"
+                            className={EDITABLE}
+                            value={field.value}
+                            onChange={field.onChange}
+                            onBlur={field.onBlur}
+                            error={errors.order?.order_date?.message}
                           />
                         )}
                       />
                     </div>
                   </div>
                 </div>
-                <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                  <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">
-                    Order parameters
-                  </h3>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <ReadOnlyField
-                      label="Order no."
-                      value={order.order_no}
-                      copyable
-                    />
-                    <Controller
-                      control={control}
-                      name="order.order_date"
-                      render={({ field }) => (
-                        <Input
-                          label="Order date"
-                          type="date"
-                          className={EDITABLE}
-                          value={field.value}
-                          onChange={field.onChange}
-                          onBlur={field.onBlur}
-                          error={errors.order?.order_date?.message}
-                        />
-                      )}
-                    />
-                  </div>
-                </div>
-              </div>
-            </section>
+              </section>
+            )}
 
-            <section>
-              <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <SectionLabel>Products</SectionLabel>
-                  <p className="text-xs text-text-muted -mt-0.5">
-                    Ordered items, allocated stock, pricing, and fulfillment progress per line.
-                  </p>
-                </div>
-                <div className="w-full sm:w-80 md:w-96">
-                  <div className="flex items-center justify-between text-xs mb-1.5">
-                    <span className="text-text-secondary font-medium">
-                      Fulfillment progress
-                    </span>
-                    <span className="tabular-nums font-mono text-[11px] text-text-muted">
-                      {sets(order.delivered_quantity_pairs)} / {sets(order.total_quantity_pairs)}
-                      <span className="ml-1.5 text-text-secondary font-semibold">({pct}%)</span>
-                    </span>
+            {activeTab === "products" && (
+              <section>
+                <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <SectionLabel>Products</SectionLabel>
+                    <p className="text-xs text-text-muted -mt-0.5">
+                      Ordered items, allocated stock, pricing, and fulfillment
+                      progress per line.
+                    </p>
                   </div>
-                  <div
-                    role="progressbar"
-                    aria-valuenow={pct}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-label="Fulfillment progress"
-                    className="h-2 rounded-full bg-bg-subtle border border-border overflow-hidden relative"
-                  >
+                  <div className="w-full sm:w-80 md:w-96">
+                    <div className="flex items-center justify-between text-xs mb-1.5">
+                      <span className="text-text-secondary font-medium">
+                        Fulfillment progress
+                      </span>
+                      <span className="tabular-nums font-mono text-[11px] text-text-muted">
+                        {sets(order.delivered_quantity_pairs)} /{" "}
+                        {sets(order.total_quantity_pairs)}
+                        <span className="ml-1.5 text-text-secondary font-semibold">
+                          ({pct}%)
+                        </span>
+                      </span>
+                    </div>
                     <div
-                      className="absolute inset-y-0 left-0 bg-brand/35 transition-[width] duration-300 motion-reduce:transition-none"
-                      style={{ width: String(allocatedPct) + "%" }}
-                    />
-                    <div
-                      className="absolute inset-y-0 left-0 bg-success transition-[width] duration-300 motion-reduce:transition-none"
-                      style={{ width: String(pct) + "%" }}
-                    />
+                      role="progressbar"
+                      aria-valuenow={pct}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label="Fulfillment progress"
+                      className="h-2 rounded-full bg-bg-subtle border border-border overflow-hidden relative"
+                    >
+                      <div
+                        className="absolute inset-y-0 left-0 bg-brand/35 transition-[width] duration-300 motion-reduce:transition-none"
+                        style={{ width: String(allocatedPct) + "%" }}
+                      />
+                      <div
+                        className="absolute inset-y-0 left-0 bg-success transition-[width] duration-300 motion-reduce:transition-none"
+                        style={{ width: String(pct) + "%" }}
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
-              <TableContainer>
-                <Thead className="top-0">
-                  <Tr>
-                    <Th className="min-w-[10rem] whitespace-nowrap">
-                      Supplier / Factory
-                    </Th>
-                    <Th className="min-w-[18rem]">Product</Th>
-                    <Th className="min-w-[11rem]">Colors</Th>
-                    <Th className="text-right whitespace-nowrap min-w-[12.5rem]">
-                      Fulfillment qty
-                      <span className="block text-[10px] font-normal text-text-muted">
-                        delivered / ordered
-                      </span>
-                    </Th>
-                    <Th className="text-right min-w-[10rem]">
-                      Selling price
-                      <span className="block text-[10px] font-normal text-text-muted">
-                        per set
-                      </span>
-                    </Th>
-                    <Th className="text-right">Amount</Th>
-                    <Th className="text-center">Mismatch</Th>
-                  </Tr>
-                </Thead>
-                <Tbody>
-                  {lineFields.map((field, index) => {
-                    const line = order.lines[index];
-                    if (!line) return null;
-                    const explanation = writeOffs.find(
-                      (entry) => entry.subject_id === line.order_line_id,
-                    );
-                    return (
-                      <Tr key={field.id}>
-                        <Td>
-                          <Controller
-                            control={control}
-                            name={`order.lines.${index}.supplier_name`}
-                            render={({ field: supplierField }) => (
-                              <SuggestInput
-                                bare
-                                label={`Supplier for product ${index + 1}`}
-                                placeholder="Choose…"
-                                suggestions={SUPPLIER_NAMES}
-                                value={supplierField.value}
-                                onChange={supplierField.onChange}
-                              />
-                            )}
-                          />
-                        </Td>
-                        <Td className="min-w-[18rem]">
-                          <div className="flex flex-col gap-1.5">
-                            <div className="flex items-center gap-1">
+                <TableContainer>
+                  <Thead className="top-0">
+                    <Tr>
+                      <Th className="min-w-[10rem] whitespace-nowrap">
+                        Supplier / Factory
+                      </Th>
+                      <Th className="min-w-[18rem]">Product</Th>
+                      <Th className="min-w-[11rem]">Colors</Th>
+                      <Th className="text-right whitespace-nowrap min-w-[12.5rem]">
+                        Delivered / Ordered
+                      </Th>
+                      <Th className="text-right min-w-[10rem]">
+                        Selling price
+                        <span className="block text-[10px] font-normal text-text-muted">
+                          per set
+                        </span>
+                      </Th>
+                      <Th className="text-right">Amount</Th>
+                      <Th className="text-center">Mismatch</Th>
+                    </Tr>
+                  </Thead>
+                  <Tbody>
+                    {lineFields.map((field, index) => {
+                      const line = order.lines[index];
+                      if (!line) return null;
+                      const explanation = writeOffs.find(
+                        (entry) => entry.subject_id === line.order_line_id,
+                      );
+                      return (
+                        <Tr key={field.id}>
+                          <Td>
+                            <Controller
+                              control={control}
+                              name={`order.lines.${index}.supplier_name`}
+                              render={({ field: supplierField }) => (
+                                <SuggestInput
+                                  bare
+                                  label={`Supplier for product ${index + 1}`}
+                                  placeholder="Choose…"
+                                  suggestions={SUPPLIER_NAMES}
+                                  value={supplierField.value}
+                                  onChange={supplierField.onChange}
+                                />
+                              )}
+                            />
+                          </Td>
+                          <Td className="min-w-[18rem]">
+                            <div className="flex flex-col gap-1.5">
+                              <div className="flex items-center gap-1">
+                                <Controller
+                                  control={control}
+                                  name={`order.lines.${index}.stock_code`}
+                                  render={({ field: stockField }) => (
+                                    <SuggestInput
+                                      bare
+                                      label={`Stock code for product ${index + 1}`}
+                                      placeholder="A1001"
+                                      suggestions={STOCK_CODES}
+                                      value={stockField.value}
+                                      onChange={(next) => {
+                                        stockField.onChange(next);
+                                        setStockCode(index, next);
+                                      }}
+                                      error={
+                                        duplicateStockCodeProblem(
+                                          order.lines,
+                                          index,
+                                        ) ?? undefined
+                                      }
+                                    />
+                                  )}
+                                />
+                                <CopyButton
+                                  value={line.stock_code}
+                                  what="stock code"
+                                />
+                              </div>
                               <Controller
                                 control={control}
-                                name={`order.lines.${index}.stock_code`}
-                                render={({ field: stockField }) => (
-                                  <SuggestInput
-                                    bare
-                                    label={`Stock code for product ${index + 1}`}
-                                    placeholder="A1001"
-                                    suggestions={STOCK_CODES}
-                                    value={stockField.value}
-                                    onChange={(next) => {
-                                      stockField.onChange(next);
-                                      setStockCode(index, next);
-                                    }}
-                                    error={
-                                      duplicateStockCodeProblem(
-                                        order.lines,
-                                        index,
-                                      ) ?? undefined
-                                    }
+                                name={`order.lines.${index}.description`}
+                                render={({ field: descriptionField }) => (
+                                  <CellInput
+                                    label={`Description for product ${index + 1}`}
+                                    placeholder="Men's leather sandal"
+                                    multiline
+                                    value={descriptionField.value}
+                                    onChange={descriptionField.onChange}
                                   />
                                 )}
                               />
-                              <CopyButton
-                                value={line.stock_code}
-                                what="stock code"
-                              />
-                            </div>
-                            <Controller
-                              control={control}
-                              name={`order.lines.${index}.description`}
-                              render={({ field: descriptionField }) => (
-                                <CellInput
-                                  label={`Description for product ${index + 1}`}
-                                  placeholder="Men's leather sandal"
-                                  multiline
-                                  value={descriptionField.value}
-                                  onChange={descriptionField.onChange}
-                                />
-                              )}
-                            />
-                            <Controller
-                              control={control}
-                              name={`order.lines.${index}.product_group`}
-                              render={({ field: groupField }) => (
-                                <GroupSelect
-                                  label={`Group for product ${index + 1}`}
-                                  value={groupField.value}
-                                  onChange={groupField.onChange}
-                                />
-                              )}
-                            />
-                          </div>
-                        </Td>
-                        <Td>
-                          <Controller
-                            control={control}
-                            name={`order.lines.${index}.color_breakdown`}
-                            render={({ field: colorField }) => (
-                              <CellInput
-                                label={`Colors for product ${index + 1}`}
-                                placeholder="Enter color qty"
-                                multiline
-                                value={colorField.value}
-                                onChange={(next) => {
-                                  colorField.onChange(next);
-                                  setColors(index, next);
-                                }}
-                                error={
-                                  colorQtyProblem(line.color_breakdown) ??
-                                  (line.quantity_pairs <
-                                  line.delivered_quantity_pairs
-                                    ? `${sets(line.delivered_quantity_pairs)} have already gone to the customer.`
-                                    : undefined)
-                                }
-                              />
-                            )}
-                          />
-                        </Td>
-                        <Td className="text-right tabular-nums whitespace-nowrap">
-                          <div className="flex flex-col items-end gap-0.5">
-                            <div className="flex items-center gap-1.5 font-mono">
-                              <span
-                                className={cn(
-                                  "font-semibold",
-                                  lineRemaining(line) === 0 && line.quantity_pairs > 0
-                                    ? "text-success"
-                                    : line.delivered_quantity_pairs > 0
-                                      ? "text-text-primary"
-                                      : "text-text-muted",
-                                )}
-                              >
-                                {sets(line.delivered_quantity_pairs)}
-                              </span>
-                              <span className="text-text-muted/50 font-normal">/</span>
-                              <span className="text-text-secondary font-medium">
-                                {sets(line.quantity_pairs)}
-                              </span>
-                            </div>
-                            <div className="text-[11px]">
-                              {lineRemaining(line) > 0 ? (
-                                <span className="text-error font-medium">
-                                  {sets(lineRemaining(line))} left
-                                </span>
-                              ) : (
-                                <span className="text-success text-[10px] font-medium">
-                                  Done
-                                </span>
-                              )}
-                              {(line.lost_quantity_pairs ?? 0) > 0 && !explanation && (
-                                <span className="text-warning text-[10px] ml-1">
-                                  ({sets(line.lost_quantity_pairs ?? 0)} lost)
-                                </span>
-                              )}
-                            </div>
-                            {(line.allocated_quantity_pairs ?? 0) > 0 && (
-                              <div
-                                className="text-[11px] text-brand font-medium"
-                                title={
-                                  line.allocated_color_breakdown
-                                    ? `Allocated: ${formatColorBreakdown(line.allocated_color_breakdown, line.unit, line.unit_conversions)}`
-                                    : undefined
-                                }
-                              >
-                                {sets(line.allocated_quantity_pairs ?? 0)} allocated
-                              </div>
-                            )}
-                            {explanation && (
-                              <span
-                                className="text-[10px] font-medium text-warning mt-0.5"
-                                title={mismatchDescription(explanation)}
-                              >
-                                {mismatchDescription(explanation)}
-                              </span>
-                            )}
-                          </div>
-                        </Td>
-                        <Td>
-                          <div className="flex flex-col gap-1">
-                            <CurrencySelect
-                              label={`Currency for product ${index + 1}`}
-                              value={
-                                (line.currency_code as CurrencyCode) ||
-                                DEFAULT_CURRENCY
-                              }
-                              onChange={(code) => {
-                                if (code === DEFAULT_CURRENCY) {
-                                  setLine(index, {
-                                    currency_code: DEFAULT_CURRENCY,
-                                    original_selling_price: null,
-                                    exchange_rate: null,
-                                  });
-                                  return;
-                                }
-                                const original =
-                                  line.original_selling_price ?? 0;
-                                const prefillRate =
-                                  line.exchange_rate ??
-                                  (settings?.today_exchange_rates[code]
-                                    ? Number(
-                                        settings.today_exchange_rates[code],
-                                      )
-                                    : null);
-                                setLine(index, {
-                                  currency_code: code,
-                                  original_selling_price: original,
-                                  exchange_rate: prefillRate,
-                                  selling_price:
-                                    prefillRate != null
-                                      ? previewKyatAmount(
-                                          original,
-                                          prefillRate,
-                                        )
-                                      : line.selling_price,
-                                });
-                              }}
-                              className="w-full"
-                            />
-                            {line.currency_code &&
-                            isForeignCurrency(line.currency_code) ? (
-                              <>
-                                <CellInput
-                                  label={`Original price for product ${index + 1}`}
-                                  placeholder="Original price"
-                                  className="text-right"
-                                  value={String(
-                                    line.original_selling_price ?? "",
-                                  )}
-                                  onChange={(next) => {
-                                    const original = Number(next) || 0;
-                                    const rate = line.exchange_rate ?? 0;
-                                    setLine(index, {
-                                      original_selling_price: original,
-                                      selling_price: previewKyatAmount(
-                                        original,
-                                        rate,
-                                      ),
-                                    });
-                                  }}
-                                />
-                                <CellInput
-                                  label={`Exchange rate for product ${index + 1}`}
-                                  placeholder="Exchange rate"
-                                  className="text-right"
-                                  value={String(line.exchange_rate ?? "")}
-                                  onChange={(next) => {
-                                    const rate = Number(next) || 0;
-                                    const original =
-                                      line.original_selling_price ?? 0;
-                                    setLine(index, {
-                                      exchange_rate: rate,
-                                      selling_price: previewKyatAmount(
-                                        original,
-                                        rate,
-                                      ),
-                                    });
-                                  }}
-                                />
-                                <span className="text-right text-[10px] text-text-muted tabular-nums">
-                                  = {formatKyat(line.selling_price)}
-                                </span>
-                              </>
-                            ) : (
                               <Controller
                                 control={control}
-                                name={`order.lines.${index}.selling_price`}
-                                render={({ field: priceField }) => (
+                                name={`order.lines.${index}.product_group`}
+                                render={({ field: groupField }) => (
+                                  <GroupSelect
+                                    label={`Group for product ${index + 1}`}
+                                    value={groupField.value}
+                                    onChange={groupField.onChange}
+                                  />
+                                )}
+                              />
+                            </div>
+                          </Td>
+                          <Td>
+                            <Controller
+                              control={control}
+                              name={`order.lines.${index}.color_breakdown`}
+                              render={({ field: colorField }) => (
+                                <CellInput
+                                  label={`Colors for product ${index + 1}`}
+                                  placeholder="Enter color qty"
+                                  multiline
+                                  value={colorField.value}
+                                  onChange={(next) => {
+                                    colorField.onChange(next);
+                                    setColors(index, next);
+                                  }}
+                                  error={
+                                    colorQtyProblem(line.color_breakdown) ??
+                                    (line.quantity_pairs <
+                                    line.delivered_quantity_pairs
+                                      ? `${sets(line.delivered_quantity_pairs)} have already gone to the customer.`
+                                      : undefined)
+                                  }
+                                />
+                              )}
+                            />
+                          </Td>
+                          <Td className="text-right tabular-nums whitespace-nowrap">
+                            <div className="flex flex-col items-end gap-0.5">
+                              <div className="flex items-center gap-1.5 font-mono">
+                                <span
+                                  className={cn(
+                                    "font-semibold",
+                                    lineRemaining(line) === 0 &&
+                                      line.quantity_pairs > 0
+                                      ? "text-success"
+                                      : line.delivered_quantity_pairs > 0
+                                        ? "text-text-primary"
+                                        : "text-text-muted",
+                                  )}
+                                >
+                                  {sets(line.delivered_quantity_pairs)}
+                                </span>
+                                <span className="text-text-muted/50 font-normal">
+                                  /
+                                </span>
+                                <span className="text-text-secondary font-medium">
+                                  {sets(line.quantity_pairs)}
+                                </span>
+                              </div>
+                              <div className="text-[11px]">
+                                {lineRemaining(line) > 0 ? (
+                                  <span className="text-error font-medium">
+                                    {sets(lineRemaining(line))} left
+                                  </span>
+                                ) : (
+                                  <span className="text-success text-[10px] font-medium">
+                                    Done
+                                  </span>
+                                )}
+                                {(line.lost_quantity_pairs ?? 0) > 0 &&
+                                  !explanation && (
+                                    <span className="text-warning text-[10px] ml-1">
+                                      ({sets(line.lost_quantity_pairs ?? 0)}{" "}
+                                      lost)
+                                    </span>
+                                  )}
+                              </div>
+                              {(line.allocated_quantity_pairs ?? 0) > 0 && (
+                                <div
+                                  className="text-[11px] text-brand font-medium"
+                                  title={
+                                    line.allocated_color_breakdown
+                                      ? `Allocated: ${formatColorBreakdown(line.allocated_color_breakdown, line.unit, line.unit_conversions)}`
+                                      : undefined
+                                  }
+                                >
+                                  {sets(line.allocated_quantity_pairs ?? 0)}{" "}
+                                  allocated
+                                </div>
+                              )}
+                              {explanation && (
+                                <span
+                                  className="text-[10px] font-medium text-warning mt-0.5"
+                                  title={mismatchDescription(explanation)}
+                                >
+                                  {mismatchDescription(explanation)}
+                                </span>
+                              )}
+                            </div>
+                          </Td>
+                          <Td>
+                            <div className="flex flex-col gap-1">
+                              <CurrencySelect
+                                label={`Currency for product ${index + 1}`}
+                                value={
+                                  (line.currency_code as CurrencyCode) ||
+                                  DEFAULT_CURRENCY
+                                }
+                                onChange={(code) => {
+                                  if (code === DEFAULT_CURRENCY) {
+                                    setLine(index, {
+                                      currency_code: DEFAULT_CURRENCY,
+                                      original_selling_price: null,
+                                      exchange_rate: null,
+                                    });
+                                    return;
+                                  }
+                                  const original =
+                                    line.original_selling_price ?? 0;
+                                  const prefillRate =
+                                    line.exchange_rate ??
+                                    (settings?.today_exchange_rates[code]
+                                      ? Number(
+                                          settings.today_exchange_rates[code],
+                                        )
+                                      : null);
+                                  setLine(index, {
+                                    currency_code: code,
+                                    original_selling_price: original,
+                                    exchange_rate: prefillRate,
+                                    selling_price:
+                                      prefillRate != null
+                                        ? previewKyatAmount(
+                                            original,
+                                            prefillRate,
+                                          )
+                                        : line.selling_price,
+                                  });
+                                }}
+                                className="w-full"
+                              />
+                              {line.currency_code &&
+                              isForeignCurrency(line.currency_code) ? (
+                                <>
                                   <CellInput
-                                    label={`Selling price for product ${index + 1}`}
-                                    placeholder="0"
-                                    numeric
+                                    label={`Original price for product ${index + 1}`}
+                                    placeholder="Original price"
                                     className="text-right"
-                                    value={String(priceField.value)}
+                                    value={String(
+                                      line.original_selling_price ?? "",
+                                    )}
                                     onChange={(next) => {
-                                      priceField.onChange(
-                                        Number(next) || 0,
-                                      );
+                                      const original = Number(next) || 0;
+                                      const rate = line.exchange_rate ?? 0;
                                       setLine(index, {
-                                        selling_price: Number(next) || 0,
+                                        original_selling_price: original,
+                                        selling_price: previewKyatAmount(
+                                          original,
+                                          rate,
+                                        ),
                                       });
                                     }}
-                                    error={
-                                      errors.order?.lines?.[index]
-                                        ?.selling_price?.message
-                                    }
                                   />
-                                )}
-                              />
+                                  <CellInput
+                                    label={`Exchange rate for product ${index + 1}`}
+                                    placeholder="Exchange rate"
+                                    className="text-right"
+                                    value={String(line.exchange_rate ?? "")}
+                                    onChange={(next) => {
+                                      const rate = Number(next) || 0;
+                                      const original =
+                                        line.original_selling_price ?? 0;
+                                      setLine(index, {
+                                        exchange_rate: rate,
+                                        selling_price: previewKyatAmount(
+                                          original,
+                                          rate,
+                                        ),
+                                      });
+                                    }}
+                                  />
+                                  <span className="text-right text-[10px] text-text-muted tabular-nums">
+                                    = {formatKyat(line.selling_price)}
+                                  </span>
+                                </>
+                              ) : (
+                                <Controller
+                                  control={control}
+                                  name={`order.lines.${index}.selling_price`}
+                                  render={({ field: priceField }) => (
+                                    <CellInput
+                                      label={`Selling price for product ${index + 1}`}
+                                      placeholder="0"
+                                      numeric
+                                      className="text-right"
+                                      value={String(priceField.value)}
+                                      onChange={(next) => {
+                                        priceField.onChange(Number(next) || 0);
+                                        setLine(index, {
+                                          selling_price: Number(next) || 0,
+                                        });
+                                      }}
+                                      error={
+                                        errors.order?.lines?.[index]
+                                          ?.selling_price?.message
+                                      }
+                                    />
+                                  )}
+                                />
+                              )}
+                            </div>
+                          </Td>
+                          <Td className="text-right tabular-nums font-medium whitespace-nowrap">
+                            {formatKyat(
+                              pricedAmount(
+                                line.quantity_pairs,
+                                line.unit,
+                                line.selling_price,
+                                line.unit_conversions,
+                              ),
                             )}
-                          </div>
-                        </Td>
-                        <Td className="text-right tabular-nums font-medium whitespace-nowrap">
-                          {formatKyat(
-                            pricedAmount(
-                              line.quantity_pairs,
-                              line.unit,
-                              line.selling_price,
-                              line.unit_conversions,
-                            ),
-                          )}
-                        </Td>
-                        {/* The row's two icon actions sit together rather than one of them
+                          </Td>
+                          {/* The row's two icon actions sit together rather than one of them
                             leaning on the money: a figure column reads as a figure. */}
-                        <Td className="text-center">
-                          <div className="flex flex-col items-center gap-1">
-                            <MismatchIconButton
-                              explained={Boolean(explanation)}
-                              disabled={lineRemaining(line) <= 0}
-                              onClick={() => setWriteOffLine(line)}
-                            />
-                            {(() => {
-                              const locked = lineLockedReason(line);
-                              if (locked) {
+                          <Td className="text-center">
+                            <div className="flex flex-col items-center gap-1">
+                              <MismatchIconButton
+                                explained={Boolean(explanation)}
+                                disabled={lineRemaining(line) <= 0}
+                                onClick={() => setWriteOffLine(line)}
+                              />
+                              {(() => {
+                                const locked = lineLockedReason(line);
+                                if (locked) {
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={() => showToast("info", locked)}
+                                      title={locked}
+                                      aria-label={`Cannot remove product ${index + 1}. ${locked}`}
+                                      className="p-1 rounded-md text-text-disabled transition-colors hover:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                    >
+                                      <TrashIcon className="w-4 h-4" />
+                                    </button>
+                                  );
+                                }
+                                if (confirmingRemoval === line.order_line_id) {
+                                  return (
+                                    <div className="flex items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => removeLine(index)}
+                                        className="rounded-md bg-error px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                                      >
+                                        Remove
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setConfirmingRemoval(null)
+                                        }
+                                        className="rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium text-text-secondary"
+                                      >
+                                        Keep
+                                      </button>
+                                    </div>
+                                  );
+                                }
                                 return (
                                   <button
                                     type="button"
-                                    onClick={() => showToast("info", locked)}
-                                    title={locked}
-                                    aria-label={`Cannot remove product ${index + 1}. ${locked}`}
-                                    className="p-1 rounded-md text-text-disabled transition-colors hover:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                    onClick={() =>
+                                      setConfirmingRemoval(line.order_line_id)
+                                    }
+                                    title="Remove this product"
+                                    aria-label={`Remove product ${index + 1}`}
+                                    className={cn(
+                                      "p-1 rounded-md transition-colors duration-150",
+                                      SOFT_RED,
+                                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
+                                    )}
                                   >
                                     <TrashIcon className="w-4 h-4" />
                                   </button>
                                 );
+                              })()}
+                            </div>
+                          </Td>
+                        </Tr>
+                      );
+                    })}
+                    <Tr className="bg-bg-subtle hover:bg-bg-subtle">
+                      <Td className="font-semibold" colSpan={3}>
+                        Total
+                      </Td>
+                      <Td className="text-right tabular-nums whitespace-nowrap">
+                        <div className="flex flex-col items-end gap-0.5">
+                          <div className="flex items-center gap-1.5 font-mono font-semibold">
+                            <span
+                              className={
+                                order.delivered_quantity_pairs ===
+                                  order.total_quantity_pairs &&
+                                order.total_quantity_pairs > 0
+                                  ? "text-success"
+                                  : "text-text-primary"
                               }
-                              if (confirmingRemoval === line.order_line_id) {
-                                return (
-                                  <div className="flex items-center gap-1">
-                                    <button
-                                      type="button"
-                                      onClick={() => removeLine(index)}
-                                      className="rounded-md bg-error px-1.5 py-0.5 text-[10px] font-semibold text-white"
-                                    >
-                                      Remove
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setConfirmingRemoval(null)}
-                                      className="rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium text-text-secondary"
-                                    >
-                                      Keep
-                                    </button>
-                                  </div>
-                                );
-                              }
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmingRemoval(line.order_line_id)}
-                                  title="Remove this product"
-                                  aria-label={`Remove product ${index + 1}`}
-                                  className={cn(
-                                    "p-1 rounded-md transition-colors duration-150",
-                                    SOFT_RED,
-                                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
-                                  )}
-                                >
-                                  <TrashIcon className="w-4 h-4" />
-                                </button>
-                              );
-                            })()}
+                            >
+                              {sets(order.delivered_quantity_pairs)}
+                            </span>
+                            <span className="text-text-muted/50 font-normal">
+                              /
+                            </span>
+                            <span>{sets(order.total_quantity_pairs)}</span>
                           </div>
-                        </Td>
-                      </Tr>
-                    );
-                  })}
-                  <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-                    <Td className="font-semibold" colSpan={3}>
-                      Total
-                    </Td>
-                    <Td className="text-right tabular-nums whitespace-nowrap">
-                      <div className="flex flex-col items-end gap-0.5">
-                        <div className="flex items-center gap-1.5 font-mono font-semibold">
-                          <span
-                            className={
-                              order.delivered_quantity_pairs === order.total_quantity_pairs &&
-                              order.total_quantity_pairs > 0
-                                ? "text-success"
-                                : "text-text-primary"
-                            }
-                          >
-                            {sets(order.delivered_quantity_pairs)}
-                          </span>
-                          <span className="text-text-muted/50 font-normal">/</span>
-                          <span>{sets(order.total_quantity_pairs)}</span>
-                        </div>
-                        <div className="text-[11px] font-sans font-normal">
-                          {remainingQty(order) > 0 ? (
-                            <span className="text-error font-medium">
-                              {sets(remainingQty(order))} left
-                            </span>
-                          ) : (
-                            <span className="text-success font-medium">
-                              Done
-                            </span>
+                          <div className="text-[11px] font-sans font-normal">
+                            {remainingQty(order) > 0 ? (
+                              <span className="text-error font-medium">
+                                {sets(remainingQty(order))} left
+                              </span>
+                            ) : (
+                              <span className="text-success font-medium">
+                                Done
+                              </span>
+                            )}
+                          </div>
+                          {allocatedPairs > 0 && (
+                            <div className="text-[11px] font-sans text-brand font-medium">
+                              {sets(allocatedPairs)} allocated
+                            </div>
                           )}
                         </div>
-                        {allocatedPairs > 0 && (
-                          <div className="text-[11px] font-sans text-brand font-medium">
-                            {sets(allocatedPairs)} allocated
-                          </div>
-                        )}
-                      </div>
-                    </Td>
-                    <Td />
-                    <Td className="text-right tabular-nums font-semibold text-brand">
-                      {formatKyat(orderAmount(order))}
-                    </Td>
-                    <Td />
-                  </Tr>
-                </Tbody>
-              </TableContainer>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Button variant="secondary" size="sm" onClick={addLine}>
-                  <PlusIcon className="w-4 h-4 mr-1" />
-                  Add product
-                </Button>
-                {addingLineId && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={cancelAddLine}
-                    className={cn(SOFT_RED)}
-                  >
-                    Cancel
+                      </Td>
+                      <Td />
+                      <Td className="text-right tabular-nums font-semibold text-brand">
+                        {formatKyat(orderAmount(order))}
+                      </Td>
+                      <Td />
+                    </Tr>
+                  </Tbody>
+                </TableContainer>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Button variant="secondary" size="sm" onClick={addLine}>
+                    <PlusIcon className="w-4 h-4 mr-1" />
+                    Add product
                   </Button>
-                )}
-              </div>
-            </section>
+                  {addingLineId && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={cancelAddLine}
+                      className={cn(SOFT_RED)}
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+              </section>
+            )}
 
-            <section ref={paymentSectionRef}>
-              <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <SectionLabel>Payment Records</SectionLabel>
-                  <p className="text-xs text-text-muted -mt-0.5">
-                    Customer receipts, installments, and outstanding balance.
-                  </p>
-                </div>
-                <div className="w-full sm:w-80 md:w-96">
-                  <div className="flex items-center justify-between text-xs mb-1.5">
-                    <span className="font-medium text-text-secondary">
-                      Paid progress
-                    </span>
-                    <span className="tabular-nums font-mono font-semibold text-text-primary">
-                      {formatKyat(paid)} / {formatKyat(amount)} ({paidShare}%)
-                    </span>
+            {activeTab === "payments" && (
+              <section>
+                <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <SectionLabel>Payment Records</SectionLabel>
+                    <p className="text-xs text-text-muted -mt-0.5">
+                      Customer receipts, installments, and outstanding balance.
+                    </p>
                   </div>
-                  <div
-                    role="progressbar"
-                    aria-valuenow={paidShare}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-label="Paid so far"
-                    className="h-2 rounded-full bg-bg-subtle border border-border overflow-hidden"
-                  >
+                  <div className="w-full sm:w-80 md:w-96">
+                    <div className="flex items-center justify-between text-xs mb-1.5">
+                      <span className="font-medium text-text-secondary">
+                        Paid progress
+                      </span>
+                      <span className="tabular-nums font-mono font-semibold text-text-primary">
+                        {formatKyat(paid)} / {formatKyat(amount)} ({paidShare}%)
+                      </span>
+                    </div>
                     <div
-                      className={cn(
-                        "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
-                        paidShare === 100 ? "bg-success" : "bg-warning",
-                      )}
-                      style={{ width: String(paidShare) + "%" }}
-                    />
+                      role="progressbar"
+                      aria-valuenow={paidShare}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label="Paid so far"
+                      className="h-2 rounded-full bg-bg-subtle border border-border overflow-hidden"
+                    >
+                      <div
+                        className={cn(
+                          "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
+                          paidShare === 100 ? "bg-success" : "bg-warning",
+                        )}
+                        style={{ width: String(paidShare) + "%" }}
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
-              <PaymentsTable
-                payments={order.payment.payments}
-                balance={balance}
-                who="customer"
-                onAdd={addPayment}
-                onUpdate={(payment) => setPayment(payment.payment_id, payment)}
-                onRemove={removePayment}
-                readOnly={false}
+                <PaymentsTable
+                  payments={order.payment.payments}
+                  balance={balance}
+                  who="customer"
+                  onAdd={addPayment}
+                  onUpdate={(payment) =>
+                    setPayment(payment.payment_id, payment)
+                  }
+                  onRemove={removePayment}
+                  readOnly={false}
+                />
+              </section>
+            )}
+
+            {activeTab === "allocate" && (
+              <FulfillmentBody
+                order={order}
+                orders={orders}
+                inventoryLines={inventoryLines}
+                inventoryLoading={inventoryLoading}
+                initialTab={initialFulfillSubTab}
+                onSaveAllocation={onSaveAllocation}
+                onSaveAllocationsComplete={onSaveAllocationsComplete}
+                onSaveDelivery={onSaveDelivery}
               />
-            </section>
+            )}
           </div>
-        </Panel>
+        </div>
       </div>
       <WriteOffModal
         open={writeOffLine !== null}
@@ -3951,7 +4072,8 @@ function NewOrderForm({
             <div>
               <SectionLabel>Step 1 — Customer Information</SectionLabel>
               <p className="text-xs text-text-muted -mt-0.5">
-                Select or type a customer name. Contact details are automatically populated for recognized customers.
+                Select or type a customer name. Contact details are
+                automatically populated for recognized customers.
               </p>
             </div>
             <div className="grid gap-3.5 grid-cols-1 sm:grid-cols-2">
@@ -4004,22 +4126,32 @@ function NewOrderForm({
               <div>
                 <SectionLabel>Step 2 — Products</SectionLabel>
                 <p className="text-xs text-text-muted -mt-0.5">
-                  One row per stock code. Specify colors with units (e.g. black10s, pink2p) and prices.
+                  One row per stock code. Specify colors with units (e.g.
+                  black10s, pink2p) and prices.
                 </p>
               </div>
 
               {/* Real-time Summary Badge Strip */}
               <div className="flex items-center gap-2.5 px-3 py-1.5 bg-bg-subtle rounded-lg border border-border text-xs">
                 <span className="text-text-muted">
-                  Items: <strong className="font-mono text-text-primary">{filledLines.length}</strong>
+                  Items:{" "}
+                  <strong className="font-mono text-text-primary">
+                    {filledLines.length}
+                  </strong>
                 </span>
                 <span className="text-border">|</span>
                 <span className="text-text-muted">
-                  Total Qty: <strong className="font-mono text-brand font-semibold">{sets(totalQty)}</strong>
+                  Total Qty:{" "}
+                  <strong className="font-mono text-brand font-semibold">
+                    {sets(totalQty)}
+                  </strong>
                 </span>
                 <span className="text-border">|</span>
                 <span className="text-text-muted">
-                  Total Amount: <strong className="font-mono text-brand font-semibold">{formatKyat(totalAmount)}</strong>
+                  Total Amount:{" "}
+                  <strong className="font-mono text-brand font-semibold">
+                    {formatKyat(totalAmount)}
+                  </strong>
                 </span>
               </div>
             </div>
@@ -4030,7 +4162,12 @@ function NewOrderForm({
                   <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[13rem]">Colors</Th>
                   <Th className="text-right whitespace-nowrap">Ordered qty</Th>
-                  <Th className="text-right min-w-[8rem]">Selling price<span className="block text-[10px] font-normal text-text-muted">per set</span></Th>
+                  <Th className="text-right min-w-[8rem]">
+                    Selling price
+                    <span className="block text-[10px] font-normal text-text-muted">
+                      per set
+                    </span>
+                  </Th>
                   <Th className="text-right min-w-[8rem]">Amount</Th>
                 </Tr>
               </Thead>
@@ -4275,11 +4412,7 @@ function NewOrderForm({
             </div>
 
             <div className="flex items-center justify-between border-t border-border pt-4">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setStep(0)}
-              >
+              <Button variant="secondary" size="sm" onClick={() => setStep(0)}>
                 <ChevronLeftIcon className="w-3.5 h-3.5" />
                 Back to customer
               </Button>
@@ -4296,7 +4429,8 @@ function NewOrderForm({
             <div>
               <SectionLabel>Step 3 — Review &amp; Confirm</SectionLabel>
               <p className="text-xs text-text-muted -mt-0.5">
-                Verify customer details and ordered quantities before generating the order record.
+                Verify customer details and ordered quantities before generating
+                the order record.
               </p>
             </div>
             <dl className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 bg-bg-subtle border border-border rounded-lg p-3.5 text-xs">
@@ -4317,7 +4451,12 @@ function NewOrderForm({
                   <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[13rem]">Colors</Th>
                   <Th className="text-right whitespace-nowrap">Ordered qty</Th>
-                  <Th className="text-right min-w-[8rem]">Selling price<span className="block text-[10px] font-normal text-text-muted">per set</span></Th>
+                  <Th className="text-right min-w-[8rem]">
+                    Selling price
+                    <span className="block text-[10px] font-normal text-text-muted">
+                      per set
+                    </span>
+                  </Th>
                   <Th className="text-right min-w-[8rem]">Amount</Th>
                 </Tr>
               </Thead>
@@ -4390,11 +4529,7 @@ function NewOrderForm({
               </Tbody>
             </TableContainer>
             <div className="flex items-center justify-between border-t border-border pt-4">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setStep(1)}
-              >
+              <Button variant="secondary" size="sm" onClick={() => setStep(1)}>
                 <ChevronLeftIcon className="w-3.5 h-3.5" />
                 Back to products
               </Button>

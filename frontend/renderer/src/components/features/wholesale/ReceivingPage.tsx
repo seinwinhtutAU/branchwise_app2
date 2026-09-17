@@ -53,6 +53,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CopyIcon,
+  DollarIcon,
   EyeIcon,
   MoreVerticalIcon,
   ReceivingIcon,
@@ -368,9 +369,9 @@ export default function ReceivingGatePage({
   const { receivings } = useWholesale();
   const [view, setView] = useState<View>("list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [focusSection, setFocusSection] = useState<"packages" | undefined>(
-    undefined,
-  );
+  const [focusSection, setFocusSection] = useState<
+    "packages" | "costs" | undefined
+  >(undefined);
 
   const selected =
     receivings.find((receiving) => receiving.receiving_id === selectedId) ??
@@ -537,7 +538,7 @@ function ReceivingList({
   onOpenOrders,
 }: {
   receivings: Receiving[];
-  onOpen: (receivingId: string, focus?: "packages") => void;
+  onOpen: (receivingId: string, focus?: "packages" | "costs") => void;
   onDelete: (receivingId: string) => void;
   onNew: () => void;
   onRefresh: () => void;
@@ -834,6 +835,9 @@ function ReceivingList({
                       <Td className="text-center">
                         <RowMenu
                           onOpen={() => onOpen(receiving.receiving_id)}
+                          onRecordCost={() =>
+                            onOpen(receiving.receiving_id, "costs")
+                          }
                           onCheckCount={
                             allOpened && difference !== 0
                               ? () => onOpen(receiving.receiving_id, "packages")
@@ -865,10 +869,12 @@ function ReceivingList({
 
 function RowMenu({
   onOpen,
+  onRecordCost,
   onCheckCount,
   onDelete,
 }: {
   onOpen: () => void;
+  onRecordCost?: () => void;
   onCheckCount?: () => void;
   onDelete: () => void;
 }): React.JSX.Element {
@@ -954,12 +960,22 @@ function RowMenu({
               )}
               <MenuItem
                 icon={<EyeIcon className="w-4 h-4" />}
-                label="Open"
+                label="Open receiving"
                 onClick={() => {
                   setOpen(false);
                   onOpen();
                 }}
               />
+              {onRecordCost && (
+                <MenuItem
+                  icon={<DollarIcon className="w-4 h-4" />}
+                  label="Record cost"
+                  onClick={() => {
+                    setOpen(false);
+                    onRecordCost();
+                  }}
+                />
+              )}
               <MenuItem
                 icon={<TrashIcon className="w-4 h-4" />}
                 label="Delete receiving"
@@ -1038,14 +1054,14 @@ function ReceivingDetail({
   onDelete,
 }: {
   receiving: Receiving;
-  focus?: "packages";
+  focus?: "packages" | "costs";
   settings: AppSettings | null;
   onBack: () => void;
   onSave: (receiving: Receiving) => Promise<void>;
   onDelete: () => void;
 }): React.JSX.Element {
   const [activeTab, setActiveTab] = useState<"packages" | "costs">(
-    focus === "packages" ? "packages" : "packages",
+    focus === "costs" ? "costs" : "packages",
   );
   const [selectedPackageIndex, setSelectedPackageIndex] = useState(0);
   const [packageSearch, setPackageSearch] = useState("");
@@ -1082,7 +1098,10 @@ function ReceivingDetail({
     reset({ receiving: initialReceiving });
     setAddingCostId(null);
     setConfirmUndoArrival(false);
-  }, [initialReceiving, reset]);
+    if (focus) {
+      setActiveTab(focus === "costs" ? "costs" : "packages");
+    }
+  }, [initialReceiving, reset, focus]);
 
   // An armed "discard this package" must not survive being left behind: walking to
   // another package and back should not find the destructive button still waiting.
@@ -1476,43 +1495,99 @@ function ReceivingDetail({
           in a single bordered block divided by hairlines rather than floating apart
           with gaps between them. */}
       <div className="rounded-xl border border-border bg-bg-surface overflow-hidden divide-y divide-border">
-        {/* ── Identity row ──────────────────────────────────────────────── */}
-        <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
-          <div className="flex items-center gap-3 min-w-0">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onBack}
-              className="text-text-muted hover:text-text-primary gap-1.5"
-              title="Back to receiving list (Esc)"
-            >
-              <ChevronLeftIcon className="w-4 h-4" />
-              <span className="hidden sm:inline">Back</span>
-            </Button>
+        {/* Identity and its tabs are one block, so no hairline runs between them —
+            the selected tab's underline is the separator, the way Customer Orders
+            and Supplier Vouchers already do it. */}
+        <div>
+          {/* ── Identity row ──────────────────────────────────────────────── */}
+          <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+            <div className="flex items-center gap-3 min-w-0">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onBack}
+                className="text-text-muted hover:text-text-primary gap-1.5"
+                title="Back to receiving list (Esc)"
+              >
+                <ChevronLeftIcon className="w-4 h-4" />
+                <span className="hidden sm:inline">Back</span>
+              </Button>
 
-            <div className="h-5 w-px bg-border" />
+              <div className="h-5 w-px bg-border" />
 
-            <div className="min-w-0 flex items-center gap-2.5">
-              <h2 className="text-base font-bold text-text-primary tracking-tight truncate">
-                {receiving.receiving_no}
-              </h2>
-              <StatusBadge
-                status={receivingStatus(receiving, shipment?.total_packages)}
-              />
-              <span className="hidden md:inline text-xs text-text-muted truncate">
-                {receiving.supplier_name}
-              </span>
+              <div className="min-w-0 flex items-center gap-2.5">
+                <h2 className="text-base font-bold text-text-primary tracking-tight truncate">
+                  {receiving.receiving_no}
+                </h2>
+                <StatusBadge
+                  status={receivingStatus(receiving, shipment?.total_packages)}
+                />
+              </div>
             </div>
-          </div>
 
-          {/* Workspace Tabs. The selected side is filled, not merely tinted: this
-            project's shadows cast nothing (--shadow-xs is none) and bg-subtle sits a
-            hair away from bg-surface, so a raised-pill treatment left both halves
-            looking like plain text nobody could tell was clickable. */}
+            {/* Action Controls */}
+            <div className="flex items-center gap-2">
+              {/* One quiet dot is all the "you have unsaved work" signal this page needs —
+              the old bottom status bar said the same thing a second time. */}
+              {hasChanges && (
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-warning"
+                  title="Unsaved changes"
+                />
+              )}
+
+              <Button
+                size="sm"
+                onClick={() => void handleSubmit(saveChanges)()}
+                loading={saving}
+                disabled={!hasChanges}
+                className="font-medium gap-1.5 shadow-xs"
+                title="Save changes (Ctrl+S)"
+              >
+                <CheckIcon className="w-4 h-4" />
+                <span>Save</span>
+              </Button>
+
+              {confirmDelete ? (
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={onDelete}
+                    className="gap-1 text-xs"
+                  >
+                    <TrashIcon className="w-3.5 h-3.5" />
+                    Confirm
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirmDelete(false)}
+                    className="text-xs"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setConfirmDelete(true)}
+                  className="gap-1.5 text-xs"
+                  title="Delete this receiving"
+                >
+                  <TrashIcon className="w-3.5 h-3.5" />
+                  Delete receiving
+                </Button>
+              )}
+            </div>
+          </header>
+
+          {/* ── Tabs, on their own row ─────────────────────────────────────── */}
           <div
             role="tablist"
             aria-label="Receiving sections"
-            className="flex items-center gap-1 bg-bg-raised p-1 rounded-lg border border-border"
+            className="flex items-center gap-1 px-5 pt-1"
           >
             <button
               type="button"
@@ -1520,20 +1595,19 @@ function ReceivingDetail({
               aria-selected={activeTab === "packages"}
               onClick={() => setActiveTab("packages")}
               className={cn(
-                "px-3.5 py-1 rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5",
+                "inline-flex items-center gap-2 border-b-2 px-3 pb-2.5 text-sm font-semibold transition-colors duration-150",
                 activeTab === "packages"
-                  ? "bg-brand text-white"
-                  : "text-text-secondary hover:bg-bg-surface hover:text-text-primary",
+                  ? "border-brand text-brand"
+                  : "border-transparent text-text-muted hover:text-text-primary",
               )}
-              title="Switch to package counting"
             >
               <span>Packages</span>
               <span
                 className={cn(
-                  "rounded-full px-1.5 py-0.2 text-[11px] font-mono",
+                  "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold leading-none tabular-nums",
                   activeTab === "packages"
-                    ? "bg-white/25 text-white"
-                    : "bg-brand/10 text-brand",
+                    ? "bg-brand text-white"
+                    : "bg-brand-subtle text-brand border border-brand/30",
                 )}
               >
                 {opened}/{receiving.packages.length}
@@ -1546,89 +1620,42 @@ function ReceivingDetail({
               aria-selected={activeTab === "costs"}
               onClick={() => setActiveTab("costs")}
               className={cn(
-                "px-3.5 py-1 rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5",
+                "inline-flex items-center gap-2 border-b-2 px-3 pb-2.5 text-sm font-semibold transition-colors duration-150",
                 activeTab === "costs"
-                  ? "bg-brand text-white"
-                  : "text-text-secondary hover:bg-bg-surface hover:text-text-primary",
+                  ? "border-brand text-brand"
+                  : "border-transparent text-text-muted hover:text-text-primary",
               )}
-              title="Switch to costs"
             >
               <span>Costs</span>
               <span
                 className={cn(
-                  "rounded-full px-1.5 py-0.2 text-[11px] font-mono",
+                  "inline-flex h-5 items-center justify-center rounded-full px-1.5 text-xs font-bold leading-none tabular-nums",
                   activeTab === "costs"
-                    ? "bg-white/25 text-white"
-                    : "bg-success/10 text-success",
+                    ? "bg-brand text-white"
+                    : "bg-brand-subtle text-brand border border-brand/30",
                 )}
               >
                 {formatKyat(totalCostAmount)}
               </span>
             </button>
           </div>
-
-          {/* Action Controls */}
-          <div className="flex items-center gap-2">
-            {/* One quiet dot is all the "you have unsaved work" signal this page needs —
-              the old bottom status bar said the same thing a second time. */}
-            {hasChanges && (
-              <span
-                className="w-1.5 h-1.5 rounded-full bg-warning"
-                title="Unsaved changes"
-              />
-            )}
-
-            <Button
-              size="sm"
-              onClick={() => void handleSubmit(saveChanges)()}
-              loading={saving}
-              disabled={!hasChanges}
-              className="font-medium gap-1.5 shadow-xs"
-              title="Save changes (Ctrl+S)"
-            >
-              <CheckIcon className="w-4 h-4" />
-              <span>Save</span>
-            </Button>
-
-            {confirmDelete ? (
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={onDelete}
-                  className="gap-1 text-xs"
-                >
-                  <TrashIcon className="w-3.5 h-3.5" />
-                  Confirm
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setConfirmDelete(false)}
-                  className="text-xs"
-                >
-                  Cancel
-                </Button>
-              </div>
-            ) : (
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => setConfirmDelete(true)}
-                className="gap-1.5 text-xs"
-                title="Delete this receiving"
-              >
-                <TrashIcon className="w-3.5 h-3.5" />
-                Delete receiving
-              </Button>
-            )}
-          </div>
-        </header>
+        </div>
 
         {/* ── Details row: the fields actually being edited ──────────────── */}
         {activeTab === "packages" && (
           <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-xs">
             <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-text-muted font-medium">
+                  Supplier / Factory:
+                </span>
+                <span className="font-medium text-text-primary">
+                  {receiving.supplier_name || "—"}
+                </span>
+              </div>
+
+              <div className="h-4 w-px bg-border" />
+
               <div className="flex items-center gap-2">
                 <span className="text-text-muted font-medium">Gate:</span>
                 <SuggestInput
