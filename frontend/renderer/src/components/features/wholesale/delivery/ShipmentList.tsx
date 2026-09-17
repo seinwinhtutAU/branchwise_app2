@@ -64,7 +64,7 @@ export function ShipmentList({
 
   // Keyboard shortcut: '/' or '⌘F' to focus search
   useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
+    function handleKeyDown(e: KeyboardEvent): void {
       if (
         (e.key === "/" &&
           document.activeElement?.tagName !== "INPUT" &&
@@ -298,11 +298,23 @@ export function ShipmentList({
                         {shipment.supplier_name}
                       </Td>
                       <Td>
-                        <div className="flex flex-col gap-1 min-w-[10rem] max-w-[14rem]">
-                          <span className="tabular-nums text-xs font-medium text-text-primary">
-                            {formatQty(shipment.final_received_packages)} /{" "}
-                            {formatQty(shipment.total_packages)}
-                          </span>
+                        <div className="flex flex-col gap-1.5 min-w-[10rem] max-w-[14rem]">
+                          <div className="flex items-center justify-between gap-4 text-xs">
+                            <span className="tabular-nums font-medium text-text-primary whitespace-nowrap shrink-0">
+                              {formatQty(shipment.final_received_packages)}
+                              <span className="text-text-muted/60 font-normal"> / </span>
+                              <span className="text-text-secondary font-normal">{formatQty(shipment.total_packages)}</span>
+                            </span>
+                            {shipment.total_packages - shipment.final_received_packages > 0 ? (
+                              <span className="text-error text-[11px] font-medium whitespace-nowrap shrink-0">
+                                {formatQty(shipment.total_packages - shipment.final_received_packages)} package{shipment.total_packages - shipment.final_received_packages === 1 ? "" : "s"} left
+                              </span>
+                            ) : (
+                              <span className="text-success text-[11px] font-medium whitespace-nowrap shrink-0">
+                                Done
+                              </span>
+                            )}
+                          </div>
                           <RowProgress
                             pct={arrivedPct(shipment)}
                             label={`Arrival progress for ${shipment.shipment_no}`}
