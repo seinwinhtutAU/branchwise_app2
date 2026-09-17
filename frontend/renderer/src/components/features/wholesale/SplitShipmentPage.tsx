@@ -63,6 +63,7 @@ export function SplitShipmentPage({
   carrierSuggestions,
   onCancel,
   onSubmit,
+  embedded = false,
 }: {
   shipment: Shipment;
   destinationSuggestions: string[];
@@ -75,6 +76,7 @@ export function SplitShipmentPage({
     carrierName: string,
     splitLegOrder: number | undefined,
   ) => Promise<void>;
+  embedded?: boolean;
 }): React.JSX.Element {
   const points = useMemo(() => splitPoints(shipment), [shipment]);
   const [selected, setSelected] = useState<SplitPoint | null>(points[0] ?? null);
@@ -99,6 +101,14 @@ export function SplitShipmentPage({
   }
 
   if (!selected) {
+    if (embedded) {
+      return (
+        <div className="rounded-lg border border-border bg-bg-subtle/50 p-6 text-sm text-text-muted">
+          Everything on this shipment has already been sent on from every stop — there is
+          nothing left to split off.
+        </div>
+      );
+    }
     return (
       <div className="flex flex-col gap-5">
         <div>
@@ -170,16 +180,23 @@ export function SplitShipmentPage({
     }
   }
 
-  return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <Button variant="ghost" size="sm" onClick={onCancel}>
-          <ChevronLeftIcon className="w-4 h-4" />
-          Back to {shipment.shipment_no}
-        </Button>
-      </div>
+  const SectionContainer = embedded ? "div" : Panel;
+  const sectionProps = embedded
+    ? { className: "rounded-lg border border-border bg-bg-subtle/50 p-5" }
+    : { className: "p-6" };
 
-      <Panel className="p-6">
+  return (
+    <div className={embedded ? "flex flex-col gap-6" : "flex flex-col gap-5"}>
+      {!embedded && (
+        <div>
+          <Button variant="ghost" size="sm" onClick={onCancel}>
+            <ChevronLeftIcon className="w-4 h-4" />
+            Back to {shipment.shipment_no}
+          </Button>
+        </div>
+      )}
+
+      <SectionContainer {...sectionProps}>
         <SectionLabel>Where is this being split from</SectionLabel>
         <div className="flex items-stretch gap-3 overflow-x-auto pb-2">
           {points.map((point) => {
@@ -207,9 +224,9 @@ export function SplitShipmentPage({
             );
           })}
         </div>
-      </Panel>
+      </SectionContainer>
 
-      <Panel className="p-6">
+      <SectionContainer {...sectionProps}>
         <SectionLabel>How much is moving</SectionLabel>
         <div className="flex flex-col gap-4">
           <div>
@@ -275,9 +292,9 @@ export function SplitShipmentPage({
             suggestions={carrierSuggestions}
           />
         </div>
-      </Panel>
+      </SectionContainer>
 
-      <Panel className="p-6">
+      <SectionContainer {...sectionProps}>
         <SectionLabel>After this</SectionLabel>
         <div className="rounded-md border border-border bg-bg-subtle px-4 py-3 text-sm">
           <div className="flex items-baseline justify-between gap-3">
@@ -306,7 +323,7 @@ export function SplitShipmentPage({
             Split shipment
           </Button>
         </div>
-      </Panel>
+      </SectionContainer>
     </div>
   );
 }

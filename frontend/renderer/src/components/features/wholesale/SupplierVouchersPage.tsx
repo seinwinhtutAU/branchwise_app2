@@ -1915,9 +1915,13 @@ function VoucherDetail({
     return null;
   }
 
+  const [activeTab, setActiveTab] = useState<"voucher" | "payments">(
+    focus === "payment" ? "payments" : "voucher",
+  );
+
   useEffect(() => {
     if (focus === "payment") {
-      paymentSectionRef.current?.scrollIntoView({ behavior: "smooth" });
+      setActiveTab("payments");
     }
   }, [focus]);
   const {
@@ -2126,61 +2130,114 @@ function VoucherDetail({
   return (
     <>
       <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            onClick={handleBack}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-text-muted hover:text-text-primary rounded-md hover:bg-bg-subtle transition-colors border border-transparent hover:border-border"
-          >
-            <ChevronLeftIcon className="w-3.5 h-3.5" />
-            <span>Back to vouchers</span>
-          </button>
-        </div>
+        <div className="rounded-xl border border-border bg-bg-surface overflow-hidden divide-y divide-border">
+          <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+            <div className="flex items-center gap-3 min-w-0">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleBack}
+                className="text-text-muted hover:text-text-primary gap-1.5"
+                title="Back to vouchers"
+              >
+                <ChevronLeftIcon className="w-4 h-4" />
+                <span className="hidden sm:inline">Back</span>
+              </Button>
 
-        <Panel className="border-border shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2.5">
-                <h2 className="text-lg font-semibold text-text-primary tracking-tight font-mono">
+              <div className="h-5 w-px bg-border" />
+
+              <div className="min-w-0 flex items-center gap-2.5">
+                <h2 className="text-base font-bold text-text-primary tracking-tight truncate font-mono">
                   {voucher.voucher_no}
                 </h2>
                 <ReceivingBadge status={receivingStatus(voucher)} />
                 <PaymentBadge status={paymentStatus(voucher)} />
               </div>
-              <p className="mt-1 text-xs text-text-muted flex items-center gap-2">
-                <span className="font-medium text-text-secondary">{voucher.supplier_name}</span>
-                <span>•</span>
-                <span>{formatDate(voucher.voucher_date)}</span>
-                {voucher.carrier_name && (
-                  <>
-                    <span>•</span>
-                    <span>Cargo: {voucher.carrier_name}</span>
-                  </>
-                )}
-              </p>
             </div>
-            <div className="flex items-center gap-2.5">
+
+            <div className="flex items-center gap-2">
               {hasChanges && (
-                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-500 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                  <span>Unsaved changes</span>
-                </span>
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-warning"
+                  title="Unsaved changes"
+                />
               )}
               <Button
                 size="sm"
                 onClick={() => void handleSubmit(saveChanges)()}
                 loading={saving}
                 disabled={!hasChanges}
+                className="font-medium gap-1.5 shadow-xs"
+                title="Save changes (Ctrl+S)"
               >
-                <CheckIcon className="w-3.5 h-3.5 mr-1" />
-                Save changes
+                <CheckIcon className="w-4 h-4" />
+                <span>Save</span>
               </Button>
             </div>
+          </header>
+
+          {/* Underline tabs */}
+          <div
+            role="tablist"
+            aria-label="Voucher sections"
+            className="flex items-center gap-1 px-5 pt-2.5"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "voucher"}
+              onClick={() => setActiveTab("voucher")}
+              className={cn(
+                "inline-flex items-center gap-2 border-b-2 px-3 pb-2.5 text-sm font-semibold transition-colors duration-150",
+                activeTab === "voucher"
+                  ? "border-brand text-brand"
+                  : "border-transparent text-text-muted hover:text-text-primary",
+              )}
+            >
+              <span>Voucher</span>
+              <span
+                className={cn(
+                  "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold leading-none tabular-nums",
+                  activeTab === "voucher"
+                    ? "bg-brand text-white"
+                    : "bg-brand-subtle text-brand border border-brand/30",
+                )}
+              >
+                {pct}%
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "payments"}
+              onClick={() => setActiveTab("payments")}
+              className={cn(
+                "inline-flex items-center gap-2 border-b-2 px-3 pb-2.5 text-sm font-semibold transition-colors duration-150",
+                activeTab === "payments"
+                  ? "border-brand text-brand"
+                  : "border-transparent text-text-muted hover:text-text-primary",
+              )}
+            >
+              <span>Payments</span>
+              <span
+                className={cn(
+                  "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold leading-none tabular-nums",
+                  activeTab === "payments"
+                    ? "bg-brand text-white"
+                    : "bg-brand-subtle text-brand border border-brand/30",
+                )}
+              >
+                {paidShare}%
+              </span>
+            </button>
           </div>
 
-          <div className="px-6 py-6 flex flex-col gap-10">
-            <section>
-              <SectionLabel>Voucher information</SectionLabel>
+          <div className="px-6 py-6 flex flex-col gap-8">
+            {activeTab === "voucher" && (
+              <>
+                <section>
+                  <SectionLabel>Voucher information</SectionLabel>
               <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <Controller
@@ -2669,37 +2726,41 @@ function VoucherDetail({
               </div>
             </section>
 
-            <section ref={paymentSectionRef}>
-              <div className="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-                <h3 className="pt-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
-                  Payment
-                </h3>
-                <InlineProgress
-                  label="Paid so far"
-                  value={`${formatKyat(paid)} / ${formatKyat(amount)} (${paidShare}%)`}
-                  pct={paidShare}
-                  warn
-                />
-              </div>
-              {/* The same table the customer side uses, so money paid to a supplier is
-                written down exactly the way money from a customer is. */}
-              <PaymentsTable
-                payments={voucher.payment.payments}
-                balance={balance}
-                who="supplier"
-                onAdd={addPayment}
-                onUpdate={(payment) => setPayment(payment.payment_id, payment)}
-                onRemove={removePayment}
-                readOnly={false}
-              />
-            </section>
-
             <section>
               <SectionLabel>Shipment journey</SectionLabel>
               <VoucherJourney voucher={voucher} />
             </section>
+          </>
+        )}
+
+            {activeTab === "payments" && (
+              <section ref={paymentSectionRef}>
+                <div className="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+                  <h3 className="pt-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
+                    Payment
+                  </h3>
+                  <InlineProgress
+                    label="Paid so far"
+                    value={`${formatKyat(paid)} / ${formatKyat(amount)} (${paidShare}%)`}
+                    pct={paidShare}
+                    warn
+                  />
+                </div>
+                {/* The same table the customer side uses, so money paid to a supplier is
+                  written down exactly the way money from a customer is. */}
+                <PaymentsTable
+                  payments={voucher.payment.payments}
+                  balance={balance}
+                  who="supplier"
+                  onAdd={addPayment}
+                  onUpdate={(payment) => setPayment(payment.payment_id, payment)}
+                  onRemove={removePayment}
+                  readOnly={false}
+                />
+              </section>
+            )}
           </div>
-        </Panel>
+        </div>
       </div>
       <WriteOffModal
         open={writeOffLine !== null}

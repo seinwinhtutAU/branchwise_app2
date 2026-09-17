@@ -808,8 +808,8 @@ function ReceivingList({
                           the same thing in words. By how much is a question the
                           receiving itself answers. The bar belongs here, beside the
                           two quantities it is actually measuring. */}
-                      <Td className="min-w-[13rem]">
-                        <div className="flex flex-col gap-1 items-end">
+                      <Td className="min-w-[16.5rem] max-w-[21rem]">
+                        <div className="flex flex-col gap-1 items-end w-full">
                           <span
                             className={cn(
                               "tabular-nums whitespace-nowrap",

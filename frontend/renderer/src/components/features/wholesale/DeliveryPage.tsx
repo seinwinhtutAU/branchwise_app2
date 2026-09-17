@@ -21,6 +21,7 @@ import {
   Required,
   Reference,
   ReviewFact,
+  RowProgress,
   SOFT_BLUE,
   SOFT_RED,
   SectionLabel,
@@ -365,7 +366,16 @@ export default function DeliveryPage({
         onSave={persistShipment}
         onDelete={() => deleteShipment(selected.shipment_id)}
         onWriteOff={writeOffShipment}
-        onSplitRequested={() => setView("split")}
+        onSplit={(packages, quantity, finalDestination, carrierName, splitLegOrder) =>
+          splitShipment(
+            selected.shipment_id,
+            packages,
+            quantity,
+            finalDestination,
+            carrierName,
+            splitLegOrder,
+          )
+        }
         writeOffs={writeOffs}
       />
     );
@@ -633,19 +643,15 @@ function ShipmentList({
                       {shipment.supplier_name}
                     </Td>
                     <Td>
-                      <div className="flex flex-col gap-1 min-w-[6rem] max-w-[8rem]">
+                      <div className="flex flex-col gap-1 min-w-[7rem]">
                         <span className="tabular-nums text-xs font-medium text-text-primary">
-                          {formatQty(shipment.final_received_packages)} / {formatQty(shipment.total_packages)}
+                          {formatQty(shipment.final_received_packages)} /{" "}
+                          {formatQty(shipment.total_packages)}
                         </span>
-                        <div className="h-1.5 w-full rounded-full bg-bg-raised overflow-hidden">
-                          <div
-                            className={cn(
-                              "h-full rounded-full transition-[width]",
-                              arrivedPct(shipment) === 100 ? "bg-success" : "bg-brand",
-                            )}
-                            style={{ width: `${arrivedPct(shipment)}%` }}
-                          />
-                        </div>
+                        <RowProgress
+                          pct={arrivedPct(shipment)}
+                          label={`Arrival progress for ${shipment.shipment_no}`}
+                        />
                       </div>
                     </Td>
                     <Td>
@@ -840,11 +846,11 @@ function ShipmentDetail({
   onSave,
   onDelete,
   onWriteOff,
-  onSplitRequested,
+  onSplit,
 }: {
   shipment: Shipment;
   writeOffs: WriteOffWire[];
-  focus?: "tracking";
+  focus?: "tracking" | "split";
   onBack: () => void;
   onSave: (shipment: Shipment) => Promise<void>;
   onDelete: () => void;
@@ -855,7 +861,13 @@ function ShipmentDetail({
     reason: WriteOffReason,
     note: string,
   ) => Promise<void>;
-  onSplitRequested: () => void;
+  onSplit?: (
+    packages: number,
+    quantity: number | undefined,
+    finalDestination: string,
+    carrierName: string,
+    splitLegOrder: number | undefined,
+  ) => Promise<void>;
 }): React.JSX.Element {
   // Edits stay in this local draft until the user explicitly presses Save changes.
   const [saving, setSaving] = useState(false);
@@ -884,9 +896,16 @@ function ShipmentDetail({
     reset({ shipment: serverShipment });
   }, [reset, serverShipment]);
 
+  const [activeTab, setActiveTab] = useState<"shipment" | "split">(
+    focus === "split" ? "split" : "shipment",
+  );
+
   useEffect(() => {
     if (focus === "tracking") {
+      setActiveTab("shipment");
       trackingSectionRef.current?.scrollIntoView({ behavior: "smooth" });
+    } else if (focus === "split") {
+      setActiveTab("split");
     }
   }, [focus]);
   const { receivings, vouchers } = useWholesale();
@@ -1002,59 +1021,66 @@ function ShipmentDetail({
     applyLegs(shipment.legs.filter((_, position) => position !== index));
   }
 
+  function handleBack(): void {
+    if (hasChanges) {
+      const confirmed = window.confirm(
+        "You have unsaved changes. Discard them?",
+      );
+      if (!confirmed) return;
+    }
+    onBack();
+  }
+
   return (
     <>
-      <div className="flex flex-col gap-5">
-        <div>
-          <Button variant="ghost" size="sm" onClick={onBack}>
-            <ChevronLeftIcon className="w-4 h-4" />
-            Back to shipments
-          </Button>
-        </div>
+      <div className="flex flex-col gap-3">
+        <div className="rounded-xl border border-border bg-bg-surface overflow-hidden divide-y divide-border">
+          <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+            <div className="flex items-center gap-3 min-w-0">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleBack}
+                className="text-text-muted hover:text-text-primary gap-1.5"
+                title="Back to shipments"
+              >
+                <ChevronLeftIcon className="w-4 h-4" />
+                <span className="hidden sm:inline">Back</span>
+              </Button>
 
-        <Panel>
-          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-lg font-semibold text-text-primary tracking-tight">
+              <div className="h-5 w-px bg-border" />
+
+              <div className="min-w-0 flex items-center gap-2.5">
+                <h2 className="text-base font-bold text-text-primary tracking-tight truncate font-mono">
                   {shipment.shipment_no}
                 </h2>
                 <StatusBadge status={shipmentStatus(shipment)} />
               </div>
-              <p className="mt-0.5 truncate text-sm text-text-muted">
-                {shipment.supplier_name} · {formatDate(shipment.sent_on)}
-              </p>
             </div>
+
             <div className="flex items-center gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={onSplitRequested}
-                disabled={!canSplit}
-                title={
-                  !canSplit
-                    ? "Everything has already been sent on from every stop — nothing left to move."
-                    : undefined
-                }
-              >
-                <TruckIcon className="w-4 h-4" />
-                Split shipment
-              </Button>
+              {hasChanges && (
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-warning"
+                  title="Unsaved changes"
+                />
+              )}
               <Button
                 size="sm"
                 onClick={() => void handleSubmit(saveChanges)()}
                 loading={saving}
                 disabled={!hasChanges}
+                className="font-medium gap-1.5 shadow-xs"
+                title="Save changes (Ctrl+S)"
               >
                 <CheckIcon className="w-4 h-4" />
-                Save changes
+                <span>Save</span>
               </Button>
-              {/* Two presses rather than one, since there is no undo behind it. */}
               {confirmDelete ? (
                 <>
                   <Button variant="destructive" size="sm" onClick={onDelete}>
                     <TrashIcon className="w-4 h-4" />
-                    Delete for good
+                    <span>Delete for good</span>
                   </Button>
                   <Button
                     variant="ghost"
@@ -1071,86 +1097,141 @@ function ShipmentDetail({
                   onClick={() => setConfirmDelete(true)}
                 >
                   <TrashIcon className="w-4 h-4" />
-                  Delete shipment
+                  <span className="hidden sm:inline">Delete shipment</span>
                 </Button>
               )}
             </div>
+          </header>
+
+          {/* Underline tabs */}
+          <div
+            role="tablist"
+            aria-label="Shipment sections"
+            className="flex items-center gap-1 px-5 pt-2.5"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "shipment"}
+              onClick={() => setActiveTab("shipment")}
+              className={cn(
+                "inline-flex items-center gap-2 border-b-2 px-3 pb-2.5 text-sm font-semibold transition-colors duration-150",
+                activeTab === "shipment"
+                  ? "border-brand text-brand"
+                  : "border-transparent text-text-muted hover:text-text-primary",
+              )}
+            >
+              <span>Shipment</span>
+              <span
+                className={cn(
+                  "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold leading-none tabular-nums",
+                  activeTab === "shipment"
+                    ? "bg-brand text-white"
+                    : "bg-brand-subtle text-brand border border-brand/30",
+                )}
+              >
+                {pct}%
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "split"}
+              onClick={() => setActiveTab("split")}
+              className={cn(
+                "inline-flex items-center gap-2 border-b-2 px-3 pb-2.5 text-sm font-semibold transition-colors duration-150",
+                activeTab === "split"
+                  ? "border-brand text-brand"
+                  : "border-transparent text-text-muted hover:text-text-primary",
+                !canSplit && "opacity-60",
+              )}
+              title={
+                !canSplit
+                  ? "Everything has already been sent on from every stop — nothing left to move."
+                  : undefined
+              }
+            >
+              <span>Split shipment</span>
+            </button>
           </div>
 
-          <div className="px-6 py-6 flex flex-col gap-10">
-            <section>
-              <SectionLabel>Shipment information</SectionLabel>
-              <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 items-start">
-                  <div>
-                    <span className="block text-xs font-medium text-text-muted mb-1">
-                      Voucher
-                    </span>
-                    <Reference
-                      value={shipment.voucher_no}
-                      what="voucher no."
-                      singleLine
-                    />
-                    <p className="mt-0.5 text-xs text-text-muted">
-                      {shipment.supplier_name}
-                    </p>
+          <div className="px-6 py-6 flex flex-col gap-8">
+            {activeTab === "shipment" && (
+              <>
+                <section>
+                  <SectionLabel>Shipment information</SectionLabel>
+                  <div className="rounded-lg border border-border bg-bg-subtle/50 p-4">
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 items-start">
+                      <div>
+                        <span className="block text-xs font-medium text-text-muted mb-1">
+                          Voucher
+                        </span>
+                        <Reference
+                          value={shipment.voucher_no}
+                          what="voucher no."
+                          singleLine
+                        />
+                        <p className="mt-0.5 text-xs text-text-muted">
+                          {shipment.supplier_name}
+                        </p>
+                      </div>
+                      <Controller
+                        control={control}
+                        name="shipment.carrier_name"
+                        render={({ field }) => (
+                          <SuggestInput
+                            label="Cargo"
+                            placeholder="Shwe Moe Cargo"
+                            suggestions={CARGO_NAMES}
+                            value={field.value}
+                            onChange={(next) => {
+                              field.onChange(next);
+                              apply({ carrier_name: next });
+                            }}
+                            error={errors.shipment?.carrier_name?.message}
+                          />
+                        )}
+                      />
+                      <Controller
+                        control={control}
+                        name="shipment.final_destination"
+                        render={({ field }) => (
+                          <SuggestInput
+                            label="Receiving gate"
+                            placeholder="Bogyoke Rd, Mawlamyine"
+                            suggestions={RECEIVING_GATES}
+                            value={field.value}
+                            onChange={(next) => {
+                              field.onChange(next);
+                              apply({ final_destination: next });
+                            }}
+                            error={errors.shipment?.final_destination?.message}
+                          />
+                        )}
+                      />
+                      <Controller
+                        control={control}
+                        name="shipment.sent_on"
+                        render={({ field }) => (
+                          <Input
+                            label="Shipment date"
+                            type="date"
+                            className={EDITABLE}
+                            value={field.value}
+                            onChange={field.onChange}
+                            onBlur={field.onBlur}
+                            error={errors.shipment?.sent_on?.message}
+                          />
+                        )}
+                      />
+                    </div>
                   </div>
-                  <Controller
-                    control={control}
-                    name="shipment.carrier_name"
-                    render={({ field }) => (
-                      <SuggestInput
-                        label="Cargo"
-                        placeholder="Shwe Moe Cargo"
-                        suggestions={CARGO_NAMES}
-                        value={field.value}
-                        onChange={(next) => {
-                          field.onChange(next);
-                          apply({ carrier_name: next });
-                        }}
-                        error={errors.shipment?.carrier_name?.message}
-                      />
-                    )}
-                  />
-                  <Controller
-                    control={control}
-                    name="shipment.final_destination"
-                    render={({ field }) => (
-                      <SuggestInput
-                        label="Receiving gate"
-                        placeholder="Bogyoke Rd, Mawlamyine"
-                        suggestions={RECEIVING_GATES}
-                        value={field.value}
-                        onChange={(next) => {
-                          field.onChange(next);
-                          apply({ final_destination: next });
-                        }}
-                        error={errors.shipment?.final_destination?.message}
-                      />
-                    )}
-                  />
-                  <Controller
-                    control={control}
-                    name="shipment.sent_on"
-                    render={({ field }) => (
-                      <Input
-                        label="Shipment date"
-                        type="date"
-                        className={EDITABLE}
-                        value={field.value}
-                        onChange={field.onChange}
-                        onBlur={field.onBlur}
-                        error={errors.shipment?.sent_on?.message}
-                      />
-                    )}
-                  />
-                </div>
-              </div>
-            </section>
+                </section>
 
-            <section>
-              <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-                <SectionLabel>Shipment journey</SectionLabel>
+                <section>
+                  <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+                    <SectionLabel>Shipment journey</SectionLabel>
                 <div className="w-full sm:w-80 md:w-96">
                   <div className="flex items-center justify-between text-xs mb-1">
                     <span className="font-medium text-text-secondary">
@@ -1612,8 +1693,25 @@ function ShipmentDetail({
                 />
               )}
             </section>
+              </>
+            )}
+
+            {activeTab === "split" && (
+              <SplitShipmentPage
+                shipment={shipment}
+                destinationSuggestions={[...RECEIVING_GATES, ...DESTINATION_NAMES]}
+                carrierSuggestions={CARRIER_NAMES}
+                onCancel={() => setActiveTab("shipment")}
+                onSubmit={async (packages, quantity, finalDestination, carrierName, splitLegOrder) => {
+                  if (onSplit) {
+                    await onSplit(packages, quantity, finalDestination, carrierName, splitLegOrder);
+                  }
+                }}
+                embedded
+              />
+            )}
           </div>
-        </Panel>
+        </div>
       </div>
       <WriteOffModal
         open={writeOffTarget !== null}
