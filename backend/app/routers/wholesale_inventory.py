@@ -1,11 +1,11 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_app_user
 from app.db.session import get_db
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.schemas.wholesale_inventory import DeliveryBatchIn, DeliveryIn, DeliveryUpdate
 from app.schemas.wholesale_stock_records import StockRecord
 from app.services.wholesale.inventory import (
@@ -17,13 +17,9 @@ from app.services.wholesale.inventory import (
     update_delivery,
 )
 from app.services.wholesale.stock_records import stock_records
+from app.routers.wholesale_common import paginate, require_wholesale
 
 router = APIRouter(prefix="/api/wholesale/inventory", tags=["wholesale"])
-
-
-def _require_wholesale(user: User) -> None:
-    if user.role not in (UserRole.WHOLESALE, UserRole.ADMIN):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "This account cannot use the wholesale workspace")
 
 
 @router.get("")
@@ -37,7 +33,7 @@ def list_inventory(
     db: Session = Depends(get_db),
     response: Response = None,
 ) -> list[dict]:
-    _require_wholesale(user)
+    require_wholesale(user)
     rows = movements(db, user.branch_id)
     query = search.strip().lower()
     if query:
@@ -50,9 +46,7 @@ def list_inventory(
         rows = [row for row in rows if row["location"] == location]
     if movement_type:
         rows = [row for row in rows if row["movement_type"] == movement_type]
-    response.headers["X-Total-Count"] = str(len(rows))
-    start = (page - 1) * page_size
-    return rows[start : start + page_size]
+    return paginate(rows, page, page_size, response)
 
 
 @router.get("/stock", response_model=list[StockRecord])
@@ -67,7 +61,7 @@ def list_stock_records(
     db: Session = Depends(get_db),
     response: Response = None,
 ) -> list[dict]:
-    _require_wholesale(user)
+    require_wholesale(user)
     rows = stock_records(db, user.branch_id)
     query = search.strip().casefold()
     if query:
@@ -86,9 +80,7 @@ def list_stock_records(
     if source:
         rows = [row for row in rows if source in row["sources"]]
     rows.sort(key=lambda row: row["stock_code"].casefold())
-    response.headers["X-Total-Count"] = str(len(rows))
-    start = (page - 1) * page_size
-    return rows[start : start + page_size]
+    return paginate(rows, page, page_size, response)
 
 
 @router.get("/movements/{stock_code}")
@@ -98,7 +90,7 @@ def list_product_movements(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    _require_wholesale(user)
+    require_wholesale(user)
     return [
         movement for movement in movements(db, user.branch_id)
         if movement["stock_code"] == stock_code
@@ -108,7 +100,7 @@ def list_product_movements(
 
 @router.post("/deliveries", status_code=status.HTTP_201_CREATED)
 def create_customer_delivery(payload: DeliveryIn, user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     created = create_delivery(db, user.branch_id, user.id, payload)
     return next(movement for movement in outgoing_movements(db, user.branch_id) if movement["movement_id"] == created.id)
 
@@ -119,7 +111,7 @@ def create_customer_delivery_batch(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    _require_wholesale(user)
+    require_wholesale(user)
     created = create_delivery_batch(db, user.branch_id, user.id, payload)
     by_id = {
         movement["movement_id"]: movement
@@ -130,12 +122,12 @@ def create_customer_delivery_batch(
 
 @router.put("/deliveries/{movement_id}")
 def correct_customer_delivery(movement_id: str, payload: DeliveryUpdate, user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> dict:
-    _require_wholesale(user)
-    changed = update_delivery(db, movement_id, user.branch_id, payload)
+    require_wholesale(user)
+    changed = update_delivery(db, movement_id, user.branch_id, payload, user_id=user.id)
     return next(movement for movement in outgoing_movements(db, user.branch_id) if movement["movement_id"] == changed.id)
 
 
 @router.delete("/deliveries/{movement_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_customer_delivery(movement_id: str, user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> None:
-    _require_wholesale(user)
-    delete_delivery(db, movement_id, user.branch_id)
+    require_wholesale(user)
+    delete_delivery(db, movement_id, user.branch_id, user_id=user.id)

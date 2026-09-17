@@ -4,12 +4,12 @@ transactions and app/services/wholesale/receivings.py for the derived figures.""
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_app_user
 from app.db.session import get_db
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.models.wholesale import Receiving, ReceivingCost, ReceivingItem, ReceivingPackage
 from app.schemas.wholesale_receivings import (
     PackageUpdate,
@@ -18,6 +18,7 @@ from app.schemas.wholesale_receivings import (
     ReceivingUpdate,
 )
 from app.services.branches import resolve_wholesale_branch_id
+from app.services.wholesale.lifecycle import get_allowed_receiving_actions
 from app.services.wholesale.receivings import (
     ItemLike,
     PackageLike,
@@ -37,13 +38,9 @@ from app.services.wholesale_receivings import (
     update_receiving,
 )
 from app.services.wholesale.units import from_pairs
+from app.routers.wholesale_common import paginate, require_wholesale
 
 router = APIRouter(prefix="/api/wholesale/receivings", tags=["wholesale"])
-
-
-def _require_wholesale(user: User) -> None:
-    if user.role not in (UserRole.WHOLESALE, UserRole.ADMIN):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "This account cannot use the wholesale workspace")
 
 
 def _item_out(item: ReceivingItem) -> dict:
@@ -98,6 +95,9 @@ def _receiving_out(receiving: Receiving) -> dict:
     expected = receiving.total_quantity_pairs
     counted = counted_pairs(packages_like)
     costs = [(cost.stage, float(cost.amount)) for cost in receiving.costs]
+    opened = opened_count(packages_like)
+    status_str = receiving_status(packages_like, expected)
+    allowed_actions = get_allowed_receiving_actions(status_str, opened_packages_count=opened)
 
     return {
         "receiving_id": receiving.id,
@@ -117,9 +117,11 @@ def _receiving_out(receiving: Receiving) -> dict:
         "counted_quantity_pairs": counted,
         "expected_quantity_pairs": expected,
         "quantity_difference_pairs": counted - expected,
-        "opened_package_count": opened_count(packages_like),
+        "opened_package_count": opened,
         "checked_pct": checked_pct(packages_like),
-        "receiving_status": receiving_status(packages_like, expected),
+        "receiving_status": status_str,
+        "allowed_actions": allowed_actions,
+        "version_id": getattr(receiving, "version_id", 1),
         "total_cost": sum(float(cost.amount) for cost in receiving.costs),
         "cost_by_stage": cost_by_stage(costs, stages=[]),
         "created_at": receiving.created_at,
@@ -137,7 +139,7 @@ def list_receivings_endpoint(
     db: Session = Depends(get_db),
     response: Response = None,
 ) -> list[dict]:
-    _require_wholesale(user)
+    require_wholesale(user)
     rows = [_receiving_out(receiving) for receiving in list_receivings(db, user.branch_id)]
     query = search.strip().lower()
     if query:
@@ -149,9 +151,7 @@ def list_receivings_endpoint(
         ]
     if receiving_status_filter:
         rows = [row for row in rows if row["receiving_status"] == receiving_status_filter]
-    response.headers["X-Total-Count"] = str(len(rows))
-    start = (page - 1) * page_size
-    return rows[start : start + page_size]
+    return paginate(rows, page, page_size, response)
 
 
 @router.get("/{receiving_id}")
@@ -160,7 +160,7 @@ def get_receiving_endpoint(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     return _receiving_out(get_receiving(db, receiving_id, user.branch_id))
 
 
@@ -170,9 +170,9 @@ def create_receiving_endpoint(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     branch_id = resolve_wholesale_branch_id(user, payload.branch_id, db)
-    return _receiving_out(create_receiving(db, branch_id, payload))
+    return _receiving_out(create_receiving(db, branch_id, payload, operator_id=user.id))
 
 
 @router.patch("/{receiving_id}")
@@ -182,8 +182,8 @@ def update_receiving_endpoint(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
-    return _receiving_out(update_receiving(db, receiving_id, user.branch_id, payload))
+    require_wholesale(user)
+    return _receiving_out(update_receiving(db, receiving_id, user.branch_id, payload, operator_id=user.id))
 
 
 @router.delete("/{receiving_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -192,8 +192,8 @@ def delete_receiving_endpoint(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> None:
-    _require_wholesale(user)
-    delete_receiving(db, receiving_id, user.branch_id)
+    require_wholesale(user)
+    delete_receiving(db, receiving_id, user.branch_id, operator_id=user.id)
 
 
 @router.patch("/{receiving_id}/packages/{package_id}")
@@ -204,8 +204,8 @@ def update_package_endpoint(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
-    return _receiving_out(update_package(db, receiving_id, package_id, user.branch_id, payload))
+    require_wholesale(user)
+    return _receiving_out(update_package(db, receiving_id, package_id, user.branch_id, payload, operator_id=user.id))
 
 
 @router.put("/{receiving_id}/costs")
@@ -215,5 +215,5 @@ def replace_costs_endpoint(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
-    return _receiving_out(replace_costs(db, receiving_id, user.branch_id, payload))
+    require_wholesale(user)
+    return _receiving_out(replace_costs(db, receiving_id, user.branch_id, payload, operator_id=user.id))

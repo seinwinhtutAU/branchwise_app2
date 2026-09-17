@@ -7,7 +7,14 @@ from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
 from app.models.user import User, UserRole
-from app.models.wholesale import Shipment
+from app.models.wholesale import (
+    Receiving,
+    Shipment,
+    WholesaleAuditLog,
+    WholesaleUnit,
+    WholesaleWriteOff,
+    WholesaleWriteOffReason,
+)
 
 
 def _make_user(db_session: Session, *, role: UserRole, branch_id: str | None = None) -> User:
@@ -284,14 +291,13 @@ def test_split_with_no_quantity_leaves_the_originals_quantity_untouched(
     assert new_shipment["total_quantity_pairs"] == 0
 
 
-def test_split_beyond_cargo_remaining_clamps_instead_of_rejecting(
+def test_split_cannot_exceed_the_undispatched_remainder(
     authed_client: TestClient, db_session: Session
 ):
-    """A split is often also a repackaging, so the packages actually moving don't have
-    to match what the cargo stage happens to show as still undispatched (here, only 2
-    of the 10 are recorded as not yet sent) — the request only has to fit inside the
-    shipment's own total (10), and the original settles back to something possible
-    (normalise_flow) rather than the request being rejected."""
+    """Packages are capped at what the cargo stage actually still holds — here, 2 of the
+    10 — because letting a bigger request through would force the original's own
+    already-sent figure to shrink to make the arithmetic add up, silently contradicting
+    a count that may already be reflected in a Receiving record."""
     branch = _make_branch(db_session)
     _make_user(db_session, role=UserRole.WHOLESALE, branch_id=branch.id)
 
@@ -312,19 +318,12 @@ def test_split_beyond_cargo_remaining_clamps_instead_of_rejecting(
             "carrier_name": "",
         },
     )
-    assert response.status_code == 201
-    body = response.json()
+    assert response.status_code == 422
+    assert "2" in response.json()["detail"]
 
-    original = body["original"]
-    assert original["total_packages"] == 7
-    # Clamped down from 8 rather than left exceeding the new, smaller total.
-    assert original["packages_sent_by_cargo"] == 7
-    assert original["total_quantity_pairs"] == 210
-
-    new_shipment = body["new_shipment"]
-    assert new_shipment["total_packages"] == 3
-    assert new_shipment["total_quantity_pairs"] == 90
-    assert new_shipment["packages_sent_by_cargo"] == 0
+    reread = authed_client.get(f"/api/wholesale/shipments/{shipment_id}")
+    assert reread.json()["total_packages"] == 10
+    assert reread.json()["packages_sent_by_cargo"] == 8
 
 
 def test_split_quantity_pairs_cannot_exceed_the_shipments_total(
@@ -411,13 +410,12 @@ def test_splitting_a_leg_carries_its_travelled_route_into_the_new_shipment(
     assert new_shipment["legs"][0]["leg_remaining"] == 2
 
 
-def test_split_leg_order_beyond_that_stops_remainder_clamps_instead_of_rejecting(
+def test_split_leg_order_cannot_exceed_that_stops_remainder(
     authed_client: TestClient, db_session: Session
 ):
-    """Same relaxed rule at a leg: Yangon only shows 3 packages not yet sent on, but a
-    repackaging there (one box opened into two, say) can plausibly move 4 — accepted
-    because it still fits inside the shipment's own total (10), with the whole chain
-    re-settled (normalise_flow) so nothing ends up negative."""
+    """Same cap at a leg: Yangon only shows 3 packages not yet sent on (10 received, 7
+    already forwarded), so asking for 4 is refused rather than being allowed to shrink
+    that already-forwarded 7 down to make the numbers balance."""
     branch = _make_branch(db_session)
     _make_user(db_session, role=UserRole.WHOLESALE, branch_id=branch.id)
 
@@ -449,21 +447,11 @@ def test_split_leg_order_beyond_that_stops_remainder_clamps_instead_of_rejecting
             "split_leg_order": 1,
         },
     )
-    assert response.status_code == 201
-    body = response.json()
+    assert response.status_code == 422
+    assert "3" in response.json()["detail"]
 
-    original = body["original"]
-    assert original["total_packages"] == 6
-    assert original["packages_sent_by_cargo"] == 6
-    assert original["legs"][0]["packages_sent"] == 6
-    assert original["legs"][0]["leg_remaining"] == 0
-
-    new_shipment = body["new_shipment"]
-    assert new_shipment["total_packages"] == 4
-    assert new_shipment["packages_sent_by_cargo"] == 4
-    assert new_shipment["legs"][0]["stop_name"] == "Yangon"
-    assert new_shipment["legs"][0]["packages_received"] == 4
-    assert new_shipment["legs"][0]["packages_sent"] == 0
+    reread = authed_client.get(f"/api/wholesale/shipments/{shipment_id}")
+    assert reread.json()["legs"][0]["packages_sent"] == 7
 
 
 def test_split_leg_order_must_reference_an_existing_stop(
@@ -508,3 +496,230 @@ def test_a_retail_account_cannot_split_a_shipment(authed_client: TestClient, db_
         json={"packages": 1, "quantity_pairs": 10, "final_destination": "Somewhere", "carrier_name": ""},
     )
     assert response.status_code == 403
+
+
+def test_split_guarded_when_completed(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_user(db_session, role=UserRole.WHOLESALE, branch_id=branch.id)
+    # total_packages=10, final_received_packages=10 -> completed
+    created = authed_client.post(
+        "/api/wholesale/shipments",
+        json=_shipment_payload(total_packages=10, final_received_packages=10, packages_sent_by_cargo=10, legs=[]),
+    )
+    shipment_id = created.json()["shipment_id"]
+    assert created.json()["shipment_status"] == "completed"
+    assert "split" not in created.json()["allowed_actions"]
+
+    response = authed_client.post(
+        f"/api/wholesale/shipments/{shipment_id}/split",
+        json={"packages": 1, "final_destination": "Mawlamyine", "carrier_name": "Test Cargo"},
+    )
+    assert response.status_code == 409
+    assert "completed shipment" in response.json()["detail"]
+
+
+def test_split_and_delete_guarded_when_receiving_exists(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_user(db_session, role=UserRole.WHOLESALE, branch_id=branch.id)
+    created = authed_client.post(
+        "/api/wholesale/shipments",
+        json=_shipment_payload(total_packages=10, packages_sent_by_cargo=5, final_received_packages=0, legs=[]),
+    )
+    shipment_id = created.json()["shipment_id"]
+
+    receiving = Receiving(
+        branch_id=branch.id,
+        receiving_no="RCV-260827-0001",
+        voucher_no="VCH-260825-0001",
+        supplier_name="Goody Factory",
+        gate="Bogyoke Rd",
+        shipment_no=created.json()["shipment_no"],
+        shipment_id=shipment_id,
+        received_on=date.today(),
+    )
+    db_session.add(receiving)
+    db_session.commit()
+
+    # Split should be rejected with 409
+    split_resp = authed_client.post(
+        f"/api/wholesale/shipments/{shipment_id}/split",
+        json={"packages": 1, "final_destination": "Mawlamyine", "carrier_name": "Test Cargo"},
+    )
+    assert split_resp.status_code == 409
+    assert "receiving recorded" in split_resp.json()["detail"]
+
+    # Delete should also be rejected with 409
+    del_resp = authed_client.delete(f"/api/wholesale/shipments/{shipment_id}")
+    assert del_resp.status_code == 409
+    assert "receiving recorded" in del_resp.json()["detail"]
+
+
+def test_split_leg_preserves_leg_id_for_writeoffs(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_user(db_session, role=UserRole.WHOLESALE, branch_id=branch.id)
+    created = authed_client.post(
+        "/api/wholesale/shipments",
+        json=_shipment_payload(
+            total_packages=10,
+            packages_sent_by_cargo=10,
+            final_received_packages=0,
+            legs=[
+                {"stop_name": "Yangon", "carrier_name": "Cargo A", "packages_received": 10, "packages_sent": 7}
+            ],
+        ),
+    )
+    shipment = created.json()
+    orig_leg_id = shipment["legs"][0]["leg_id"]
+
+    # Record a write-off against this leg
+    write_off = WholesaleWriteOff(
+        branch_id=branch.id,
+        subject_type="shipment_leg",
+        subject_id=orig_leg_id,
+        unit=WholesaleUnit.PAIR,
+        reason=WholesaleWriteOffReason.DAMAGED,
+        quantity=1,
+        recorded_by_user_id="test-user-id",
+    )
+    db_session.add(write_off)
+    db_session.commit()
+
+    # Split from Yangon leg (physical remaining at Yangon: 10 - 7 - 1 = 2)
+    response = authed_client.post(
+        f"/api/wholesale/shipments/{shipment['shipment_id']}/split",
+        json={
+            "packages": 1,
+            "final_destination": "Bago",
+            "carrier_name": "Express",
+            "split_leg_order": 1,
+        },
+    )
+    assert response.status_code == 201
+    split_result = response.json()
+    orig_updated = split_result["original"]
+
+    # The original leg's ID must be preserved, NOT replaced with a new UUID
+    assert orig_updated["legs"][0]["leg_id"] == orig_leg_id
+
+    # The write_off subject_id still matches
+    attached_wo = db_session.query(WholesaleWriteOff).filter_by(subject_id=orig_leg_id).first()
+    assert attached_wo is not None
+
+
+def test_split_with_set_unit_deducts_pairs(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_user(db_session, role=UserRole.WHOLESALE, branch_id=branch.id)
+    created = authed_client.post(
+        "/api/wholesale/shipments",
+        json=_shipment_payload(
+            total_packages=10,
+            total_quantity_pairs=60,  # 10 sets = 60 pairs
+            total_unit="set",
+            packages_sent_by_cargo=0,
+            final_received_packages=0,
+            legs=[],
+        ),
+    )
+    shipment_id = created.json()["shipment_id"]
+
+    # Split 2 packages with 12 pairs (2 sets)
+    response = authed_client.post(
+        f"/api/wholesale/shipments/{shipment_id}/split",
+        json={
+            "packages": 2,
+            "quantity_pairs": 12,
+            "final_destination": "Mandalay",
+            "carrier_name": "MDY Express",
+        },
+    )
+    assert response.status_code == 201
+    res = response.json()
+    orig = res["original"]
+    new_shp = res["new_shipment"]
+
+    assert orig["total_packages"] == 8
+    assert orig["total_quantity_pairs"] == 48
+    assert orig["total_unit"] == "set"
+
+    assert new_shp["total_packages"] == 2
+    assert new_shp["total_quantity_pairs"] == 12
+    assert new_shp["total_unit"] == "set"
+    assert new_shp["split_from_shipment_id"] == shipment_id
+
+
+def test_split_records_audit_log_and_version(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_user(db_session, role=UserRole.WHOLESALE, branch_id=branch.id)
+    created = authed_client.post(
+        "/api/wholesale/shipments",
+        json=_shipment_payload(
+            total_packages=10,
+            total_quantity_pairs=100,
+            packages_sent_by_cargo=0,
+            final_received_packages=0,
+            legs=[],
+        ),
+    )
+    shipment_id = created.json()["shipment_id"]
+    assert created.json()["version_id"] == 1
+
+    split_resp = authed_client.post(
+        f"/api/wholesale/shipments/{shipment_id}/split",
+        json={
+            "packages": 3,
+            "quantity_pairs": 30,
+            "final_destination": "Mawlamyine",
+            "carrier_name": "Express",
+        },
+    )
+    assert split_resp.status_code == 201
+
+    # Audit log check
+    audit = db_session.query(WholesaleAuditLog).filter_by(entity_id=shipment_id, action="split").first()
+    assert audit is not None
+    assert audit.payload["packages"] == 3
+    assert audit.payload["final_destination"] == "Mawlamyine"
+
+
+def test_write_off_shipment_guard_and_version_bump(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_user(db_session, role=UserRole.WHOLESALE, branch_id=branch.id)
+    created = authed_client.post(
+        "/api/wholesale/shipments",
+        json=_shipment_payload(
+            total_packages=10,
+            total_quantity_pairs=100,
+            packages_sent_by_cargo=10,
+            final_received_packages=5,
+            legs=[],
+        ),
+    )
+    shipment_id = created.json()["shipment_id"]
+    assert created.json()["version_id"] == 1
+
+    # Record write-off on in-transit/partly-delivered shipment
+    wo_resp = authed_client.post(
+        f"/api/wholesale/shipments/{shipment_id}/write-off",
+        json={"quantity": 1, "reason": "lost_in_transit", "note": "Box lost"},
+    )
+    assert wo_resp.status_code == 201
+
+    # Version should be bumped
+    fetched = authed_client.get(f"/api/wholesale/shipments/{shipment_id}")
+    assert fetched.json()["version_id"] == 2
+
+    # Now update to completed (final_received_packages = 9, since 1 lost, remaining 0)
+    upd_resp = authed_client.patch(
+        f"/api/wholesale/shipments/{shipment_id}",
+        json={"final_received_packages": 9},
+    )
+    assert upd_resp.status_code == 200
+    assert upd_resp.json()["shipment_status"] == "completed"
+
+    # Attempt write-off on completed shipment must raise 409 Conflict
+    blocked_wo = authed_client.post(
+        f"/api/wholesale/shipments/{shipment_id}/write-off",
+        json={"quantity": 1, "reason": "lost_in_transit", "note": "Too late"},
+    )
+    assert blocked_wo.status_code == 409
+

@@ -1,6 +1,7 @@
 """Transactions for closing an outstanding wholesale shortfall with an explanation."""
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.wholesale import (
@@ -9,6 +10,10 @@ from app.models.wholesale import (
     SupplierVoucherLine,
     WholesaleWriteOff,
     WholesaleWriteOffReason,
+)
+from app.services.wholesale.lifecycle import (
+    ShipmentAction,
+    assert_can_perform_shipment_action,
 )
 from app.services.wholesale.shipments import final_remaining, max_for_leg
 from app.services.wholesale_supplier_vouchers import received_pairs_by_voucher_stock
@@ -108,6 +113,12 @@ def write_off_shipment(
     )
     if shipment is None or (branch_id is not None and shipment.branch_id != branch_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Shipment not found")
+
+    received = final_received_by_shipment(db, [shipment.id]).get(
+        shipment.id, shipment.final_received_packages
+    )
+    assert_can_perform_shipment_action(shipment, ShipmentAction.WRITE_OFF, received)
+    shipment.updated_at = func.now()
 
     if leg_id_or_none is not None:
         leg = next((candidate for candidate in shipment.legs if candidate.id == leg_id_or_none), None)
@@ -215,6 +226,8 @@ def write_off_voucher_line(
     remaining = max(0, line.quantity_pairs - received - line.lost_quantity_pairs)
     _exceeding(quantity, remaining)
     line.lost_quantity_pairs += quantity
+    if line.voucher is not None:
+        line.voucher.updated_at = func.now()
     return _write_off(
         db,
         branch_id=line.voucher.branch_id,

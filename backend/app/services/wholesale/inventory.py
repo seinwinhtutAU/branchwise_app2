@@ -15,6 +15,7 @@ from app.models.wholesale import (
     WholesaleUnit,
     WholesaleStockMovement,
 )
+from app.services.wholesale.audit import record_audit_log
 from app.services.wholesale.colors import (
     color_qty_pairs,
     color_qty_pairs_by_color,
@@ -546,13 +547,29 @@ def create_delivery_batch(
     except Exception:
         db.rollback()
         raise
+    # Bump the parent order's version_id so concurrent writers see the change.
+    order.updated_at = func.now()
+    record_audit_log(
+        db,
+        branch_id=order.branch_id,
+        entity_type="customer_order",
+        entity_id=order.id,
+        action="deliver",
+        operator_id=user_id,
+        payload={
+            "stock_codes": [line.stock_code.strip() for line in payload.lines],
+            "delivery_address": payload.delivery_address.strip(),
+        },
+    )
+    db.commit()
     return [_load_delivery(db, movement.id, branch_id) for movement in movements]
 
 
-def update_delivery(db: Session, movement_id: str, branch_id: str | None, payload) -> WholesaleStockMovement:
+def update_delivery(db: Session, movement_id: str, branch_id: str | None, payload, user_id: str = "") -> WholesaleStockMovement:
     movement = _load_delivery(db, movement_id, branch_id)
+    order = movement.order
     pairs, _ = _validate_delivery(
-        db, movement.order, payload, branch_id, movement.stock_code, excluding_id=movement.id,
+        db, order, payload, branch_id, movement.stock_code, excluding_id=movement.id,
     )
     movement.location = payload.location.strip()
     movement.color_breakdown = payload.color_breakdown.strip()
@@ -561,11 +578,38 @@ def update_delivery(db: Session, movement_id: str, branch_id: str | None, payloa
     movement.delivered_on = payload.delivered_on
     movement.note = payload.note.strip()
     db.commit()
+    order.updated_at = func.now()
+    record_audit_log(
+        db,
+        branch_id=order.branch_id,
+        entity_type="customer_order",
+        entity_id=order.id,
+        action="update_delivery",
+        operator_id=user_id,
+        payload={"movement_id": movement_id, "stock_code": movement.stock_code},
+    )
+    db.commit()
     return _load_delivery(db, movement.id, branch_id)
 
 
-def delete_delivery(db: Session, movement_id: str, branch_id: str | None) -> None:
-    db.delete(_load_delivery(db, movement_id, branch_id))
+def delete_delivery(db: Session, movement_id: str, branch_id: str | None, user_id: str = "") -> None:
+    movement = _load_delivery(db, movement_id, branch_id)
+    order = movement.order
+    order_id = order.id
+    order_branch_id = order.branch_id
+    stock_code = movement.stock_code
+    db.delete(movement)
+    db.commit()
+    order.updated_at = func.now()
+    record_audit_log(
+        db,
+        branch_id=order_branch_id,
+        entity_type="customer_order",
+        entity_id=order_id,
+        action="delete_delivery",
+        operator_id=user_id,
+        payload={"movement_id": movement_id, "stock_code": stock_code},
+    )
     db.commit()
 
 

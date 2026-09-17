@@ -7,17 +7,13 @@ from sqlalchemy.orm import Session
 
 from app.core.security import get_current_app_user
 from app.db.session import get_db
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.schemas.wholesale_reports import CostReport, CustomerReport, InventoryReport, RevenueReport
 from app.services import dashboard as dashboard_service
 from app.services.wholesale import reports
+from app.routers.wholesale_common import require_wholesale
 
 router = APIRouter(prefix="/api/wholesale/reports", tags=["wholesale"])
-
-
-def _require_wholesale(user: User) -> None:
-    if user.role not in (UserRole.WHOLESALE, UserRole.ADMIN):
-        raise HTTPException(403, "This account cannot use the wholesale workspace")
 
 
 def _resolve_window(period: str, date_from: date | None, date_to: date | None):
@@ -54,7 +50,7 @@ def get_revenue_report(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     return reports.revenue_report(db, user.branch_id, _resolve_window(period, date_from, date_to))
 
 
@@ -66,7 +62,7 @@ def get_cost_report(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     return reports.cost_report(db, user.branch_id, _resolve_window(period, date_from, date_to))
 
 
@@ -78,7 +74,7 @@ def get_inventory_report(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     return reports.inventory_report(db, user.branch_id, _resolve_window(period, date_from, date_to))
 
 
@@ -90,5 +86,5 @@ def get_customer_report(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     return reports.customer_report(db, user.branch_id, _resolve_window(period, date_from, date_to))

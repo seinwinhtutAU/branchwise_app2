@@ -416,6 +416,31 @@ export function StatusPill({
   );
 }
 
+/** The same pill as StatusPill, with a leading colour dot — the shape every order/
+ *  voucher status and payment badge across the wholesale screens actually uses. The
+ *  words, background and dot colour still belong to each screen. */
+export function DotPill({
+  label,
+  className,
+  dotClassName,
+}: {
+  label: string;
+  className: string;
+  dotClassName: string;
+}): React.JSX.Element {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap select-none",
+        className,
+      )}
+    >
+      <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", dotClassName)} />
+      {label}
+    </span>
+  );
+}
+
 /** The product's range — man, lady or child — as a quiet tag beside its description. Kept
  *  grey rather than colour-coded: it is a label, not a status, and colour on this screen
  *  already means "good" or "still owed". */

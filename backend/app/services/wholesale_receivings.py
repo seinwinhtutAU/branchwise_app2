@@ -12,10 +12,21 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.wholesale import Receiving, ReceivingCost, ReceivingItem, ReceivingPackage
+from app.services.wholesale.audit import record_audit_log
 from app.services.wholesale.colors import color_qty_problem, colors_as_json, conversion_rates
 from app.services.wholesale.currency import resolve_money
+from app.services.wholesale.lifecycle import (
+    ReceivingAction,
+    assert_can_perform_receiving_action,
+)
 from app.services.wholesale.master_data import get_or_create_product
 from app.services.wholesale.inventory import auto_allocate_arrivals
+from app.services.wholesale.receivings import (
+    ItemLike,
+    PackageLike,
+    opened_count,
+    receiving_status,
+)
 from app.services.wholesale.references import allocate_reference, retry_on_reference_collision
 from app.services.wholesale.units import from_pairs, to_pairs
 from app.services.wholesale_shipments import get_shipment
@@ -24,6 +35,19 @@ _LOAD_OPTIONS = (
     selectinload(Receiving.packages).selectinload(ReceivingPackage.items),
     selectinload(Receiving.costs),
 )
+
+
+def _current_receiving_status_and_opened(receiving: Receiving) -> tuple[str, int]:
+    packages_like = [
+        PackageLike(
+            opened=p.opened,
+            items=[ItemLike(quantity_pairs=item.quantity_pairs) for item in p.items],
+        )
+        for p in receiving.packages
+    ]
+    status_str = receiving_status(packages_like, receiving.total_quantity_pairs)
+    opened = opened_count(packages_like)
+    return status_str, opened
 
 
 def _load(db: Session, receiving_id: str, branch_id: str | None) -> Receiving:
@@ -50,7 +74,12 @@ def _empty_packages(count: int) -> list[ReceivingPackage]:
     return [ReceivingPackage(package_no=index + 1) for index in range(max(0, count))]
 
 
-def create_receiving(db: Session, branch_id: str | None, payload) -> Receiving:
+def create_receiving(
+    db: Session,
+    branch_id: str | None,
+    payload,
+    operator_id: str | None = None,
+) -> Receiving:
     # The shipment supplies the denormalised supplier_name/voucher_no/shipment_no, the
     # same way picking a stock code fills a line's description in elsewhere — a
     # receiving still reads correctly if the shipment is edited afterwards.
@@ -73,6 +102,22 @@ def create_receiving(db: Session, branch_id: str | None, payload) -> Receiving:
             packages=_empty_packages(payload.total_packages),
         )
         db.add(receiving)
+        db.flush()
+        record_audit_log(
+            db,
+            branch_id=branch_id,
+            entity_type="receiving",
+            entity_id=receiving.id,
+            action="create",
+            operator_id=operator_id,
+            summary=f"Created receiving {receiving.receiving_no} at gate {receiving.gate}",
+            payload={
+                "receiving_no": receiving.receiving_no,
+                "shipment_no": receiving.shipment_no,
+                "total_packages": receiving.total_packages,
+                "total_quantity_pairs": receiving.total_quantity_pairs,
+            },
+        )
         db.commit()
         db.refresh(receiving)
         return receiving
@@ -106,8 +151,20 @@ def _resize_packages(db: Session, receiving: Receiving, count: int) -> None:
         db.delete(entry)
 
 
-def update_receiving(db: Session, receiving_id: str, branch_id: str | None, payload) -> Receiving:
+def update_receiving(
+    db: Session,
+    receiving_id: str,
+    branch_id: str | None,
+    payload,
+    operator_id: str | None = None,
+) -> Receiving:
     receiving = _load(db, receiving_id, branch_id)
+    status_str, opened = _current_receiving_status_and_opened(receiving)
+    assert_can_perform_receiving_action(
+        ReceivingAction.EDIT,
+        status_str,
+        opened_packages_count=opened,
+    )
     data = payload.model_dump(exclude_unset=True)
     total_packages = data.pop("total_packages", None)
     for field, value in data.items():
@@ -115,13 +172,44 @@ def update_receiving(db: Session, receiving_id: str, branch_id: str | None, payl
     if total_packages is not None:
         receiving.total_packages = total_packages
         _resize_packages(db, receiving, total_packages)
+    record_audit_log(
+        db,
+        branch_id=receiving.branch_id,
+        entity_type="receiving",
+        entity_id=receiving.id,
+        action="edit",
+        operator_id=operator_id,
+        summary=f"Updated receiving {receiving.receiving_no}",
+        payload={"gate": receiving.gate, "total_packages": receiving.total_packages},
+    )
     db.commit()
     db.refresh(receiving)
     return receiving
 
 
-def delete_receiving(db: Session, receiving_id: str, branch_id: str | None) -> None:
+def delete_receiving(
+    db: Session,
+    receiving_id: str,
+    branch_id: str | None,
+    operator_id: str | None = None,
+) -> None:
     receiving = _load(db, receiving_id, branch_id)
+    status_str, opened = _current_receiving_status_and_opened(receiving)
+    assert_can_perform_receiving_action(
+        ReceivingAction.DELETE,
+        status_str,
+        opened_packages_count=opened,
+    )
+    record_audit_log(
+        db,
+        branch_id=receiving.branch_id,
+        entity_type="receiving",
+        entity_id=receiving.id,
+        action="delete",
+        operator_id=operator_id,
+        summary=f"Deleted receiving {receiving.receiving_no}",
+        payload={"receiving_no": receiving.receiving_no, "shipment_no": receiving.shipment_no},
+    )
     db.delete(receiving)
     db.commit()
 
@@ -153,8 +241,15 @@ def update_package(
     package_id: str,
     branch_id: str | None,
     payload,
+    operator_id: str | None = None,
 ) -> Receiving:
     receiving = _load(db, receiving_id, branch_id)
+    status_str, opened = _current_receiving_status_and_opened(receiving)
+    assert_can_perform_receiving_action(
+        ReceivingAction.INSPECT_PACKAGE,
+        status_str,
+        opened_packages_count=opened,
+    )
     package = next((entry for entry in receiving.packages if entry.id == package_id), None)
     if package is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Package not found")
@@ -168,6 +263,17 @@ def update_package(
     if items_in is not None:
         package.items = [_item_from_payload(db, item) for item in items_in]
 
+    receiving.updated_at = func.now()
+    record_audit_log(
+        db,
+        branch_id=receiving.branch_id,
+        entity_type="receiving",
+        entity_id=receiving.id,
+        action="inspect_package",
+        operator_id=operator_id,
+        summary=f"Updated package #{package.package_no} on receiving {receiving.receiving_no}",
+        payload={"package_no": package.package_no, "opened": package.opened, "item_count": len(package.items)},
+    )
     db.commit()
 
     # Opening a package is the moment its contents become real stock, so it is also the
@@ -202,9 +308,32 @@ def _cost(cost_in) -> ReceivingCost:
     )
 
 
-def replace_costs(db: Session, receiving_id: str, branch_id: str | None, costs_in) -> Receiving:
+def replace_costs(
+    db: Session,
+    receiving_id: str,
+    branch_id: str | None,
+    costs_in,
+    operator_id: str | None = None,
+) -> Receiving:
     receiving = _load(db, receiving_id, branch_id)
+    status_str, opened = _current_receiving_status_and_opened(receiving)
+    assert_can_perform_receiving_action(
+        ReceivingAction.UPDATE_COSTS,
+        status_str,
+        opened_packages_count=opened,
+    )
     receiving.costs = [_cost(cost) for cost in costs_in]
+    receiving.updated_at = func.now()
+    record_audit_log(
+        db,
+        branch_id=receiving.branch_id,
+        entity_type="receiving",
+        entity_id=receiving.id,
+        action="update_costs",
+        operator_id=operator_id,
+        summary=f"Updated transport costs for receiving {receiving.receiving_no}",
+        payload={"cost_count": len(receiving.costs), "total_cost": sum(float(c.amount) for c in receiving.costs)},
+    )
     db.commit()
     db.refresh(receiving)
     return receiving

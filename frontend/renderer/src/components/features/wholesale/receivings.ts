@@ -123,6 +123,7 @@ export const COST_KINDS = [
 export interface Receiving {
   receiving_id: string;
   receiving_no: string;
+  shipment_id?: string;
   /** The shipment these packages came off. */
   shipment_no: string;
   voucher_no: string;
@@ -140,6 +141,8 @@ export interface Receiving {
   total_quantity_pairs: number;
   total_unit: Unit;
   packages: ReceivingPackage[];
+  allowed_actions?: string[];
+  version_id?: number;
 }
 
 /** Everything this delivery has cost so far. */

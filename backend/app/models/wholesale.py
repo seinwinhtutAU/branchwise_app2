@@ -143,8 +143,11 @@ class Shipment(Base):
     split_from_shipment_id: Mapped[str | None] = mapped_column(
         ForeignKey("wholesale_shipments.id", ondelete="SET NULL"), nullable=True
     )
+    version_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __mapper_args__ = {"version_id_col": version_id}
 
     branch: Mapped["Branch | None"] = relationship()
     legs: Mapped[list["ShipmentLeg"]] = relationship(
@@ -221,8 +224,11 @@ class Receiving(Base):
         nullable=False,
         default=WholesaleUnit.SET,
     )
+    version_id: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1", default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __mapper_args__ = {"version_id_col": version_id}
 
     branch: Mapped["Branch | None"] = relationship()
     packages: Mapped[list["ReceivingPackage"]] = relationship(
@@ -354,8 +360,11 @@ class SupplierVoucher(Base):
     voucher_date: Mapped[date] = mapped_column(Date, nullable=False)
     carrier_name: Mapped[str] = mapped_column("cargo_name", String(255), nullable=False, default="")
     total_packages: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    version_id: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1", default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __mapper_args__ = {"version_id_col": version_id}
 
     branch: Mapped["Branch | None"] = relationship()
     lines: Mapped[list["SupplierVoucherLine"]] = relationship(
@@ -443,8 +452,12 @@ class CustomerOrder(Base):
     customer_address: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
     order_date: Mapped[date] = mapped_column(Date, nullable=False)
     cancelled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    version_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __mapper_args__ = {"version_id_col": version_id}
+
     lines: Mapped[list["CustomerOrderLine"]] = relationship(
         back_populates="order", cascade="all, delete-orphan", order_by="CustomerOrderLine.id"
     )
@@ -611,3 +624,26 @@ class WholesaleWriteOff(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     branch: Mapped["Branch | None"] = relationship()
+
+
+class WholesaleAuditLog(Base):
+    """An append-only audit trail for wholesale domain events and state transitions."""
+
+    __tablename__ = "wholesale_audit_logs"
+    __table_args__ = (
+        Index("ix_wholesale_audit_logs_branch_id_created_at", "branch_id", "created_at"),
+        Index("ix_wholesale_audit_logs_entity", "entity_type", "entity_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True)
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    operator_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    summary: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    branch: Mapped["Branch | None"] = relationship()
+

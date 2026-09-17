@@ -1,22 +1,18 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_app_user
 from app.db.session import get_db
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.services.wholesale.inventory import delivered_pairs_by_order
 from app.services.wholesale.money import order_totals
 from app.services.wholesale.orders import list_orders
+from app.routers.wholesale_common import require_wholesale
 
 
 router = APIRouter(prefix="/api/wholesale/finance", tags=["wholesale"])
-
-
-def _require_wholesale(user: User) -> None:
-    if user.role not in (UserRole.WHOLESALE, UserRole.ADMIN):
-        raise HTTPException(403, "This account cannot use the wholesale workspace")
 
 
 def _payment_status(paid: float, total: float) -> str:
@@ -45,7 +41,7 @@ def customer_finance_rows(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    _require_wholesale(user)
+    require_wholesale(user)
     orders = [order for order in list_orders(db, user.branch_id) if not order.cancelled]
     delivered_by_order = delivered_pairs_by_order(db, [order.id for order in orders], user.branch_id)
     query = search.strip().lower()

@@ -80,6 +80,12 @@ export interface SupplierVoucher {
   lost_quantity_pairs?: number;
   payment: VoucherPayment;
   lines: SupplierVoucherLine[];
+  status?: string;
+  allowed_actions?: string[];
+  version_id?: number;
+  total_amount?: number;
+  paid_amount?: number;
+  balance_due?: number;
 }
 
 export function voucherAmount(voucher: SupplierVoucher): number {

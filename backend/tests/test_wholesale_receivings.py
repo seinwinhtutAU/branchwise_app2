@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
 from app.models.user import User, UserRole
+from app.models.wholesale import Receiving, WholesaleAuditLog
 from app.models.wholesale_master_data import WholesaleProduct
 
 
@@ -69,6 +70,8 @@ def test_receiving_crud_packages_costs_and_shipment_figure(
     assert body["receiving_no"] == f"RCV-{date.today():%y%m%d}-0001"
     assert body["shipment_no"].startswith("SHP-")
     assert body["receiving_status"] == "recorded"
+    assert body["version_id"] == 1
+    assert "delete" in body["allowed_actions"]
     assert len(body["packages"]) == 2
 
     package_id = body["packages"][0]["package_id"]
@@ -93,6 +96,8 @@ def test_receiving_crud_packages_costs_and_shipment_figure(
     assert updated.status_code == 200
     assert updated.json()["counted_quantity_pairs"] == 6
     assert updated.json()["receiving_status"] == "checking"
+    # When packages are opened, delete action is removed from allowed_actions
+    assert "delete" not in updated.json()["allowed_actions"]
 
     costs = authed_client.put(
         f"/api/wholesale/receivings/{body['receiving_id']}/costs",
@@ -105,6 +110,19 @@ def test_receiving_crud_packages_costs_and_shipment_figure(
     shipment = authed_client.get(f"/api/wholesale/shipments/{shipment_id}")
     assert shipment.status_code == 200
     assert shipment.json()["final_received_packages"] == 2
+
+    # Attempting to delete a receiving with opened packages must raise 409 Conflict
+    conflict = authed_client.delete(f"/api/wholesale/receivings/{body['receiving_id']}")
+    assert conflict.status_code == 409
+    assert "opened packages" in conflict.json()["detail"]
+
+    # Close the package
+    reclosed = authed_client.patch(
+        f"/api/wholesale/receivings/{body['receiving_id']}/packages/{package_id}",
+        json={"opened": False, "items": []},
+    )
+    assert reclosed.status_code == 200
+    assert "delete" in reclosed.json()["allowed_actions"]
 
     deleted = authed_client.delete(f"/api/wholesale/receivings/{body['receiving_id']}")
     assert deleted.status_code == 204
@@ -248,3 +266,97 @@ def test_opening_a_package_with_a_new_stock_code_creates_a_master_data_product(
     product = db_session.query(WholesaleProduct).filter(WholesaleProduct.stock_code == "A1001").first()
     assert product is not None
     assert product.description == "Men's sandal"
+
+
+def test_receiving_audit_logs_and_optimistic_locking(
+    authed_client: TestClient, db_session: Session
+) -> None:
+    branch = _make_branch(db_session)
+    user = _make_user(db_session, UserRole.WHOLESALE, branch.id)
+    shipment_id = _create_shipment(authed_client)
+
+    # 1. Create
+    res = authed_client.post(
+        "/api/wholesale/receivings",
+        json={
+            "shipment_id": shipment_id,
+            "gate": "Gate 1",
+            "received_on": "2026-09-12",
+            "total_packages": 2,
+            "total_quantity_pairs": 12,
+            "total_unit": "set",
+        },
+    )
+    assert res.status_code == 201
+    rcv = res.json()
+    receiving_id = rcv["receiving_id"]
+    assert rcv["version_id"] == 1
+
+    create_log = (
+        db_session.query(WholesaleAuditLog)
+        .filter(WholesaleAuditLog.entity_id == receiving_id, WholesaleAuditLog.action == "create")
+        .first()
+    )
+    assert create_log is not None
+    assert create_log.entity_type == "receiving"
+    assert create_log.operator_id == user.id
+
+    # 2. Update gate / packages
+    patch_res = authed_client.patch(
+        f"/api/wholesale/receivings/{receiving_id}",
+        json={"gate": "Gate 2"},
+    )
+    assert patch_res.status_code == 200
+    assert patch_res.json()["version_id"] == 2
+    assert patch_res.json()["gate"] == "Gate 2"
+
+    edit_log = (
+        db_session.query(WholesaleAuditLog)
+        .filter(WholesaleAuditLog.entity_id == receiving_id, WholesaleAuditLog.action == "edit")
+        .first()
+    )
+    assert edit_log is not None
+    assert edit_log.payload["gate"] == "Gate 2"
+
+    # 3. Inspect package
+    package_id = rcv["packages"][0]["package_id"]
+    pkg_res = authed_client.patch(
+        f"/api/wholesale/receivings/{receiving_id}/packages/{package_id}",
+        json={"opened": False, "note": "Checked outer seal intact"},
+    )
+    assert pkg_res.status_code == 200
+    assert pkg_res.json()["version_id"] == 3
+
+    pkg_log = (
+        db_session.query(WholesaleAuditLog)
+        .filter(WholesaleAuditLog.entity_id == receiving_id, WholesaleAuditLog.action == "inspect_package")
+        .first()
+    )
+    assert pkg_log is not None
+
+    # 4. Update costs
+    costs_res = authed_client.put(
+        f"/api/wholesale/receivings/{receiving_id}/costs",
+        json=[{"cost_date": "2026-09-12", "stage": "Gate", "carrier": "Porter", "kind": "Unload", "amount": 5000, "note": "Done"}],
+    )
+    assert costs_res.status_code == 200
+    assert costs_res.json()["version_id"] == 4
+
+    cost_log = (
+        db_session.query(WholesaleAuditLog)
+        .filter(WholesaleAuditLog.entity_id == receiving_id, WholesaleAuditLog.action == "update_costs")
+        .first()
+    )
+    assert cost_log is not None
+
+    # 5. Delete (unopened packages, so allowed)
+    del_res = authed_client.delete(f"/api/wholesale/receivings/{receiving_id}")
+    assert del_res.status_code == 204
+
+    del_log = (
+        db_session.query(WholesaleAuditLog)
+        .filter(WholesaleAuditLog.entity_id == receiving_id, WholesaleAuditLog.action == "delete")
+        .first()
+    )
+    assert del_log is not None
+

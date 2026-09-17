@@ -5,15 +5,16 @@ app/services/wholesale/shipments.py for the derived figures."""
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_app_user
 from app.db.session import get_db
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.models.wholesale import Shipment
 from app.schemas.wholesale_shipments import ShipmentCreate, ShipmentSplitIn, ShipmentUpdate, ShipmentWriteOffIn
 from app.services.branches import resolve_wholesale_branch_id
+from app.services.wholesale.lifecycle import get_allowed_shipment_actions
 from app.services.wholesale.shipments import shipment_derived
 from app.services.wholesale.write_offs import write_off_shipment, write_off_to_dict
 from app.services.wholesale_receivings import final_received_by_shipment
@@ -25,13 +26,9 @@ from app.services.wholesale_shipments import (
     split_shipment,
     update_shipment,
 )
+from app.routers.wholesale_common import paginate, require_wholesale
 
 router = APIRouter(prefix="/api/wholesale/shipments", tags=["wholesale"])
-
-
-def _require_wholesale(user: User) -> None:
-    if user.role not in (UserRole.WHOLESALE, UserRole.ADMIN):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "This account cannot use the wholesale workspace")
 
 
 def _leg_out(leg, index: int, derived_legs: list[dict]) -> dict:
@@ -47,8 +44,20 @@ def _leg_out(leg, index: int, derived_legs: list[dict]) -> dict:
     }
 
 
-def _shipment_out(shipment: Shipment, final_received_override: int | None = None) -> dict:
+def _shipment_out(
+    shipment: Shipment,
+    final_received_override: int | None = None,
+    has_receiving: bool | None = None,
+) -> dict:
     derived = shipment_derived(shipment, final_received_override)
+    is_received = (
+        has_receiving if has_receiving is not None else (final_received_override is not None)
+    )
+    allowed_actions = get_allowed_shipment_actions(
+        shipment,
+        derived["final_received_packages"],
+        has_receiving=is_received,
+    )
     return {
         "shipment_id": shipment.id,
         "branch_id": shipment.branch_id,
@@ -71,6 +80,8 @@ def _shipment_out(shipment: Shipment, final_received_override: int | None = None
         "cargo_remaining": derived["cargo_remaining"],
         "final_remaining": derived["final_remaining"],
         "shipment_status": derived["shipment_status"],
+        "allowed_actions": allowed_actions,
+        "version_id": getattr(shipment, "version_id", 1),
         "destination_count": derived["destination_count"],
         "arrived_pct": derived["arrived_pct"],
         "legs": [_leg_out(leg, index, derived["legs"]) for index, leg in enumerate(shipment.legs)],
@@ -89,10 +100,17 @@ def list_shipments_endpoint(
     db: Session = Depends(get_db),
     response: Response = None,
 ) -> list[dict]:
-    _require_wholesale(user)
+    require_wholesale(user)
     shipments = list_shipments(db, user.branch_id)
     overrides = final_received_by_shipment(db, [shipment.id for shipment in shipments])
-    rows = [_shipment_out(shipment, overrides.get(shipment.id)) for shipment in shipments]
+    rows = [
+        _shipment_out(
+            shipment,
+            overrides.get(shipment.id),
+            has_receiving=shipment.id in overrides,
+        )
+        for shipment in shipments
+    ]
     query = search.strip().lower()
     if query:
         rows = [
@@ -103,9 +121,7 @@ def list_shipments_endpoint(
         ]
     if shipment_status:
         rows = [row for row in rows if row["shipment_status"] == shipment_status]
-    response.headers["X-Total-Count"] = str(len(rows))
-    start = (page - 1) * page_size
-    return rows[start : start + page_size]
+    return paginate(rows, page, page_size, response)
 
 
 @router.get("/{shipment_id}")
@@ -114,10 +130,11 @@ def get_shipment_endpoint(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     shipment = get_shipment(db, shipment_id, user.branch_id)
-    override = final_received_by_shipment(db, [shipment.id]).get(shipment.id)
-    return _shipment_out(shipment, override)
+    overrides = final_received_by_shipment(db, [shipment.id])
+    override = overrides.get(shipment.id)
+    return _shipment_out(shipment, override, has_receiving=shipment.id in overrides)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -126,7 +143,7 @@ def create_shipment_endpoint(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     branch_id = resolve_wholesale_branch_id(user, payload.branch_id, db)
     shipment = create_shipment(db, branch_id, payload)
     return _shipment_out(shipment)
@@ -139,10 +156,11 @@ def update_shipment_endpoint(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
-    shipment = update_shipment(db, shipment_id, user.branch_id, payload)
-    override = final_received_by_shipment(db, [shipment.id]).get(shipment.id)
-    return _shipment_out(shipment, override)
+    require_wholesale(user)
+    shipment = update_shipment(db, shipment_id, user.branch_id, payload, operator_id=user.id)
+    overrides = final_received_by_shipment(db, [shipment.id])
+    override = overrides.get(shipment.id)
+    return _shipment_out(shipment, override, has_receiving=shipment.id in overrides)
 
 
 @router.post("/{shipment_id}/write-off", status_code=status.HTTP_201_CREATED)
@@ -152,7 +170,7 @@ def write_off_shipment_endpoint(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     entry = write_off_shipment(
         db, shipment_id, payload.leg_id, payload.quantity, payload.reason, payload.note, user.id,
         branch_id=user.branch_id,
@@ -167,7 +185,7 @@ def split_shipment_endpoint(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     original, new_shipment = split_shipment(
         db,
         shipment_id,
@@ -177,10 +195,12 @@ def split_shipment_endpoint(
         payload.final_destination,
         payload.carrier_name,
         payload.split_leg_order,
+        operator_id=user.id,
     )
-    original_override = final_received_by_shipment(db, [original.id]).get(original.id)
+    original_overrides = final_received_by_shipment(db, [original.id])
+    original_override = original_overrides.get(original.id)
     return {
-        "original": _shipment_out(original, original_override),
+        "original": _shipment_out(original, original_override, has_receiving=original.id in original_overrides),
         "new_shipment": _shipment_out(new_shipment),
     }
 
@@ -191,5 +211,5 @@ def delete_shipment_endpoint(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> None:
-    _require_wholesale(user)
-    delete_shipment(db, shipment_id, user.branch_id)
+    require_wholesale(user)
+    delete_shipment(db, shipment_id, user.branch_id, operator_id=user.id)

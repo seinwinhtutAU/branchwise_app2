@@ -103,6 +103,8 @@ export interface ShipmentWire {
   lost_packages?: number;
   final_lost_packages?: number;
   split_from_shipment_id?: string | null;
+  allowed_actions?: string[];
+  version_id?: number;
   legs: (ShipmentLegWire & { leg_id: string; leg_order: number })[];
 }
 
@@ -205,6 +207,8 @@ export function shipmentFromWire(wire: ShipmentWire): Shipment {
     lost_packages: wire.lost_packages ?? 0,
     final_lost_packages: wire.final_lost_packages ?? 0,
     split_from_shipment_id: wire.split_from_shipment_id ?? null,
+    allowed_actions: wire.allowed_actions ?? [],
+    version_id: wire.version_id ?? 1,
     legs: wire.legs.map((leg) => ({
       leg_id: leg.leg_id,
       leg_order: leg.leg_order,

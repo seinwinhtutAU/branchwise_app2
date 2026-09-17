@@ -1,12 +1,12 @@
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_app_user
 from app.db.session import get_db
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.models.wholesale import CustomerOrder
 from app.schemas.wholesale_orders import OrderIn, OrderLineAllocationIn, OrderPaymentIn
 from app.schemas.wholesale_write_offs import WriteOffIn
@@ -24,6 +24,7 @@ from app.services.wholesale.orders import (
     update_order,
     order_status,
 )
+from app.services.wholesale.lifecycle import get_allowed_order_actions
 from app.services.wholesale.money import order_totals
 from app.services.wholesale.inventory import (
     color_pairs_breakdown,
@@ -33,13 +34,9 @@ from app.services.wholesale.inventory import (
 )
 from app.services.wholesale.references import allocate_reference
 from app.services.wholesale.write_offs import write_off_order_line, write_off_to_dict
+from app.routers.wholesale_common import paginate, require_wholesale
 
 router = APIRouter(prefix="/api/wholesale/orders", tags=["wholesale"])
-
-
-def _require_wholesale(user: User) -> None:
-    if user.role not in (UserRole.WHOLESALE, UserRole.ADMIN):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "This account cannot use the wholesale workspace")
 
 
 def _visible_branch_id(user: User, branch_id: str | None) -> str | None:
@@ -120,6 +117,11 @@ def _out(
     allocated = sum(line["allocated_quantity_pairs"] for line in lines)
     lost = sum(line["lost_quantity_pairs"] for line in lines)
     status_value = order_status(total_wanted, received, allocated, order.cancelled, lost)
+    allowed_actions = get_allowed_order_actions(
+        status_value,
+        has_payments=len(payments) > 0,
+        has_movements=received > 0,
+    )
     return {
         "order_id": order.id,
         "branch_id": order.branch_id,
@@ -133,6 +135,8 @@ def _out(
         "lost_quantity_pairs": lost,
         "remaining_quantity_pairs": max(0, total_wanted - received - lost),
         "order_status": status_value,
+        "allowed_actions": allowed_actions,
+        "version_id": getattr(order, "version_id", 1),
         "lines": lines,
         "payment": {"account_id": order.id, "payments": payments},
         "total_amount": totals["total"],
@@ -162,7 +166,7 @@ def list_customer_orders(
     db: Session = Depends(get_db),
     response: Response = None,
 ) -> list[dict]:
-    _require_wholesale(user)
+    require_wholesale(user)
     resolved_branch_id = _visible_branch_id(user, branch_id)
     orders = list_orders(db, resolved_branch_id)
     delivered = delivered_pairs_by_order(db, [order.id for order in orders], resolved_branch_id)
@@ -189,9 +193,7 @@ def list_customer_orders(
             row for row in rows
             if ("paid" if row["balance_due"] <= 0 else "partial" if row["paid_amount"] > 0 else "unpaid") == payment_status
         ]
-    response.headers["X-Total-Count"] = str(len(rows))
-    start = (page - 1) * page_size
-    return rows[start : start + page_size]
+    return paginate(rows, page, page_size, response)
 
 
 @router.get("/allocations")
@@ -204,11 +206,9 @@ def list_customer_order_allocations(
     db: Session = Depends(get_db),
     response: Response = None,
 ) -> list[dict]:
-    _require_wholesale(user)
+    require_wholesale(user)
     resolved_branch_id = _visible_branch_id(user, branch_id)
-    events = list_allocation_events(db, resolved_branch_id, search)
-    response.headers["X-Total-Count"] = str(len(events))
-    start = (page - 1) * page_size
+    events = paginate(list_allocation_events(db, resolved_branch_id, search), page, page_size, response)
     return [
         {
             "event_id": event.id,
@@ -228,7 +228,7 @@ def list_customer_order_allocations(
             "recorded_by_user_id": event.recorded_by_user_id,
             "created_at": event.created_at,
         }
-        for event in events[start : start + page_size]
+        for event in events
     ]
 
 
@@ -238,14 +238,14 @@ def next_order_no(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     resolved_branch_id = _visible_branch_id(user, branch_id)
     return {"order_no": allocate_reference(db, CustomerOrder.order_no, resolved_branch_id, "ORD", date.today())}
 
 
 @router.get("/{order_id}")
 def read_customer_order(order_id: str, user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     order = get_order(db, order_id, user.branch_id)
     return _out(
         order,
@@ -256,16 +256,16 @@ def read_customer_order(order_id: str, user: User = Depends(get_current_app_user
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_customer_order(payload: OrderIn, user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     branch_id = resolve_wholesale_branch_id(user, payload.branch_id, db)
-    order = create_order(db, branch_id, payload)
+    order = create_order(db, branch_id, payload, operator_id=user.id)
     return _out(order, None, _delivered_colors(db, order, branch_id))
 
 
 @router.put("/{order_id}")
 def update_customer_order(order_id: str, payload: OrderIn, user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> dict:
-    _require_wholesale(user)
-    order = update_order(db, order_id, user.branch_id, payload)
+    require_wholesale(user)
+    order = update_order(db, order_id, user.branch_id, payload, operator_id=user.id)
     return _out(
         order,
         delivered_pairs_by_order(db, [order.id], user.branch_id).get(order.id),
@@ -275,8 +275,8 @@ def update_customer_order(order_id: str, payload: OrderIn, user: User = Depends(
 
 @router.post("/{order_id}/cancel")
 def cancel_customer_order(order_id: str, user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> dict:
-    _require_wholesale(user)
-    order = cancel_order(db, order_id, user.branch_id)
+    require_wholesale(user)
+    order = cancel_order(db, order_id, user.branch_id, operator_id=user.id)
     return _out(
         order,
         delivered_pairs_by_order(db, [order.id], user.branch_id).get(order.id),
@@ -286,13 +286,13 @@ def cancel_customer_order(order_id: str, user: User = Depends(get_current_app_us
 
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_customer_order(order_id: str, user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> None:
-    _require_wholesale(user)
-    delete_order(db, order_id, user.branch_id)
+    require_wholesale(user)
+    delete_order(db, order_id, user.branch_id, operator_id=user.id)
 
 
 @router.post("/{order_id}/payments", status_code=status.HTTP_201_CREATED)
 def create_customer_payment(order_id: str, payload: OrderPaymentIn, user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     payment = add_payment(db, order_id, user.branch_id, user.id, payload)
     return {
         "payment_id": payment.id,
@@ -310,7 +310,7 @@ def update_customer_order_line_allocation(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     line = allocate_order_line(db, order_line_id, user.branch_id, payload.color_breakdown, user.id)
     order = get_order(db, line.order_id, user.branch_id)
     return _out(
@@ -327,7 +327,7 @@ def write_off_customer_order_line(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     entry = write_off_order_line(
         db, line_id, payload.quantity, payload.reason, payload.note, user.id,
         branch_id=user.branch_id,
@@ -337,5 +337,5 @@ def write_off_customer_order_line(
 
 @router.delete("/{order_id}/payments/{payment_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_customer_payment(order_id: str, payment_id: str, user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> None:
-    _require_wholesale(user)
+    require_wholesale(user)
     delete_payment(db, order_id, payment_id, user.branch_id)

@@ -16,6 +16,7 @@ from app.models.wholesale import (
     ShipmentLeg,
     SupplierVoucher,
     SupplierVoucherLine,
+    WholesaleAuditLog,
     WholesaleStockMovement,
     WholesaleUnit,
 )
@@ -576,3 +577,44 @@ def test_order_line_reports_what_has_been_delivered_by_color(
     line = after["lines"][0]
     assert line["delivered_color_breakdown"] == "black6p"
     assert line["delivered_quantity_pairs"] == 6
+
+
+def test_delivery_bumps_order_version_and_records_audit(
+    authed_client: TestClient, db_session: Session,
+) -> None:
+    """create_delivery_batch must bump the order version_id and write an audit log."""
+    branch = _branch(db_session)
+    _user(db_session, branch.id)
+    _incoming_stock(db_session, branch)
+
+    order_resp = authed_client.post("/api/wholesale/orders", json=_order_payload()).json()
+    order_id = order_resp["order_id"]
+
+    # Allocation is required before delivery can be accepted.
+    _allocate(authed_client, order_resp, "black1s")
+
+    order_before = db_session.get(CustomerOrder, order_id)
+    version_before = order_before.version_id
+
+    batch = authed_client.post("/api/wholesale/inventory/deliveries/batch", json={
+        "order_id": order_id,
+        "delivered_on": "2026-09-14",
+        "delivery_address": "Yangon",
+        "note": "",
+        "lines": [
+            {"stock_code": "A1001", "location": "Gate", "color_breakdown": "black1s", "unit": "set"},
+        ],
+    })
+    assert batch.status_code == 201, batch.text
+
+    db_session.expire(order_before)
+    order_after = db_session.get(CustomerOrder, order_id)
+    assert order_after.version_id != version_before, "version_id should have been bumped"
+
+    log = (
+        db_session.query(WholesaleAuditLog)
+        .filter_by(entity_type="customer_order", entity_id=order_id, action="deliver")
+        .first()
+    )
+    assert log is not None, "audit log entry should have been created"
+    assert log.payload["stock_codes"] == ["A1001"]

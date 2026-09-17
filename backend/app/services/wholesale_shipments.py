@@ -12,8 +12,13 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.wholesale import Receiving, Shipment, ShipmentLeg, WholesaleWriteOff, WholesaleWriteOffReason
+from app.services.wholesale.audit import record_audit_log
+from app.services.wholesale.lifecycle import (
+    ShipmentAction,
+    assert_can_perform_shipment_action,
+)
 from app.services.wholesale.references import allocate_reference, retry_on_reference_collision
-from app.services.wholesale.shipments import LegInput, normalise_flow
+from app.services.wholesale.shipments import LegInput, cargo_remaining, leg_remaining, normalise_flow
 
 
 def _load(db: Session, shipment_id: str, branch_id: str | None) -> Shipment:
@@ -113,8 +118,25 @@ def create_shipment(db: Session, branch_id: str | None, payload) -> Shipment:
     return retry_on_reference_collision(db, attempt)
 
 
-def update_shipment(db: Session, shipment_id: str, branch_id: str | None, payload) -> Shipment:
+def update_shipment(
+    db: Session,
+    shipment_id: str,
+    branch_id: str | None,
+    payload,
+    operator_id: str | None = None,
+) -> Shipment:
     shipment = _load(db, shipment_id, branch_id)
+    from app.services.wholesale_receivings import final_received_by_shipment
+
+    has_receiving = db.query(Receiving.id).filter(Receiving.shipment_id == shipment.id).first() is not None
+    overrides = final_received_by_shipment(db, [shipment.id])
+    final_received = overrides.get(shipment.id, shipment.final_received_packages)
+    assert_can_perform_shipment_action(
+        shipment,
+        ShipmentAction.EDIT,
+        final_received,
+        has_receiving=has_receiving,
+    )
     existing_losses = {leg.stop_name: leg.lost_packages for leg in shipment.legs}
     repackaged_rows = (
         db.query(WholesaleWriteOff)
@@ -196,6 +218,16 @@ def update_shipment(db: Session, shipment_id: str, branch_id: str | None, payloa
                 leg.packages_sent = corrected
         _restore_leg_losses(shipment, shipment.legs, existing_losses)
 
+    record_audit_log(
+        db,
+        branch_id=shipment.branch_id,
+        entity_type="shipment",
+        entity_id=shipment.id,
+        action="update",
+        operator_id=operator_id,
+        summary=f"Updated shipment {shipment.shipment_no}",
+        payload=payload.model_dump(exclude_unset=True),
+    )
     db.commit()
     db.refresh(shipment)
     return shipment
@@ -221,36 +253,66 @@ def split_shipment(
     final_destination: str,
     carrier_name: str,
     split_leg_order: int | None = None,
+    operator_id: str | None = None,
 ) -> tuple[Shipment, Shipment]:
-    """Carves `packages` (and, if known, `quantity_pairs`) out of a shipment into a
-    brand-new shipment of its own — the case where the cargo company only sends part of
-    a voucher one way and holds the rest for a different destination. By default that's
-    the cargo company's own still-undispatched packages; `split_leg_order` instead names
-    a stop further along the route whose own leftover is being redirected somewhere new.
+    """Carves `packages` (and, if known, `quantity_pairs`) out of a shipment's
+    still-undispatched remainder into a brand-new shipment of its own — the case where
+    the cargo company only sends part of a voucher one way and holds the rest for a
+    different destination. By default that remainder is the cargo company's own
+    still-undispatched packages; `split_leg_order` instead names a stop further along the
+    route whose own leftover (physically arrived there, not yet sent on) is being redirected
+    somewhere new. Either way, only an undispatched remainder can move: packages already
+    sent onward from wherever they are now belong to the journey already in progress —
+    `packages` is strictly capped at that remainder (cargo_remaining, or physical available
+    packages for the chosen stop) precisely so a split can never rewrite an already-sent
+    figure a Receiving may already refer to.
 
-    Neither figure is pinned to what a stop's own records show it is holding, only
-    checked against the shipment's own current totals: a split is often also a
-    repackaging (one box becomes two for two different places, or several become one),
-    so the box count moving doesn't have to match what any one stop was last recorded
-    with, and what's actually inside a box isn't known for certain until it's opened and
-    counted at the receiving gate — `quantity_pairs` is optional for exactly that reason,
-    and the original's own quantity is left untouched when it's left unset.
+    `quantity_pairs` gets a looser rule: it's optional, and when given is only checked
+    against the shipment's own total, not against a per-stop share of it. Quantity isn't
+    tracked per stop the way packages are, and what's actually inside a box isn't known
+    for certain until it's opened and counted at the receiving gate, so this doesn't try
+    to pin it down — the original's own quantity is simply left untouched when it's left
+    unset.
 
     A leg-stage split carries the new shipment's already-travelled route with it rather
     than starting it blank: every stop up to and including the split point is copied
     across (at `packages`), so its journey still shows where it has actually been, and
-    the same amount is subtracted (never below zero — see the note above on why this
-    isn't pinned to exact stop figures) from the original's matching stops.
+    the same amount is subtracted from the original's matching stops.
 
     Both the reduction on the original and the new shipment are written in the same
     transaction — via the same allocate-reference-and-commit retry `create_shipment`
     uses — so the two totals can never drift out of sync with each other."""
     original = _load(db, shipment_id, branch_id)
     leg_index = _split_leg_index(original, split_leg_order)
-    if packages > original.total_packages:
+    from app.services.wholesale_receivings import final_received_by_shipment
+
+    has_receiving = db.query(Receiving.id).filter(Receiving.shipment_id == original.id).first() is not None
+    overrides = final_received_by_shipment(db, [original.id])
+    final_received = overrides.get(original.id, original.final_received_packages)
+
+    assert_can_perform_shipment_action(
+        original,
+        ShipmentAction.SPLIT,
+        final_received,
+        has_receiving=has_receiving,
+    )
+    if leg_index is None:
+        available = cargo_remaining(original)
+        stage_description = "still undispatched at cargo"
+    else:
+        leg = original.legs[leg_index]
+        available = max(0, leg.packages_received - leg.packages_sent - getattr(leg, "lost_packages", 0))
+        stage_description = f"still sitting at {leg.stop_name}"
+
+    if packages <= 0:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "Split packages cannot exceed the shipment's own total packages",
+            "Split packages must be at least 1",
+        )
+    if packages > available:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Only {available} packages are {stage_description} and can be split off",
         )
     if quantity_pairs is not None and quantity_pairs > original.total_quantity_pairs:
         raise HTTPException(
@@ -263,33 +325,26 @@ def split_shipment(
         # expires this session's objects, so the pending subtraction below must be
         # re-applied against the current committed state, not a stale in-memory value.
         current = _load(db, shipment_id, branch_id)
-        existing_losses = {leg.stop_name: leg.lost_packages for leg in current.legs}
+        current.total_packages = max(0, current.total_packages - packages)
         if quantity_pairs is not None:
             current.total_quantity_pairs = max(0, current.total_quantity_pairs - quantity_pairs)
 
         travelled_legs: list[ShipmentLeg] = []
         new_packages_sent_by_cargo = 0
-        raw_cargo_sent = current.packages_sent_by_cargo
-        raw_legs = [
-            LegInput(
-                stop_name=leg.stop_name,
-                carrier_name=leg.carrier_name,
-                packages_received=leg.packages_received,
-                packages_sent=leg.packages_sent,
-            )
-            for leg in current.legs
-        ]
+        new_cargo_carrier = carrier_name.strip() or current.carrier_name
+
         if leg_index is not None:
             # Every stop strictly before the split point forwarded these packages in
             # full — that is what let them reach the split stop at all — so both sides
             # of its figures move across. The split stop itself only had them arrive,
             # not go out, which is exactly why they were free to redirect.
-            raw_cargo_sent -= packages
+            new_cargo_carrier = current.carrier_name
+            current.packages_sent_by_cargo = max(0, current.packages_sent_by_cargo - packages)
             new_packages_sent_by_cargo = packages
             for index, leg in enumerate(current.legs):
                 if index < leg_index:
-                    raw_legs[index].packages_received -= packages
-                    raw_legs[index].packages_sent -= packages
+                    leg.packages_received = max(0, leg.packages_received - packages)
+                    leg.packages_sent = max(0, leg.packages_sent - packages)
                     travelled_legs.append(
                         ShipmentLeg(
                             leg_order=index + 1,
@@ -300,36 +355,17 @@ def split_shipment(
                         )
                     )
                 elif index == leg_index:
-                    raw_legs[index].packages_received -= packages
+                    leg.packages_received = max(0, leg.packages_received - packages)
+                    split_leg_carrier = carrier_name.strip() or leg.carrier_name
                     travelled_legs.append(
                         ShipmentLeg(
                             leg_order=index + 1,
                             stop_name=leg.stop_name,
-                            carrier_name=leg.carrier_name,
+                            carrier_name=split_leg_carrier,
                             packages_received=packages,
                             packages_sent=0,
                         )
                     )
-
-        # A repackaging split doesn't have to fit neatly inside what any one stop's own
-        # figures show it holding (see the docstring above) — rather than rejecting an
-        # input that doesn't, this runs it through the same re-clamp every other edit
-        # goes through (normalise_flow) so the original settles back to something
-        # possible, never a negative or otherwise impossible number.
-        settled_legs = _apply_normalised_flow(
-            current,
-            max(0, current.total_packages - packages),
-            max(0, raw_cargo_sent),
-            raw_legs,
-            current.final_received_packages,
-        )
-        # Cleared and flushed before the replacements are added — see update_shipment's
-        # identical dance, done for the identical reason (the (shipment_id, leg_order)
-        # uniqueness constraint).
-        current.legs.clear()
-        db.flush()
-        current.legs = settled_legs
-        _restore_leg_losses(current, settled_legs, existing_losses)
 
         shipment_no = allocate_reference(db, Shipment.shipment_no, current.branch_id, "SHP", date.today())
         new_shipment = Shipment(
@@ -337,7 +373,7 @@ def split_shipment(
             shipment_no=shipment_no,
             voucher_no=current.voucher_no,
             supplier_name=current.supplier_name,
-            carrier_name=carrier_name.strip() or current.carrier_name,
+            carrier_name=new_cargo_carrier,
             final_destination=final_destination,
             sent_on=current.sent_on,
             total_packages=packages,
@@ -349,6 +385,24 @@ def split_shipment(
             legs=travelled_legs,
         )
         db.add(new_shipment)
+        record_audit_log(
+            db,
+            branch_id=current.branch_id,
+            entity_type="shipment",
+            entity_id=current.id,
+            action="split",
+            operator_id=operator_id,
+            summary=f"Split {packages} packages into {new_shipment.shipment_no} to {final_destination}",
+            payload={
+                "new_shipment_id": new_shipment.id,
+                "new_shipment_no": new_shipment.shipment_no,
+                "packages": packages,
+                "quantity_pairs": quantity_pairs,
+                "final_destination": final_destination,
+                "carrier_name": carrier_name,
+                "split_leg_order": split_leg_order,
+            },
+        )
         db.commit()
         db.refresh(new_shipment)
         return new_shipment
@@ -357,13 +411,33 @@ def split_shipment(
     return _load(db, shipment_id, branch_id), new_shipment
 
 
-def delete_shipment(db: Session, shipment_id: str, branch_id: str | None) -> None:
+def delete_shipment(
+    db: Session,
+    shipment_id: str,
+    branch_id: str | None,
+    operator_id: str | None = None,
+) -> None:
     shipment = _load(db, shipment_id, branch_id)
-    has_receiving = db.query(Receiving.id).filter(Receiving.shipment_id == shipment.id).first()
-    if has_receiving is not None:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "This shipment has a receiving against it — remove that first.",
-        )
+    from app.services.wholesale_receivings import final_received_by_shipment
+
+    has_receiving = db.query(Receiving.id).filter(Receiving.shipment_id == shipment.id).first() is not None
+    overrides = final_received_by_shipment(db, [shipment.id])
+    final_received = overrides.get(shipment.id, shipment.final_received_packages)
+    assert_can_perform_shipment_action(
+        shipment,
+        ShipmentAction.DELETE,
+        final_received,
+        has_receiving=has_receiving,
+    )
+    record_audit_log(
+        db,
+        branch_id=shipment.branch_id,
+        entity_type="shipment",
+        entity_id=shipment.id,
+        action="delete",
+        operator_id=operator_id,
+        summary=f"Deleted shipment {shipment.shipment_no}",
+        payload={"shipment_no": shipment.shipment_no},
+    )
     db.delete(shipment)
     db.commit()

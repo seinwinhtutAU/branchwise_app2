@@ -129,6 +129,8 @@ export interface CustomerOrder {
   delivered_quantity_pairs: number;
   lost_quantity_pairs?: number;
   order_status: OrderStatus;
+  allowed_actions?: string[];
+  version_id?: number;
   payment: PaymentAccount;
   lines: CustomerOrderLine[];
 }

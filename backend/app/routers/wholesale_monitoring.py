@@ -1,17 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_app_user
 from app.db.session import get_db
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.services.wholesale.monitoring import monitoring_snapshot
+from app.routers.wholesale_common import require_wholesale
 
 router = APIRouter(prefix="/api/wholesale/monitoring", tags=["wholesale"])
-
-
-def _require_wholesale(user: User) -> None:
-    if user.role not in (UserRole.WHOLESALE, UserRole.ADMIN):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "This account cannot use the wholesale workspace")
 
 
 @router.get("")
@@ -19,5 +15,5 @@ def get_monitoring_snapshot(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_wholesale(user)
+    require_wholesale(user)
     return monitoring_snapshot(db, user.branch_id)

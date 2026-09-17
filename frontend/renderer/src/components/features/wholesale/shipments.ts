@@ -63,6 +63,8 @@ export interface Shipment {
   /** Set when this shipment was carved out of another one's still-undispatched
    *  remainder (see the Split shipment action) — null for an ordinary shipment. */
   split_from_shipment_id?: string | null;
+  allowed_actions?: string[];
+  version_id?: number;
   legs: ShipmentLeg[];
 }
 

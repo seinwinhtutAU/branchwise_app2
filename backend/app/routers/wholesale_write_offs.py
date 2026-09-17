@@ -1,19 +1,15 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_app_user
 from app.db.session import get_db
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.services.wholesale.write_offs import list_write_offs, write_off_to_dict
+from app.routers.wholesale_common import paginate, require_wholesale
 
 router = APIRouter(prefix="/api/wholesale", tags=["wholesale"])
-
-
-def _require_wholesale(user: User) -> None:
-    if user.role not in (UserRole.WHOLESALE, UserRole.ADMIN):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "This account cannot use the wholesale workspace")
 
 
 @router.get("/write-offs")
@@ -25,8 +21,6 @@ def list_wholesale_write_offs(
     db: Session = Depends(get_db),
     response: Response = None,
 ) -> list[dict]:
-    _require_wholesale(user)
-    entries = list_write_offs(db, user.branch_id, search)
-    response.headers["X-Total-Count"] = str(len(entries))
-    start = (page - 1) * page_size
-    return [write_off_to_dict(entry) for entry in entries[start : start + page_size]]
+    require_wholesale(user)
+    entries = paginate(list_write_offs(db, user.branch_id, search), page, page_size, response)
+    return [write_off_to_dict(entry) for entry in entries]

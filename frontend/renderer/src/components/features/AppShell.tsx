@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@renderer/lib/utils";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
@@ -8,6 +8,7 @@ import {
   LogOutIcon,
   StoreIcon,
   FactoryIcon,
+  SettingsIcon,
   SwapIcon,
 } from "@renderer/components/ui/icons";
 import { LogoChip, LogoWordmark } from "@renderer/components/ui/Logo";
@@ -71,6 +72,20 @@ const workspaceActiveClasses: Record<"brand" | "info", string> = {
 
 const SIDEBAR_STORAGE_KEY = "branchwise:sidebarCollapsed";
 
+function accountInitials(
+  profile: Profile | null,
+  email: string | null | undefined,
+): string {
+  const name = profile?.name?.trim() || email?.split("@")[0]?.trim() || "User";
+  const words = name.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    return (words[0][0] + words[1][0]).toUpperCase();
+  }
+  const compact = name.replace(/[^a-zA-Z0-9]/g, "");
+  if (compact.length <= 1) return compact.toUpperCase() || "U";
+  return (compact[0] + compact[compact.length - 1]).toUpperCase();
+}
+
 // Layout wrapper — no skeleton/empty state (exempt per rubric).
 export function AppShell({
   navItems,
@@ -98,6 +113,43 @@ export function AppShell({
       return false;
     }
   });
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+
+    function handlePointer(event: PointerEvent): void {
+      if (
+        accountMenuRef.current &&
+        !accountMenuRef.current.contains(event.target as Node)
+      ) {
+        setAccountMenuOpen(false);
+      }
+    }
+
+    function handleFocus(event: FocusEvent): void {
+      if (
+        accountMenuRef.current &&
+        !accountMenuRef.current.contains(event.target as Node)
+      ) {
+        setAccountMenuOpen(false);
+      }
+    }
+
+    function handleKey(event: KeyboardEvent): void {
+      if (event.key === "Escape") setAccountMenuOpen(false);
+    }
+
+    document.addEventListener("pointerdown", handlePointer, true);
+    document.addEventListener("focusin", handleFocus);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointer, true);
+      document.removeEventListener("focusin", handleFocus);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [accountMenuOpen]);
 
   function handleToggleCollapse(): void {
     setCollapsed((prev) => {
@@ -473,25 +525,79 @@ export function AppShell({
         {(isMac || isWindows) && (
           <div
             className={cn(
-              "h-9 shrink-0 flex items-center justify-between px-4 app-drag-region border-b border-border/60 text-xs text-text-muted select-none bg-bg-base",
+              "h-14 shrink-0 flex items-center justify-between px-6 app-drag-region border-b border-border/60 text-sm text-text-muted select-none bg-bg-base",
               isWindows && "pr-[140px]",
             )}
           >
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="font-medium text-text-secondary truncate">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="text-base font-semibold text-text-secondary truncate">
                 BranchWise
               </span>
-              <span className="text-border">/</span>
-              <span className="capitalize text-text-muted">
+              <span className="text-lg text-border">/</span>
+              <span className="capitalize text-base text-text-muted">
                 {activeWorkspace ?? "workspace"}
               </span>
             </div>
-            <div className="flex items-center gap-2 app-no-drag">
-              <span className="text-[11px] text-text-muted/70 hidden sm:inline-block">
+            <div className="flex items-center gap-3 app-no-drag">
+              <span className="text-xs text-text-muted/70 hidden sm:inline-block">
                 {isMac
                   ? "⌘B Sidebar · ⌘, Settings"
                   : "Ctrl+B Sidebar · Ctrl+, Settings"}
               </span>
+              <div className="relative" ref={accountMenuRef}>
+                <button
+                  type="button"
+                  aria-label="Open account menu"
+                  aria-haspopup="menu"
+                  aria-expanded={accountMenuOpen}
+                  onClick={() => setAccountMenuOpen((open) => !open)}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-brand text-xs font-bold text-white shadow-xs transition-colors hover:bg-brand/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base"
+                >
+                  {accountInitials(profile, email)}
+                </button>
+                {accountMenuOpen && (
+                  <div
+                    role="menu"
+                    aria-label="Account menu"
+                    className="absolute right-0 top-full z-50 mt-2 w-52 rounded-lg border border-border bg-bg-base p-1.5 text-sm shadow-lg"
+                  >
+                    <div className="border-b border-border px-2.5 pb-2 pt-1">
+                      <p className="truncate font-medium text-text-primary">
+                        {profile?.name || email || "User"}
+                      </p>
+                      {profile?.role && (
+                        <p className="mt-0.5 text-xs capitalize text-text-muted">
+                          {profile.role}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAccountMenuOpen(false);
+                        onSectionChange("settings");
+                      }}
+                      className="mt-1 flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-text-secondary transition-colors hover:bg-bg-raised hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                    >
+                      <SettingsIcon className="h-4 w-4" />
+                      Settings
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAccountMenuOpen(false);
+                        onSignOut();
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-error transition-colors hover:bg-error-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error"
+                    >
+                      <LogOutIcon className="h-4 w-4" />
+                      Sign out
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -506,5 +612,3 @@ export function AppShell({
     </div>
   );
 }
-
-

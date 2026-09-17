@@ -104,7 +104,33 @@ def _check_no_duplicate_stock_codes(lines) -> None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Each stock code can only appear on one line per order")
 
 
-def create_order(db: Session, branch_id: str | None, payload) -> CustomerOrder:
+from app.services.wholesale.audit import record_audit_log
+from app.services.wholesale.lifecycle import (
+    OrderAction,
+    OrderStatus,
+    assert_can_perform_order_action,
+    get_allowed_order_actions,
+)
+
+
+def order_lifecycle_info(db: Session, order: CustomerOrder, branch_id: str | None) -> tuple[str, bool, bool]:
+    delivered = delivered_pairs_by_order(db, [order.id], branch_id).get(order.id, {})
+    total_delivered = sum(delivered.values())
+    total_wanted = sum(line.quantity_pairs for line in order.lines)
+    total_allocated = sum(line.allocated_quantity_pairs for line in order.lines)
+    total_lost = sum(line.lost_quantity_pairs for line in order.lines)
+    status_str = order_status(total_wanted, total_delivered, total_allocated, order.cancelled, total_lost)
+    has_payments = len(order.payments) > 0
+    has_movements = total_delivered > 0
+    return status_str, has_payments, has_movements
+
+
+def create_order(
+    db: Session,
+    branch_id: str | None,
+    payload,
+    operator_id: str | None = None,
+) -> CustomerOrder:
     _check_no_duplicate_stock_codes(payload.lines)
 
     def attempt() -> CustomerOrder:
@@ -116,15 +142,43 @@ def create_order(db: Session, branch_id: str | None, payload) -> CustomerOrder:
             lines=[_line(db, line) for line in payload.lines],
         )
         db.add(order)
+        db.flush()
+        record_audit_log(
+            db,
+            branch_id=branch_id,
+            entity_type="order",
+            entity_id=order.id,
+            action="create",
+            operator_id=operator_id,
+            summary=f"Created order {order.order_no} for {order.customer_name}",
+            payload={
+                "order_no": order.order_no,
+                "customer_name": order.customer_name,
+                "line_count": len(order.lines),
+            },
+        )
         db.commit()
         return _load(db, order.id, branch_id)
 
     return retry_on_reference_collision(db, attempt)
 
 
-def update_order(db: Session, order_id: str, branch_id: str | None, payload) -> CustomerOrder:
+def update_order(
+    db: Session,
+    order_id: str,
+    branch_id: str | None,
+    payload,
+    operator_id: str | None = None,
+) -> CustomerOrder:
     _check_no_duplicate_stock_codes(payload.lines)
     order = _load(db, order_id, branch_id)
+    status_str, has_payments, has_movements = order_lifecycle_info(db, order, branch_id)
+    assert_can_perform_order_action(
+        OrderAction.EDIT,
+        status_str,
+        has_payments=has_payments,
+        has_movements=has_movements,
+    )
     existing_allocations = {
         line.stock_code: (
             line.allocated_quantity_pairs,
@@ -152,36 +206,81 @@ def update_order(db: Session, order_id: str, branch_id: str | None, payload) -> 
         line.allocated_quantity_pairs = allocated_pairs
         line.allocated_color_breakdown = allocated_colors
     order.lines = replacement_lines
+    record_audit_log(
+        db,
+        branch_id=order.branch_id,
+        entity_type="order",
+        entity_id=order.id,
+        action="edit",
+        operator_id=operator_id,
+        summary=f"Updated order {order.order_no}",
+        payload={
+            "customer_name": order.customer_name,
+            "customer_phone": order.customer_phone,
+            "customer_address": order.customer_address,
+            "line_count": len(order.lines),
+        },
+    )
     db.commit()
     return _load(db, order_id, branch_id)
 
 
-def cancel_order(db: Session, order_id: str, branch_id: str | None) -> CustomerOrder:
-    """Cancelling releases whatever stock the order was holding, which is the whole point
-    of it — but it cannot un-hand goods that have already gone out. An order with
-    deliveries against it would end up marked cancelled while its stock movements stood,
-    so the shelves and the order would disagree with nobody able to reconcile them. The
-    way back from that is to take the delivery back first, which leaves a record.
-
-    Payments are deliberately not a blocker: a deposit taken on an order that is then
-    cancelled is an ordinary thing that ends in a refund, and the payment rows stay where
-    they are to be settled.
-    """
+def cancel_order(
+    db: Session,
+    order_id: str,
+    branch_id: str | None,
+    operator_id: str | None = None,
+) -> CustomerOrder:
     order = _load(db, order_id, branch_id)
-    delivered = delivered_pairs_by_order(db, [order.id], branch_id).get(order.id, {})
-    if any(pairs > 0 for pairs in delivered.values()):
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "Some of this order has already gone out to the customer. "
-            "Take those deliveries back before cancelling it.",
-        )
+    status_str, has_payments, has_movements = order_lifecycle_info(db, order, branch_id)
+    assert_can_perform_order_action(
+        OrderAction.CANCEL,
+        status_str,
+        has_payments=has_payments,
+        has_movements=has_movements,
+    )
     order.cancelled = True
+    for line in order.lines:
+        line.allocated_quantity_pairs = 0
+        line.allocated_color_breakdown = ""
+    record_audit_log(
+        db,
+        branch_id=order.branch_id,
+        entity_type="order",
+        entity_id=order.id,
+        action="cancel",
+        operator_id=operator_id,
+        summary=f"Cancelled order {order.order_no}",
+        payload={"order_no": order.order_no},
+    )
     db.commit()
     return _load(db, order_id, branch_id)
 
 
-def delete_order(db: Session, order_id: str, branch_id: str | None) -> None:
+def delete_order(
+    db: Session,
+    order_id: str,
+    branch_id: str | None,
+    operator_id: str | None = None,
+) -> None:
     order = _load(db, order_id, branch_id)
+    status_str, has_payments, has_movements = order_lifecycle_info(db, order, branch_id)
+    assert_can_perform_order_action(
+        OrderAction.DELETE,
+        status_str,
+        has_payments=has_payments,
+        has_movements=has_movements,
+    )
+    record_audit_log(
+        db,
+        branch_id=order.branch_id,
+        entity_type="order",
+        entity_id=order.id,
+        action="delete",
+        operator_id=operator_id,
+        summary=f"Deleted order {order.order_no}",
+        payload={"order_no": order.order_no, "customer_name": order.customer_name},
+    )
     db.delete(order)
     db.commit()
 
@@ -244,8 +343,13 @@ def allocate_order_line(
     )
     if line is None or (branch_id is not None and line.order.branch_id != branch_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer order line not found")
-    if line.order.cancelled:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "A cancelled order cannot be allocated")
+    status_str, has_payments, has_movements = order_lifecycle_info(db, line.order, branch_id)
+    assert_can_perform_order_action(
+        OrderAction.ALLOCATE,
+        status_str,
+        has_payments=has_payments,
+        has_movements=has_movements,
+    )
 
     value = color_breakdown.strip()
     if value:
