@@ -734,7 +734,9 @@ function ReceivingList({
                   <Th className="whitespace-nowrap">Date</Th>
                   <Th className="whitespace-nowrap">Supplier / Factory</Th>
                   <Th className="whitespace-nowrap">Packages</Th>
-                  <Th className="text-right whitespace-nowrap">Received</Th>
+                  <Th className="whitespace-nowrap min-w-[16.5rem]">
+                    Received / Ordered
+                  </Th>
                   <Th>Status</Th>
                   <Th className="w-12" aria-label="Actions" />
                 </Tr>
@@ -762,6 +764,7 @@ function ReceivingList({
                     expectedPackages !== undefined
                       ? Math.max(expectedPackages, receiving.total_packages)
                       : receiving.total_packages;
+                  const remaining = Math.max(0, expectedQuantity - counted);
                   return (
                     <Tr key={receiving.receiving_id}>
                       <Td className="whitespace-nowrap">
@@ -809,20 +812,25 @@ function ReceivingList({
                           receiving itself answers. The bar belongs here, beside the
                           two quantities it is actually measuring. */}
                       <Td className="min-w-[16.5rem] max-w-[21rem]">
-                        <div className="flex flex-col gap-1 items-end w-full">
-                          <span
-                            className={cn(
-                              "tabular-nums whitespace-nowrap",
-                              allOpened && difference !== 0
-                                ? "text-error font-semibold"
-                                : "text-text-secondary",
-                            )}
-                          >
-                            {formatSets(counted)}{" "}
-                            <span className="text-text-muted">
-                              / {formatSets(expectedQuantity)}
+                        <div className="flex flex-col gap-1.5 w-full">
+                          <div className="flex items-center justify-between gap-4 text-xs font-mono">
+                            <span className="font-semibold text-text-primary whitespace-nowrap shrink-0">
+                              {formatSets(counted)}
+                              <span className="text-text-muted/60 font-normal"> / </span>
+                              <span className="text-text-secondary font-normal">
+                                {formatSets(expectedQuantity)}
+                              </span>
                             </span>
-                          </span>
+                            {remaining > 0 ? (
+                              <span className="text-error text-[11px] font-sans font-medium whitespace-nowrap shrink-0">
+                                {formatSets(remaining)} left
+                              </span>
+                            ) : (
+                              <span className="text-success text-[11px] font-sans font-medium whitespace-nowrap shrink-0">
+                                Done
+                              </span>
+                            )}
+                          </div>
                           <RowProgress
                             pct={sharePct(counted, expectedQuantity)}
                             label={`Received quantity for ${receiving.receiving_no}`}
@@ -1515,13 +1523,16 @@ function ReceivingDetail({
 
               <div className="h-5 w-px bg-border" />
 
-              <div className="min-w-0 flex items-center gap-2.5">
-                <h2 className="text-base font-bold text-text-primary tracking-tight truncate">
+              <div className="flex items-center gap-2 min-w-0">
+                <h2 className="text-base font-semibold text-text-primary truncate">
                   {receiving.receiving_no}
                 </h2>
                 <StatusBadge
                   status={receivingStatus(receiving, shipment?.total_packages)}
                 />
+                <span className="hidden md:inline text-xs text-text-muted truncate">
+                  {receiving.supplier_name}
+                </span>
               </div>
             </div>
 
@@ -1645,6 +1656,17 @@ function ReceivingDetail({
         {activeTab === "packages" && (
           <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-xs">
             <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-text-muted font-medium">Shipment:</span>
+                <Reference
+                  value={receiving.shipment_no}
+                  what="shipment no."
+                  singleLine
+                />
+              </div>
+
+              <div className="h-4 w-px bg-border" />
+
               <div className="flex items-center gap-2">
                 <span className="text-text-muted font-medium">
                   Supplier / Factory:

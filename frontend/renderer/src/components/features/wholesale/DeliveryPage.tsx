@@ -643,7 +643,7 @@ function ShipmentList({
                       {shipment.supplier_name}
                     </Td>
                     <Td>
-                      <div className="flex flex-col gap-1 min-w-[7rem]">
+                      <div className="flex flex-col gap-1 min-w-[10rem] max-w-[14rem]">
                         <span className="tabular-nums text-xs font-medium text-text-primary">
                           {formatQty(shipment.final_received_packages)} /{" "}
                           {formatQty(shipment.total_packages)}

@@ -881,10 +881,7 @@ function VoucherList({
                   <Th className="whitespace-nowrap min-w-[12rem]">Supplier / Factory</Th>
                   <Th className="whitespace-nowrap">Date</Th>
                   <Th className="min-w-[17.5rem] whitespace-nowrap">
-                    Receiving qty
-                    <span className="block text-[10px] font-normal text-text-muted">
-                      received / ordered
-                    </span>
+                    Received / Ordered
                   </Th>
                   <Th className="whitespace-nowrap">Receiving status</Th>
                   <Th className="whitespace-nowrap">Payment status</Th>
@@ -2339,10 +2336,7 @@ function VoucherDetail({
                     <Th className="min-w-[18rem]">Product</Th>
                     <Th className="min-w-[11rem]">Colors</Th>
                     <Th className="text-right whitespace-nowrap min-w-[12.5rem]">
-                      Receiving qty
-                      <span className="block text-[10px] font-normal text-text-muted">
-                        received / ordered
-                      </span>
+                      Received / Ordered
                     </Th>
                     <Th className="text-right min-w-[7rem]">
                       Buying price

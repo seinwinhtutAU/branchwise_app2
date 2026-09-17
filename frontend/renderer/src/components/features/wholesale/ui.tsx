@@ -356,12 +356,14 @@ export function MismatchIconButton({
 export function RowProgress({
   pct,
   label = "Progress",
+  className,
 }: {
   pct: number;
   label?: string;
+  className?: string;
 }): React.JSX.Element {
   return (
-    <div className="flex items-center gap-2 min-w-[7rem]">
+    <div className={cn("flex items-center gap-2 min-w-[7rem] w-full", className)}>
       <div
         role="progressbar"
         aria-valuenow={pct}
@@ -380,7 +382,7 @@ export function RowProgress({
       </div>
       <span
         className={cn(
-          "text-xs font-semibold tabular-nums w-9 text-right",
+          "text-xs font-semibold tabular-nums w-9 text-right shrink-0",
           pct === 100
             ? "text-success"
             : pct === 0
