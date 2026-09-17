@@ -62,7 +62,7 @@ export function ReceivingCostsView({
           already on the tab and again under the table, and the "Add cost" button
           already sits in the table header, so neither needs a card of its own. */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-xl border border-border bg-bg-surface p-4 shadow-xs">
+        <div className="rounded-xl border border-border bg-bg-base p-4 shadow-xs">
           <span className="text-xs font-medium text-text-muted">
             Cost Per Package
           </span>
@@ -74,7 +74,7 @@ export function ReceivingCostsView({
           </p>
         </div>
 
-        <div className="rounded-xl border border-border bg-bg-surface p-4 shadow-xs">
+        <div className="rounded-xl border border-border bg-bg-base p-4 shadow-xs">
           <span className="text-xs font-medium text-text-muted">
             Cost / Pair
           </span>
@@ -88,7 +88,7 @@ export function ReceivingCostsView({
       </div>
 
       {/* Costs table */}
-      <div className="flex-1 min-h-[440px] border border-border rounded-xl bg-bg-surface overflow-hidden flex flex-col shadow-xs">
+      <div className="flex-1 min-h-[440px] border border-border rounded-xl bg-bg-base overflow-hidden flex flex-col shadow-xs">
         <div className="px-5 py-3 border-b border-border flex items-center justify-between bg-bg-subtle/30">
           <div>
             <h3 className="text-sm font-bold text-text-primary">Costs</h3>

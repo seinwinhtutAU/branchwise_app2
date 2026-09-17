@@ -30,6 +30,7 @@ import {
   WHOLESALE_FINANCE_CUSTOMERS_URL,
   type ReceivingWire,
 } from "@renderer/components/features/wholesale/api";
+import { DotPill } from "@renderer/components/features/wholesale/ui";
 import {
   formatDate,
   formatKyat,
@@ -62,10 +63,19 @@ const STATUS_LABELS: Record<PaymentStatus, string> = {
   partial: "Part paid",
   paid: "Paid",
 };
-const STATUS_STYLES: Record<PaymentStatus, string> = {
-  unpaid: "bg-error text-white",
-  partial: "bg-warning text-white",
-  paid: "bg-success text-white",
+const STATUS_STYLES: Record<PaymentStatus, { bg: string; dot: string }> = {
+  unpaid: {
+    bg: "bg-error-subtle text-error border border-error/30",
+    dot: "bg-error",
+  },
+  partial: {
+    bg: "bg-warning-subtle text-warning border border-warning/30",
+    dot: "bg-warning",
+  },
+  paid: {
+    bg: "bg-success-subtle text-success border border-success/30",
+    dot: "bg-success",
+  },
 };
 
 interface SupplierFinanceRow {
@@ -156,7 +166,13 @@ export default function FinancePage({
       (supplierQuery.data ?? []).map((voucher) => {
         const totalAmount = voucher.lines.reduce(
           (sum, line) =>
-            sum + pricedAmount(line.quantity_pairs, line.unit, line.buying_price, line.unit_conversions),
+            sum +
+            pricedAmount(
+              line.quantity_pairs,
+              line.unit,
+              line.buying_price,
+              line.unit_conversions,
+            ),
           0,
         );
         return {
@@ -415,13 +431,18 @@ function TabButton({
   );
 }
 
-function StatusPill({ status }: { status: PaymentStatus }): React.JSX.Element {
+function PaymentStatusBadge({
+  status,
+}: {
+  status: PaymentStatus;
+}): React.JSX.Element {
+  const style = STATUS_STYLES[status];
   return (
-    <span
-      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_STYLES[status]}`}
-    >
-      {STATUS_LABELS[status]}
-    </span>
+    <DotPill
+      label={STATUS_LABELS[status]}
+      className={style.bg}
+      dotClassName={style.dot}
+    />
   );
 }
 
@@ -521,7 +542,7 @@ function FinanceTable({
                   {formatKyat(row.balance)}
                 </Td>
                 <Td>
-                  <StatusPill status={row.payment_status} />
+                  <PaymentStatusBadge status={row.payment_status} />
                 </Td>
                 <Td>
                   <Button size="sm" onClick={() => onRecordPayment(row)}>
@@ -625,7 +646,7 @@ function SupplierTable({
                   {formatKyat(row.balance)}
                 </Td>
                 <Td>
-                  <StatusPill status={row.status} />
+                  <PaymentStatusBadge status={row.status} />
                 </Td>
                 <Td>
                   <Button size="sm" onClick={() => onRecordPayment(row)}>

@@ -340,7 +340,7 @@ export function VoucherDetail({
   return (
     <>
       <div className="flex flex-col gap-3">
-        <div className="rounded-xl border border-border bg-bg-surface overflow-hidden divide-y divide-border">
+        <div className="rounded-xl border border-border bg-bg-base overflow-hidden divide-y divide-border">
           <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
             <div className="flex items-center gap-3 min-w-0">
               <Button

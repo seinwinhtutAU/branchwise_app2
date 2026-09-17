@@ -109,7 +109,7 @@ export function ReceivingPackagesView({
       )}
 
       {/* Main 2-Column Cockpit */}
-      <div className="flex-1 min-h-[540px] flex border border-border rounded-xl bg-bg-surface overflow-hidden shadow-xs">
+      <div className="flex-1 min-h-[540px] flex border border-border rounded-xl bg-bg-base overflow-hidden shadow-xs">
         {/* ── Left Column: Packages list ─────────────────────────────── */}
         <aside className="w-64 sm:w-72 shrink-0 border-r border-border flex flex-col bg-bg-subtle/40">
           <div className="p-3 border-b border-border/80 flex items-center justify-between gap-2">
@@ -128,7 +128,7 @@ export function ReceivingPackagesView({
               placeholder="Filter package #..."
               value={packageSearch}
               onChange={(e) => setPackageSearch(e.target.value)}
-              className="h-7 text-xs bg-bg-surface"
+              className="h-7 text-xs bg-bg-base"
             />
           </div>
 
@@ -146,7 +146,7 @@ export function ReceivingPackagesView({
                     "w-full text-left px-3 py-2 rounded-lg cursor-pointer transition-all flex items-center justify-between gap-2 select-none",
                     isSelected
                       ? "bg-brand text-white shadow-xs font-semibold"
-                      : "hover:bg-bg-surface text-text-primary bg-transparent",
+                      : "hover:bg-bg-base text-text-primary bg-transparent",
                   )}
                 >
                   <div className="min-w-0 flex items-center gap-2">
@@ -233,7 +233,7 @@ export function ReceivingPackagesView({
                 onClick={() =>
                   markPackageArrived(receiving.packages.length + 1)
                 }
-                className="w-full px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs text-text-muted hover:text-brand hover:bg-bg-surface transition-colors"
+                className="w-full px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs text-text-muted hover:text-brand hover:bg-bg-base transition-colors"
                 title="Record a package the shipment did not list"
               >
                 <PlusIcon className="w-3.5 h-3.5" />
@@ -242,7 +242,7 @@ export function ReceivingPackagesView({
             )}
           </div>
 
-          <div className="p-2.5 border-t border-border/80 bg-bg-surface flex items-center justify-between text-xs text-text-muted">
+          <div className="p-2.5 border-t border-border/80 bg-bg-base flex items-center justify-between text-xs text-text-muted">
             <span>
               Opened: {opened}/{receiving.packages.length}
             </span>
@@ -253,7 +253,7 @@ export function ReceivingPackagesView({
         </aside>
 
         {/* ── Middle Column: Active Package Workbench ───────────────────── */}
-        <main className="flex-1 min-w-0 flex flex-col bg-bg-surface">
+        <main className="flex-1 min-w-0 flex flex-col bg-bg-base">
           {activePackage ? (
             <>
               {/* Active Package Top Bar */}

@@ -509,7 +509,7 @@ export function ReceivingDetail({
           edited and the arrival notice are all "what this receiving is", so they sit
           in a single bordered block divided by hairlines rather than floating apart
           with gaps between them. */}
-      <div className="rounded-xl border border-border bg-bg-surface overflow-hidden divide-y divide-border">
+      <div className="rounded-xl border border-border bg-bg-base overflow-hidden divide-y divide-border">
         {/* Identity and its tabs are one block, so no hairline runs between them —
             the selected tab's underline is the separator, the way Customer Orders
             and Supplier Vouchers already do it. */}

@@ -46,6 +46,7 @@ import {
   type WholesaleProductWire,
 } from "./api";
 import { GROUP_LABELS, PRODUCT_GROUPS, type ProductGroup } from "./products";
+import { DotPill } from "./ui";
 // Quantities are entered in sets everywhere, so a product no longer carries a unit of
 // its own — only how many pairs make up one of its sets or dozens.
 import { type Unit } from "./units";
@@ -516,11 +517,17 @@ export default function MasterDataPage({
                         </>
                       )}
                       <Td>
-                        <span
-                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap ${row.active ? "bg-success text-white" : "bg-text-secondary text-bg-base"}`}
-                        >
-                          {row.active ? "Active" : "Inactive"}
-                        </span>
+                        <DotPill
+                          label={row.active ? "Active" : "Inactive"}
+                          className={
+                            row.active
+                              ? "bg-success-subtle text-success border border-success/30"
+                              : "bg-bg-raised text-text-secondary border border-border-strong"
+                          }
+                          dotClassName={
+                            row.active ? "bg-success" : "bg-text-muted"
+                          }
+                        />
                       </Td>
                       <Td>
                         <div className="flex justify-end gap-2">

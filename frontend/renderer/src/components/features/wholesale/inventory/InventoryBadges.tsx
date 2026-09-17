@@ -4,7 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@renderer/lib/utils";
 import { Button } from "@renderer/components/ui/Button";
 import { EyeIcon, MoreIcon } from "@renderer/components/ui/icons";
-import { FloatingLayer, MenuItem, StatusPill } from "@renderer/components/features/wholesale/ui";
+import {
+  DotPill,
+  FloatingLayer,
+  MenuItem,
+} from "@renderer/components/features/wholesale/ui";
 import { formatSets } from "@renderer/components/features/wholesale/units";
 import { type StockRecord } from "@renderer/components/features/wholesale/stock";
 import {
@@ -68,7 +72,12 @@ export function InventoryRefreshButton({
   refreshing: boolean;
 }): React.JSX.Element {
   return (
-    <Button variant="secondary" size="sm" onClick={onRefresh} loading={refreshing}>
+    <Button
+      variant="secondary"
+      size="sm"
+      onClick={onRefresh}
+      loading={refreshing}
+    >
       Refresh
     </Button>
   );
@@ -76,7 +85,11 @@ export function InventoryRefreshButton({
 
 // ── Row Menu ──────────────────────────────────────────────────────────────────
 
-export function StockRowMenu({ onView }: { onView: () => void }): React.JSX.Element {
+export function StockRowMenu({
+  onView,
+}: {
+  onView: () => void;
+}): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -136,37 +149,64 @@ export function StockRowMenu({ onView }: { onView: () => void }): React.JSX.Elem
 
 // ── Health Badge ──────────────────────────────────────────────────────────────
 
-export function HealthBadge({ record }: { record: StockRecord }): React.JSX.Element {
+export function HealthBadge({
+  record,
+}: {
+  record: StockRecord;
+}): React.JSX.Element {
   const health = inventoryHealth(record);
-  return <StatusPill label={health} className={HEALTH_STYLES[health as InventoryHealth]} />;
+  const style = HEALTH_STYLES[health as InventoryHealth];
+  return (
+    <DotPill label={health} className={style.bg} dotClassName={style.dot} />
+  );
 }
 
 // ── Movement Badge ────────────────────────────────────────────────────────────
 
-export function MovementTypeBadge({ type }: { type: string }): React.JSX.Element {
+export function MovementTypeBadge({
+  type,
+}: {
+  type: string;
+}): React.JSX.Element {
+  const style = MOVEMENT_STYLES[type] ?? {
+    bg: "bg-bg-raised text-text-secondary border border-border-strong",
+    dot: "bg-text-muted",
+  };
   return (
-    <StatusPill
+    <DotPill
       label={MOVEMENT_LABELS[type] ?? type}
-      className={MOVEMENT_STYLES[type] ?? "bg-text-secondary text-white"}
+      className={style.bg}
+      dotClassName={style.dot}
     />
   );
 }
 
 // ── Stock Places (inline) ─────────────────────────────────────────────────────
 
-export function StockPlaces({ record }: { record: StockRecord }): React.JSX.Element {
+export function StockPlaces({
+  record,
+}: {
+  record: StockRecord;
+}): React.JSX.Element {
   const places = stockPlaces(record);
-  if (places.length === 0) return <span className="text-text-muted">Nowhere yet</span>;
+  if (places.length === 0)
+    return <span className="text-text-muted">Nowhere yet</span>;
 
   const shown = places.slice(0, 2);
   const hidden = places.length - shown.length;
   return (
-    <span title={places.map((place) => `${place.label} ${formatSets(place.pairs)}`).join(" · ")}>
+    <span
+      title={places
+        .map((place) => `${place.label} ${formatSets(place.pairs)}`)
+        .join(" · ")}
+    >
       {shown.map((place, index) => (
         <span key={place.label}>
           {index > 0 && <span className="text-text-muted"> · </span>}
           {place.label}{" "}
-          <span className="tabular-nums text-text-muted">{formatSets(place.pairs)}</span>
+          <span className="tabular-nums text-text-muted">
+            {formatSets(place.pairs)}
+          </span>
         </span>
       ))}
       {hidden > 0 && <span className="text-text-muted"> · +{hidden} more</span>}
@@ -187,7 +227,11 @@ export function StockDetailTabs({
   orderCount: number;
   movementCount: number;
 }): React.JSX.Element {
-  const tabs: { value: "overview" | "orders" | "movement" | "pipeline"; label: string; count: number | null }[] = [
+  const tabs: {
+    value: "overview" | "orders" | "movement" | "pipeline";
+    label: string;
+    count: number | null;
+  }[] = [
     { value: "overview", label: "Overview", count: null },
     { value: "orders", label: "Customer Orders", count: orderCount },
     { value: "movement", label: "Movement", count: movementCount },
