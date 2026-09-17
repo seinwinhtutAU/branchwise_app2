@@ -531,7 +531,7 @@ export function AppShell({
           >
             <div className="flex items-center gap-3 min-w-0">
               <span className="text-base font-semibold text-text-secondary truncate">
-                BranchWise
+                Branch<span className="text-brand">Wise</span>
               </span>
               <span className="text-lg text-border">/</span>
               <span className="capitalize text-base text-text-muted">

@@ -7,12 +7,11 @@
   </defs>
   <rect width="512" height="512" rx="114" fill="url(#bw)"/>
   <g transform="translate(96 96) scale(5)">
-    <path d="M32 35 V 47" stroke="#ffffff" stroke-width="4.8" stroke-linecap="round"/>
-    <path d="M13 35 H 51" stroke="#ffffff" stroke-width="4.8" stroke-linecap="round"/>
-    <path d="M13 35 V 27 M32 35 V 23 M51 35 V 19" stroke="#ffffff" stroke-width="4.8" stroke-linecap="round"/>
-    <circle cx="32" cy="51" r="6" fill="#ffffff"/>
-    <rect x="7"  y="15" width="12" height="12" rx="3.5" fill="#c7d2fe"/>
-    <rect x="26" y="11" width="12" height="12" rx="3.5" fill="#e0e7ff"/>
-    <rect x="45" y="7"  width="12" height="12" rx="3.5" fill="#ffffff"/>
+    <path d="M32 50V31M32 31L18 17M32 31L46 17M32 31L46 45" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="18" cy="17" r="5.5" fill="#ffffff"/>
+    <circle cx="46" cy="17" r="5.5" fill="#ffffff"/>
+    <circle cx="46" cy="45" r="5.5" fill="#ffffff"/>
+    <circle cx="32" cy="50" r="5.5" fill="#ffffff"/>
+    <circle cx="32" cy="31" r="4.5" fill="#ffffff"/>
   </g>
 </svg>

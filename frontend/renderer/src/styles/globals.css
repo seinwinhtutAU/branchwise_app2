@@ -168,6 +168,25 @@
 }
 
 @media (prefers-color-scheme: dark) {
+  /* `system` removes data-theme, so it needs the same child-level Wholesale
+     overrides as the explicit dark mode above. Without this, the Wholesale
+     workspace keeps its light-blue surface values while the rest of the app
+     correctly follows the OS into dark mode. */
+  :root:not([data-theme="light"]) .workspace-wholesale {
+    --color-brand: #60a5fa;
+    --color-brand-hover: #93c5fd;
+    --color-brand-active: #bfdbfe;
+    --color-brand-subtle: rgba(37, 99, 235, 0.18);
+
+    --color-info: #60a5fa;
+    --color-info-subtle: rgba(37, 99, 235, 0.14);
+
+    --color-bg-subtle: #121a2a;
+    --color-bg-raised: #1a2438;
+    --color-border: rgba(96, 165, 250, 0.22);
+    --color-border-strong: rgba(96, 165, 250, 0.32);
+  }
+
   :root:not([data-theme="light"]) {
     --color-bg-base: #0f1117;
     --color-bg-subtle: #161b27;
@@ -282,4 +301,3 @@ pre,
   -webkit-appearance: none;
   margin: 0;
 }
-

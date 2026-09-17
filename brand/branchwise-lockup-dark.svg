@@ -1,11 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 288 64" width="288" height="64" fill="none" role="img" aria-label="BranchWise">
-  <path d="M32 35 V 47" stroke="#a5b4fc" stroke-width="4.5" stroke-linecap="round"/>
-  <path d="M13 35 H 51" stroke="#a5b4fc" stroke-width="4.5" stroke-linecap="round"/>
-  <path d="M13 35 V 27 M32 35 V 23 M51 35 V 19" stroke="#a5b4fc" stroke-width="4.5" stroke-linecap="round"/>
-  <circle cx="32" cy="51" r="6" fill="#ffffff"/>
-  <rect x="7"  y="15" width="12" height="12" rx="3.5" fill="#818cf8"/>
-  <rect x="26" y="11" width="12" height="12" rx="3.5" fill="#c7d2fe"/>
-  <rect x="45" y="7"  width="12" height="12" rx="3.5" fill="#ffffff"/>
+  <path d="M32 50V31M32 31L18 17M32 31L46 17M32 31L46 45" stroke="#a5b4fc" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="18" cy="17" r="5.5" fill="#818cf8"/>
+  <circle cx="46" cy="17" r="5.5" fill="#c7d2fe"/>
+  <circle cx="46" cy="45" r="5.5" fill="#ffffff"/>
+  <circle cx="32" cy="50" r="5.5" fill="#ffffff"/>
+  <circle cx="32" cy="31" r="4.5" fill="#a5b4fc"/>
   <text x="76" y="43" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="34" letter-spacing="-1">
     <tspan font-weight="700" fill="#f8fafc">Branch</tspan><tspan font-weight="300" fill="#a5b4fc">Wise</tspan>
   </text>

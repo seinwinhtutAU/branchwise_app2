@@ -1,6 +1,7 @@
 // The BranchWise logo, as components.
 //
-// The mark is a modern interlocking "BW" (Branch + Wise) monogram mark.
+// The mark is a branch network: one connected centre with four distinct destinations.
+// It stays clear at the tiny sizes used by the sidebar and desktop title bar.
 //
 // Two variants:
 //   'mono'  — one colour (inherits `currentColor`), for a white mark inside the brand
@@ -26,29 +27,20 @@ export function LogoMark({
       className={className}
       aria-hidden="true"
     >
-      {/* B spine */}
+      {/* The shared path between branches. */}
       <path
-        d="M14 13V51"
-        stroke={strokeColor}
-        strokeWidth="5"
-        strokeLinecap="round"
-      />
-      {/* B upper loop */}
-      <path
-        d="M14 13H30C35.5 13 39 16.5 39 22C39 27.5 35.5 31 30 31H14"
+        d="M32 50V31M32 31L18 17M32 31L46 17M32 31L46 45"
         stroke={strokeColor}
         strokeWidth="5"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      {/* W monogram interlock */}
-      <path
-        d="M18 31L28 51L38 16L47 51L55 20"
-        stroke={strokeColor}
-        strokeWidth="5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      {/* Branch endpoints and the point that connects them. */}
+      <circle cx="18" cy="17" r="5.5" fill={strokeColor} />
+      <circle cx="46" cy="17" r="5.5" fill={strokeColor} />
+      <circle cx="46" cy="45" r="5.5" fill={strokeColor} />
+      <circle cx="32" cy="50" r="5.5" fill={strokeColor} />
+      <circle cx="32" cy="31" r="4.5" fill={strokeColor} />
     </svg>
   );
 }
