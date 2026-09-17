@@ -29,7 +29,7 @@ from app.services.wholesale.receivings import (
 )
 from app.services.wholesale.references import allocate_reference, retry_on_reference_collision
 from app.services.wholesale.units import from_pairs, to_pairs
-from app.services.wholesale_shipments import get_shipment
+from app.services.wholesale.shipments_service import get_shipment
 
 _LOAD_OPTIONS = (
     selectinload(Receiving.packages).selectinload(ReceivingPackage.items),

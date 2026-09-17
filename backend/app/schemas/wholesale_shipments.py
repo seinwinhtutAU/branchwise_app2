@@ -27,7 +27,7 @@ class ShipmentWriteOffIn(BaseModel):
 class ShipmentSplitIn(BaseModel):
     """Carves part of a shipment's still-undispatched remainder into a new shipment of
     its own — e.g. the cargo company sends part of a voucher toward Yangon and holds the
-    rest for Mandalay. See app/services/wholesale_shipments.py::split_shipment."""
+    rest for Mandalay. See app/services/wholesale/shipments_service.py::split_shipment."""
 
     packages: int = Field(gt=0)
     # Optional: what is actually inside a box isn't known for certain until it's opened

@@ -1,5 +1,5 @@
 """The Receiving screen's backend: what is due to arrive at a gate, and what actually
-turned up once the packages are opened. See app/services/wholesale_receivings.py for the
+turned up once the packages are opened. See app/services/wholesale/receivings_service.py for the
 transactions and app/services/wholesale/receivings.py for the derived figures."""
 
 from typing import Annotated
@@ -28,7 +28,7 @@ from app.services.wholesale.receivings import (
     opened_count,
     receiving_status,
 )
-from app.services.wholesale_receivings import (
+from app.services.wholesale.receivings_service import (
     create_receiving,
     delete_receiving,
     get_receiving,

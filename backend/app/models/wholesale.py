@@ -24,7 +24,7 @@ Phase 2 (this revision): Receiving — wholesale_receivings, wholesale_receiving
 wholesale_receiving_items, wholesale_receiving_costs. Once a receiving exists for a
 shipment, the shipment's final_received_packages column becomes a fallback: the API
 prefers the count of packages actually recorded at the gate (see
-app/services/wholesale_receivings.py::final_received_by_shipment and its use in
+app/services/wholesale/receivings_service.py::final_received_by_shipment and its use in
 app/routers/wholesale_shipments.py), the same rule store.ts::settleShipment already
 follows on the front end.
 """
@@ -136,7 +136,7 @@ class Shipment(Base):
     # running total; WholesaleWriteOff is the append-only explanation for each change.
     lost_packages: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     # Set only when this shipment was carved out of another one's still-undispatched
-    # remainder (see app/services/wholesale_shipments.py::split_shipment) — e.g. the
+    # remainder (see app/services/wholesale/shipments_service.py::split_shipment) — e.g. the
     # cargo company sends part of a voucher toward Yangon and holds the rest for
     # Mandalay. NULL for an ordinary shipment. SET NULL on delete rather than CASCADE:
     # removing the parent shouldn't take a since-independent split down with it.
@@ -209,7 +209,7 @@ class Receiving(Base):
     receiving_no: Mapped[str] = mapped_column(String(30), nullable=False)
     # RESTRICT, not CASCADE: a shipment with a receiving against it cannot be deleted
     # (the router returns 409 before it ever reaches the database, but this is the
-    # backstop) — see app/services/wholesale_shipments.py::delete_shipment.
+    # backstop) — see app/services/wholesale/shipments_service.py::delete_shipment.
     shipment_id: Mapped[str] = mapped_column(ForeignKey("wholesale_shipments.id", ondelete="RESTRICT"), nullable=False)
     shipment_no: Mapped[str] = mapped_column(String(30), nullable=False)
     voucher_no: Mapped[str] = mapped_column(String(30), nullable=False)

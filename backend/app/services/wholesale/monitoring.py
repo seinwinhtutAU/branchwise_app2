@@ -21,9 +21,9 @@ from app.services.wholesale.inventory import (
 from app.services.wholesale.money import order_totals, voucher_totals
 from app.services.wholesale.orders import list_orders, order_status
 from app.services.wholesale.shipments import shipment_status
-from app.services.wholesale_receivings import final_received_by_shipment
-from app.services.wholesale_shipments import list_shipments
-from app.services.wholesale_supplier_vouchers import list_vouchers
+from app.services.wholesale.receivings_service import final_received_by_shipment
+from app.services.wholesale.shipments_service import list_shipments
+from app.services.wholesale.supplier_vouchers_service import list_vouchers
 
 
 def _days_open(value: date) -> int:

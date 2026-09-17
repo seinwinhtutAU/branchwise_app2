@@ -126,7 +126,7 @@ def update_shipment(
     operator_id: str | None = None,
 ) -> Shipment:
     shipment = _load(db, shipment_id, branch_id)
-    from app.services.wholesale_receivings import final_received_by_shipment
+    from app.services.wholesale.receivings_service import final_received_by_shipment
 
     has_receiving = db.query(Receiving.id).filter(Receiving.shipment_id == shipment.id).first() is not None
     overrides = final_received_by_shipment(db, [shipment.id])
@@ -284,7 +284,7 @@ def split_shipment(
     uses — so the two totals can never drift out of sync with each other."""
     original = _load(db, shipment_id, branch_id)
     leg_index = _split_leg_index(original, split_leg_order)
-    from app.services.wholesale_receivings import final_received_by_shipment
+    from app.services.wholesale.receivings_service import final_received_by_shipment
 
     has_receiving = db.query(Receiving.id).filter(Receiving.shipment_id == original.id).first() is not None
     overrides = final_received_by_shipment(db, [original.id])
@@ -418,7 +418,7 @@ def delete_shipment(
     operator_id: str | None = None,
 ) -> None:
     shipment = _load(db, shipment_id, branch_id)
-    from app.services.wholesale_receivings import final_received_by_shipment
+    from app.services.wholesale.receivings_service import final_received_by_shipment
 
     has_receiving = db.query(Receiving.id).filter(Receiving.shipment_id == shipment.id).first() is not None
     overrides = final_received_by_shipment(db, [shipment.id])

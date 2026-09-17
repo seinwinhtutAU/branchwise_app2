@@ -1,6 +1,6 @@
 """The Delivery screen's backend: a supplier voucher travelling as freight, and the
 stops it passes through on the way to a receiving gate. See
-app/services/wholesale_shipments.py for the transactions and
+app/services/wholesale/shipments_service.py for the transactions and
 app/services/wholesale/shipments.py for the derived figures."""
 
 from typing import Annotated
@@ -17,8 +17,8 @@ from app.services.branches import resolve_wholesale_branch_id
 from app.services.wholesale.lifecycle import get_allowed_shipment_actions
 from app.services.wholesale.shipments import shipment_derived
 from app.services.wholesale.write_offs import write_off_shipment, write_off_to_dict
-from app.services.wholesale_receivings import final_received_by_shipment
-from app.services.wholesale_shipments import (
+from app.services.wholesale.receivings_service import final_received_by_shipment
+from app.services.wholesale.shipments_service import (
     create_shipment,
     delete_shipment,
     get_shipment,

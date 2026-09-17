@@ -27,7 +27,7 @@ from app.models.wholesale import (
 from app.services.wholesale.colors import color_qty_pairs_by_color
 from app.services.wholesale.inventory import effective_allocated_color_pairs
 from app.services.wholesale.shipments import into_final
-from app.services.wholesale_supplier_vouchers import received_pairs_by_voucher_stock
+from app.services.wholesale.supplier_vouchers_service import received_pairs_by_voucher_stock
 
 
 def _filter_branch(query, model, branch_id: str | None):

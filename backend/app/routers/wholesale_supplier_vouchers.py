@@ -11,7 +11,7 @@ from app.schemas.wholesale_supplier_vouchers import SupplierVoucherIn, VoucherPa
 from app.schemas.wholesale_write_offs import WriteOffIn
 from app.services.branches import resolve_wholesale_branch_id
 from app.services.wholesale.lifecycle import get_allowed_voucher_actions, voucher_status
-from app.services.wholesale_supplier_vouchers import (
+from app.services.wholesale.supplier_vouchers_service import (
     add_payment,
     create_voucher,
     delete_payment,

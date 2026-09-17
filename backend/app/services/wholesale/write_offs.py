@@ -16,8 +16,8 @@ from app.services.wholesale.lifecycle import (
     assert_can_perform_shipment_action,
 )
 from app.services.wholesale.shipments import final_remaining, max_for_leg
-from app.services.wholesale_supplier_vouchers import received_pairs_by_voucher_stock
-from app.services.wholesale_receivings import final_received_by_shipment
+from app.services.wholesale.supplier_vouchers_service import received_pairs_by_voucher_stock
+from app.services.wholesale.receivings_service import final_received_by_shipment
 from app.services.wholesale.inventory import delivered_pairs_by_order
 
 

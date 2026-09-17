@@ -131,7 +131,7 @@ def shipment_derived(shipment: Shipment, final_received_override: int | None = N
     """Every worked-out figure for one shipment, as its API response includes them.
 
     final_received_override is the count of packages actually recorded at the gate,
-    computed by app/services/wholesale_receivings.py::final_received_by_shipment once a
+    computed by app/services/wholesale/receivings_service.py::final_received_by_shipment once a
     receiving exists for this shipment; None means no receiving has been raised for it
     yet, so the shipment's own stored figure is the only word anyone has — the same
     fallback rule store.ts::settleShipment follows on the front end."""
