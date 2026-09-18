@@ -131,6 +131,9 @@ const DashboardPage = lazy(
 const BusinessAlertsPage = lazy(
   () => import("@renderer/components/features/retail/BusinessAlertsPage"),
 );
+const PurchasingPage = lazy(
+  () => import("@renderer/components/features/retail/PurchasingPage"),
+);
 const SettingsPage = lazy(
   () => import("@renderer/components/features/settings/SettingsPage"),
 );
@@ -144,6 +147,7 @@ type Section =
   | "overview"
   | "sales"
   | "inventory"
+  | "purchasing"
   | "purchase"
   | "warnings"
   | "orders"
@@ -205,6 +209,13 @@ const RETAIL_NAV_ITEMS: NavItem[] = [
     label: "Inventory",
     icon: <InventoryIcon />,
     dotColor: "bg-sky-400",
+  },
+  {
+    id: "purchasing",
+    label: "Purchasing",
+    shortLabel: "Reorder",
+    icon: <ClipboardIcon />,
+    dotColor: "bg-amber-400",
   },
   {
     id: "purchase",
@@ -293,6 +304,7 @@ const SECTION_TITLES: Record<Section, string> = {
   overview: "Data overview",
   sales: "Sale",
   inventory: "Inventory",
+  purchasing: "Purchasing",
   purchase: "Purchase",
   warnings: "Warning",
   orders: "Customer orders",
@@ -339,7 +351,7 @@ const SALE_COLUMNS: DataTableColumn<SaleRow>[] = [
   { key: "SlipNumber", label: "Slip Number" },
   { key: "LineNo", label: "Line No", align: "right" },
   { key: "LineID", label: "Line ID" },
-  { key: "StockCode", label: "Stock Code" },
+  { key: "StockCode", label: "Stock Code", copyable: true },
   { key: "Description", label: "Description" },
   { key: "Selling_Price", label: "Selling Price", align: "right" },
   { key: "Qty", label: "Qty", align: "right" },
@@ -380,7 +392,7 @@ interface PurchaseRow {
 const PURCHASE_COLUMNS: DataTableColumn<PurchaseRow>[] = [
   { key: "Branch", label: "Branch" },
   { key: "Date", label: "Date" },
-  { key: "StockCode", label: "Stock Code" },
+  { key: "StockCode", label: "Stock Code", copyable: true },
   { key: "Description", label: "Description" },
   { key: "Quantity", label: "Quantity", align: "right" },
   { key: "UOM", label: "UOM" },
@@ -1117,6 +1129,13 @@ function App(): React.JSX.Element {
                   session={session}
                   branchOptions={branchOptions}
                   initialTab={inventoryTarget ?? undefined}
+                />
+              )}
+              {section === "purchasing" && (
+                <PurchasingPage
+                  session={session}
+                  profile={profile}
+                  branchOptions={retailBranchOptions}
                 />
               )}
               {section === "purchase" && (

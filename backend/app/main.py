@@ -9,6 +9,7 @@ from app.retail.routers import (
     import_health,
     imports,
     inventory,
+    purchasing,
     purchases,
     sales,
     warnings,
@@ -46,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(data_overview.router)
     app.include_router(sales.router)
     app.include_router(purchases.router)
+    app.include_router(purchasing.router)
     app.include_router(warnings.router)
     app.include_router(settings.router)
     app.include_router(chat.router)
