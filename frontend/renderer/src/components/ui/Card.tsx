@@ -38,6 +38,7 @@ export function CardHeader({
   title,
   description,
   action,
+  className,
 }: {
   // Optional so a caller that already shows its title elsewhere (e.g. a tab label just
   // above) can keep the description and action row without repeating it — see
@@ -45,9 +46,10 @@ export function CardHeader({
   title?: ReactNode;
   description?: ReactNode;
   action?: ReactNode;
+  className?: string;
 }): React.JSX.Element {
   return (
-    <div className="flex items-start justify-between gap-4 mb-4">
+    <div className={cn("flex items-start justify-between gap-4 mb-3", className)}>
       <div>
         {title && (
           <h3 className="text-base font-semibold text-text-primary tracking-tight">

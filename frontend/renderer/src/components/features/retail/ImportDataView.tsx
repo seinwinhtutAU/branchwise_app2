@@ -8,6 +8,7 @@ import {
   Td,
 } from "@renderer/components/ui/Table";
 import { Button } from "@renderer/components/ui/Button";
+import { TabBar } from "@renderer/components/ui/Tabs";
 import { Pagination } from "@renderer/components/ui/Pagination";
 import { ChevronUpIcon, ChevronDownIcon } from "@renderer/components/ui/icons";
 import { cn } from "@renderer/lib/utils";
@@ -153,28 +154,16 @@ export function ImportDataView({
     <div className="flex flex-col gap-4" style={containerStyle}>
       <div
         ref={aboveRef}
-        className="sticky top-14 lg:top-0 z-30 bg-bg-subtle flex flex-col gap-4"
+        className="sticky top-14 lg:top-0 z-30 bg-bg-base flex flex-col gap-4"
       >
-        <div
-          role="tablist"
-          className="flex gap-1 p-1 rounded-lg bg-bg-raised w-fit"
-        >
-          {(["clean", "original"] as const).map((tab) => (
-            <button
-              key={tab}
-              role="tab"
-              aria-selected={activeTab === tab}
-              onClick={() => setActiveTab(tab)}
-              className={`h-7 px-3 rounded-md text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 ${
-                activeTab === tab
-                  ? "bg-brand text-white shadow-sm"
-                  : "text-text-muted hover:text-text-secondary"
-              }`}
-            >
-              {tab === "clean" ? "Cleaned data" : "Original data"}
-            </button>
-          ))}
-        </div>
+        <TabBar<"clean" | "original">
+          tabs={[
+            { id: "clean", label: "Cleaned data" },
+            { id: "original", label: "Original data" },
+          ]}
+          activeTab={activeTab}
+          onSelect={setActiveTab}
+        />
 
         {invalidRowCount > 0 && (
           <div className="rounded-md bg-warning-subtle text-warning text-sm px-3 py-2 flex items-start gap-2">

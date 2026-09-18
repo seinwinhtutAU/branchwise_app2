@@ -54,7 +54,7 @@ export function periodQueryParams(
 // useCachedFetch, so every parameter that changes what comes back has to appear in it —
 // which is exactly why building it here rather than inline in five tabs matters.
 export function dashboardUrl(
-  tab: "overview" | "revenue" | "cost" | "inventory" | "customer",
+  tab: "overview" | "summary" | "revenue" | "cost" | "inventory" | "customer",
   branchId: string,
   // Omitted for Inventory, which has no period control at all.
   window?: { period: PeriodKey; dateFrom: string; dateTo: string },
@@ -311,3 +311,133 @@ export function dateRangeLabel(dateFrom: string, dateTo: string): string {
 }
 
 export const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+// --- Summary Dashboard Interfaces ---
+
+export interface SummaryKpis {
+  net_revenue: number;
+  gross_profit: number;
+  profit_margin_pct: number;
+  transaction_count: number;
+  avg_sale: number;
+  quantity_sold: number;
+  selling_sku_count: number;
+  dead_stock_count: number;
+  active_stock_count: number;
+  total_products_count: number;
+  dead_stock_pct: number;
+}
+
+export interface CategoryRevenueItem {
+  category: string;
+  net_revenue: number;
+  share_pct: number;
+}
+
+export interface InventoryConditionData {
+  dead_stock_count: number;
+  active_stock_count: number;
+  total_products_count: number;
+  dead_stock_pct: number;
+  risk_alert: string;
+}
+
+export interface HourlyDemandPoint {
+  hour: string;
+  count: number;
+  net_revenue: number;
+}
+
+export interface FootfallCell {
+  weekday: number;
+  hour_band: string;
+  transaction_count: number;
+}
+
+export interface CustomerDemandData {
+  summary: string;
+  peak_period: string;
+  peak_hour_desc: string;
+  busiest_hour: FootfallCell | null;
+  hourly: HourlyDemandPoint[];
+  footfall_heatmap: FootfallCell[];
+}
+
+export interface TopProductSummary {
+  stock_code: string;
+  description: string;
+  qty: number;
+  net_revenue: number;
+  avg_selling_price: number | null;
+}
+
+export interface SummaryRecommendation {
+  id: string;
+  title: string;
+  description: string;
+}
+
+export interface SummaryDashboardData {
+  branch_id: string;
+  branch_name: string;
+  period: string;
+  date_from: string;
+  date_to: string;
+  as_of: string | null;
+  kpis: SummaryKpis;
+  category_revenue: CategoryRevenueItem[];
+  inventory_condition: InventoryConditionData;
+  customer_demand: CustomerDemandData;
+  top_products: TopProductSummary[];
+  recommendations: SummaryRecommendation[];
+}
+
+export function formatCompactMmk(val: number): string {
+  if (Math.abs(val) >= 1_000_000) {
+    const m = val / 1_000_000;
+    return `${m >= 10 ? m.toFixed(2) : m.toFixed(2)}M`;
+  }
+  if (Math.abs(val) >= 1_000) {
+    return `${(val / 1_000).toFixed(1)}K`;
+  }
+  return val.toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
+function parseIsoDate(isoStr: string): Date {
+  if (!isoStr) return new Date(NaN);
+  const clean = isoStr.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    return new Date(`${clean}T00:00:00`);
+  }
+  return new Date(clean);
+}
+
+export function formatExecutiveDate(isoStr: string): string {
+  const d = parseIsoDate(isoStr);
+  if (isNaN(d.getTime())) return isoStr;
+  const day = d.getDate();
+  const month = d.toLocaleDateString("en-GB", { month: "short" });
+  const year = d.getFullYear();
+  return `${day} ${month} ${year}`;
+}
+
+export function formatExecutivePeriod(fromIso: string, toIso: string): string {
+  const fromD = parseIsoDate(fromIso);
+  const toD = parseIsoDate(toIso);
+  if (isNaN(fromD.getTime()) || isNaN(toD.getTime())) {
+    return `${fromIso}–${toIso}`;
+  }
+  const fromDay = fromD.getDate();
+  const fromMonth = fromD.toLocaleDateString("en-GB", { month: "short" });
+  const toDay = toD.getDate();
+  const toMonth = toD.toLocaleDateString("en-GB", { month: "short" });
+  const toYear = toD.getFullYear();
+
+  if (fromIso === toIso) {
+    return `${fromDay} ${fromMonth} ${toYear}`;
+  }
+  if (fromD.getFullYear() === toD.getFullYear() && fromMonth === toMonth) {
+    return `${fromDay}–${toDay} ${toMonth} ${toYear}`;
+  }
+  return `${fromDay} ${fromMonth}–${toDay} ${toMonth} ${toYear}`;
+}

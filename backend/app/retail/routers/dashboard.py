@@ -138,3 +138,22 @@ def get_customer_dashboard(
     return dashboard_service.build_customer_dashboard(
         db, branch.id, branch.name, period, date_from=date_from, date_to=date_to
     )
+
+
+@router.get("/summary")
+def get_summary_dashboard(
+    period: str = Query("30d", description="today | yesterday | 7d | 30d"),
+    date_from: date | None = Query(None, description=DATE_FROM_DESCRIPTION),
+    date_to: date | None = Query(None, description=DATE_TO_DESCRIPTION),
+    branch_id: str | None = Query(
+        None, description="Required for an admin account (no fixed branch); ignored otherwise"
+    ),
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    _validate_period_or_dates(period, date_from, date_to)
+    branch = _resolve_retail_branch(user, branch_id, db)
+    return dashboard_service.build_summary_dashboard(
+        db, branch.id, branch.name, period, date_from=date_from, date_to=date_to
+    )
+

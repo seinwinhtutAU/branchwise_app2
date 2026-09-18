@@ -202,11 +202,28 @@ def _parse_hour(raw: str | None) -> int | None:
     if not raw:
         return None
     raw = raw.strip()
-    for fmt in _TIME_FORMATS:
+    if " " in raw and ":" in raw:
+        # e.g. "2026-09-04 18:30:00"
+        time_part = raw.split(" ")[-1]
+        if ":" in time_part:
+            raw = time_part
+    elif "T" in raw and ":" in raw:
+        time_part = raw.split("T")[-1]
+        if ":" in time_part:
+            raw = time_part
+    if "." in raw:
+        raw = raw.split(".")[0]
+    for fmt in ["%H:%M:%S", "%H:%M", "%I:%M:%S %p", "%I:%M %p", "%I:%M%p", "%H"]:
         try:
             return datetime.strptime(raw, fmt).hour
         except ValueError:
             continue
+    if ":" in raw:
+        parts = raw.split(":")
+        if parts[0].isdigit():
+            hr = int(parts[0])
+            if 0 <= hr <= 23:
+                return hr
     return None
 
 
@@ -850,3 +867,209 @@ def build_customer_dashboard(
         ],
         "sale_warnings": sale_warnings,
     }
+
+
+# --- Summary --------------------------------------------------------------------------
+
+
+def _category_revenue(
+    db: Session, branch_id: str, start: date, end: date
+) -> tuple[list[dict], float]:
+    """Aggregate net sales revenue grouped by product category (Product.group_name)."""
+    cat_rows = (
+        db.query(
+            func.coalesce(Product.group_name, "Uncategorized"),
+            func.coalesce(func.sum(SaleLine.net_amount), 0),
+        )
+        .join(SaleLine, SaleLine.product_id == Product.id)
+        .join(Sale, SaleLine.sale_id == Sale.id)
+        .filter(Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end)
+        .group_by(Product.group_name)
+        .order_by(func.sum(SaleLine.net_amount).desc())
+        .all()
+    )
+    total_rev = sum(float(amount) for _, amount in cat_rows)
+    items = [
+        {
+            "category": str(cat),
+            "net_revenue": float(amount),
+            "share_pct": (float(amount) / total_rev * 100) if total_rev > 0 else 0.0,
+        }
+        for cat, amount in cat_rows
+    ]
+    return items, total_rev
+
+
+def _hourly_demand(
+    db: Session, branch_id: str, start: date, end: date
+) -> tuple[list[dict], str, str, str, int]:
+    """Hourly sales demand distribution and peak window analysis."""
+    sales = (
+        db.query(Sale.sale_time, func.coalesce(func.sum(SaleLine.net_amount), 0))
+        .join(SaleLine, SaleLine.sale_id == Sale.id)
+        .filter(Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end)
+        .group_by(Sale.id, Sale.sale_time)
+        .all()
+    )
+    hourly_counts: dict[int, int] = {}
+    hourly_revenue: dict[int, float] = {}
+    for sale_time, amount in sales:
+        hr = _parse_hour(sale_time)
+        if hr is not None:
+            hourly_counts[hr] = hourly_counts.get(hr, 0) + 1
+            hourly_revenue[hr] = hourly_revenue.get(hr, 0.0) + float(amount or 0)
+
+    all_hours = sorted(hourly_counts.keys())
+    if all_hours:
+        min_hr = min(8, min(all_hours))
+        max_hr = max(20, max(all_hours))
+        display_hours = list(range(min_hr, max_hr + 1))
+    else:
+        display_hours = list(range(8, 21))
+
+    hourly_demand_list = [
+        {
+            "hour": f"{hr:02d}",
+            "count": hourly_counts.get(hr, 0),
+            "net_revenue": hourly_revenue.get(hr, 0.0),
+        }
+        for hr in display_hours
+    ]
+
+    if hourly_counts:
+        peak_hr = max(hourly_counts.keys(), key=lambda h: hourly_counts[h])
+        peak_start = max(8, peak_hr - 2)
+        peak_end = min(22, peak_hr + 2)
+        peak_period = f"{peak_start:02d}:00-{peak_end:02d}:00"
+        peak_hour_desc = f"Highest activity occurs around {peak_hr:02d}:00."
+        if peak_hr >= 17:
+            demand_summary = "Strongest demand occurs in the evening"
+        elif peak_hr >= 12:
+            demand_summary = "Strongest demand occurs in the afternoon"
+        else:
+            demand_summary = "Strongest demand occurs in the morning"
+    else:
+        peak_period = "16:00-20:00"
+        peak_hour_desc = "Highest activity occurs around 18:00."
+        demand_summary = "Strongest demand occurs in the evening"
+        peak_start = 16
+
+    return hourly_demand_list, peak_period, peak_hour_desc, demand_summary, peak_start
+
+
+def build_summary_dashboard(
+    db: Session,
+    branch_id: str,
+    branch_name: str,
+    period: PeriodKey,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> dict:
+    period_range = resolve_period(period, date_from=date_from, date_to=date_to)
+    net_revenue, transaction_count = _revenue_totals(
+        db, branch_id, period_range.start, period_range.end
+    )
+    _, cogs, _, _, _, _ = _cost_totals_and_products(
+        db, branch_id, period_range.start, period_range.end
+    )
+
+    gross_profit = net_revenue - cogs
+    profit_margin_pct = (gross_profit / net_revenue * 100) if net_revenue > 0 else 0.0
+    avg_sale = net_revenue / transaction_count if transaction_count else 0.0
+
+    qty_sold_row = (
+        db.query(
+            func.coalesce(func.sum(SaleLine.qty), 0),
+            func.count(func.distinct(SaleLine.product_id)),
+        )
+        .join(Sale, SaleLine.sale_id == Sale.id)
+        .filter(Sale.branch_id == branch_id, Sale.sale_date >= period_range.start, Sale.sale_date <= period_range.end)
+        .one()
+    )
+    quantity_sold = float(qty_sold_row[0])
+    selling_sku_count = int(qty_sold_row[1])
+
+    stock_summary = _stock_summary(db, branch_id)
+    as_of = stock_summary["as_of"]
+    total_products = stock_summary["sku_count"]
+    dead_stock_count = stock_summary["dead_stock_count"]
+    active_stock_count = max(0, total_products - dead_stock_count)
+    dead_stock_pct = (dead_stock_count / total_products * 100) if total_products > 0 else 0.0
+
+    category_revenue, _ = _category_revenue(db, branch_id, period_range.start, period_range.end)
+    hourly_demand_list, peak_period, peak_hour_desc, demand_summary, peak_start = _hourly_demand(
+        db, branch_id, period_range.start, period_range.end
+    )
+    footfall_heatmap = _footfall_heatmap(db, branch_id, period_range.start, period_range.end)
+    busiest_hour = max(footfall_heatmap, key=lambda cell: cell["transaction_count"], default=None)
+    top_products = _top_products(db, branch_id, period_range.start, period_range.end, limit=5)
+
+    risk_alert = (
+        "Main risk: more than half of current products are not generating sales."
+        if dead_stock_pct >= 50
+        else (
+            f"Risk: {dead_stock_pct:.1f}% of current products are not generating sales."
+            if dead_stock_pct > 20
+            else "Healthy inventory movement with low dead stock."
+        )
+    )
+
+    recommendations = [
+        {
+            "id": "dead_stock",
+            "title": "Clear dead stock",
+            "description": "Use markdowns and targeted promotions before new purchasing.",
+        },
+        {
+            "id": "peak_hours",
+            "title": "Protect peak hours",
+            "description": f"Prepare staff and popular products before {peak_start:02d}:00.",
+        },
+        {
+            "id": "purchasing",
+            "title": "Purchase selectively",
+            "description": "Reorder strong sellers with low stock and healthy profit.",
+        },
+    ]
+
+    return {
+        "branch_id": branch_id,
+        "branch_name": branch_name,
+        "period": _period_label(period, date_from, date_to),
+        "date_from": period_range.start.isoformat(),
+        "date_to": period_range.end.isoformat(),
+        "as_of": as_of,
+        "kpis": {
+            "net_revenue": net_revenue,
+            "gross_profit": gross_profit,
+            "profit_margin_pct": profit_margin_pct,
+            "transaction_count": transaction_count,
+            "avg_sale": avg_sale,
+            "quantity_sold": quantity_sold,
+            "selling_sku_count": selling_sku_count,
+            "dead_stock_count": dead_stock_count,
+            "active_stock_count": active_stock_count,
+            "total_products_count": total_products,
+            "dead_stock_pct": dead_stock_pct,
+        },
+        "category_revenue": category_revenue,
+        "inventory_condition": {
+            "dead_stock_count": dead_stock_count,
+            "active_stock_count": active_stock_count,
+            "total_products_count": total_products,
+            "dead_stock_pct": dead_stock_pct,
+            "risk_alert": risk_alert,
+        },
+        "customer_demand": {
+            "summary": demand_summary,
+            "peak_period": peak_period,
+            "peak_hour_desc": peak_hour_desc,
+            "busiest_hour": busiest_hour,
+            "hourly": hourly_demand_list,
+            "footfall_heatmap": footfall_heatmap,
+        },
+        "top_products": top_products,
+        "recommendations": recommendations,
+    }
+
+

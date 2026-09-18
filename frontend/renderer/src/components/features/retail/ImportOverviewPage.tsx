@@ -3,13 +3,13 @@ import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
 import { useUrlQuery } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
-import { cn } from "@renderer/lib/utils";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Select } from "@renderer/components/ui/Select";
+import { TabBar } from "@renderer/components/ui/Tabs";
 import { TableSkeleton } from "@renderer/components/ui/Skeleton";
 import {
   TableContainer,
@@ -175,29 +175,11 @@ function OverviewTabBar({
   onSelect: (tab: Tab) => void;
 }): React.JSX.Element {
   return (
-    <div
-      role="tablist"
-      className="flex flex-wrap gap-1 p-1 rounded-lg bg-bg-subtle w-fit"
-    >
-      {TABS.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          role="tab"
-          aria-selected={activeTab === tab.id}
-          onClick={() => onSelect(tab.id)}
-          className={cn(
-            "flex items-center gap-1.5 h-8 px-4 rounded-md text-sm font-medium transition-all duration-150",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1",
-            activeTab === tab.id
-              ? "bg-brand-subtle text-brand shadow-sm"
-              : "text-text-muted hover:text-text-secondary",
-          )}
-        >
-          {tab.label}
-        </button>
-      ))}
-    </div>
+    <TabBar<Tab>
+      tabs={TABS}
+      activeTab={activeTab}
+      onSelect={onSelect}
+    />
   );
 }
 

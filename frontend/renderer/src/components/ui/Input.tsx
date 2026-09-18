@@ -1,18 +1,20 @@
 import { forwardRef, type InputHTMLAttributes, type ReactNode } from "react";
 import { cn } from "@renderer/lib/utils";
 
-interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
+interface InputProps
+  extends Omit<InputHTMLAttributes<HTMLInputElement>, "size"> {
   label?: ReactNode;
   error?: string;
   hint?: string;
   startIcon?: ReactNode;
   endIcon?: ReactNode;
+  size?: "sm" | "md";
 }
 
 // Pure primitive — no skeleton/empty state (exempt per rubric).
 export const Input = forwardRef<HTMLInputElement, InputProps>(
   (
-    { label, error, hint, startIcon, endIcon, className, id, ...props },
+    { label, error, hint, startIcon, endIcon, size = "md", className, id, ...props },
     ref,
   ) => {
     const inputId =
@@ -32,7 +34,12 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         )}
         <div className="relative">
           {startIcon && (
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none">
+            <span
+              className={cn(
+                "absolute top-1/2 -translate-y-1/2 text-text-muted pointer-events-none",
+                size === "sm" ? "left-2.5" : "left-3",
+              )}
+            >
               {startIcon}
             </span>
           )}
@@ -40,7 +47,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             ref={ref}
             id={inputId}
             className={cn(
-              "w-full h-10 rounded-md border bg-bg-base px-3 text-sm text-text-primary",
+              "w-full rounded-md border bg-bg-base text-text-primary",
+              size === "sm" ? "h-8 px-2.5 text-xs" : "h-10 px-3 text-sm",
               "placeholder:text-text-muted",
               "transition-all duration-150",
               "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base focus:border-transparent",
@@ -48,8 +56,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               error
                 ? "border-error focus-visible:ring-error"
                 : "border-border hover:border-border-strong",
-              startIcon && "pl-9",
-              endIcon && "pr-9",
+              startIcon && (size === "sm" ? "pl-7" : "pl-9"),
+              endIcon && (size === "sm" ? "pr-7" : "pr-9"),
               className,
             )}
             aria-invalid={!!error}

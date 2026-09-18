@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { useIsFetching } from "@tanstack/react-query";
 import type { Session } from "@renderer/lib/auth";
-import { cn } from "@renderer/lib/utils";
 import type { BranchOption } from "@renderer/lib/useBranches";
 import { refreshEverything } from "@renderer/lib/queryClient";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Select } from "@renderer/components/ui/Select";
+import { TabBar } from "@renderer/components/ui/Tabs";
 import { DashboardIcon } from "@renderer/components/ui/icons";
 import type { Profile } from "@renderer/components/features/types";
 import { CostTab } from "@renderer/components/features/dashboard/CostTab";
@@ -18,6 +18,7 @@ import {
   type EvidenceTarget,
 } from "@renderer/components/features/dashboard/OverviewTab";
 import { RevenueTab } from "@renderer/components/features/dashboard/RevenueTab";
+import { SummaryTab } from "@renderer/components/features/dashboard/SummaryTab";
 import { PeriodControls } from "@renderer/components/features/dashboard/shared";
 import { usePeriodRange } from "@renderer/components/features/dashboard/usePeriodRange";
 
@@ -47,11 +48,11 @@ interface Props {
   onOverviewBranchChange: (branchId: string | null) => void;
 }
 
-type Tab = "overview" | "revenue" | "cost" | "inventory" | "customer";
+type Tab = "summary" | "overview" | "revenue" | "cost" | "inventory" | "customer";
 
-// Overview first, and first on load: it's the decision page, and the four that follow
-// are the evidence behind whichever part of it is red (see docs/branch_health.md).
+// Summary gives the executive dashboard snapshot; Overview gives the branch health scores.
 const TABS: { id: Tab; label: string }[] = [
+  { id: "summary", label: "Summary" },
   { id: "overview", label: "Overview" },
   { id: "revenue", label: "Revenue" },
   { id: "cost", label: "Cost" },
@@ -67,29 +68,11 @@ function DashboardTabBar({
   onSelect: (tab: Tab) => void;
 }): React.JSX.Element {
   return (
-    <div
-      role="tablist"
-      className="flex flex-wrap gap-1 p-1 rounded-lg bg-bg-subtle w-fit"
-    >
-      {TABS.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          role="tab"
-          aria-selected={activeTab === tab.id}
-          onClick={() => onSelect(tab.id)}
-          className={cn(
-            "flex items-center gap-1.5 h-8 px-4 rounded-md text-sm font-medium transition-all duration-150",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1",
-            activeTab === tab.id
-              ? "bg-brand-subtle text-brand shadow-sm"
-              : "text-text-muted hover:text-text-secondary",
-          )}
-        >
-          {tab.label}
-        </button>
-      ))}
-    </div>
+    <TabBar<Tab>
+      tabs={TABS}
+      activeTab={activeTab}
+      onSelect={onSelect}
+    />
   );
 }
 
@@ -176,6 +159,17 @@ export function DashboardPage({
           icon={<DashboardIcon />}
           title="No retail branches yet"
           description="Add a retail branch before the dashboard has anything to show."
+        />
+      )}
+
+      {!waitingOnBranch && activeTab === "summary" && (
+        <SummaryTab
+          session={session}
+          branchId={branchId}
+          period={period}
+          dateFrom={appliedRange.from}
+          dateTo={appliedRange.to}
+          canLoad={canLoad}
         />
       )}
 

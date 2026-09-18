@@ -19,6 +19,7 @@ import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
+import { DateInput } from "@renderer/components/ui/DateInput";
 import { Select } from "@renderer/components/ui/Select";
 import { TableSkeleton } from "@renderer/components/ui/Skeleton";
 import {
@@ -30,7 +31,7 @@ import {
   Td,
 } from "@renderer/components/ui/Table";
 import { Pagination } from "@renderer/components/ui/Pagination";
-import { DownloadIcon, OverviewIcon } from "@renderer/components/ui/icons";
+import { DownloadIcon, OverviewIcon, SearchIcon } from "@renderer/components/ui/icons";
 import { CopyButton } from "@renderer/components/ui/CopyButton";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 import { useSettled } from "@renderer/lib/useSettled";
@@ -419,7 +420,7 @@ function DataOverviewTable({
 
   return (
     <div className="flex flex-col" style={containerStyle}>
-      <div ref={aboveRef} className="sticky top-14 lg:top-0 z-30 bg-bg-subtle">
+      <div ref={aboveRef} className="sticky top-14 lg:top-0 z-30 bg-bg-base">
         <CardHeader
           title="Data overview"
           description="Sale line items merged with inventory and purchase data by stock code."
@@ -456,14 +457,16 @@ function DataOverviewTable({
         <SourceLegend />
 
         {(total > 0 || hasActiveFilters) && (
-          <div className="flex flex-wrap items-end gap-3 pb-4 -mt-1">
-            <Input
-              label="Search"
-              placeholder="Stock code or description"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-56"
-            />
+          <div className="flex flex-wrap items-center gap-2 pb-3">
+            <div className="w-56 max-w-full">
+              <Input
+                size="sm"
+                placeholder="Stock code or description"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                startIcon={<SearchIcon className="w-3.5 h-3.5" />}
+              />
+            </div>
 
             {(() => {
               const options =
@@ -471,13 +474,13 @@ function DataOverviewTable({
                   ? branchOptions
                   : (data?.branches ?? []);
               return options.length > 1 ? (
-                <div className="w-40">
+                <div className="w-36 max-w-full">
                   <Select
-                    label="Branch"
+                    size="sm"
                     value={branchFilter}
                     onChange={(e) => setBranchFilter(e.target.value)}
                   >
-                    <option value="">All</option>
+                    <option value="">All Branches</option>
                     {options.map((opt) => (
                       <option key={opt} value={opt}>
                         {opt}
@@ -491,13 +494,13 @@ function DataOverviewTable({
             {(() => {
               const groupOptions = data?.groups ?? [];
               return groupOptions.length > 1 ? (
-                <div className="w-40">
+                <div className="w-36 max-w-full">
                   <Select
-                    label="Group"
+                    size="sm"
                     value={groupFilter}
                     onChange={(e) => setGroupFilter(e.target.value)}
                   >
-                    <option value="">All</option>
+                    <option value="">All Groups</option>
                     {groupOptions.map((opt) => (
                       <option key={opt} value={opt}>
                         {opt}
@@ -508,24 +511,34 @@ function DataOverviewTable({
               ) : null;
             })()}
 
-            <div className="flex items-end gap-2">
-              <Input
-                type="date"
-                label="Date from"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-              />
-              <Input
-                type="date"
-                label="Date to"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-              />
+            <div className="flex items-center gap-1.5">
+              <div className="w-32">
+                <DateInput
+                  size="sm"
+                  placeholder="Date from"
+                  value={dateFrom}
+                  onChange={setDateFrom}
+                />
+              </div>
+              <span className="text-text-muted text-xs select-none">–</span>
+              <div className="w-32">
+                <DateInput
+                  size="sm"
+                  placeholder="Date to"
+                  value={dateTo}
+                  onChange={setDateTo}
+                />
+              </div>
             </div>
 
             {hasActiveFilters && (
-              <Button variant="ghost" size="sm" onClick={clearFilters}>
-                Clear filters
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearFilters}
+                className="text-xs h-8 px-2 text-text-muted hover:text-error transition-colors"
+              >
+                Clear
               </Button>
             )}
           </div>

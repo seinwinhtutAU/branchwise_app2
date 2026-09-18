@@ -87,6 +87,24 @@ export function HistoryIcon({
   );
 }
 
+export function CalendarIcon({
+  className = "w-4 h-4",
+}: {
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path
+        d="M3 10h18M8 3v4M16 3v4M5 6h14a1 1 0 011 1v12a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function CalendarCheckIcon({
   className = "w-5 h-5",
 }: {

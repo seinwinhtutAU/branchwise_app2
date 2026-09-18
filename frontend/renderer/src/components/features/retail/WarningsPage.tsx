@@ -10,6 +10,7 @@ import { Badge } from "@renderer/components/ui/Badge";
 import { CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Select } from "@renderer/components/ui/Select";
+import { TabBar } from "@renderer/components/ui/Tabs";
 import { TableSkeleton } from "@renderer/components/ui/Skeleton";
 import {
   TableContainer,
@@ -721,33 +722,22 @@ function WarningTabBar({
   onSelect: (tab: Tab) => void;
   counts: Record<Tab, number>;
 }): React.JSX.Element {
+  const tabs = useMemo(
+    () =>
+      TAB_ORDER.map((tab) => ({
+        id: tab,
+        label: tab,
+        count: counts[tab],
+      })),
+    [counts],
+  );
+
   return (
-    <div
-      role="tablist"
-      className="flex flex-wrap gap-1 p-1 rounded-lg bg-bg-subtle w-fit"
-    >
-      {TAB_ORDER.map((tab) => (
-        <button
-          key={tab}
-          type="button"
-          role="tab"
-          aria-selected={activeTab === tab}
-          onClick={() => onSelect(tab)}
-          className={cn(
-            "flex items-center gap-1.5 h-8 px-3 rounded-md text-sm font-medium transition-all duration-150",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1",
-            activeTab === tab
-              ? "bg-brand-subtle text-brand shadow-sm"
-              : "text-text-muted hover:text-text-secondary",
-          )}
-        >
-          {tab}
-          <Badge variant={activeTab === tab ? "brand" : "default"}>
-            {counts[tab]}
-          </Badge>
-        </button>
-      ))}
-    </div>
+    <TabBar<Tab>
+      tabs={tabs}
+      activeTab={activeTab}
+      onSelect={onSelect}
+    />
   );
 }
 

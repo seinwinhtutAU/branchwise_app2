@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Session } from "@renderer/lib/auth";
-import { cn } from "@renderer/lib/utils";
 import { CardHeader } from "@renderer/components/ui/Card";
+import { TabBar } from "@renderer/components/ui/Tabs";
 import { InventoryIcon } from "@renderer/components/ui/icons";
 import {
   SimpleDataTable,
@@ -34,29 +34,11 @@ function InventoryTabBar({
   onSelect: (tab: InventorySubTab) => void;
 }): React.JSX.Element {
   return (
-    <div
-      role="tablist"
-      className="flex flex-wrap gap-1 p-1 rounded-lg bg-bg-subtle w-fit"
-    >
-      {SUB_TABS.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          role="tab"
-          aria-selected={activeTab === tab.id}
-          onClick={() => onSelect(tab.id)}
-          className={cn(
-            "flex items-center gap-1.5 h-8 px-4 rounded-md text-sm font-medium transition-all duration-150",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1",
-            activeTab === tab.id
-              ? "bg-brand-subtle text-brand shadow-sm"
-              : "text-text-muted hover:text-text-secondary",
-          )}
-        >
-          {tab.label}
-        </button>
-      ))}
-    </div>
+    <TabBar<InventorySubTab>
+      tabs={SUB_TABS}
+      activeTab={activeTab}
+      onSelect={onSelect}
+    />
   );
 }
 
@@ -197,10 +179,11 @@ export function InventoryPage({
   );
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-2.5">
       <CardHeader
         title="Inventory"
         description="Current stock, and the products worth a closer look — running low or not moving."
+        className="mb-0"
       />
       <InventoryTabBar activeTab={tab} onSelect={setTab} />
 

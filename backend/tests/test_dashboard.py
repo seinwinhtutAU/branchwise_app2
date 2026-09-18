@@ -682,3 +682,66 @@ def test_dashboard_rejects_inverted_custom_range(
         "/api/dashboard/revenue?date_from=2026-08-14&date_to=2026-08-10"
     )
     assert response.status_code == 400
+
+
+def test_summary_dashboard_endpoint(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session, name="Ashley")
+    _make_retail_user(db_session, branch)
+    product_men = Product(stock_code="MEN-1", description="Shower", group_name="Men")
+    product_lady = Product(stock_code="LADY-1", description="Luofu", group_name="Lady")
+    db_session.add_all([product_men, product_lady])
+    db_session.flush()
+
+    # Sales
+    _make_sale(
+        db_session,
+        branch=branch,
+        product=product_men,
+        slip_id="slip-sum-1",
+        sale_date=datetime.date.today(),
+        sale_time="18:30",
+        qty=2,
+        net_amount=20000,
+    )
+    _make_sale(
+        db_session,
+        branch=branch,
+        product=product_lady,
+        slip_id="slip-sum-2",
+        sale_date=datetime.date.today(),
+        sale_time="18:45",
+        qty=1,
+        net_amount=10000,
+    )
+
+    # Stock level for products
+    db_session.add(
+        StockLevel(
+            branch_id=branch.id,
+            product_id=product_men.id,
+            snapshot_at=datetime.datetime.now(),
+            on_hand_qty=10,
+            buying_price=5000,
+            selling_price=10000,
+        )
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/summary?period=today")
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["branch_name"] == "Ashley"
+    assert "kpis" in body
+    assert body["kpis"]["net_revenue"] == 30000.0
+    assert body["kpis"]["transaction_count"] == 2
+    assert body["kpis"]["quantity_sold"] == 3.0
+    assert body["kpis"]["selling_sku_count"] == 2
+    assert len(body["category_revenue"]) >= 1
+    assert "inventory_condition" in body
+    assert "customer_demand" in body
+    assert len(body["top_products"]) >= 1
+    assert len(body["recommendations"]) == 3
+
