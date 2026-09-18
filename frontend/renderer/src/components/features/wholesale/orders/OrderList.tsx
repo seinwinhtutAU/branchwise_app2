@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { cn } from "@renderer/lib/utils";
+import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import { Button } from "@renderer/components/ui/Button";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
@@ -145,30 +146,8 @@ export function OrderList({
     pay !== "all" ||
     quickView !== "all";
 
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useSearchShortcut();
   const isMac = typeof window !== "undefined" && Boolean(window.api?.isMac);
-
-  // Global search focus shortcut: Press "/" or "Cmd/Ctrl + F" to focus search input
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      // Ignore if user is already typing in an input/textarea
-      const activeEl = document.activeElement;
-      const isInput =
-        activeEl instanceof HTMLInputElement ||
-        activeEl instanceof HTMLTextAreaElement;
-
-      if (
-        (e.key === "/" && !isInput) ||
-        ((e.metaKey || e.ctrlKey) && (e.key === "f" || e.key === "F"))
-      ) {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
 
   // Quick filter counts based on actionable operational status
   const countAll = orders.length;

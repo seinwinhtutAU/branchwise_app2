@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import { Button } from "@renderer/components/ui/Button";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
@@ -51,7 +52,7 @@ export function ReceivingList({
   onNew,
   onRefresh,
   refreshing,
-  readyToAllocatePairs,
+  readyToDeliverPairs,
   owedToCustomersPairs,
   onOpenOrders,
 }: {
@@ -61,13 +62,14 @@ export function ReceivingList({
   onNew: () => void;
   onRefresh: () => void;
   refreshing: boolean;
-  readyToAllocatePairs: number;
+  readyToDeliverPairs: number;
   owedToCustomersPairs: number;
   onOpenOrders?: () => void;
 }): React.JSX.Element {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
+  const searchInputRef = useSearchShortcut();
 
   const { shipments } = useWholesale();
   function expectedPackagesFor(receiving: Receiving): number | undefined {
@@ -124,21 +126,18 @@ export function ReceivingList({
 
   return (
     <div className="flex flex-col gap-6">
-      {readyToAllocatePairs > 0 && onOpenOrders && (
+      {owedToCustomersPairs > 0 && onOpenOrders && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-success/40 bg-success-subtle px-5 py-4">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-text-primary">
-              {formatSets(readyToAllocatePairs)} on the shelf with no customer
-              allocated yet.
+              {formatSets(readyToDeliverPairs)} on the shelf, ready to go out.
             </p>
             <p className="mt-0.5 text-sm text-text-secondary">
-              {owedToCustomersPairs > 0
-                ? `Customers are still waiting for ${formatSets(owedToCustomersPairs)}.`
-                : "Counting the packages is only half the job — the stock still has to be shared out."}
+              {`Customers are still waiting for ${formatSets(owedToCustomersPairs)}.`}
             </p>
           </div>
           <Button size="sm" onClick={onOpenOrders}>
-            Allocate to customers
+            Deliver to customer
           </Button>
         </div>
       )}
@@ -186,6 +185,7 @@ export function ReceivingList({
         <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-bg-subtle">
           <div className="w-full sm:w-[28rem] lg:w-[32rem]">
             <Input
+              ref={searchInputRef}
               aria-label="Search receivings"
               placeholder="Search receiving, shipment, voucher, supplier or gate"
               startIcon={<SearchIcon className="w-4 h-4" />}

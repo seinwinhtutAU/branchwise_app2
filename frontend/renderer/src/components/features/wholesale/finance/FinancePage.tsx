@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import { useQuery } from "@tanstack/react-query";
 import { type Session } from "@renderer/lib/auth";
 import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
@@ -65,15 +66,15 @@ const STATUS_LABELS: Record<PaymentStatus, string> = {
 };
 const STATUS_STYLES: Record<PaymentStatus, { bg: string; dot: string }> = {
   unpaid: {
-    bg: "bg-error-subtle text-error border border-error/30",
+    bg: "bg-error-subtle text-error border border-error-pill",
     dot: "bg-error",
   },
   partial: {
-    bg: "bg-warning-subtle text-warning border border-warning/30",
+    bg: "bg-warning-subtle text-warning border border-warning-pill",
     dot: "bg-warning",
   },
   paid: {
-    bg: "bg-success-subtle text-success border border-success/30",
+    bg: "bg-success-subtle text-success border border-success-pill",
     dot: "bg-success",
   },
 };
@@ -118,6 +119,7 @@ export default function FinancePage({
   const showToast = useToast();
   const [tab, setTab] = useState<Tab>("customers");
   const [search, setSearch] = useState("");
+  const searchInputRef = useSearchShortcut();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [paymentTarget, setPaymentTarget] = useState<PaymentTarget | null>(
     null,
@@ -318,6 +320,7 @@ export default function FinancePage({
       <div className="flex flex-wrap items-end gap-3">
         <div className="w-full md:w-72">
           <Input
+            ref={searchInputRef}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search name or reference"

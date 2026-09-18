@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
+import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import {
   FigureCard,
   PAGE_SIZE,
@@ -60,24 +61,7 @@ export function ShipmentList({
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
-  // Keyboard shortcut: '/' or '⌘F' to focus search
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent): void {
-      if (
-        (e.key === "/" &&
-          document.activeElement?.tagName !== "INPUT" &&
-          document.activeElement?.tagName !== "TEXTAREA") ||
-        ((e.metaKey || e.ctrlKey) && e.key === "f")
-      ) {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  const searchInputRef = useSearchShortcut();
 
   const countBy = (status: ShipmentStatus): number =>
     shipments.filter((shipment) => shipmentStatus(shipment) === status).length;

@@ -1,6 +1,7 @@
 // StockList — filterable list of stock records with overview, locations, movement tabs.
 
 import { useMemo, useState } from "react";
+import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import { Button } from "@renderer/components/ui/Button";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
@@ -51,9 +52,10 @@ export function StockList({
   const [location, setLocation] = useState("all");
   const [health, setHealth] = useState<InventoryHealth | "all">("all");
   const [page, setPage] = useState(1);
+  const searchInputRef = useSearchShortcut();
   const [section, setSection] = useState<"overview" | "locations" | "movement">("overview");
 
-  const unallocatedPairs = records.reduce(
+  const onShelfPairs = records.reduce(
     (sum, record) => sum + Math.max(0, record.available_pairs),
     0,
   );
@@ -113,20 +115,18 @@ export function StockList({
 
       {section === "overview" && (
         <>
-          {unallocatedPairs > 0 && onOpenOrders && (
+          {owedToCustomersPairs > 0 && onOpenOrders && (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-success/40 bg-success-subtle px-5 py-4">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-text-primary">
-                  {formatSets(unallocatedPairs)} on the shelf with no customer allocated yet.
+                  {formatSets(onShelfPairs)} on the shelf, ready to go out.
                 </p>
                 <p className="mt-0.5 text-sm text-text-secondary">
-                  {owedToCustomersPairs > 0
-                    ? `Customers are still waiting for ${formatSets(owedToCustomersPairs)}.`
-                    : "Counting the boxes is only half the job — the stock still has to be shared out."}
+                  {`Customers are still waiting for ${formatSets(owedToCustomersPairs)}.`}
                 </p>
               </div>
               <Button size="sm" onClick={onOpenOrders}>
-                Allocate to customers
+                Deliver to customer
               </Button>
             </div>
           )}
@@ -161,6 +161,7 @@ export function StockList({
           <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-bg-subtle">
             <div className="w-full sm:w-[24rem] lg:w-[28rem]">
               <Input
+                ref={searchInputRef}
                 aria-label="Search stock"
                 placeholder="Search product, place or color"
                 startIcon={<SearchIcon className="w-4 h-4" />}

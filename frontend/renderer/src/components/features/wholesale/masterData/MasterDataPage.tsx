@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import { useQuery } from "@tanstack/react-query";
 import type { Session } from "@renderer/lib/auth";
 import { useToast } from "@renderer/lib/useToast";
@@ -172,6 +173,7 @@ export default function MasterDataPage({
   const showToast = useToast();
   const [tab, setTab] = useState<MasterDataTab>("products");
   const [search, setSearch] = useState("");
+  const searchInputRef = useSearchShortcut();
   const [showInactive, setShowInactive] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -430,6 +432,7 @@ export default function MasterDataPage({
           </div>
           <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border bg-bg-subtle p-4">
             <Input
+              ref={searchInputRef}
               label={`Search ${activeTab.label.toLowerCase()}`}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -521,7 +524,7 @@ export default function MasterDataPage({
                           label={row.active ? "Active" : "Inactive"}
                           className={
                             row.active
-                              ? "bg-success-subtle text-success border border-success/30"
+                              ? "bg-success-subtle text-success border border-success-pill"
                               : "bg-bg-raised text-text-secondary border border-border-strong"
                           }
                           dotClassName={

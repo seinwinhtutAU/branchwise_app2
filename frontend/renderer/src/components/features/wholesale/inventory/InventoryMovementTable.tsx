@@ -1,6 +1,7 @@
 // InventoryMovementTable — searchable table of all stock movements.
 
 import { useCallback, useMemo, useState } from "react";
+import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import { Button } from "@renderer/components/ui/Button";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
@@ -42,6 +43,7 @@ export function InventoryMovementTable({
   const [kind, setKind] = useState<MovementKind | "all">("all");
   const [location, setLocation] = useState("all");
   const [page, setPage] = useState(1);
+  const searchInputRef = useSearchShortcut();
   const placesByStockCode = useMemo(() => {
     const places = new Map<string, string>();
     for (const record of records) {
@@ -106,6 +108,7 @@ export function InventoryMovementTable({
       <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-bg-subtle">
         <div className="w-full sm:w-[28rem]">
           <Input
+            ref={searchInputRef}
             aria-label="Search inventory movement"
             placeholder="Search product, stock code or reference"
             startIcon={<SearchIcon className="w-4 h-4" />}
