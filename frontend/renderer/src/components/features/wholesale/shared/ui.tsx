@@ -258,14 +258,14 @@ export function FigureCard({
       className={cn(
         "bg-bg-base border border-border border-t-2 rounded-md shadow-sm transition-shadow duration-150",
         toneBorder(tone),
-        compact ? "px-2.5 py-1.5" : "px-3.5 py-2.5 sm:px-4 sm:py-3",
+        compact ? "px-2 py-1.5" : "px-3 py-2 sm:px-3.5 sm:py-2.5",
         className,
       )}
     >
       <span
         className={cn(
           "block text-[11px] font-semibold uppercase tracking-wider text-text-muted select-none truncate",
-          compact ? "mb-0.5" : "mb-1",
+          compact ? "mb-0.5" : "mb-0.5",
         )}
       >
         {label}
@@ -273,14 +273,14 @@ export function FigureCard({
       <span
         className={cn(
           "block font-bold tabular-nums tracking-tight font-mono leading-tight",
-          compact ? "text-base sm:text-lg mb-0.5" : "text-lg sm:text-xl mb-0.5",
+          compact ? "text-base sm:text-lg mb-0.5" : "text-base sm:text-lg mb-0.5",
           toneText(tone),
         )}
       >
         {value}
       </span>
       {sub && (
-        <span className="block text-[11px] text-text-muted/80 leading-normal truncate select-none">
+        <span className="block text-[10px] sm:text-[11px] text-text-muted/80 leading-tight truncate select-none">
           {sub}
         </span>
       )}

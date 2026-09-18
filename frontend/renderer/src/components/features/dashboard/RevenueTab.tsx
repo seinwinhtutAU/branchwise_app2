@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { useUrlQuery } from "@renderer/lib/queryClient";
 import { Button } from "@renderer/components/ui/Button";
+import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Skeleton } from "@renderer/components/ui/Skeleton";
@@ -165,9 +166,9 @@ export function RevenueTab({
     return (
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Skeleton className="h-24" />
-          <Skeleton className="h-24" />
-          <Skeleton className="h-24" />
+          <Skeleton className="h-18" />
+          <Skeleton className="h-18" />
+          <Skeleton className="h-18" />
         </div>
         <Skeleton className="h-48" />
         <Skeleton className="h-48" />
@@ -178,26 +179,28 @@ export function RevenueTab({
   return (
     <div className="flex flex-col gap-4">
       <RefreshingHint show={isRefreshing} />
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatTile
-          label="Net Revenue"
-          value={formatMoney(data.net_revenue.value)}
-          deltaPct={data.net_revenue.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
-        />
-        <StatTile
-          label="Transactions"
-          value={formatCount(data.transaction_count.value)}
-          deltaPct={data.transaction_count.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
-        />
-        <StatTile
-          label="Average Sale Value"
-          value={formatMoney(data.avg_basket.value)}
-          deltaPct={data.avg_basket.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
-        />
-      </div>
+      <CollapsibleKpiSummary storageKey="dashboard_revenue" title="Revenue KPIs">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <StatTile
+            label="Net Revenue"
+            value={formatMoney(data.net_revenue.value)}
+            deltaPct={data.net_revenue.delta_pct}
+            previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          />
+          <StatTile
+            label="Transactions"
+            value={formatCount(data.transaction_count.value)}
+            deltaPct={data.transaction_count.delta_pct}
+            previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          />
+          <StatTile
+            label="Average Sale Value"
+            value={formatMoney(data.avg_basket.value)}
+            deltaPct={data.avg_basket.delta_pct}
+            previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          />
+        </div>
+      </CollapsibleKpiSummary>
 
       <Card>
         <CardHeader

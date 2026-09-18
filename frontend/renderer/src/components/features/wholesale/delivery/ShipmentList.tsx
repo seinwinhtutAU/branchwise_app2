@@ -8,6 +8,7 @@ import {
   RowProgress,
 } from "@renderer/components/features/wholesale/shared/ui";
 import { Button } from "@renderer/components/ui/Button";
+import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
 import { Pagination } from "@renderer/components/ui/Pagination";
@@ -124,20 +125,22 @@ export function ShipmentList({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-        <FigureCard
-          label="On the way"
-          value={formatQty(countBy("in_transit") + countBy("partly_delivered"))}
-          sub="shipments"
-          tone="brand"
-        />
-        <FigureCard
-          label="Waiting at cargo"
-          value={formatQty(countBy("waiting_at_cargo"))}
-          sub="shipments"
-          tone="warning"
-        />
-      </div>
+      <CollapsibleKpiSummary storageKey="wholesale_shipments" title="Shipments Summary">
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
+          <FigureCard
+            label="On the way"
+            value={formatQty(countBy("in_transit") + countBy("partly_delivered"))}
+            sub="shipments"
+            tone="brand"
+          />
+          <FigureCard
+            label="Waiting at cargo"
+            value={formatQty(countBy("waiting_at_cargo"))}
+            sub="shipments"
+            tone="warning"
+          />
+        </div>
+      </CollapsibleKpiSummary>
 
       <Panel>
         <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">

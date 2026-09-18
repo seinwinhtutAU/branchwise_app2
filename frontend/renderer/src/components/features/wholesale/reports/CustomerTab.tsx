@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import {
   ChartViewToggle,
   StatTile,
@@ -81,30 +82,32 @@ export function CustomerTab(props: ReportTabProps): React.JSX.Element {
         Su” and “ma su su ” are one customer. Orders use the order date;
         collections use the payment date.
       </p>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile
-          label="Active customers"
-          value={formatQty(data.active_customers.value)}
-          deltaPct={data.active_customers.delta_pct}
-          previousLabel={note}
-        />
-        <StatTile
-          label="New customers"
-          value={formatQty(data.new_customers.value)}
-          deltaPct={data.new_customers.delta_pct}
-          previousLabel={note}
-        />
-        <StatTile
-          label="Average order value"
-          value={formatKyat(data.average_order_value.value)}
-          deltaPct={data.average_order_value.delta_pct}
-          previousLabel={note}
-        />
-        <StatTile
-          label="Owed by customers"
-          value={formatKyat(data.receivables.value)}
-        />
-      </div>
+      <CollapsibleKpiSummary storageKey="wholesale_report_customer" title="Customer KPIs">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatTile
+            label="Active customers"
+            value={formatQty(data.active_customers.value)}
+            deltaPct={data.active_customers.delta_pct}
+            previousLabel={note}
+          />
+          <StatTile
+            label="New customers"
+            value={formatQty(data.new_customers.value)}
+            deltaPct={data.new_customers.delta_pct}
+            previousLabel={note}
+          />
+          <StatTile
+            label="Average order value"
+            value={formatKyat(data.average_order_value.value)}
+            deltaPct={data.average_order_value.delta_pct}
+            previousLabel={note}
+          />
+          <StatTile
+            label="Owed by customers"
+            value={formatKyat(data.receivables.value)}
+          />
+        </div>
+      </CollapsibleKpiSummary>
       <ReportSection
         title="Daily order count"
         description="Orders placed in the selected period."

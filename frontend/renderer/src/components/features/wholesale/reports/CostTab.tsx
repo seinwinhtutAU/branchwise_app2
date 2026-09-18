@@ -2,6 +2,7 @@ import {
   StatTile,
   TwoLineTrendChart,
 } from "@renderer/components/features/dashboard/shared";
+import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import type { WholesaleCostReport } from "@renderer/components/features/wholesale/shared/api";
 import {
   ReportError,
@@ -75,32 +76,34 @@ export function CostTab(props: ReportTabProps): React.JSX.Element {
         receiving date, and supplier payments use the payment date. Gross margin
         is before freight.
       </p>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile
-          label="Purchases"
-          value={formatKyat(data.purchases.value)}
-          deltaPct={data.purchases.delta_pct}
-          previousLabel={note}
-        />
-        <StatTile
-          label="Freight & handling"
-          value={formatKyat(data.freight_and_handling.value)}
-          deltaPct={data.freight_and_handling.delta_pct}
-          previousLabel={note}
-        />
-        <StatTile
-          label="Gross margin %"
-          value={`${data.gross_margin_pct.value.toFixed(1)}%`}
-          deltaPct={data.gross_margin_pct.delta_pct}
-          previousLabel={note}
-        />
-        <StatTile
-          label="Owed to suppliers"
-          value={formatKyat(data.owed_to_suppliers.value)}
-          deltaPct={data.owed_to_suppliers.delta_pct}
-          previousLabel={note}
-        />
-      </div>
+      <CollapsibleKpiSummary storageKey="wholesale_report_cost" title="Cost & Margin KPIs">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatTile
+            label="Purchases"
+            value={formatKyat(data.purchases.value)}
+            deltaPct={data.purchases.delta_pct}
+            previousLabel={note}
+          />
+          <StatTile
+            label="Freight & handling"
+            value={formatKyat(data.freight_and_handling.value)}
+            deltaPct={data.freight_and_handling.delta_pct}
+            previousLabel={note}
+          />
+          <StatTile
+            label="Gross margin %"
+            value={`${data.gross_margin_pct.value.toFixed(1)}%`}
+            deltaPct={data.gross_margin_pct.delta_pct}
+            previousLabel={note}
+          />
+          <StatTile
+            label="Owed to suppliers"
+            value={formatKyat(data.owed_to_suppliers.value)}
+            deltaPct={data.owed_to_suppliers.delta_pct}
+            previousLabel={note}
+          />
+        </div>
+      </CollapsibleKpiSummary>
       <ReportSection
         title="Revenue vs. cost of goods delivered"
         description="Buying price is an estimate based on the latest voucher price available on each delivery date."

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import {
   ChartViewToggle,
   StatTile,
@@ -80,32 +81,34 @@ export function RevenueTab(props: ReportTabProps): React.JSX.Element {
         Revenue is counted when goods are delivered. Orders taken use the order
         date; money collected uses the payment date.
       </p>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile
-          label="Delivered revenue"
-          value={formatKyat(data.delivered_revenue.value)}
-          deltaPct={data.delivered_revenue.delta_pct}
-          previousLabel={note}
-        />
-        <StatTile
-          label="Ordered value"
-          value={formatKyat(data.ordered_value.value)}
-          deltaPct={data.ordered_value.delta_pct}
-          previousLabel={note}
-        />
-        <StatTile
-          label="Quantity delivered"
-          value={formatSets(data.pairs_delivered.value)}
-          deltaPct={data.pairs_delivered.delta_pct}
-          previousLabel={note}
-        />
-        <StatTile
-          label="Money collected"
-          value={formatKyat(data.collected.value)}
-          deltaPct={data.collected.delta_pct}
-          previousLabel={note}
-        />
-      </div>
+      <CollapsibleKpiSummary storageKey="wholesale_report_revenue" title="Revenue KPIs">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatTile
+            label="Delivered revenue"
+            value={formatKyat(data.delivered_revenue.value)}
+            deltaPct={data.delivered_revenue.delta_pct}
+            previousLabel={note}
+          />
+          <StatTile
+            label="Ordered value"
+            value={formatKyat(data.ordered_value.value)}
+            deltaPct={data.ordered_value.delta_pct}
+            previousLabel={note}
+          />
+          <StatTile
+            label="Quantity delivered"
+            value={formatSets(data.pairs_delivered.value)}
+            deltaPct={data.pairs_delivered.delta_pct}
+            previousLabel={note}
+          />
+          <StatTile
+            label="Money collected"
+            value={formatKyat(data.collected.value)}
+            deltaPct={data.collected.delta_pct}
+            previousLabel={note}
+          />
+        </div>
+      </CollapsibleKpiSummary>
       <ReportSection
         title="Delivered revenue and money collected"
         description="The gap between the lines is sold goods that have not been paid for yet."

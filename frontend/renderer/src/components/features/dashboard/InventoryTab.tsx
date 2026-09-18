@@ -2,6 +2,7 @@ import type { Session } from "@renderer/lib/auth";
 import { useUrlQuery } from "@renderer/lib/queryClient";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
+import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Skeleton } from "@renderer/components/ui/Skeleton";
@@ -298,11 +299,12 @@ export function InventoryTab({
     return (
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-          <Skeleton className="h-24" />
-          <Skeleton className="h-24" />
-          <Skeleton className="h-24" />
-          <Skeleton className="h-24" />
+          <Skeleton className="h-18" />
+          <Skeleton className="h-18" />
+          <Skeleton className="h-18" />
+          <Skeleton className="h-18" />
         </div>
+        <Skeleton className="h-48" />
         <Skeleton className="h-48" />
       </div>
     );
@@ -319,26 +321,28 @@ export function InventoryTab({
           : "No inventory snapshot on record for this branch yet."}
       </p>
 
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <StatTile
-          label="SKUs Tracked"
-          value={data.sku_count.toLocaleString()}
-        />
-        <StatTile
-          label="Low / Critical Stock"
-          value={lowStockCount.toLocaleString()}
-          sub={`${data.critical_count} critical, ${data.low_count} low, ${data.watch_count} watch`}
-        />
-        <StatTile
-          label="Estimated Stock Value"
-          value={formatMoney(data.estimated_stock_value)}
-        />
-        <StatTile
-          label="Dead Stock"
-          value={data.dead_stock_count.toLocaleString()}
-          sub="On hand, no sales in 90 days"
-        />
-      </div>
+      <CollapsibleKpiSummary storageKey="dashboard_inventory" title="Inventory KPIs">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <StatTile
+            label="SKUs Tracked"
+            value={data.sku_count.toLocaleString()}
+          />
+          <StatTile
+            label="Low / Critical Stock"
+            value={lowStockCount.toLocaleString()}
+            sub={`${data.critical_count} critical, ${data.low_count} low, ${data.watch_count} watch`}
+          />
+          <StatTile
+            label="Estimated Stock Value"
+            value={formatMoney(data.estimated_stock_value)}
+          />
+          <StatTile
+            label="Dead Stock"
+            value={data.dead_stock_count.toLocaleString()}
+            sub="On hand, no sales in 90 days"
+          />
+        </div>
+      </CollapsibleKpiSummary>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <Card>

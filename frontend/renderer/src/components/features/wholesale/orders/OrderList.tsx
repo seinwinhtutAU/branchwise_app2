@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { cn } from "@renderer/lib/utils";
 import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import { Button } from "@renderer/components/ui/Button";
+import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
 import { Pagination } from "@renderer/components/ui/Pagination";
@@ -173,31 +174,33 @@ export function OrderList({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <FigureCard
-          label="Open Orders"
-          value={formatQty(openOrders.length)}
-          sub="not fulfilled or cancelled"
-        />
-        <FigureCard
-          label="Ready to Deliver"
-          value={sets(readyToDeliverPairs)}
-          sub="allocated, ready to send"
-          tone={readyToDeliverPairs > 0 ? "brand" : "success"}
-        />
-        <FigureCard
-          label="Qty Remaining to Deliver"
-          value={sets(remainingAll)}
-          sub="across all open orders"
-          tone={remainingAll > 0 ? "error" : "success"}
-        />
-        <FigureCard
-          label="Unpaid amount"
-          value={formatKyat(unpaid)}
-          sub={`${unpaidCount} order${unpaidCount === 1 ? "" : "s"} not fully paid`}
-          tone={unpaid > 0 ? "error" : "success"}
-        />
-      </div>
+      <CollapsibleKpiSummary storageKey="wholesale_orders" title="Orders Summary">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <FigureCard
+            label="Open Orders"
+            value={formatQty(openOrders.length)}
+            sub="not fulfilled or cancelled"
+          />
+          <FigureCard
+            label="Ready to Deliver"
+            value={sets(readyToDeliverPairs)}
+            sub="allocated, ready to send"
+            tone={readyToDeliverPairs > 0 ? "brand" : "success"}
+          />
+          <FigureCard
+            label="Qty Remaining to Deliver"
+            value={sets(remainingAll)}
+            sub="across all open orders"
+            tone={remainingAll > 0 ? "error" : "success"}
+          />
+          <FigureCard
+            label="Unpaid amount"
+            value={formatKyat(unpaid)}
+            sub={`${unpaidCount} order${unpaidCount === 1 ? "" : "s"} not fully paid`}
+            tone={unpaid > 0 ? "error" : "success"}
+          />
+        </div>
+      </CollapsibleKpiSummary>
 
       <Panel className="shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">

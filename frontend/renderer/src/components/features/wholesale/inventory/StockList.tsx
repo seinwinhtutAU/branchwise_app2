@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import { Button } from "@renderer/components/ui/Button";
+import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
 import { Pagination } from "@renderer/components/ui/Pagination";
@@ -137,8 +138,10 @@ export function StockList({
             </div>
             <InventoryRefreshButton onRefresh={onRefresh} refreshing={refreshing} />
           </div>
-          <InventorySummaryCards records={records} />
-          <InventoryInsights records={records} />
+          <CollapsibleKpiSummary storageKey="wholesale_stock_overview" title="Stock Overview">
+            <InventorySummaryCards records={records} />
+            <InventoryInsights records={records} />
+          </CollapsibleKpiSummary>
         </>
       )}
 

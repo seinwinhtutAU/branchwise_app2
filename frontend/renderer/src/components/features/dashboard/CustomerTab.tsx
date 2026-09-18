@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { useUrlQuery } from "@renderer/lib/queryClient";
 import { Button } from "@renderer/components/ui/Button";
+import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { Skeleton } from "@renderer/components/ui/Skeleton";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
@@ -145,10 +146,11 @@ export function CustomerTab({
     return (
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Skeleton className="h-24" />
-          <Skeleton className="h-24" />
-          <Skeleton className="h-24" />
+          <Skeleton className="h-18" />
+          <Skeleton className="h-18" />
+          <Skeleton className="h-18" />
         </div>
+        <Skeleton className="h-48" />
         <Skeleton className="h-48" />
       </div>
     );
@@ -165,33 +167,35 @@ export function CustomerTab({
         visits) instead of who they are.
       </p>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatTile
-          label="Average Items per Transaction"
-          value={data.avg_items_per_basket.value.toFixed(1)}
-          deltaPct={data.avg_items_per_basket.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
-        />
-        <StatTile
-          label="Single-Item Transaction Share"
-          value={formatPercent(data.single_item_basket_share_pct.value)}
-          deltaPct={data.single_item_basket_share_pct.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
-        />
-        <StatTile
-          label="Busiest Hour"
-          value={
-            busiest
-              ? `${WEEKDAY_LABELS[busiest.weekday]} ${busiest.hour_band}`
-              : "—"
-          }
-          sub={
-            busiest
-              ? `${busiest.transaction_count.toLocaleString()} transactions`
-              : "No transactions in this period"
-          }
-        />
-      </div>
+      <CollapsibleKpiSummary storageKey="dashboard_customer" title="Customer Behaviour KPIs">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <StatTile
+            label="Average Items per Transaction"
+            value={data.avg_items_per_basket.value.toFixed(1)}
+            deltaPct={data.avg_items_per_basket.delta_pct}
+            previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          />
+          <StatTile
+            label="Single-Item Transaction Share"
+            value={formatPercent(data.single_item_basket_share_pct.value)}
+            deltaPct={data.single_item_basket_share_pct.delta_pct}
+            previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          />
+          <StatTile
+            label="Busiest Hour"
+            value={
+              busiest
+                ? `${WEEKDAY_LABELS[busiest.weekday]} ${busiest.hour_band}`
+                : "—"
+            }
+            sub={
+              busiest
+                ? `${busiest.transaction_count.toLocaleString()} transactions`
+                : "No transactions in this period"
+            }
+          />
+        </div>
+      </CollapsibleKpiSummary>
 
       <Card>
         <CardHeader

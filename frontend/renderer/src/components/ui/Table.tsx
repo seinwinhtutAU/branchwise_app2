@@ -92,7 +92,7 @@ export function Th({
   return (
     <th
       className={cn(
-        "text-left font-semibold text-text-muted text-[11px] uppercase tracking-wider px-4 py-3 whitespace-nowrap",
+        "text-left font-semibold text-text-muted text-[11px] uppercase tracking-wider px-3.5 py-2 whitespace-nowrap",
         "border-b border-r border-border select-none",
         className,
       )}
@@ -111,7 +111,7 @@ export function Td({
   return (
     <td
       className={cn(
-        "px-4 py-3 text-text-primary align-middle border-b border-r border-border",
+        "px-3.5 py-1.5 sm:py-2 text-text-primary align-middle border-b border-r border-border text-sm",
         className,
       )}
       {...props}

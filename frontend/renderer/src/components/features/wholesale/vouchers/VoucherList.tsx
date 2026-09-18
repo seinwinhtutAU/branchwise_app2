@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import { Button } from "@renderer/components/ui/Button";
+import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
 import { Pagination } from "@renderer/components/ui/Pagination";
@@ -142,31 +143,33 @@ export function VoucherList({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <FigureCard
-          label="Open Vouchers"
-          value={formatQty(openVouchers.length)}
-          sub="in transit or partly received"
-        />
-        <FigureCard
-          label="Waiting to Arrive"
-          value={formatQty(countWaiting)}
-          sub="factory dispatched, on the way"
-          tone={countWaiting > 0 ? "warning" : "success"}
-        />
-        <FigureCard
-          label="Qty Remaining to Arrive"
-          value={sets(remainingAll)}
-          sub={`of ${sets(totalQty)} ordered`}
-          tone={remainingAll > 0 ? "error" : "success"}
-        />
-        <FigureCard
-          label="Unpaid to Suppliers"
-          value={formatKyat(unpaid)}
-          sub={`${unpaidCount} voucher${unpaidCount === 1 ? "" : "s"} not fully paid`}
-          tone={unpaid > 0 ? "error" : "success"}
-        />
-      </div>
+      <CollapsibleKpiSummary storageKey="wholesale_vouchers" title="Vouchers Summary">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <FigureCard
+            label="Open Vouchers"
+            value={formatQty(openVouchers.length)}
+            sub="in transit or partly received"
+          />
+          <FigureCard
+            label="Waiting to Arrive"
+            value={formatQty(countWaiting)}
+            sub="factory dispatched, on the way"
+            tone={countWaiting > 0 ? "warning" : "success"}
+          />
+          <FigureCard
+            label="Qty Remaining to Arrive"
+            value={sets(remainingAll)}
+            sub={`of ${sets(totalQty)} ordered`}
+            tone={remainingAll > 0 ? "error" : "success"}
+          />
+          <FigureCard
+            label="Unpaid to Suppliers"
+            value={formatKyat(unpaid)}
+            sub={`${unpaidCount} voucher${unpaidCount === 1 ? "" : "s"} not fully paid`}
+            tone={unpaid > 0 ? "error" : "success"}
+          />
+        </div>
+      </CollapsibleKpiSummary>
 
       <Panel className="shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">

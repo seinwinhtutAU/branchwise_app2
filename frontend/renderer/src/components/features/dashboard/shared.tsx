@@ -502,13 +502,13 @@ export function StatTile({
   sub?: string;
 }): React.JSX.Element {
   return (
-    <Card className="flex flex-col gap-2">
-      <div className="text-sm text-text-secondary">{label}</div>
-      <div className="text-2xl font-semibold text-text-primary tracking-tight tabular-nums">
+    <Card className="flex flex-col gap-1 p-3.5 sm:p-4">
+      <div className="text-xs font-medium text-text-secondary">{label}</div>
+      <div className="text-xl font-semibold text-text-primary tracking-tight tabular-nums sm:text-2xl">
         {value}
       </div>
       {deltaPct !== undefined ? (
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <DeltaBadge deltaPct={deltaPct} />
           {previousLabel && (
             <span className="text-xs text-text-muted">{previousLabel}</span>

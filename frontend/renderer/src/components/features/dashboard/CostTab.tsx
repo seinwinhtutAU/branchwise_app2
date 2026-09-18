@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { useUrlQuery } from "@renderer/lib/queryClient";
 import { Button } from "@renderer/components/ui/Button";
+import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Skeleton } from "@renderer/components/ui/Skeleton";
@@ -166,9 +167,9 @@ export function CostTab({
     return (
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Skeleton className="h-24" />
-          <Skeleton className="h-24" />
-          <Skeleton className="h-24" />
+          <Skeleton className="h-18" />
+          <Skeleton className="h-18" />
+          <Skeleton className="h-18" />
         </div>
         <Skeleton className="h-48" />
         <Skeleton className="h-48" />
@@ -180,26 +181,28 @@ export function CostTab({
   return (
     <div className="flex flex-col gap-4">
       <RefreshingHint show={isRefreshing} />
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatTile
-          label="Estimated Cost of Goods Sold"
-          value={formatMoney(data.estimated_cogs.value)}
-          deltaPct={data.estimated_cogs.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
-        />
-        <StatTile
-          label="Estimated Gross Margin"
-          value={formatPercent(data.estimated_gross_margin_pct.value)}
-          deltaPct={data.estimated_gross_margin_pct.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
-        />
-        <StatTile
-          label="Estimated Margin per Transaction"
-          value={formatMoney(data.estimated_margin_per_basket.value)}
-          deltaPct={data.estimated_margin_per_basket.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
-        />
-      </div>
+      <CollapsibleKpiSummary storageKey="dashboard_cost" title="Cost & Margin KPIs">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <StatTile
+            label="Estimated Cost of Goods Sold"
+            value={formatMoney(data.estimated_cogs.value)}
+            deltaPct={data.estimated_cogs.delta_pct}
+            previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          />
+          <StatTile
+            label="Estimated Gross Margin"
+            value={formatPercent(data.estimated_gross_margin_pct.value)}
+            deltaPct={data.estimated_gross_margin_pct.delta_pct}
+            previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          />
+          <StatTile
+            label="Estimated Margin per Transaction"
+            value={formatMoney(data.estimated_margin_per_basket.value)}
+            deltaPct={data.estimated_margin_per_basket.delta_pct}
+            previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          />
+        </div>
+      </CollapsibleKpiSummary>
 
       <Card>
         <CardHeader

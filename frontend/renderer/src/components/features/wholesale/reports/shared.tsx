@@ -71,7 +71,7 @@ export function ReportLoading({
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: tiles }, (_, index) => (
-          <Skeleton key={index} className="h-24" />
+          <Skeleton key={index} className="h-18" />
         ))}
       </div>
       <Skeleton className="h-56" />

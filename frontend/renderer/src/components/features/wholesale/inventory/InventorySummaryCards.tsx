@@ -29,20 +29,20 @@ function SummaryCard({
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-bg-base shadow-sm">
-      <div className="flex items-start gap-3 px-4 py-4 sm:px-5 sm:py-5">
-        <div className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-xl", iconClassName)}>
+    <div className="overflow-hidden rounded-xl border border-border bg-bg-base shadow-xs">
+      <div className="flex items-center gap-3 px-3.5 py-2.5 sm:px-4 sm:py-3">
+        <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", iconClassName)}>
           {icon}
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-bold tracking-tight text-text-primary sm:text-base">{title}</h2>
-          <p className="mt-0.5 text-xs text-text-muted sm:text-sm">{description}</p>
+          <h2 className="text-xs font-bold tracking-tight text-text-primary sm:text-sm">{title}</h2>
+          <p className="text-[11px] text-text-muted truncate">{description}</p>
         </div>
         <div className="shrink-0 text-right">
-          <div className={cn("text-xl font-bold leading-none tabular-nums sm:text-2xl", totalClassName)}>
+          <div className={cn("text-base font-bold leading-none tabular-nums sm:text-lg", totalClassName)}>
             {formatSets(total)}
           </div>
-          <div className="mt-1 text-sm text-text-muted">total quantity</div>
+          <div className="mt-0.5 text-[11px] text-text-muted">total quantity</div>
         </div>
       </div>
       {children}
@@ -59,11 +59,11 @@ function SummaryRow({ row }: { row: InventorySummaryRow }): React.JSX.Element {
     gray: "bg-text-muted",
   }[row.tone];
   return (
-    <div className="flex items-center gap-2.5 px-4 py-3 sm:px-5">
-      <span className={cn("h-3 w-3 shrink-0 rounded-full", dotClass)} />
-      <span className="min-w-0 flex-1 text-sm font-semibold text-text-primary">{row.label}</span>
-      <span className="hidden text-xs italic text-text-muted md:block">{row.detail}</span>
-      <span className="shrink-0 text-sm font-bold tabular-nums text-text-primary">
+    <div className="flex items-center gap-2 px-3.5 py-1.5 sm:px-4">
+      <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", dotClass)} />
+      <span className="min-w-0 flex-1 text-xs font-semibold text-text-primary truncate">{row.label}</span>
+      <span className="hidden text-[11px] italic text-text-muted md:block">{row.detail}</span>
+      <span className="shrink-0 text-xs font-bold tabular-nums text-text-primary">
         {formatSets(row.pairs)}
       </span>
     </div>
@@ -101,16 +101,16 @@ export function InventoryInsights({
   ];
 
   return (
-    <Panel className="p-5">
-      <h3 className="text-base font-bold text-text-primary">Stock health</h3>
-      <div className="mt-4 space-y-2.5">
+    <Panel className="p-3.5 sm:p-4">
+      <h3 className="text-sm font-bold text-text-primary">Stock health</h3>
+      <div className="mt-2.5 space-y-1.5">
         {healthRows.map((row) => {
           const count = counts[row.label];
           const pct = Math.round((count / total) * 100);
           return (
-            <div key={row.label} className="flex items-center gap-3">
+            <div key={row.label} className="flex items-center gap-2.5">
               <span className="w-24 shrink-0 text-xs text-text-muted">{row.label}</span>
-              <div className="h-2 flex-1 overflow-hidden rounded-full bg-bg-subtle">
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg-subtle">
                 <div className={cn("h-full rounded-full", row.color)} style={{ width: `${pct}%` }} />
               </div>
               <span className={cn("w-16 text-right text-xs font-bold", row.text)}>{formatQty(count)}</span>
@@ -118,7 +118,7 @@ export function InventoryInsights({
           );
         })}
       </div>
-      <p className="mt-3 text-xs text-text-muted">{formatQty(records.length)} stock-record SKUs</p>
+      <p className="mt-2 text-[11px] text-text-muted">{formatQty(records.length)} stock-record SKUs</p>
     </Panel>
   );
 }
@@ -159,32 +159,32 @@ export function InventorySummaryCards({
   const onTheWayPairs = atSupplierPairs + inTransitPairs;
 
   return (
-    <div className="grid gap-4 xl:grid-cols-2">
+    <div className="grid gap-3 xl:grid-cols-2">
       <SummaryCard
         title="Physical Stock"
         description="Goods physically present at controlled locations."
         total={physicalPairs}
-        icon={<WarehouseIcon className="h-6 w-6" />}
+        icon={<WarehouseIcon className="h-4 w-4" />}
         iconClassName="bg-success-subtle text-success"
         totalClassName="text-success"
       >
         <div className="divide-y divide-border border-t border-border">
-          {physicalRows.slice(0, 6).map((row) => (
-            <div key={`${row.stockCode}-${row.location}`} className="flex items-center gap-3 px-4 py-3 sm:px-5">
-              <span className="h-3 w-3 shrink-0 rounded-full bg-success" />
-              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary sm:text-base">
+          {physicalRows.slice(0, 4).map((row) => (
+            <div key={`${row.stockCode}-${row.location}`} className="flex items-center gap-2.5 px-3.5 py-1.5 sm:px-4">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-success" />
+              <span className="min-w-0 flex-1 truncate text-xs font-semibold text-text-primary">
                 {row.stockCode} · {row.location}
               </span>
-              <span className="shrink-0 rounded-full bg-bg-subtle px-3 py-1 text-xs font-medium text-text-muted">
+              <span className="shrink-0 rounded-full bg-bg-subtle px-2 py-0.5 text-[10px] font-medium text-text-muted">
                 On hand
               </span>
-              <span className="shrink-0 text-right text-sm font-bold tabular-nums text-text-primary sm:text-base">
+              <span className="shrink-0 text-right text-xs font-bold tabular-nums text-text-primary">
                 {formatSets(row.pairs)}
               </span>
             </div>
           ))}
           {physicalRows.length === 0 && (
-            <div className="px-4 py-5 text-sm text-text-muted sm:px-5">
+            <div className="px-3.5 py-3 text-xs text-text-muted sm:px-4">
               {onTheWayPairs > 0 ? (
                 <>
                   Nothing on the shelf yet. {formatSets(onTheWayPairs)} on the
@@ -197,7 +197,7 @@ export function InventorySummaryCards({
             </div>
           )}
           {emptyLocations > 0 && (
-            <div className="px-4 py-3 text-sm text-text-muted sm:px-5">
+            <div className="px-3.5 py-2 text-xs text-text-muted sm:px-4">
               {formatQty(emptyLocations)} product
               {emptyLocations === 1 ? " has" : "s have"} not arrived anywhere yet.
             </div>
@@ -209,18 +209,18 @@ export function InventorySummaryCards({
         title="Pipeline &amp; Committed Stock"
         description="Stock at each shipment stage and amounts reserved for customers."
         total={incomingCommittedPairs}
-        icon={<TruckIcon className="h-6 w-6" />}
+        icon={<TruckIcon className="h-4 w-4" />}
         iconClassName="bg-brand-subtle text-brand"
         totalClassName="text-brand"
       >
         <div className="border-t border-border">
-          <div className="px-5 pb-1 pt-4 text-xs font-bold uppercase tracking-widest text-text-muted sm:px-6">
+          <div className="px-4 pb-0.5 pt-2 text-[10px] font-bold uppercase tracking-widest text-text-muted">
             Incoming
           </div>
           {incomingRows.slice(0, 3).map((row) => (
             <SummaryRow key={row.label} row={row} />
           ))}
-          <div className="border-t border-border px-5 pb-1 pt-4 text-xs font-bold uppercase tracking-widest text-text-muted sm:px-6">
+          <div className="border-t border-border px-4 pb-0.5 pt-2 text-[10px] font-bold uppercase tracking-widest text-text-muted">
             Committed
           </div>
           <SummaryRow row={committedRow} />

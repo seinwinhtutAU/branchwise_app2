@@ -3,6 +3,7 @@ import { type Session } from "@renderer/lib/auth";
 import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
+import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Spinner } from "@renderer/components/ui/Spinner";
 import {
@@ -317,36 +318,38 @@ export default function MonitoringDashboardPage({
         </div>
       </header>
 
-      <section className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
-        <FigureCard
-          label="Fulfillment"
-          value={formatQty(fulfillmentTotal)}
-          sub="shipments and orders needing attention"
-          tone={fulfillmentTotal > 0 ? "warning" : "success"}
-          className="border-border-strong"
-        />
-        <FigureCard
-          label="Customer receivable"
-          value={formatKyat(customerReceivable)}
-          sub={`${data.unpaid_orders.count} customer orders outstanding`}
-          tone={customerReceivable > 0 ? "error" : "success"}
-          className="border-border-strong"
-        />
-        <FigureCard
-          label="Supplier payable"
-          value={formatKyat(supplierPayable)}
-          sub={`${data.unpaid_vouchers.count} supplier vouchers outstanding`}
-          tone={supplierPayable > 0 ? "error" : "success"}
-          className="border-border-strong"
-        />
-        <FigureCard
-          label="Inventory"
-          value={formatQty(data.zero_stock_products.count)}
-          sub={inventorySummary}
-          tone={inventoryTone}
-          className="border-border-strong"
-        />
-      </section>
+      <CollapsibleKpiSummary storageKey="wholesale_monitoring" title="Monitoring KPIs">
+        <section className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
+          <FigureCard
+            label="Fulfillment"
+            value={formatQty(fulfillmentTotal)}
+            sub="shipments and orders needing attention"
+            tone={fulfillmentTotal > 0 ? "warning" : "success"}
+            className="border-border-strong"
+          />
+          <FigureCard
+            label="Customer receivable"
+            value={formatKyat(customerReceivable)}
+            sub={`${data.unpaid_orders.count} customer orders outstanding`}
+            tone={customerReceivable > 0 ? "error" : "success"}
+            className="border-border-strong"
+          />
+          <FigureCard
+            label="Supplier payable"
+            value={formatKyat(supplierPayable)}
+            sub={`${data.unpaid_vouchers.count} supplier vouchers outstanding`}
+            tone={supplierPayable > 0 ? "error" : "success"}
+            className="border-border-strong"
+          />
+          <FigureCard
+            label="Inventory"
+            value={formatQty(data.zero_stock_products.count)}
+            sub={inventorySummary}
+            tone={inventoryTone}
+            className="border-border-strong"
+          />
+        </section>
+      </CollapsibleKpiSummary>
 
       <div className="grid items-start gap-4 lg:grid-cols-2">
         <Panel className="border-border-strong">

@@ -1,4 +1,5 @@
 import type { WholesaleInventoryReport } from "@renderer/components/features/wholesale/shared/api";
+import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import {
   ReportError,
   ReportLoading,
@@ -84,40 +85,42 @@ export function InventoryTab(props: ReportTabProps): React.JSX.Element {
         and delivered figures follow the selected dates; they do not change the
         on-hand snapshot.
       </p>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <ReportSection
-          title="On hand"
-          description="Stock currently at a receiving location."
-        >
-          <div className="text-2xl font-semibold tabular-nums">
-            {formatSets(data.on_hand.value)}
-          </div>
-        </ReportSection>
-        <ReportSection
-          title="Available"
-          description="On hand less customer allocations."
-        >
-          <div className="text-2xl font-semibold tabular-nums">
-            {formatSets(data.available.value)}
-          </div>
-        </ReportSection>
-        <ReportSection
-          title="Incoming"
-          description="At supplier plus in transit."
-        >
-          <div className="text-2xl font-semibold tabular-nums">
-            {formatSets(data.incoming.value)}
-          </div>
-        </ReportSection>
-        <ReportSection
-          title="Stock value"
-          description="On hand at estimated buying price."
-        >
-          <div className="text-2xl font-semibold tabular-nums">
-            {formatKyat(data.stock_value.value)}
-          </div>
-        </ReportSection>
-      </div>
+      <CollapsibleKpiSummary storageKey="wholesale_report_inventory" title="Inventory KPIs">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <ReportSection
+            title="On hand"
+            description="Stock currently at a receiving location."
+          >
+            <div className="text-xl font-semibold tabular-nums">
+              {formatSets(data.on_hand.value)}
+            </div>
+          </ReportSection>
+          <ReportSection
+            title="Available"
+            description="On hand less customer allocations."
+          >
+            <div className="text-xl font-semibold tabular-nums">
+              {formatSets(data.available.value)}
+            </div>
+          </ReportSection>
+          <ReportSection
+            title="Incoming"
+            description="At supplier plus in transit."
+          >
+            <div className="text-xl font-semibold tabular-nums">
+              {formatSets(data.incoming.value)}
+            </div>
+          </ReportSection>
+          <ReportSection
+            title="Stock value"
+            description="On hand at estimated buying price."
+          >
+            <div className="text-xl font-semibold tabular-nums">
+              {formatKyat(data.stock_value.value)}
+            </div>
+          </ReportSection>
+        </div>
+      </CollapsibleKpiSummary>
       <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
         <ReportSection
           title="Stock by location"
