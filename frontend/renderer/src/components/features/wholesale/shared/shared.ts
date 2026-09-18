@@ -48,8 +48,9 @@ export interface ColorQty {
   unit?: Unit;
 }
 
-/** The letter a colour can carry to say what it is counted in. */
-const UNIT_LETTERS: Record<string, Unit> = {
+/** The letter a colour — or, below, a plain quantity — can carry to say what it is
+ *  counted in. */
+export const UNIT_LETTERS: Record<string, Unit> = {
   p: "pair",
   s: "set",
   d: "dozen",
@@ -109,6 +110,87 @@ export function colorQtyProblem(text: string): string | null {
     }
   }
   return null;
+}
+
+// ── Plain quantity shorthand ─────────────────────────────────────────────────
+// The same idea as the colour shorthand above, minus the colour name: a quantity box
+// (a shipment's total packages, a receiving's counted quantity, ...) reads "1s3p" as
+// 1 set plus 3 pairs, "13p" as 13 pairs, or a bare "13" as 13 of whatever unit the field
+// is already in — so someone can type in whichever unit they're actually counting in,
+// or several at once, without a unit picker changing what the field means. Unlike the
+// colour shorthand, pieces don't need a comma between them ("1s3p" and "1s+3p" read the
+// same) since there's no colour name for a run-together number to be confused with.
+
+export interface QuantityShorthandPiece {
+  qty: number;
+  /** Missing only when the whole box is a single bare number — it then reads in the
+   *  field's own unit, same as before this shorthand existed. */
+  unit?: Unit;
+}
+
+export function parseQuantityShorthand(text: string): QuantityShorthandPiece[] {
+  const cleaned = text.trim().replace(/[\s,+]/g, "");
+  if (cleaned === "") return [];
+  return [...cleaned.matchAll(/(\d+)([psd])?/gi)].map((match) => ({
+    qty: Number(match[1]),
+    unit: match[2] ? UNIT_LETTERS[match[2].toLowerCase()] : undefined,
+  }));
+}
+
+/** What a quantity shorthand comes to in pairs, in `fallbackUnit` for any piece typed
+ *  without a letter of its own (which can only be the box's one and only piece — see
+ *  quantityShorthandProblem). */
+export function quantityShorthandPairs(
+  text: string,
+  fallbackUnit: Unit,
+  conversions: UnitConversions = PAIRS_PER,
+): number {
+  return parseQuantityShorthand(text).reduce(
+    (sum, piece) => sum + toPairs(piece.qty, piece.unit ?? fallbackUnit, conversions),
+    0,
+  );
+}
+
+/** Checks a quantity box reads the way the business writes them, and says plainly what
+ *  is wrong when it does not — same spirit as colorQtyProblem, but pieces run together
+ *  are told apart by their unit letters rather than by a colour name, so every piece
+ *  needs one as soon as there is more than one. Returns null when the box is fine. */
+export function quantityShorthandProblem(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed === "") return null;
+
+  const cleaned = trimmed.replace(/[\s,+]/g, "");
+  const matches = [...cleaned.matchAll(/(\d+)([psd])?/gi)];
+  const consumed = matches.reduce((sum, match) => sum + match[0].length, 0);
+
+  if (matches.length === 0 || consumed !== cleaned.length) {
+    return `"${trimmed}" isn't a count — try 5, 5p, 5s, or 1s3p.`;
+  }
+  if (matches.some((match) => Number(match[1]) <= 0)) {
+    return `"${trimmed}" counts nothing.`;
+  }
+  if (matches.length > 1 && matches.some((match) => !match[2])) {
+    return `Each piece needs its own unit once there's more than one — s for sets, p for pairs, d for dozens.`;
+  }
+  return null;
+}
+
+/** The reverse of quantityShorthandPairs: a figure already known in pairs, written the
+ *  way this shorthand reads it — "2s3p" for two sets and three leftover pairs, "2s" for
+ *  an exact number of sets, "3p" for anything smaller than one. For pre-filling a box
+ *  with a figure that may not land on a whole set, rather than forcing the whole box to
+ *  switch to a different unit just so one number reads exactly. */
+export function pairsToQuantityShorthand(
+  pairs: number,
+  conversions: UnitConversions = PAIRS_PER,
+): string {
+  if (pairs <= 0) return "";
+  const setSize = conversions.set;
+  const wholeSets = Math.floor(pairs / setSize);
+  const leftoverPairs = pairs % setSize;
+  if (wholeSets > 0 && leftoverPairs > 0) return `${wholeSets}s${leftoverPairs}p`;
+  if (wholeSets > 0) return `${wholeSets}s`;
+  return `${leftoverPairs}p`;
 }
 
 /** What a colour line comes to in pairs. Every saved colour carries its own letter; a

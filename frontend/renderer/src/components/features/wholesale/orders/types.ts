@@ -48,15 +48,15 @@ export const PAYMENT_LABELS: Record<PaymentStatus, string> = {
 
 export const PAYMENT_STYLES: Record<PaymentStatus, { bg: string; dot: string }> = {
   unpaid: {
-    bg: "bg-error-subtle text-error border border-error/30",
+    bg: "bg-error-subtle text-error border border-error-pill",
     dot: "bg-error",
   },
   partial: {
-    bg: "bg-warning-subtle text-warning border border-warning/30",
+    bg: "bg-warning-subtle text-warning border border-warning-pill",
     dot: "bg-warning",
   },
   paid: {
-    bg: "bg-success-subtle text-success border border-success/30",
+    bg: "bg-success-subtle text-success border border-success-pill",
     dot: "bg-success",
   },
 };
@@ -69,19 +69,19 @@ export const STATUS_STYLES: Record<OrderStatus, { bg: string; dot: string }> = {
     dot: "bg-text-muted",
   },
   ready_to_deliver: {
-    bg: "bg-brand-subtle text-brand border border-brand/30",
+    bg: "bg-brand-subtle text-brand border border-brand-pill",
     dot: "bg-brand",
   },
   partly_delivered: {
-    bg: "bg-warning-subtle text-warning border border-warning/30",
+    bg: "bg-warning-subtle text-warning border border-warning-pill",
     dot: "bg-warning",
   },
   fulfilled: {
-    bg: "bg-success-subtle text-success border border-success/30",
+    bg: "bg-success-subtle text-success border border-success-pill",
     dot: "bg-success",
   },
   cancelled: {
-    bg: "bg-error-subtle text-error border border-error/30",
+    bg: "bg-error-subtle text-error border border-error-pill",
     dot: "bg-error",
   },
 };

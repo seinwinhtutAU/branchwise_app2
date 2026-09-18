@@ -24,19 +24,19 @@ export interface DotPillStyle {
 
 export const HEALTH_STYLES: Record<InventoryHealth, DotPillStyle> = {
   Healthy: {
-    bg: "bg-success-subtle text-success border border-success/30",
+    bg: "bg-success-subtle text-success border border-success-pill",
     dot: "bg-success",
   },
   "Low Stock": {
-    bg: "bg-warning-subtle text-warning border border-warning/30",
+    bg: "bg-warning-subtle text-warning border border-warning-pill",
     dot: "bg-warning",
   },
   "Out of Stock": {
-    bg: "bg-error-subtle text-error border border-error/30",
+    bg: "bg-error-subtle text-error border border-error-pill",
     dot: "bg-error",
   },
   Overstock: {
-    bg: "bg-brand-subtle text-brand border border-brand/30",
+    bg: "bg-brand-subtle text-brand border border-brand-pill",
     dot: "bg-brand",
   },
   "Not arrived yet": {
@@ -53,15 +53,15 @@ export const MOVEMENT_LABELS: Record<string, string> = {
 
 export const MOVEMENT_STYLES: Record<string, DotPillStyle> = {
   in: {
-    bg: "bg-success-subtle text-success border border-success/30",
+    bg: "bg-success-subtle text-success border border-success-pill",
     dot: "bg-success",
   },
   out: {
-    bg: "bg-brand-subtle text-brand border border-brand/30",
+    bg: "bg-brand-subtle text-brand border border-brand-pill",
     dot: "bg-brand",
   },
   allocated: {
-    bg: "bg-warning-subtle text-warning border border-warning/30",
+    bg: "bg-warning-subtle text-warning border border-warning-pill",
     dot: "bg-warning",
   },
 };
@@ -80,19 +80,19 @@ export const RELATED_ORDER_STATUS_STYLES: Record<string, DotPillStyle> = {
     dot: "bg-text-muted",
   },
   ready_to_deliver: {
-    bg: "bg-brand-subtle text-brand border border-brand/30",
+    bg: "bg-brand-subtle text-brand border border-brand-pill",
     dot: "bg-brand",
   },
   partly_delivered: {
-    bg: "bg-warning-subtle text-warning border border-warning/30",
+    bg: "bg-warning-subtle text-warning border border-warning-pill",
     dot: "bg-warning",
   },
   fulfilled: {
-    bg: "bg-success-subtle text-success border border-success/30",
+    bg: "bg-success-subtle text-success border border-success-pill",
     dot: "bg-success",
   },
   cancelled: {
-    bg: "bg-error-subtle text-error border border-error/30",
+    bg: "bg-error-subtle text-error border border-error-pill",
     dot: "bg-error",
   },
 };

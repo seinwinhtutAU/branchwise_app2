@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { type Unit } from "@renderer/components/features/wholesale/shared/units";
 import { type Receiving, type ReceivingStatus } from "@renderer/components/features/wholesale/receiving/receivings";
-import { nextReference } from "@renderer/components/features/wholesale/shared/shared";
+import {
+  nextReference,
+  quantityShorthandProblem,
+} from "@renderer/components/features/wholesale/shared/shared";
 
 export const RECEIVINGS_QUERY_KEY = ["wholesale", "receivings"] as const;
 export const SHIPMENTS_QUERY_KEY = ["wholesale", "shipments"] as const;
@@ -17,11 +20,23 @@ export const STATUS_LABELS: Record<ReceivingStatus, string> = {
   issue: "Does not match",
 };
 
-export const STATUS_STYLES: Record<ReceivingStatus, string> = {
-  recorded: "bg-text-secondary text-bg-base",
-  checking: "bg-brand text-white",
-  checked: "bg-success text-white",
-  issue: "bg-error text-white",
+export const STATUS_STYLES: Record<ReceivingStatus, { bg: string; dot: string }> = {
+  recorded: {
+    bg: "bg-bg-raised text-text-secondary border border-border-strong",
+    dot: "bg-text-muted",
+  },
+  checking: {
+    bg: "bg-brand-subtle text-brand border border-brand-pill",
+    dot: "bg-brand",
+  },
+  checked: {
+    bg: "bg-success-subtle text-success border border-success-pill",
+    dot: "bg-success",
+  },
+  issue: {
+    bg: "bg-error-subtle text-error border border-error-pill",
+    dot: "bg-error",
+  },
 };
 
 export const STEPS = ["Receiving", "Review"] as const;
@@ -90,7 +105,10 @@ export const receivingFormSchema = z.object({
       (value) => Number(value) > 0,
       "Enter at least one received package.",
     ),
-  sets: z.string().regex(/^\d*$/, "Quantity can only contain numbers."),
+  sets: z.string().superRefine((value, context) => {
+    const problem = quantityShorthandProblem(value);
+    if (problem) context.addIssue({ code: "custom", message: problem });
+  }),
   sets_unit: z.enum(["set", "pair", "dozen"]),
   cost: z.string().regex(/^\d*$/, "Cost can only contain numbers."),
 });

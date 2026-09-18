@@ -67,7 +67,6 @@ import {
   VoucherIcon,
   WarehouseIcon,
   WarningIcon,
-  SettingsIcon,
   DollarIcon,
   ReportsIcon,
   MasterDataIcon,
@@ -264,11 +263,11 @@ const WORKSPACE_LABELS: Record<Workspace, string> = {
   wholesale: "Wholesale",
 };
 
-// Matches roleBadgeVariant in AppShell (wholesale accounts already show an 'info' role
-// badge) so a workspace's active-tab color is consistent with its color elsewhere.
+// Matches roleBadgeVariant in AppShell — retail and wholesale share one brand colour,
+// so both the workspace tab and the role badge use the same "brand" variant now.
 const WORKSPACE_COLORS: Record<Workspace, "brand" | "info"> = {
   retail: "brand",
-  wholesale: "info",
+  wholesale: "brand",
 };
 
 const WORKSPACE_SECTION_IDS: Record<Workspace, Set<string>> = {
@@ -285,15 +284,6 @@ const DEV_PASSWORD = "12345678";
 
 const WORKSPACE_STORAGE_KEY = "branchwise:lastWorkspace";
 
-// Every role sees Settings — the theme switcher living there applies universally, even
-// though the daily-check-window section on that page only applies to non-wholesale. It's
-// pinned below the workspace-specific nav list rather than inside either workspace, since
-// it isn't scoped to one.
-const SETTINGS_NAV_ITEM: NavItem = {
-  id: "settings",
-  label: "Settings",
-  icon: <SettingsIcon />,
-};
 const SECTION_TITLES: Record<Section, string> = {
   dashboard: "Dashboard",
   businessAlerts: "Business alerts",
@@ -573,8 +563,6 @@ function App(): React.JSX.Element {
   const branchOptions = useBranches(isAdmin ? session : null);
   const retailBranchOptions = useRetailBranchOptions(isAdmin ? session : null);
 
-  const pinnedNavItems = useMemo(() => [SETTINGS_NAV_ITEM], []);
-
   async function refreshWarningCount(): Promise<void> {
     if (!session) return;
     try {
@@ -750,21 +738,16 @@ function App(): React.JSX.Element {
       (settings?.theme === "system" &&
         window.matchMedia("(prefers-color-scheme: dark)").matches);
 
-    const isWholesaleActive = effectiveWorkspace === "wholesale";
-
-    let bgHex = isDark ? "#0f1117" : "#ffffff";
-    let symbolHex = isDark ? "#f9fafb" : "#111827";
-
-    if (!isDark && isWholesaleActive) {
-      bgHex = "#f7faff";
-      symbolHex = "#1e40af";
-    }
+    // Retail and wholesale share one colour now, so the overlay no longer branches on
+    // effectiveWorkspace — only light/dark still changes it.
+    const bgHex = isDark ? "#0f1117" : "#ffffff";
+    const symbolHex = isDark ? "#f9fafb" : "#111827";
 
     window.api.updateTitleBarOverlay({
       color: bgHex,
       symbolColor: symbolHex,
     });
-  }, [settings?.theme, effectiveWorkspace]);
+  }, [settings?.theme]);
 
 
   const saleFilters: DataTableFilter<SaleRow>[] = useMemo(
@@ -957,7 +940,6 @@ function App(): React.JSX.Element {
       workspaces={workspaceTabs}
       activeWorkspace={effectiveWorkspace}
       onWorkspaceChange={handleWorkspaceChange}
-      pinnedNavItems={pinnedNavItems}
       email={session.user.email}
       profile={profile}
       onSignOut={handleSignOut}

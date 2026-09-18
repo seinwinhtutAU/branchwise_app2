@@ -38,11 +38,11 @@ export const RECEIVING_STYLES: Record<ReceivingStatus, { bg: string; dot: string
     dot: "bg-text-muted",
   },
   partly_received: {
-    bg: "bg-warning-subtle text-warning border border-warning/30",
+    bg: "bg-warning-subtle text-warning border border-warning-pill",
     dot: "bg-warning animate-pulse",
   },
   fully_received: {
-    bg: "bg-success-subtle text-success border border-success/30",
+    bg: "bg-success-subtle text-success border border-success-pill",
     dot: "bg-success",
   },
 };
@@ -55,15 +55,15 @@ export const PAYMENT_LABELS: Record<PaymentStatus, string> = {
 
 export const PAYMENT_STYLES: Record<PaymentStatus, { bg: string; dot: string }> = {
   unpaid: {
-    bg: "bg-error-subtle text-error border border-error/30",
+    bg: "bg-error-subtle text-error border border-error-pill",
     dot: "bg-error",
   },
   partial: {
-    bg: "bg-warning-subtle text-warning border border-warning/30",
+    bg: "bg-warning-subtle text-warning border border-warning-pill",
     dot: "bg-warning",
   },
   paid: {
-    bg: "bg-success-subtle text-success border border-success/30",
+    bg: "bg-success-subtle text-success border border-success-pill",
     dot: "bg-success",
   },
 };

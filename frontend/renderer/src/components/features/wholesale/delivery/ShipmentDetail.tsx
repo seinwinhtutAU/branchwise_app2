@@ -455,7 +455,7 @@ export function ShipmentDetail({
                   "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold leading-none tabular-nums",
                   activeTab === "shipment"
                     ? "bg-brand text-white"
-                    : "bg-brand-subtle text-brand border border-brand/30",
+                    : "bg-brand-subtle text-brand border border-brand-pill",
                 )}
               >
                 {pct}%

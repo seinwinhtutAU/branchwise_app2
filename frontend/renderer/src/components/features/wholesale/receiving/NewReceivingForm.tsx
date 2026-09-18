@@ -27,10 +27,12 @@ import {
   formatKyat,
   formatQty,
   onlyDigits,
+  quantityShorthandPairs,
   todayIso,
 } from "@renderer/components/features/wholesale/shared/shared";
 import {
   formatIn,
+  formatSets,
   toPairs,
 } from "@renderer/components/features/wholesale/shared/units";
 import { useWholesale } from "@renderer/components/features/wholesale/shared/store";
@@ -148,10 +150,14 @@ export function NewReceivingForm({
             ]
           : [],
       // An empty field means "whatever the shipment says", and that figure carries the
-      // shipment's unit, not the one left sitting in the form.
+      // shipment's own unit. A typed figure is resolved to real pairs by the shorthand
+      // (it may mix units, "1s3p"), so it always carries "pair" rather than whatever
+      // unit happened to be showing on the box.
       total_quantity_pairs:
-        Number(values.sets) || shipment.total_quantity_pairs,
-      total_unit: Number(values.sets) ? values.sets_unit : shipment.total_unit,
+        values.sets.trim() !== ""
+          ? quantityShorthandPairs(values.sets, values.sets_unit)
+          : shipment.total_quantity_pairs,
+      total_unit: values.sets.trim() !== "" ? "pair" : shipment.total_unit,
     });
   }
 
@@ -326,7 +332,13 @@ export function NewReceivingForm({
               />
               <ReviewFact
                 label="Total quantity"
-                value={formatIn(toPairs(Number(sets) || 0, setsUnit), setsUnit)}
+                value={formatSets(
+                  sets.trim() !== ""
+                    ? quantityShorthandPairs(sets, setsUnit)
+                    : shipment
+                      ? toPairs(shipment.total_quantity_pairs, shipment.total_unit)
+                      : 0,
+                )}
               />
               <ReviewFact label="Cost" value={formatKyat(Number(cost) || 0)} />
             </dl>

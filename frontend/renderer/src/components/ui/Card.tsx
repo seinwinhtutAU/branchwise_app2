@@ -17,7 +17,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "bg-bg-base rounded-lg border border-border p-5",
+        "bg-bg-base rounded-lg border border-border p-5 shadow-xs",
         // No lift on hover: the card's bottom edge flickers as it moves, and a surface
         // that jumps under the pointer reads as a web page rather than as software.
         // The border doing the work is enough to say "this one is clickable".

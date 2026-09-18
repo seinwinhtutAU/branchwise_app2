@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@renderer/lib/utils";
-import { FloatingLayer, MenuItem, EDITABLE } from "@renderer/components/features/wholesale/shared/ui";
+import { DotPill, FloatingLayer, MenuItem, EDITABLE } from "@renderer/components/features/wholesale/shared/ui";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -27,16 +27,8 @@ export function StatusBadge({
 }: {
   status: ShipmentStatus;
 }): React.JSX.Element {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap",
-        STATUS_STYLES[status],
-      )}
-    >
-      {STATUS_LABELS[status]}
-    </span>
-  );
+  const style = STATUS_STYLES[status];
+  return <DotPill label={STATUS_LABELS[status]} className={style.bg} dotClassName={style.dot} />;
 }
 
 /** A row's own actions. Deleting asks a second time inside the menu, with FSM guards. */

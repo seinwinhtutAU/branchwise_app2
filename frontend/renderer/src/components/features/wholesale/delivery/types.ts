@@ -6,6 +6,7 @@ import {
   type ShipmentStatus,
 } from "@renderer/components/features/wholesale/delivery/shipments";
 import { type Unit } from "@renderer/components/features/wholesale/shared/units";
+import { quantityShorthandProblem } from "@renderer/components/features/wholesale/shared/shared";
 
 export const SHIPMENTS_QUERY_KEY = ["wholesale", "shipments"] as const;
 
@@ -19,11 +20,23 @@ export const STATUS_LABELS: Record<ShipmentStatus, string> = {
   completed: "All shipped",
 };
 
-export const STATUS_STYLES: Record<ShipmentStatus, string> = {
-  waiting_at_cargo: "bg-text-secondary text-bg-base",
-  in_transit: "bg-brand text-white",
-  partly_delivered: "bg-warning text-white",
-  completed: "bg-success text-white",
+export const STATUS_STYLES: Record<ShipmentStatus, { bg: string; dot: string }> = {
+  waiting_at_cargo: {
+    bg: "bg-bg-raised text-text-secondary border border-border-strong",
+    dot: "bg-text-muted",
+  },
+  in_transit: {
+    bg: "bg-brand-subtle text-brand border border-brand-pill",
+    dot: "bg-brand",
+  },
+  partly_delivered: {
+    bg: "bg-warning-subtle text-warning border border-warning-pill",
+    dot: "bg-warning",
+  },
+  completed: {
+    bg: "bg-success-subtle text-success border border-success-pill",
+    dot: "bg-success",
+  },
 };
 
 export const shipmentDetailLegSchema = z.object({
@@ -92,7 +105,10 @@ export const shipmentFormSchema = z.object({
   total_packages: z
     .string()
     .regex(/^\d*$/, "Packages can only contain numbers."),
-  total_sets: z.string().regex(/^\d*$/, "Quantity can only contain numbers."),
+  total_sets: z.string().superRefine((value, context) => {
+    const problem = quantityShorthandProblem(value);
+    if (problem) context.addIssue({ code: "custom", message: problem });
+  }),
   total_unit: z.enum(["set", "pair", "dozen"]),
   stops: z.array(
     z.object({

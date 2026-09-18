@@ -27,9 +27,12 @@ import {
 
 export const PAGE_SIZE = 10;
 
-/** The tint on every box a person is meant to fill in. */
+/** Every box a person is meant to fill in — the same plain surface `Input` already uses
+ *  elsewhere, since the border alone already says "type here" next to a `ReadOnlyField`'s
+ *  bare text. An earlier version tinted these amber to call out "editable"; composited
+ *  over a dark background that tint read as a muddy brown rather than a colour choice. */
 export const EDITABLE =
-  "bg-warning-subtle border-warning/50 hover:border-warning focus-visible:ring-brand";
+  "bg-bg-base border-border hover:border-border-strong focus-visible:ring-brand";
 
 /** Blue, but pale: actions in the same family as the filled primary button without
  *  competing with it. */
@@ -199,7 +202,7 @@ export function Panel({
   return (
     <div
       className={cn(
-        "bg-bg-base border border-border rounded-md overflow-hidden",
+        "bg-bg-base border border-border rounded-md overflow-hidden shadow-xs",
         className,
       )}
     >

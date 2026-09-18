@@ -265,7 +265,7 @@ export function StockDetailTabs({
                 "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold leading-none tabular-nums",
                 tab === value
                   ? "bg-brand text-white"
-                  : "border border-brand/30 bg-brand-subtle text-brand",
+                  : "border border-brand-pill bg-brand-subtle text-brand",
               )}
             >
               {count}

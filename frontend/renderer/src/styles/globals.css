@@ -16,34 +16,54 @@
   --color-text-disabled: #d1d5db;
   --color-text-inverse: #ffffff;
 
-  /* Brand */
-  --color-brand: #4f46e5;
-  --color-brand-hover: #4338ca;
-  --color-brand-active: #3730a3;
+  /* Brand — one purple-blue for retail and wholesale alike, and the same hex in
+     light and dark mode rather than each theme picking its own shade (dark mode
+     used to lighten it for contrast; #6366f1 already reads clearly on both a
+     white and a near-black surface, so that step is no longer needed). */
+  --color-brand: #6366f1;
+  --color-brand-hover: #4f46e5;
+  --color-brand-active: #4338ca;
   --color-brand-subtle: #eef2ff;
   --color-brand-text: #ffffff;
 
-  /* Semantic */
-  --color-success: #10b981;
+  /* Semantic — each nudged 10% toward the brand purple-blue (#6366f1) rather than left as
+     a pure textbook green/amber/red, so the three read as part of the same coloured
+     family as the rest of the app instead of clashing primaries next to it. Deliberately
+     a small blend: enough to feel coordinated, not so much that success/warning/error
+     stop reading as green/yellow/red at a glance. Subtle backgrounds untouched — amber's
+     tint in particular has almost no blue in it, so blending brand into it turned the
+     warning chip a muddy grey instead of a softer yellow. */
+  --color-success: #18b18c;
   --color-success-subtle: #ecfdf5;
-  --color-warning: #f59e0b;
+  --color-warning: #e69822;
   --color-warning-subtle: #fffbeb;
-  --color-error: #ef4444;
+  --color-error: #e14755;
   --color-error-subtle: #fef2f2;
   --color-info: #3b82f6;
   --color-info-subtle: #eff6ff;
 
-  /* Borders */
-  --color-border: #e5e7eb;
-  --color-border-strong: #d1d5db;
+  /* A DotPill's border — its own token rather than an opacity modifier on the solid
+     colour above, so dark mode (below) can mute it independently instead of the border
+     and the dot/text fighting over one shared value. Baked at the same 30% this used to
+     be written inline as, so light mode looks exactly as it did. */
+  --color-success-pill-border: rgba(24, 177, 140, 0.3);
+  --color-warning-pill-border: rgba(230, 152, 34, 0.3);
+  --color-error-pill-border: rgba(225, 71, 85, 0.3);
+  --color-brand-pill-border: rgba(99, 102, 241, 0.3);
+
+  /* Borders — a shade darker than a bare Tailwind gray-200/300 so panels and inputs
+     read as outlined on a light background instead of almost blending into it. */
+  --color-border: #d7dbe0;
+  --color-border-strong: #c0c6cf;
   --color-border-brand: var(--color-brand);
 
   /* Shadows */
-  /* Only things that genuinely float get a shadow — a dropdown, a dialog. Buttons and
-     panels sit flat and are told apart by their border, which is how desktop software
-     reads. xs/sm stay in the scale so existing classes resolve; they cast nothing. */
-  --shadow-xs: none;
-  --shadow-sm: none;
+  /* A card or panel gets the faintest lift (xs/sm) so it separates from the page behind
+     it without needing a stronger border or a tinted background to do that job — one
+     more way to tell surfaces apart without reaching for colour. Dropdowns and dialogs
+     still get the stronger md/lg/xl, since those genuinely float above everything else. */
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.07);
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
   --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.16);
@@ -65,74 +85,45 @@
 }
 
 /* The four stages a shipment passes through, each needing to be told apart at a glance on
-   the Delivery screen's journey cards and tracking table. Solid colours rather than
-   opacity steps of one hue, so no two stages ever read as the same block. */
+   the Delivery screen's journey cards and tracking table. Told apart by lightness/hue
+   steps along one story instead of four unrelated saturated colours: still at the
+   supplier is neutral, moving (cargo, then a stop) is two shades of the app's own brand
+   purple-blue, and arrived reuses the app's own "success" green rather than a fifth
+   invented hue — so a shipment in motion reads as the same colour the rest of the app
+   already uses for "this is the active thing", in both light and dark alike. */
 :root {
-  --color-journey-supplier: #0f172a;
-  --color-journey-cargo: #6d28d9;
-  --color-journey-stop: #1d4ed8;
-  --color-journey-final: #15803d;
+  --color-journey-supplier: #334155;
+  --color-journey-cargo: var(--color-brand);
+  --color-journey-stop: var(--color-brand-active);
+  --color-journey-final: #10b981;
 
   /* The faint wash under each stage's name band, so a card reads as one piece of its
      stage rather than as a coloured strip sitting on plain white. */
   --color-journey-supplier-soft: #f1f5f9;
-  --color-journey-cargo-soft: #f5f3ff;
-  --color-journey-stop-soft: #eff6ff;
-  --color-journey-final-soft: #f0fdf4;
+  --color-journey-cargo-soft: var(--color-brand-subtle);
+  --color-journey-stop-soft: #e0e7ff;
+  --color-journey-final-soft: #ecfdf5;
 }
 
 :root[data-theme="dark"] {
-  --color-journey-supplier: #334155;
-  --color-journey-cargo: #7c3aed;
-  --color-journey-stop: #2563eb;
-  --color-journey-final: #16a34a;
+  --color-journey-supplier: #64748b;
+  --color-journey-cargo: var(--color-brand);
+  --color-journey-stop: var(--color-brand-active);
+  --color-journey-final: #10b981;
 
   --color-journey-supplier-soft: rgba(148, 163, 184, 0.1);
-  --color-journey-cargo-soft: rgba(124, 58, 237, 0.14);
-  --color-journey-stop-soft: rgba(37, 99, 235, 0.14);
-  --color-journey-final-soft: rgba(22, 163, 74, 0.14);
+  --color-journey-cargo-soft: rgba(99, 102, 241, 0.18);
+  --color-journey-stop-soft: rgba(67, 56, 202, 0.28);
+  --color-journey-final-soft: rgba(16, 185, 129, 0.12);
 }
 
-/* Wholesale is blue-on-white rather than the retail indigo. Rather than repainting
-   every component, the workspace re-points the brand and surface tokens the primitives
-   already read, so one class on the shell turns the whole workspace blue — buttons,
-   focus rings, active nav item, progress bars and badges included. */
-.workspace-wholesale {
-  --color-brand: #2563eb;
-  --color-brand-hover: #1d4ed8;
-  --color-brand-active: #1e40af;
-  --color-brand-subtle: #eff6ff;
-
-  --color-info: #2563eb;
-  --color-info-subtle: #f2f7ff;
-
-  /* Surfaces stay white; the greys behind them pick up the faintest blue so the page
-     reads as one family instead of blue accents dropped on neutral grey. */
-  --color-bg-subtle: #f7faff;
-  --color-bg-raised: #eaf2fe;
-  --color-border: rgba(37, 99, 235, 0.2);
-  --color-border-strong: rgba(37, 99, 235, 0.3);
-}
-
-/* Give standard bordered Wholesale cards and controls a clearer edge. Directional
-   separators such as border-b remain one pixel so internal rows stay quiet. */
+/* Wholesale used to be blue-on-white, kept apart from the retail indigo. Retail and
+   Wholesale now share one brand colour (see :root's Brand block) — this class is kept
+   only for the border-thickness tweak below, so Wholesale's bordered cards and controls
+   still read with a clearer edge than retail's hairlines. Directional separators such as
+   border-b remain one pixel so internal rows stay quiet. */
 .workspace-wholesale .border {
   border-width: 1.5px;
-}
-
-:root[data-theme="dark"] .workspace-wholesale {
-  --color-brand: #60a5fa;
-  --color-brand-hover: #93c5fd;
-  --color-brand-active: #bfdbfe;
-  --color-brand-subtle: rgba(37, 99, 235, 0.18);
-
-  --color-info: #60a5fa;
-  --color-info-subtle: rgba(37, 99, 235, 0.14);
-
-  --color-bg-subtle: #121a2a;
-  --color-bg-raised: #1a2438;
-  --color-border: rgba(96, 165, 250, 0.22);
-  --color-border-strong: rgba(96, 165, 250, 0.32);
 }
 
 :root[data-theme="dark"] {
@@ -147,46 +138,42 @@
   --color-text-disabled: #374151;
   --color-text-inverse: #111827;
 
-  --color-brand: #818cf8;
-  --color-brand-hover: #a5b4fc;
-  --color-brand-active: #c7d2fe;
+  /* Same hex as :root's light-mode Brand block — one purple-blue regardless of theme. */
+  --color-brand: #6366f1;
+  --color-brand-hover: #4f46e5;
+  --color-brand-active: #4338ca;
   --color-brand-subtle: #1e1b4b;
 
-  --color-success-subtle: rgba(16, 185, 129, 0.12);
-  --color-warning-subtle: rgba(245, 158, 11, 0.12);
-  --color-error-subtle: rgba(239, 68, 68, 0.12);
-  --color-info-subtle: rgba(59, 130, 246, 0.12);
+  /* A status pill's tinted fill (e.g. DotPill) — 0.12 read as a muddy, desaturated brown
+     once composited over the near-black page behind it rather than as a quiet version of
+     the colour, most noticeably on red/amber. Raised enough that the hue itself is still
+     legible at a glance, not just the text sitting on top of it. */
+  --color-success-subtle: rgba(16, 185, 129, 0.2);
+  --color-warning-subtle: rgba(245, 158, 11, 0.2);
+  --color-error-subtle: rgba(239, 68, 68, 0.2);
+  --color-info-subtle: rgba(59, 130, 246, 0.2);
+
+  /* Muted well below the light-mode 30% — at that strength a pill's border read as a
+     bright, almost pastel outline against the dark fill inside it and the near-black
+     page around it. */
+  --color-success-pill-border: rgba(24, 177, 140, 0.18);
+  --color-warning-pill-border: rgba(230, 152, 34, 0.18);
+  --color-error-pill-border: rgba(225, 71, 85, 0.18);
+  --color-brand-pill-border: rgba(99, 102, 241, 0.22);
 
   --color-border: #2a3040;
   --color-border-strong: #3a4255;
 
-  --shadow-xs: none;
-  --shadow-sm: none;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
   --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.7);
 }
 
 @media (prefers-color-scheme: dark) {
-  /* `system` removes data-theme, so it needs the same child-level Wholesale
-     overrides as the explicit dark mode above. Without this, the Wholesale
-     workspace keeps its light-blue surface values while the rest of the app
-     correctly follows the OS into dark mode. */
-  :root:not([data-theme="light"]) .workspace-wholesale {
-    --color-brand: #60a5fa;
-    --color-brand-hover: #93c5fd;
-    --color-brand-active: #bfdbfe;
-    --color-brand-subtle: rgba(37, 99, 235, 0.18);
-
-    --color-info: #60a5fa;
-    --color-info-subtle: rgba(37, 99, 235, 0.14);
-
-    --color-bg-subtle: #121a2a;
-    --color-bg-raised: #1a2438;
-    --color-border: rgba(96, 165, 250, 0.22);
-    --color-border-strong: rgba(96, 165, 250, 0.32);
-  }
-
+  /* `system` removes data-theme, so this repeats the explicit dark mode above for
+     whichever surfaces the OS itself switches into dark. */
   :root:not([data-theme="light"]) {
     --color-bg-base: #0f1117;
     --color-bg-subtle: #161b27;
@@ -199,21 +186,36 @@
     --color-text-disabled: #374151;
     --color-text-inverse: #111827;
 
-    --color-brand: #818cf8;
-    --color-brand-hover: #a5b4fc;
-    --color-brand-active: #c7d2fe;
+    --color-brand: #6366f1;
+    --color-brand-hover: #4f46e5;
+    --color-brand-active: #4338ca;
     --color-brand-subtle: #1e1b4b;
 
-    --color-success-subtle: rgba(16, 185, 129, 0.12);
-    --color-warning-subtle: rgba(245, 158, 11, 0.12);
-    --color-error-subtle: rgba(239, 68, 68, 0.12);
-    --color-info-subtle: rgba(59, 130, 246, 0.12);
+    --color-success-subtle: rgba(16, 185, 129, 0.2);
+    --color-warning-subtle: rgba(245, 158, 11, 0.2);
+    --color-error-subtle: rgba(239, 68, 68, 0.2);
+    --color-info-subtle: rgba(59, 130, 246, 0.2);
+
+    --color-success-pill-border: rgba(24, 177, 140, 0.18);
+    --color-warning-pill-border: rgba(230, 152, 34, 0.18);
+    --color-error-pill-border: rgba(225, 71, 85, 0.18);
+    --color-brand-pill-border: rgba(99, 102, 241, 0.22);
 
     --color-border: #2a3040;
     --color-border-strong: #3a4255;
 
-    --shadow-xs: none;
-    --shadow-sm: none;
+    --color-journey-supplier: #64748b;
+    --color-journey-cargo: var(--color-brand);
+    --color-journey-stop: var(--color-brand-active);
+    --color-journey-final: #10b981;
+
+    --color-journey-supplier-soft: rgba(148, 163, 184, 0.1);
+    --color-journey-cargo-soft: rgba(99, 102, 241, 0.18);
+    --color-journey-stop-soft: rgba(67, 56, 202, 0.28);
+    --color-journey-final-soft: rgba(16, 185, 129, 0.12);
+
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.5);
     --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
     --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.7);

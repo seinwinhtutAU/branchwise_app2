@@ -5,7 +5,12 @@ import { Input } from "@renderer/components/ui/Input";
 import { ArrowRightIcon } from "@renderer/components/ui/icons";
 import { cn } from "@renderer/lib/utils";
 import { WholesaleApiError } from "../shared/api";
-import { formatQty, onlyDigits } from "../shared/shared";
+import {
+  formatQty,
+  onlyDigits,
+  quantityShorthandPairs,
+  quantityShorthandProblem,
+} from "../shared/shared";
 import {
   cargoRemaining,
   legRemaining,
@@ -14,7 +19,7 @@ import {
   type Shipment,
 } from "./shipments";
 import { EDITABLE, JourneyArrow, JourneyCard, JourneyRow, QuantityInput, Required, SectionLabel, SuggestInput } from "../shared/ui";
-import { formatIn, toPairs, type Unit } from "../shared/units";
+import { formatIn, type Unit } from "../shared/units";
 
 /**
  * The Split shipment tab — the shipment's real journey (the same row the Shipment tab
@@ -153,13 +158,17 @@ export function SplitShipmentPage({
   const availablePackages = selectedStage?.point?.available ?? 0;
 
   const quantityEntered = quantityText.trim() !== "";
-  // Typed in the shipment's own unit (a set, a dozen, a pair — whichever `unit` is), so
-  // it has to go through the same conversion every other quantity field in this app
-  // uses before it means anything next to `totalQuantity` (real pairs) or gets sent to
-  // the server, which only ever deals in real pairs.
-  const quantity = quantityEntered
-    ? toPairs(Math.max(0, Math.floor(Number(quantityText)) || 0), unit)
-    : undefined;
+  // Typed in the shipment's own unit by default, or in whatever a piece names its own
+  // ("83p", "1s3p") — the same shorthand the colour boxes use — converted to real pairs
+  // before it means anything next to `totalQuantity` or gets sent to the server, which
+  // only ever deals in real pairs.
+  const quantityFormatProblem = quantityEntered
+    ? quantityShorthandProblem(quantityText)
+    : null;
+  const quantity =
+    quantityEntered && !quantityFormatProblem
+      ? quantityShorthandPairs(quantityText, unit)
+      : undefined;
 
   const destinationWrong =
     destination.trim() === "" ? "Say where this part is going." : undefined;
@@ -174,9 +183,10 @@ export function SplitShipmentPage({
         ? `Only ${availablePackages} packages are still at ${selectedStage?.title}.`
         : undefined;
   const quantityWrong =
-    quantity !== undefined && quantity > totalQuantity
+    quantityFormatProblem ??
+    (quantity !== undefined && quantity > totalQuantity
       ? `That is more than the shipment's own ${formatIn(totalQuantity, unit)}.`
-      : undefined;
+      : undefined);
 
   const canSubmit = !!selected && !packagesWrong && !quantityWrong && !destinationWrong && !saving;
 

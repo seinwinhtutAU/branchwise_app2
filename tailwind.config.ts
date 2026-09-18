@@ -14,6 +14,7 @@ export default {
           hover: "var(--color-brand-hover)",
           active: "var(--color-brand-active)",
           subtle: "var(--color-brand-subtle)",
+          pill: "var(--color-brand-pill-border)",
         },
         bg: {
           base: "var(--color-bg-base)",
@@ -36,14 +37,17 @@ export default {
         success: {
           DEFAULT: "var(--color-success)",
           subtle: "var(--color-success-subtle)",
+          pill: "var(--color-success-pill-border)",
         },
         warning: {
           DEFAULT: "var(--color-warning)",
           subtle: "var(--color-warning-subtle)",
+          pill: "var(--color-warning-pill-border)",
         },
         error: {
           DEFAULT: "var(--color-error)",
           subtle: "var(--color-error-subtle)",
+          pill: "var(--color-error-pill-border)",
         },
         info: {
           DEFAULT: "var(--color-info)",

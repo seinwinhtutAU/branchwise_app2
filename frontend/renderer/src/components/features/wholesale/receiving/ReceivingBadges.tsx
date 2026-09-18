@@ -1,6 +1,6 @@
 import React from "react";
 import { cn } from "@renderer/lib/utils";
-import { FloatingLayer, MenuItem, StatusPill } from "@renderer/components/features/wholesale/shared/ui";
+import { DotPill, FloatingLayer, MenuItem } from "@renderer/components/features/wholesale/shared/ui";
 import { useDismissableMenu } from "@renderer/components/features/wholesale/shared/useDismissableMenu";
 import { Switch } from "@renderer/components/ui/Switch";
 import {
@@ -22,7 +22,8 @@ export function StatusBadge({
 }: {
   status: ReceivingStatus;
 }): React.JSX.Element {
-  return <StatusPill label={STATUS_LABELS[status]} className={STATUS_STYLES[status]} />;
+  const style = STATUS_STYLES[status];
+  return <DotPill label={STATUS_LABELS[status]} className={style.bg} dotClassName={style.dot} />;
 }
 
 export function OpenedToggle({

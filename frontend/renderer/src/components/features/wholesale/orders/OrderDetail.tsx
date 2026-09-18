@@ -466,7 +466,7 @@ export function OrderDetail({
                   "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold leading-none tabular-nums",
                   activeTab === "products"
                     ? "bg-brand text-white"
-                    : "bg-brand-subtle text-brand border border-brand/30",
+                    : "bg-brand-subtle text-brand border border-brand-pill",
                 )}
               >
                 {pct}%
@@ -491,7 +491,7 @@ export function OrderDetail({
                   "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold leading-none tabular-nums",
                   activeTab === "payments"
                     ? "bg-brand text-white"
-                    : "bg-brand-subtle text-brand border border-brand/30",
+                    : "bg-brand-subtle text-brand border border-brand-pill",
                 )}
               >
                 {paidShare}%

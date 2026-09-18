@@ -90,7 +90,7 @@ export default function ReceivingGatePage({
     () => (stockWire ? stockRecordsFromWire(stockWire) : []),
     [stockWire],
   );
-  const readyToAllocatePairs = stockRecords.reduce(
+  const readyToDeliverPairs = stockRecords.reduce(
     (sum, record) => sum + Math.max(0, record.available_pairs),
     0,
   );
@@ -262,7 +262,7 @@ export default function ReceivingGatePage({
       onNew={() => setView("new")}
       onRefresh={refreshPage}
       refreshing={isRefreshing || shipmentsRefreshing}
-      readyToAllocatePairs={readyToAllocatePairs}
+      readyToDeliverPairs={readyToDeliverPairs}
       owedToCustomersPairs={owedToCustomersPairs}
       onOpenOrders={onOpenOrders}
     />

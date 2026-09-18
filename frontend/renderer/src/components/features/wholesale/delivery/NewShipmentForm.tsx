@@ -32,14 +32,11 @@ import {
   formatDate,
   formatQty,
   onlyDigits,
+  pairsToQuantityShorthand,
+  quantityShorthandPairs,
   todayIso,
 } from "@renderer/components/features/wholesale/shared/shared";
-import {
-  formatIn,
-  formatSets,
-  toPairs,
-  PAIRS_PER,
-} from "@renderer/components/features/wholesale/shared/units";
+import { formatSets } from "@renderer/components/features/wholesale/shared/units";
 import {
   CARGO_NAMES,
   CARRIER_NAMES,
@@ -108,7 +105,7 @@ export function NewShipmentForm({
   const quantityMismatch =
     voucher &&
     totalSets.trim() !== "" &&
-    toPairs(Number(totalSets) || 0, totalUnit) !== voucher.total_quantity_pairs
+    quantityShorthandPairs(totalSets, totalUnit) !== voucher.total_quantity_pairs
       ? `The voucher says ${formatSets(voucher.total_quantity_pairs)}.`
       : undefined;
 
@@ -128,24 +125,18 @@ export function NewShipmentForm({
       shouldDirty: true,
       shouldValidate: true,
     });
+    setValue("total_unit", "set", { shouldDirty: true });
     if (!picked) {
       setValue("total_sets", "", { shouldDirty: true });
-      setValue("total_unit", "set", { shouldDirty: true });
       return;
     }
-    const wholeSets = picked.total_quantity_pairs % PAIRS_PER.set === 0;
-    setValue("total_unit", wholeSets ? "set" : "pair", {
+    // Filled in as shorthand rather than forced into a single unit, so a voucher whose
+    // quantity isn't a whole number of sets ("83 pairs" for a 6-pair set) still shows
+    // exactly, as "13s5p", instead of switching the whole box to pairs just for this one
+    // figure.
+    setValue("total_sets", pairsToQuantityShorthand(picked.total_quantity_pairs), {
       shouldDirty: true,
     });
-    setValue(
-      "total_sets",
-      String(
-        wholeSets
-          ? picked.total_quantity_pairs / PAIRS_PER.set
-          : picked.total_quantity_pairs,
-      ),
-      { shouldDirty: true },
-    );
   }
 
   function removeStop(index: number): void {
@@ -185,8 +176,14 @@ export function NewShipmentForm({
       final_destination: values.final_destination.trim(),
       sent_on: values.sent_on,
       total_packages: Number(values.total_packages) || voucher.total_packages,
-      total_quantity_pairs: Number(values.total_sets) || 0,
-      total_unit: values.total_unit,
+      // Resolved to real pairs by the shorthand (it may mix units, "1s3p"), so it
+      // always carries "pair" rather than whatever unit happened to be showing on the
+      // box — see shipmentsApi.ts's createShipment, which stores this in pairs either way.
+      total_quantity_pairs: quantityShorthandPairs(
+        values.total_sets,
+        values.total_unit,
+      ),
+      total_unit: "pair",
       packages_sent_by_cargo: 0,
       final_received_packages: 0,
       legs: values.stops
@@ -465,10 +462,7 @@ export function NewShipmentForm({
                 />
                 <ReviewFact
                   label="Quantity"
-                  value={formatIn(
-                    toPairs(Number(totalSets) || 0, totalUnit),
-                    totalUnit,
-                  )}
+                  value={formatSets(quantityShorthandPairs(totalSets, totalUnit))}
                 />
               </dl>
               <div>

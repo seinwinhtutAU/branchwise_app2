@@ -6,7 +6,11 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@renderer/lib/utils";
 import { Input } from "@renderer/components/ui/Input";
 import { Textarea } from "@renderer/components/ui/Textarea";
-import { onlyDigits } from "@renderer/components/features/wholesale/shared/shared";
+import {
+  onlyDigits,
+  parseQuantityShorthand,
+  quantityShorthandPairs,
+} from "@renderer/components/features/wholesale/shared/shared";
 import { CURRENCY_CODES, type CurrencyCode } from "@renderer/components/features/wholesale/shared/currency";
 import {
   GROUP_LABELS,
@@ -14,8 +18,10 @@ import {
   type ProductGroup,
 } from "@renderer/components/features/wholesale/shared/products";
 import {
+  formatSets,
   UNIT_LABELS,
   type Unit,
+  type UnitConversions,
 } from "@renderer/components/features/wholesale/shared/units";
 import { CopyButton, EDITABLE, FloatingLayer } from "./ui";
 
@@ -177,6 +183,7 @@ export function QuantityInput({
   label,
   value,
   unit,
+  conversions,
   placeholder = "0",
   hint,
   error,
@@ -187,6 +194,7 @@ export function QuantityInput({
   label: string;
   value: string;
   unit: Unit;
+  conversions?: UnitConversions;
   placeholder?: string;
   hint?: string;
   error?: string;
@@ -194,8 +202,17 @@ export function QuantityInput({
   compact?: boolean;
   /** When true, the quantity is derived from another field and cannot be typed directly. */
   readOnly?: boolean;
-  onChange: (digits: string) => void;
+  onChange: (text: string) => void;
 }): React.JSX.Element {
+  // The line beneath the box only earns its place once a letter has actually been used —
+  // a plain "10" already reads fully next to the unit badge, and repeating "10 Sets"
+  // underneath it would just be noise. It appears the moment a piece names its own unit,
+  // whether that agrees with the badge (confirms the reading) or overrides it (says what
+  // changed) or there is more than one piece (nothing else shows the combined total).
+  const pieces = value.trim() === "" ? [] : parseQuantityShorthand(value);
+  const showsItsOwnUnit =
+    pieces.length > 1 || (pieces.length === 1 && pieces[0].unit !== undefined);
+
   return (
     <div className="flex flex-col gap-1.5">
       {!compact && (
@@ -216,10 +233,9 @@ export function QuantityInput({
         <input
           aria-label={label}
           type="text"
-          inputMode="numeric"
           placeholder={placeholder}
           value={value}
-          onChange={(event) => onChange(onlyDigits(event.target.value))}
+          onChange={(event) => onChange(event.target.value)}
           aria-invalid={!!error}
           className={cn(
             "w-full min-w-0 bg-transparent px-3 text-sm text-right text-text-primary",
@@ -228,55 +244,22 @@ export function QuantityInput({
           )}
           readOnly={readOnly}
         />
-        {/* The unit is shown, not chosen. Offering pair/set/dozen beside the number is
-            how "10" meaning pairs becomes sixty pairs, and nothing downstream catches
-            it. New figures are counted in sets; a record saved in another unit keeps
-            reading in the unit it was written in. */}
+        {/* The unit shown here is only what a bare number — one with no letter of its
+            own — is read in; typing a letter (10p) or several pieces (1s3p) names a
+            different or mixed unit for that box, the same shorthand the colour boxes
+            already use, so nothing has to pick a unit for the whole box up front. */}
         <span className="flex shrink-0 items-center border-l border-border pl-2 pr-3 text-sm text-text-secondary">
           {UNIT_LABELS[unit]}
         </span>
       </div>
       {error && <p className="text-xs text-error">{error}</p>}
+      {!error && showsItsOwnUnit && (
+        <p className="text-xs text-text-muted">
+          = {formatSets(quantityShorthandPairs(value, unit, conversions), conversions)}
+        </p>
+      )}
       {hint && !error && <p className="text-xs text-text-muted">{hint}</p>}
     </div>
-  );
-}
-
-/** The same box, for a figure already stored as a number. Keeps its own draft so an empty
- *  box reads as a figure half-typed rather than as a zero. */
-export function QuantityField({
-  label,
-  value,
-  unit,
-  hint,
-  error,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  unit: Unit;
-  hint?: string;
-  error?: string;
-  onChange: (value: number) => void;
-}): React.JSX.Element {
-  const [draft, setDraft] = useState(String(value));
-  useEffect(() => {
-    setDraft(String(value));
-  }, [value]);
-
-  return (
-    <QuantityInput
-      label={label}
-      value={draft}
-      unit={unit}
-      hint={hint}
-      error={error}
-      onChange={(digits) => {
-        setDraft(digits);
-        if (digits === "") return;
-        onChange(Number(digits));
-      }}
-    />
   );
 }
 
