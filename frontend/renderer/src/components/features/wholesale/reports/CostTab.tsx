@@ -3,6 +3,7 @@ import {
   TwoLineTrendChart,
 } from "@renderer/components/features/dashboard/shared";
 import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
+import { CopyButton } from "@renderer/components/ui/CopyButton";
 import type { WholesaleCostReport } from "@renderer/components/features/wholesale/shared/api";
 import {
   ReportError,
@@ -131,6 +132,7 @@ export function CostTab(props: ReportTabProps): React.JSX.Element {
         >
           <ReportTable>
             <ReportTableHeader>
+              <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
               <Th>Supplier</Th>
               <Th className="text-right">Vouchers</Th>
               <Th className="text-right">Quantity</Th>
@@ -140,8 +142,11 @@ export function CostTab(props: ReportTabProps): React.JSX.Element {
             </ReportTableHeader>
             <ReportTableBody>
               {data.suppliers.length ? (
-                data.suppliers.map((row) => (
+                data.suppliers.map((row, index) => (
                   <tr key={row.supplier_name}>
+                    <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                      {index + 1}
+                    </Td>
                     <Td>{row.supplier_name}</Td>
                     <Td className="text-right tabular-nums">
                       {formatQty(row.vouchers)}
@@ -161,7 +166,7 @@ export function CostTab(props: ReportTabProps): React.JSX.Element {
                   </tr>
                 ))
               ) : (
-                <EmptyRow colSpan={6}>
+                <EmptyRow colSpan={7}>
                   No supplier purchases in this period.
                 </EmptyRow>
               )}
@@ -176,6 +181,7 @@ export function CostTab(props: ReportTabProps): React.JSX.Element {
         >
           <ReportTable>
             <ReportTableHeader>
+              <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
               <Th>Voucher</Th>
               <Th>Supplier</Th>
               <Th>Date</Th>
@@ -184,8 +190,11 @@ export function CostTab(props: ReportTabProps): React.JSX.Element {
             </ReportTableHeader>
             <ReportTableBody>
               {data.payables.length ? (
-                data.payables.map((row) => (
+                data.payables.map((row, index) => (
                   <tr key={row.voucher_no}>
+                    <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                      {index + 1}
+                    </Td>
                     <Td className="font-semibold text-brand">
                       {row.voucher_no}
                     </Td>
@@ -200,7 +209,7 @@ export function CostTab(props: ReportTabProps): React.JSX.Element {
                   </tr>
                 ))
               ) : (
-                <EmptyRow colSpan={5}>No supplier balances are open.</EmptyRow>
+                <EmptyRow colSpan={6}>No supplier balances are open.</EmptyRow>
               )}
             </ReportTableBody>
           </ReportTable>
@@ -211,6 +220,7 @@ export function CostTab(props: ReportTabProps): React.JSX.Element {
         >
           <ReportTable>
             <ReportTableHeader>
+              <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
               <Th>Reference</Th>
               <Th>Product</Th>
               <Th>Reason</Th>
@@ -221,12 +231,16 @@ export function CostTab(props: ReportTabProps): React.JSX.Element {
               {data.write_offs.length ? (
                 data.write_offs.map((row, index) => (
                   <tr key={`${row.reference}-${index}`}>
+                    <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                      {index + 1}
+                    </Td>
                     <Td>{row.reference || "—"}</Td>
                     <Td>
-                      <span className="font-mono text-xs">
-                        {row.stock_code}
-                      </span>{" "}
-                      {row.description}
+                      <div className="flex items-center gap-1 whitespace-nowrap mb-0.5">
+                        <span className="font-mono text-xs font-semibold text-brand">{row.stock_code}</span>
+                        <CopyButton value={row.stock_code} what="stock code" />
+                      </div>
+                      <span className="text-xs text-text-secondary">{row.description}</span>
                     </Td>
                     <Td>{(row.reason ?? "").replaceAll("_", " ") || "—"}</Td>
                     <Td className="text-right tabular-nums">
@@ -238,9 +252,7 @@ export function CostTab(props: ReportTabProps): React.JSX.Element {
                   </tr>
                 ))
               ) : (
-                <EmptyRow colSpan={5}>
-                  No write-offs were recorded in this period.
-                </EmptyRow>
+                <EmptyRow colSpan={6}>No write-offs in this period.</EmptyRow>
               )}
             </ReportTableBody>
           </ReportTable>

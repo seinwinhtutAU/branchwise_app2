@@ -16,6 +16,7 @@ import {
   ColorQtySummary,
 } from "@renderer/components/features/wholesale/shared/ColorQtyPicker";
 import { GROUP_LABELS } from "@renderer/components/features/wholesale/shared/products";
+import { CopyButton } from "@renderer/components/features/wholesale/shared/ui";
 import { todayIso } from "@renderer/components/features/wholesale/shared/shared";
 import {
   formatIn,
@@ -228,6 +229,7 @@ export function DeliveryView({
       <TableContainer>
         <Thead className="top-0">
           <Tr>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
             <Th className="min-w-[12rem]">Product</Th>
             <Th className="text-right whitespace-nowrap">
               Delivered / Ordered
@@ -237,7 +239,7 @@ export function DeliveryView({
           </Tr>
         </Thead>
         <Tbody>
-          {rows.map((row) => {
+          {rows.map((row, index) => {
             const deliverableColors = Object.entries(
               row.allocatedColors,
             ).reduce<ColorPairs>((colors, [color, pairs]) => {
@@ -256,14 +258,23 @@ export function DeliveryView({
             const setSize = row.line.unit_conversions?.set ?? PAIRS_PER.set;
             return (
               <Tr key={row.line.order_line_id}>
+                <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                  {index + 1}
+                </Td>
                 <Td>
                   <div className="flex min-w-[12rem] flex-col gap-0.5">
-                    <div className="flex items-baseline gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="font-bold text-brand">
                         {row.line.stock_code || "No stock code"}
                       </span>
+                      {row.line.stock_code && (
+                        <CopyButton
+                          value={row.line.stock_code}
+                          what="stock code"
+                        />
+                      )}
                       <span className="text-xs text-text-muted">
-                        {GROUP_LABELS[row.line.product_group]}
+                        · {GROUP_LABELS[row.line.product_group]}
                       </span>
                     </div>
                     <span className="font-semibold text-text-primary">

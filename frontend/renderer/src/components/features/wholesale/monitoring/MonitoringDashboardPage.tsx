@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { type Session } from "@renderer/lib/auth";
 import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
 import { Badge } from "@renderer/components/ui/Badge";
-import { Button } from "@renderer/components/ui/Button";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Spinner } from "@renderer/components/ui/Spinner";
@@ -307,14 +307,10 @@ export default function MonitoringDashboardPage({
             />
             {isFetching ? "Refreshing…" : "Updates when wholesale data changes"}
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
+          <RefreshButton
             onClick={() => void query.refetch()}
-            loading={isFetching}
-          >
-            Refresh
-          </Button>
+            refreshing={isFetching}
+          />
         </div>
       </header>
 

@@ -4,7 +4,7 @@ import type { Session } from "@renderer/lib/auth";
 import { cn } from "@renderer/lib/utils";
 import type { BranchOption } from "@renderer/lib/useBranches";
 import { refreshEverything } from "@renderer/lib/queryClient";
-import { Button } from "@renderer/components/ui/Button";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Select } from "@renderer/components/ui/Select";
@@ -142,14 +142,10 @@ export function DashboardPage({
         title="Dashboard"
         description="Branch health across every retail branch, and revenue, cost, inventory and customer detail one branch at a time."
         action={
-          <Button
-            variant="secondary"
-            size="sm"
+          <RefreshButton
             onClick={refreshEverything}
-            loading={isFetching}
-          >
-            Refresh
-          </Button>
+            refreshing={isFetching}
+          />
         }
       />
 

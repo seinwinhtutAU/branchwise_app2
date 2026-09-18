@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from "react";
 import { cn } from "@renderer/lib/utils";
 import { Button } from "@renderer/components/ui/Button";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
+import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import {
   FigureCard,
@@ -164,60 +166,72 @@ export function ToOrderView({
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
-        <FigureCard
-          label="Suppliers waiting"
-          value={formatQty(groups.length)}
-          sub="with customer demand"
-          tone={groups.length > 0 ? "warning" : "success"}
-        />
-        <FigureCard
-          label="Products waiting"
-          value={formatQty(
-            groups.reduce(
-              (sum, group) => sum + group.lines.length,
-              0,
-            ),
-          )}
-          sub="products to request"
-        />
-        <FigureCard
-          label="Quantity to request"
-          value={sets(totalQty)}
-          sub="after existing vouchers"
-          tone={totalQty > 0 ? "error" : "success"}
-        />
-      </div>
+    <div className="flex flex-col gap-4">
+      <CollapsibleKpiSummary storageKey="wholesale_to_order_kpi" title="To Order Summary">
+        <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
+          <FigureCard
+            label="Suppliers waiting"
+            value={formatQty(groups.length)}
+            sub="with customer demand"
+            tone={groups.length > 0 ? "warning" : "success"}
+          />
+          <FigureCard
+            label="Products waiting"
+            value={formatQty(
+              groups.reduce(
+                (sum, group) => sum + group.lines.length,
+                0,
+              ),
+            )}
+            sub="products to request"
+          />
+          <FigureCard
+            label="Quantity to request"
+            value={sets(totalQty)}
+            sub="after existing vouchers"
+            tone={totalQty > 0 ? "error" : "success"}
+          />
+        </div>
+      </CollapsibleKpiSummary>
 
       <Panel>
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="min-w-0">
-              <h2 className="text-base font-semibold text-text-primary tracking-tight">
-                Create from customer orders
-              </h2>
-              <p className="text-sm text-text-muted mt-0.5">
-                Customer order products still waiting for a supplier voucher.
-              </p>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-base">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
+              Supplier vouchers
+            </h2>
+            <div className="flex items-center gap-1.5 flex-wrap select-none">
+              <button
+                type="button"
+                onClick={onOpenVouchers}
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium transition-all duration-150 border cursor-pointer bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary"
+              >
+                <span>Vouchers</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums bg-bg-raised text-text-muted">
+                  {vouchers.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium transition-all duration-150 border cursor-pointer bg-brand text-white border-brand shadow-xs"
+              >
+                <span>To Order</span>
+                {groups.reduce((sum, g) => sum + g.lines.length, 0) > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums bg-white/20 text-white">
+                    {groups.reduce((sum, g) => sum + g.lines.length, 0)}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={onRefresh}
-            loading={refreshing}
-          >
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <RefreshButton
+              onClick={onRefresh}
+              refreshing={refreshing}
+            />
+          </div>
         </div>
-
-        <SupplierVoucherTabs
-          active="to_order"
-          onVouchers={onOpenVouchers}
-          onToOrder={() => undefined}
-          toOrderCount={groups.reduce((sum, g) => sum + g.lines.length, 0)}
-        />
 
         {groups.length === 0 ? (
           <EmptyState
@@ -319,7 +333,7 @@ export function ToOrderView({
           </div>
         ) : (
           <div className="flex flex-col">
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-bg-subtle px-6 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-bg-subtle/60 px-4 py-2.5 border-b border-border">
               <div>
                 <div className="flex items-center gap-2">
                   <button
@@ -375,6 +389,7 @@ export function ToOrderView({
             <TableContainer className="rounded-none border-0">
               <Thead>
                 <Tr>
+                  <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                   <Th>
                     <label className="flex cursor-pointer items-center gap-2">
                       <input
@@ -415,6 +430,9 @@ export function ToOrderView({
               <Tbody>
                 {selectedGroup.lines.map((line, index) => (
                   <Tr key={`${line.order_no}-${line.stock_code}-${index}`}>
+                    <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                      {index + 1}
+                    </Td>
                     <Td>
                       <div className="flex items-start gap-2">
                         <input
@@ -440,7 +458,7 @@ export function ToOrderView({
                     </Td>
                     <Td>
                       <div className="flex min-w-0 flex-col items-start gap-0.5">
-                        <div className="flex min-w-0 items-center gap-1">
+                        <div className="flex min-w-0 items-center gap-1.5 flex-wrap">
                           <span className="break-words font-semibold text-brand">
                             {line.stock_code || "No stock code"}
                           </span>
@@ -450,12 +468,12 @@ export function ToOrderView({
                               what="stock code"
                             />
                           )}
+                          <span className="text-xs text-text-muted">
+                            · {GROUP_LABELS[line.product_group]}
+                          </span>
                         </div>
                         <span className="break-words text-text-primary">
                           {line.description || "—"}
-                        </span>
-                        <span className="text-xs text-text-muted">
-                          {GROUP_LABELS[line.product_group]}
                         </span>
                       </div>
                     </Td>

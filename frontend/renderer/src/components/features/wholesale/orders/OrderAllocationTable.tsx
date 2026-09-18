@@ -15,6 +15,7 @@ import {
   ColorQtySummary,
 } from "@renderer/components/features/wholesale/shared/ColorQtyPicker";
 import { GROUP_LABELS } from "@renderer/components/features/wholesale/shared/products";
+import { CopyButton } from "@renderer/components/features/wholesale/shared/ui";
 import { colorQtyProblem } from "@renderer/components/features/wholesale/shared/shared";
 import {
   formatIn,
@@ -41,6 +42,7 @@ import {
 } from "./orderColorUtils";
 
 export function AllocationLineRow({
+  index,
   line,
   order,
   orders,
@@ -49,6 +51,7 @@ export function AllocationLineRow({
   draftPairs,
   onDraftChange,
 }: {
+  index: number;
   line: CustomerOrderLine;
   order: CustomerOrder;
   orders: CustomerOrder[];
@@ -114,14 +117,20 @@ export function AllocationLineRow({
 
   return (
     <Tr>
+      <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+        {index + 1}
+      </Td>
       <Td>
         <div className="flex min-w-[12rem] flex-col gap-0.5">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className="font-bold text-brand">
               {line.stock_code || "No stock code"}
             </span>
+            {line.stock_code && (
+              <CopyButton value={line.stock_code} what="stock code" />
+            )}
             <span className="text-xs text-text-muted">
-              {GROUP_LABELS[line.product_group]}
+              · {GROUP_LABELS[line.product_group]}
             </span>
           </div>
           <span className="font-semibold text-text-primary">
@@ -366,6 +375,7 @@ export function AllocationTable({
       <TableContainer>
         <Thead className="top-0">
           <Tr>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
             <Th className="min-w-[12rem]">Product</Th>
             <Th className="text-right whitespace-nowrap min-w-[11rem]">
               Delivered / Ordered
@@ -375,9 +385,10 @@ export function AllocationTable({
           </Tr>
         </Thead>
         <Tbody>
-          {order.lines.map((line) => (
+          {order.lines.map((line, index) => (
             <AllocationLineRow
               key={line.order_line_id}
+              index={index}
               line={line}
               order={order}
               orders={orders}

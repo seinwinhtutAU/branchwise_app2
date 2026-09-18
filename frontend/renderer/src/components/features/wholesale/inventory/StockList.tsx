@@ -1,17 +1,15 @@
-// StockList — filterable list of stock records with overview, locations, movement tabs.
-
 import { useMemo, useState } from "react";
 import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import { Button } from "@renderer/components/ui/Button";
 import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
+import { ColumnHeaderFilter } from "@renderer/components/ui/ColumnHeaderFilter";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
 import { Pagination } from "@renderer/components/ui/Pagination";
-import { Select } from "@renderer/components/ui/Select";
 import {
   TableContainer, Tbody, Td, Th, Thead, Tr,
 } from "@renderer/components/ui/Table";
-import { InventoryIcon, SearchIcon } from "@renderer/components/ui/icons";
+import { CheckIcon, CloseIcon, InventoryIcon, SearchIcon } from "@renderer/components/ui/icons";
 import {
   CopyButton, PAGE_SIZE, Panel,
 } from "@renderer/components/features/wholesale/shared/ui";
@@ -146,78 +144,44 @@ export function StockList({
       )}
 
       {section === "locations" && <Panel>
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-          <div>
-            <h2 className="text-base font-semibold text-text-primary tracking-tight">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-base">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
               Stock Records
             </h2>
-            <p className="text-sm text-text-muted mt-0.5">
-              All inventory items across all locations.
-            </p>
+            {isFiltered && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={resetFilters}
+                className="text-xs h-6 px-1.5 text-text-muted hover:text-error"
+              >
+                <CloseIcon className="w-3.5 h-3.5" />
+                Clear
+              </Button>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <InventoryRefreshButton onRefresh={onRefresh} refreshing={refreshing} />
-          </div>
-        </div>
 
-        <>
-          <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-bg-subtle">
-            <div className="w-full sm:w-[24rem] lg:w-[28rem]">
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-48 sm:w-64">
               <Input
                 ref={searchInputRef}
                 aria-label="Search stock"
-                placeholder="Search product, place or color"
-                startIcon={<SearchIcon className="w-4 h-4" />}
+                placeholder="Search product, place or color… (/)"
+                startIcon={<SearchIcon className="w-3.5 h-3.5" />}
                 value={search}
                 onChange={(event) => {
                   setSearch(event.target.value);
                   setPage(1);
                 }}
+                className="h-8 text-xs"
               />
             </div>
-            <div className="w-full sm:w-60">
-              <Select
-                aria-label="Filter by stock health"
-                value={health}
-                onChange={(event) => {
-                  setHealth(event.target.value as InventoryHealth | "all");
-                  setPage(1);
-                }}
-              >
-                <option value="all">All stock health</option>
-                <option value="Healthy">Healthy</option>
-                <option value="Low Stock">Low Stock</option>
-                <option value="Out of Stock">Out of Stock</option>
-                <option value="Overstock">Overstock</option>
-                <option value="Not arrived yet">Not arrived yet</option>
-              </Select>
-            </div>
-            {locations.length > 1 && (
-              <div className="w-full sm:w-52">
-                <Select
-                  aria-label="Filter by place"
-                  value={location}
-                  onChange={(event) => {
-                    setLocation(event.target.value);
-                    setPage(1);
-                  }}
-                >
-                  <option value="all">All locations</option>
-                  {locations.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            )}
-            {isFiltered && (
-              <Button variant="ghost" size="sm" onClick={resetFilters}>
-                Clear filters
-              </Button>
-            )}
+            <InventoryRefreshButton onRefresh={onRefresh} refreshing={refreshing} />
           </div>
+        </div>
 
+        <>
           {visible.length === 0 ? (
             <EmptyState
               icon={<InventoryIcon />}
@@ -240,21 +204,134 @@ export function StockList({
               <TableContainer className="border-0 rounded-none">
                 <Thead>
                   <Tr>
+                    <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                     <Th className="min-w-[12rem]">Product</Th>
                     <Th>Available</Th>
-                    <Th>Location</Th>
+                    <Th className="whitespace-nowrap">
+                      {locations.length > 1 ? (
+                        <ColumnHeaderFilter
+                          label="Location"
+                          isActive={location !== "all"}
+                        >
+                          {(close) => (
+                            <div className="flex flex-col gap-1.5">
+                              <div className="font-semibold text-text-primary text-[11px] uppercase tracking-wider pb-1 border-b border-border">
+                                Filter Location
+                              </div>
+                              <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setLocation("all");
+                                    setPage(1);
+                                    close();
+                                  }}
+                                  className={cn(
+                                    "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                    location === "all"
+                                      ? "bg-brand/10 font-bold text-brand"
+                                      : "hover:bg-bg-subtle text-text-secondary",
+                                  )}
+                                >
+                                  <span>All locations</span>
+                                  {location === "all" && <CheckIcon className="w-3.5 h-3.5" />}
+                                </button>
+                                {locations.map((name) => (
+                                  <button
+                                    key={name}
+                                    type="button"
+                                    onClick={() => {
+                                      setLocation(name);
+                                      setPage(1);
+                                      close();
+                                    }}
+                                    className={cn(
+                                      "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                      location === name
+                                        ? "bg-brand/10 font-bold text-brand"
+                                        : "hover:bg-bg-subtle text-text-secondary",
+                                    )}
+                                  >
+                                    <span>{name}</span>
+                                    {location === name && <CheckIcon className="w-3.5 h-3.5" />}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </ColumnHeaderFilter>
+                      ) : (
+                        "Location"
+                      )}
+                    </Th>
                     <Th>Color</Th>
-                    <Th>Stock Health</Th>
+                    <Th className="whitespace-nowrap">
+                      <ColumnHeaderFilter
+                        label="Stock Health"
+                        isActive={health !== "all"}
+                      >
+                        {(close) => (
+                          <div className="flex flex-col gap-1.5">
+                            <div className="font-semibold text-text-primary text-[11px] uppercase tracking-wider pb-1 border-b border-border">
+                              Filter Stock Health
+                            </div>
+                            <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setHealth("all");
+                                  setPage(1);
+                                  close();
+                                }}
+                                className={cn(
+                                  "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                  health === "all"
+                                    ? "bg-brand/10 font-bold text-brand"
+                                    : "hover:bg-bg-subtle text-text-secondary",
+                                )}
+                              >
+                                <span>All stock health</span>
+                                {health === "all" && <CheckIcon className="w-3.5 h-3.5" />}
+                              </button>
+                              {(["Healthy", "Low Stock", "Out of Stock", "Overstock", "Not arrived yet"] as const).map((option) => (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  onClick={() => {
+                                    setHealth(option);
+                                    setPage(1);
+                                    close();
+                                  }}
+                                  className={cn(
+                                    "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                    health === option
+                                      ? "bg-brand/10 font-bold text-brand"
+                                      : "hover:bg-bg-subtle text-text-secondary",
+                                  )}
+                                >
+                                  <span>{option}</span>
+                                  {health === option && <CheckIcon className="w-3.5 h-3.5" />}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </ColumnHeaderFilter>
+                    </Th>
                     <Th className="w-12" aria-label="Actions" />
                   </Tr>
                 </Thead>
                 <Tbody>
-                  {visible.map((record) => {
+                  {visible.map((record, index) => {
+                    const rowNum = (safePage - 1) * PAGE_SIZE + index + 1;
                     return (
                       <Tr key={record.stock_code}>
+                        <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                          {rowNum}
+                        </Td>
                         <Td>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1">
+                          <div className="min-w-0 max-w-[16rem]">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <button
                                 type="button"
                                 onClick={() => onOpen(record.stock_code)}
@@ -266,15 +343,13 @@ export function StockList({
                                 {record.stock_code || "No stock code"}
                               </button>
                               {record.stock_code && <CopyButton value={record.stock_code} what="stock code" />}
-                            </div>
-                            <div className="mt-1 max-w-[14rem]">
-                              <span className="block truncate text-sm text-text-primary" title={record.description}>
-                                {record.description || "—"}
+                              <span className="text-xs text-text-muted">
+                                · {GROUP_LABELS[record.product_group]}
                               </span>
-                              <div className="text-xs text-text-muted">
-                                {GROUP_LABELS[record.product_group]}
-                              </div>
                             </div>
+                            <span className="block truncate text-sm text-text-primary mt-0.5" title={record.description}>
+                              {record.description || "—"}
+                            </span>
                           </div>
                         </Td>
                         <Td>
@@ -299,7 +374,7 @@ export function StockList({
                   })}
                 </Tbody>
               </TableContainer>
-              <div className="px-6 py-3 border-t border-border">
+              <div className="px-4 py-1.5 border-t border-border">
                 <Pagination
                   page={safePage}
                   totalPages={totalPages}

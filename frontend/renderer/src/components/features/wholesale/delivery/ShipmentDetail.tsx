@@ -20,6 +20,7 @@ import {
   TrashIcon,
 } from "@renderer/components/ui/icons";
 import {
+  CopyButton,
   EDITABLE,
   JourneyFace,
   MismatchIconButton,
@@ -339,9 +340,12 @@ export function ShipmentDetail({
               <div className="h-5 w-px bg-border" />
 
               <div className="min-w-0 flex items-center gap-2.5">
-                <h2 className="text-base font-bold text-text-primary tracking-tight truncate font-mono">
-                  {shipment.shipment_no}
-                </h2>
+                <div className="flex items-center gap-1">
+                  <h2 className="text-base font-bold text-text-primary tracking-tight truncate font-mono">
+                    {shipment.shipment_no}
+                  </h2>
+                  <CopyButton value={shipment.shipment_no} what="shipment no." />
+                </div>
                 <StatusBadge status={shipmentStatus(shipment)} />
               </div>
             </div>

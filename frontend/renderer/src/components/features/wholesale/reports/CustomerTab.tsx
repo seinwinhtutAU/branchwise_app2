@@ -135,6 +135,7 @@ export function CustomerTab(props: ReportTabProps): React.JSX.Element {
       >
         <ReportTable>
           <ReportTableHeader>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
             <Th>Customer</Th>
             <Th className="text-right">Orders</Th>
             <Th className="text-right">Ordered</Th>
@@ -145,8 +146,11 @@ export function CustomerTab(props: ReportTabProps): React.JSX.Element {
           </ReportTableHeader>
           <ReportTableBody>
             {data.ranking.length ? (
-              data.ranking.map((row) => (
+              data.ranking.map((row, index) => (
                 <tr key={row.customer_name}>
+                  <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                    {index + 1}
+                  </Td>
                   <Td className="font-medium">{row.customer_name}</Td>
                   <Td className="text-right tabular-nums">
                     {formatQty(row.orders)}
@@ -169,7 +173,7 @@ export function CustomerTab(props: ReportTabProps): React.JSX.Element {
                 </tr>
               ))
             ) : (
-              <EmptyRow colSpan={7}>
+              <EmptyRow colSpan={8}>
                 No customers placed orders in this period.
               </EmptyRow>
             )}
@@ -183,6 +187,7 @@ export function CustomerTab(props: ReportTabProps): React.JSX.Element {
         >
           <ReportTable>
             <ReportTableHeader>
+              <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
               <Th>Order</Th>
               <Th>Customer</Th>
               <Th>Date</Th>
@@ -191,8 +196,11 @@ export function CustomerTab(props: ReportTabProps): React.JSX.Element {
             </ReportTableHeader>
             <ReportTableBody>
               {data.open_orders.length ? (
-                data.open_orders.map((row) => (
+                data.open_orders.map((row, index) => (
                   <tr key={row.order_no}>
+                    <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                      {index + 1}
+                    </Td>
                     <Td className="font-semibold text-brand">{row.order_no}</Td>
                     <Td>{row.customer_name}</Td>
                     <Td>{formatDate(row.order_date)}</Td>
@@ -205,7 +213,7 @@ export function CustomerTab(props: ReportTabProps): React.JSX.Element {
                   </tr>
                 ))
               ) : (
-                <EmptyRow colSpan={5}>
+                <EmptyRow colSpan={6}>
                   No orders are still open in this period.
                 </EmptyRow>
               )}
@@ -218,17 +226,21 @@ export function CustomerTab(props: ReportTabProps): React.JSX.Element {
         >
           <ReportTable>
             <ReportTableHeader>
+              <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
               <Th>Customer</Th>
             </ReportTableHeader>
             <ReportTableBody>
               {data.quiet_customers.length ? (
-                data.quiet_customers.map((row) => (
+                data.quiet_customers.map((row, index) => (
                   <tr key={row.customer_name}>
+                    <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                      {index + 1}
+                    </Td>
                     <Td>{row.customer_name}</Td>
                   </tr>
                 ))
               ) : (
-                <EmptyRow colSpan={1}>
+                <EmptyRow colSpan={2}>
                   No earlier customers are quiet in this period.
                 </EmptyRow>
               )}

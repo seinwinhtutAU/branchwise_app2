@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
+import { CopyButton } from "@renderer/components/ui/CopyButton";
 import {
   ChartViewToggle,
   StatTile,
@@ -149,6 +150,7 @@ export function RevenueTab(props: ReportTabProps): React.JSX.Element {
         >
           <ReportTable>
             <ReportTableHeader>
+              <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
               <Th>Product</Th>
               <Th className="text-right">Quantity</Th>
               <Th className="text-right">Ks</Th>
@@ -156,13 +158,17 @@ export function RevenueTab(props: ReportTabProps): React.JSX.Element {
             </ReportTableHeader>
             <ReportTableBody>
               {data.top_products.length ? (
-                data.top_products.map((row) => (
+                data.top_products.map((row, index) => (
                   <tr key={row.stock_code}>
+                    <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                      {index + 1}
+                    </Td>
                     <Td>
-                      <span className="font-mono text-xs">
-                        {row.stock_code}
-                      </span>
-                      <span className="ml-2">{row.description}</span>
+                      <div className="flex items-center gap-1 whitespace-nowrap mb-0.5">
+                        <span className="font-mono text-xs font-semibold text-brand">{row.stock_code}</span>
+                        <CopyButton value={row.stock_code} what="stock code" />
+                      </div>
+                      <span className="text-xs text-text-secondary">{row.description}</span>
                     </Td>
                     <Td className="text-right tabular-nums">
                       {formatSets(row.pairs_delivered)}
@@ -178,7 +184,7 @@ export function RevenueTab(props: ReportTabProps): React.JSX.Element {
                   </tr>
                 ))
               ) : (
-                <EmptyRow colSpan={4}>
+                <EmptyRow colSpan={5}>
                   No products were delivered in this period.
                 </EmptyRow>
               )}
@@ -192,6 +198,7 @@ export function RevenueTab(props: ReportTabProps): React.JSX.Element {
       >
         <ReportTable>
           <ReportTableHeader>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
             <Th>Order</Th>
             <Th>Customer</Th>
             <Th className="text-right">Quantity</Th>
@@ -201,8 +208,11 @@ export function RevenueTab(props: ReportTabProps): React.JSX.Element {
           </ReportTableHeader>
           <ReportTableBody>
             {data.orders.length ? (
-              data.orders.map((row) => (
+              data.orders.map((row, index) => (
                 <tr key={row.order_no}>
+                  <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                    {index + 1}
+                  </Td>
                   <Td className="font-semibold text-brand">{row.order_no}</Td>
                   <Td>{row.customer_name}</Td>
                   <Td className="text-right tabular-nums">
@@ -220,7 +230,7 @@ export function RevenueTab(props: ReportTabProps): React.JSX.Element {
                 </tr>
               ))
             ) : (
-              <EmptyRow colSpan={6}>
+              <EmptyRow colSpan={7}>
                 No orders were placed in this period.
               </EmptyRow>
             )}

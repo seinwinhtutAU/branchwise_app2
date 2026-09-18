@@ -14,6 +14,7 @@ import { useToast } from "@renderer/lib/useToast";
 import { cn } from "@renderer/lib/utils";
 import { useImportFilePicker } from "@renderer/lib/useImportFilePicker";
 import { Button } from "@renderer/components/ui/Button";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { Badge } from "@renderer/components/ui/Badge";
 import { CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
@@ -363,14 +364,10 @@ function ImportHistoryTable({
           title="Import history"
           description="Every confirmed upload — reimport a corrected file to replace a mistaken one, or remove it outright."
           action={
-            <Button
-              variant="secondary"
-              size="sm"
+            <RefreshButton
               onClick={reload}
-              loading={isRefreshing}
-            >
-              Refresh
-            </Button>
+              refreshing={isRefreshing}
+            />
           }
         />
 

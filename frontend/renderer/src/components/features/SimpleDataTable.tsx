@@ -22,10 +22,10 @@ import {
   matchesSearch,
 } from "@renderer/lib/filters";
 import { Button } from "@renderer/components/ui/Button";
-import { CardHeader } from "@renderer/components/ui/Card";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
+import { ColumnHeaderFilter } from "@renderer/components/ui/ColumnHeaderFilter";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
-import { Select } from "@renderer/components/ui/Select";
 import { TableSkeleton } from "@renderer/components/ui/Skeleton";
 import {
   TableContainer,
@@ -37,6 +37,7 @@ import {
 } from "@renderer/components/ui/Table";
 import { Pagination } from "@renderer/components/ui/Pagination";
 import { DownloadIcon } from "@renderer/components/ui/icons";
+import { CopyButton } from "@renderer/components/ui/CopyButton";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 
 export interface DataTableColumn<T> {
@@ -44,6 +45,8 @@ export interface DataTableColumn<T> {
   label: string;
   align?: "right";
   format?: (value: T[keyof T]) => string;
+  /** If true, renders the cell value in a monospace font with a copy-to-clipboard button. */
+  copyable?: boolean;
 }
 
 export type DataTableFilter<T> =
@@ -315,7 +318,19 @@ export function SimpleDataTable<T extends object>({
         id: String(col.key),
         accessorFn: (row: T) => row[col.key],
         header: col.label,
-        cell: (info) => (col.format ?? defaultFormat)(info.getValue() as T[keyof T]),
+        cell: col.copyable
+          ? (info) => {
+              const val = info.getValue();
+              const str = val === null || val === undefined || val === "" ? "" : String(val);
+              if (!str) return <span className="text-text-muted">—</span>;
+              return (
+                <div className="flex items-center gap-1 whitespace-nowrap">
+                  <span className="font-mono text-xs font-semibold text-brand">{str}</span>
+                  <CopyButton value={str} what={col.label.toLowerCase()} />
+                </div>
+              );
+            }
+          : (info) => (col.format ?? defaultFormat)(info.getValue() as T[keyof T]),
         meta: { align: col.align },
       })),
     [columns],
@@ -440,10 +455,6 @@ export function SimpleDataTable<T extends object>({
     );
   }
 
-  const showFilterBar = serverPaged
-    ? filters && filters.length > 0 && (totalItems > 0 || hasActiveFilters)
-    : filters && filters.length > 0 && rows && rows.length > 0;
-
   const actionButtons = (
     <div className="flex items-center gap-2">
       <Button
@@ -474,102 +485,96 @@ export function SimpleDataTable<T extends object>({
         <DownloadIcon className="w-4 h-4" />
         Excel
       </Button>
-      <Button
-        variant="secondary"
-        size="sm"
+      <RefreshButton
         onClick={reload}
-        loading={isRefreshing}
-      >
-        Refresh
-      </Button>
+        refreshing={isRefreshing}
+      />
     </div>
   );
 
   return (
     <div className="flex flex-col" style={containerStyle}>
-      <div ref={aboveRef} className="sticky top-14 lg:top-0 z-30 bg-bg-subtle">
-        {showHeading ? (
-          <CardHeader
-            title={showTitle ? title : undefined}
-            description={description}
-            action={actionButtons}
-          />
-        ) : (
-          <div className="flex items-center justify-end gap-2 mb-4">
-            {actionButtons}
-          </div>
-        )}
-
-        {showFilterBar && (
-          <div className="flex flex-wrap items-end gap-3 pb-4 -mt-1">
-            {filters!.map((filter) => {
-              if (filter.type === "search") {
-                return (
-                  <Input
-                    key="search"
-                    label="Search"
-                    placeholder={filter.placeholder ?? "Search…"}
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="w-56"
-                  />
-                );
-              }
-              if (filter.type === "select") {
-                const options =
-                  filter.options ??
-                  (rows ? distinctValues(rows, filter.key) : []);
-                if (options.length <= 1) return null;
-                return (
-                  <div key={String(filter.key)} className="w-40">
-                    <Select
-                      label={filter.label}
-                      value={selectValues[String(filter.key)] ?? ""}
-                      onChange={(e) =>
-                        setSelectValues((prev) => ({
-                          ...prev,
-                          [String(filter.key)]: e.target.value,
-                        }))
-                      }
-                    >
-                      <option value="">All</option>
-                      {options.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                );
-              }
-              return (
-                <div key={String(filter.key)} className="flex items-end gap-2">
-                  <Input
-                    type="date"
-                    label={`${filter.label} from`}
-                    value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                  />
-                  <Input
-                    type="date"
-                    label={`${filter.label} to`}
-                    value={dateTo}
-                    onChange={(e) => setDateTo(e.target.value)}
-                  />
-                </div>
-              );
-            })}
+      <div ref={aboveRef} className="sticky top-14 lg:top-0 z-30 bg-bg-subtle pb-2 pt-1 border-b border-border">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 flex-wrap min-w-0">
+            {showHeading && (showTitle ? title : undefined) && (
+              <div>
+                <h3 className="text-base font-semibold text-text-primary tracking-tight">
+                  {title}
+                </h3>
+                {description && (
+                  <p className="text-xs text-text-muted">{description}</p>
+                )}
+              </div>
+            )}
             {hasActiveFilters && (
-              <Button variant="ghost" size="sm" onClick={clearFilters}>
-                Clear filters
-              </Button>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {search && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-brand-subtle text-brand text-xs font-medium">
+                    Search: {search}
+                    <button
+                      type="button"
+                      onClick={() => setSearch("")}
+                      className="hover:opacity-75 font-bold cursor-pointer"
+                    >
+                      ×
+                    </button>
+                  </span>
+                )}
+                {Object.entries(selectValues).map(([k, v]) =>
+                  v ? (
+                    <span
+                      key={k}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-brand-subtle text-brand text-xs font-medium"
+                    >
+                      {k}: {v}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectValues((prev) => ({ ...prev, [k]: "" }))
+                        }
+                        className="hover:opacity-75 font-bold cursor-pointer"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ) : null,
+                )}
+                {(dateFrom || dateTo) && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-brand-subtle text-brand text-xs font-medium">
+                    Date: {dateFrom || "…"} – {dateTo || "…"}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDateFrom("");
+                        setDateTo("");
+                      }}
+                      className="hover:opacity-75 font-bold cursor-pointer"
+                    >
+                      ×
+                    </button>
+                  </span>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearFilters}
+                  className="text-xs h-6 px-1.5 text-text-muted hover:text-error"
+                >
+                  Clear all
+                </Button>
+              </div>
             )}
           </div>
-        )}
+
+          <div className="flex items-center gap-2 shrink-0">
+            {actionButtons}
+          </div>
+        </div>
       </div>
 
       {rows === null && !failed && (
-        <TableSkeleton rows={6} cols={columns.length} />
+        <TableSkeleton rows={6} cols={columns.length + 1} />
       )}
 
       {rows === null && failed && (
@@ -617,27 +622,225 @@ export function SimpleDataTable<T extends object>({
             <Thead className="top-0">
               {table.getHeaderGroups().map((headerGroup) => (
                 <Tr key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => (
-                    <Th
-                      key={header.id}
-                      className={
-                        header.column.columnDef.meta?.align === "right"
-                          ? "text-right"
-                          : undefined
-                      }
-                    >
-                      {flexRender(
-                        header.column.columnDef.header,
-                        header.getContext(),
-                      )}
-                    </Th>
-                  ))}
+                  <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
+                    #
+                  </Th>
+                  {headerGroup.headers.map((header) => {
+                    const colKey = header.column.id as keyof T;
+                    const matchingFilter = filters?.find((f) => {
+                      if (f.type === "search") return f.keys.includes(colKey);
+                      return f.key === colKey;
+                    });
+                    const align = header.column.columnDef.meta?.align;
+                    const headerLabel = flexRender(
+                      header.column.columnDef.header,
+                      header.getContext(),
+                    );
+
+                    if (!matchingFilter) {
+                      return (
+                        <Th
+                          key={header.id}
+                          className={
+                            align === "right" ? "text-right" : undefined
+                          }
+                        >
+                          {headerLabel}
+                        </Th>
+                      );
+                    }
+
+                    if (matchingFilter.type === "select") {
+                      const options =
+                        matchingFilter.options ??
+                        (rows ? distinctValues(rows, matchingFilter.key) : []);
+                      const activeVal =
+                        selectValues[String(matchingFilter.key)] ?? "";
+                      return (
+                        <Th
+                          key={header.id}
+                          className={
+                            align === "right" ? "text-right" : undefined
+                          }
+                        >
+                          <ColumnHeaderFilter
+                            label={headerLabel}
+                            isActive={Boolean(activeVal)}
+                            align={align === "right" ? "right" : "left"}
+                          >
+                            {(close) => (
+                              <div className="flex flex-col gap-2">
+                                <div className="font-semibold text-text-primary text-[11px] uppercase tracking-wider pb-1 border-b border-border">
+                                  Filter: {matchingFilter.label}
+                                </div>
+                                <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectValues((prev) => ({
+                                        ...prev,
+                                        [String(matchingFilter.key)]: "",
+                                      }));
+                                      close();
+                                    }}
+                                    className={cn(
+                                      "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                      !activeVal
+                                        ? "bg-brand/10 font-bold text-brand"
+                                        : "hover:bg-bg-raised text-text-secondary",
+                                    )}
+                                  >
+                                    <span>All</span>
+                                  </button>
+                                  {options.map((opt) => (
+                                    <button
+                                      key={opt}
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectValues((prev) => ({
+                                          ...prev,
+                                          [String(matchingFilter.key)]: opt,
+                                        }));
+                                        close();
+                                      }}
+                                      className={cn(
+                                        "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                        activeVal === opt
+                                          ? "bg-brand/10 font-bold text-brand"
+                                          : "hover:bg-bg-raised text-text-secondary",
+                                      )}
+                                    >
+                                      <span className="truncate">{opt}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </ColumnHeaderFilter>
+                        </Th>
+                      );
+                    }
+
+                    if (matchingFilter.type === "dateRange") {
+                      const isDateActive = Boolean(dateFrom || dateTo);
+                      return (
+                        <Th
+                          key={header.id}
+                          className={
+                            align === "right" ? "text-right" : undefined
+                          }
+                        >
+                          <ColumnHeaderFilter
+                            label={headerLabel}
+                            isActive={isDateActive}
+                            align={align === "right" ? "right" : "left"}
+                          >
+                            {(close) => (
+                              <div className="flex flex-col gap-2 min-w-[14rem]">
+                                <div className="font-semibold text-text-primary text-[11px] uppercase tracking-wider pb-1 border-b border-border">
+                                  Date Range: {matchingFilter.label}
+                                </div>
+                                <div className="flex flex-col gap-1.5">
+                                  <Input
+                                    type="date"
+                                    label="From"
+                                    value={dateFrom}
+                                    onChange={(e) => setDateFrom(e.target.value)}
+                                  />
+                                  <Input
+                                    type="date"
+                                    label="To"
+                                    value={dateTo}
+                                    onChange={(e) => setDateTo(e.target.value)}
+                                  />
+                                </div>
+                                {isDateActive && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-xs self-end text-error"
+                                    onClick={() => {
+                                      setDateFrom("");
+                                      setDateTo("");
+                                      close();
+                                    }}
+                                  >
+                                    Clear
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+                          </ColumnHeaderFilter>
+                        </Th>
+                      );
+                    }
+
+                    if (matchingFilter.type === "search") {
+                      return (
+                        <Th
+                          key={header.id}
+                          className={
+                            align === "right" ? "text-right" : undefined
+                          }
+                        >
+                          <ColumnHeaderFilter
+                            label={headerLabel}
+                            isActive={Boolean(search)}
+                            align={align === "right" ? "right" : "left"}
+                          >
+                            {(close) => (
+                              <div className="flex flex-col gap-2 min-w-[12rem]">
+                                <div className="font-semibold text-text-primary text-[11px] uppercase tracking-wider pb-1 border-b border-border">
+                                  Search
+                                </div>
+                                <Input
+                                  placeholder={
+                                    matchingFilter.placeholder ?? "Search…"
+                                  }
+                                  value={search}
+                                  onChange={(e) => setSearch(e.target.value)}
+                                  autoFocus
+                                />
+                                {search && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-xs self-end text-error"
+                                    onClick={() => {
+                                      setSearch("");
+                                      close();
+                                    }}
+                                  >
+                                    Clear
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+                          </ColumnHeaderFilter>
+                        </Th>
+                      );
+                    }
+
+                    return (
+                      <Th
+                        key={header.id}
+                        className={
+                          align === "right" ? "text-right" : undefined
+                        }
+                      >
+                        {headerLabel}
+                      </Th>
+                    );
+                  })}
                 </Tr>
               ))}
             </Thead>
             <Tbody>
-              {renderedRows.map((row) => (
+              {renderedRows.map((row, idx) => (
                 <Tr key={rowKey(row.original, row.index)}>
+                  <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                    {(currentPage - 1) * PAGE_SIZE + idx + 1}
+                  </Td>
                   {row.getVisibleCells().map((cell) => (
                     <Td
                       key={cell.id}

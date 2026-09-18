@@ -111,6 +111,7 @@ export function ReceivingCostsView({
           <TableContainer className="rounded-lg border border-border">
             <Thead>
               <Tr>
+                <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                 <Th className="min-w-[11rem]">Stage / Location</Th>
                 <Th className="w-32">Date</Th>
                 <Th className="min-w-[11rem]">Paid To</Th>
@@ -123,6 +124,9 @@ export function ReceivingCostsView({
             <Tbody>
               {receiving.costs.map((cost, index) => (
                 <Tr key={cost.cost_id}>
+                  <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                    {index + 1}
+                  </Td>
                   <Td>
                     <SuggestInput
                       label={`Where cost ${index + 1} was spent`}

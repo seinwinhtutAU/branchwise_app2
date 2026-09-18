@@ -5,6 +5,7 @@ import type { Session } from "@renderer/lib/auth";
 import { useToast } from "@renderer/lib/useToast";
 import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
 import { Button } from "@renderer/components/ui/Button";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
@@ -47,7 +48,7 @@ import {
   type WholesaleProductWire,
 } from "../shared/api";
 import { GROUP_LABELS, PRODUCT_GROUPS, type ProductGroup } from "../shared/products";
-import { DotPill } from "../shared/ui";
+import { CopyButton, DotPill } from "../shared/ui";
 // Quantities are entered in sets everywhere, so a product no longer carries a unit of
 // its own — only how many pairs make up one of its sets or dozens.
 import { type Unit } from "../shared/units";
@@ -411,14 +412,10 @@ export default function MasterDataPage({
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
+              <RefreshButton
                 onClick={() => void query.refetch()}
-                loading={query.isFetching}
-              >
-                Refresh
-              </Button>
+                refreshing={query.isFetching}
+              />
               <Button
                 size="sm"
                 onClick={openCreate}
@@ -472,6 +469,7 @@ export default function MasterDataPage({
             <TableContainer className="rounded-none border-0">
               <Thead>
                 <Tr>
+                  <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                   <Th>{tab === "products" ? "Stock code" : "Name"}</Th>
                   {tab === "products" && (
                     <>
@@ -490,7 +488,7 @@ export default function MasterDataPage({
                 </Tr>
               </Thead>
               <Tbody>
-                {rows.map((row) => {
+                {rows.map((row, index) => {
                   const isProduct = tab === "products";
                   const product = isProduct
                     ? (row as WholesaleProductWire & { id: string })
@@ -498,8 +496,18 @@ export default function MasterDataPage({
                   const named = !isProduct ? (row as NamedRow) : null;
                   return (
                     <Tr key={isProduct ? product?.product_id : named?.id}>
+                      <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                        {index + 1}
+                      </Td>
                       <Td className="font-medium">
-                        {isProduct ? product?.stock_code : named?.name}
+                        {isProduct && product?.stock_code ? (
+                          <div className="flex items-center gap-1">
+                            <span>{product.stock_code}</span>
+                            <CopyButton value={product.stock_code} what="stock code" />
+                          </div>
+                        ) : (
+                          named?.name
+                        )}
                       </Td>
                       {isProduct && (
                         <>

@@ -75,7 +75,7 @@ interface InventoryRow {
 const INVENTORY_COLUMNS: DataTableColumn<InventoryRow>[] = [
   { key: "Branch", label: "Branch" },
   { key: "Snapshot_At", label: "Last Updated" },
-  { key: "StockCode", label: "Stock Code" },
+  { key: "StockCode", label: "Stock Code", copyable: true },
   { key: "Description", label: "Description" },
   { key: "Group", label: "Group" },
   { key: "On_Hand_Qty", label: "On Hand Qty", align: "right" },
@@ -96,7 +96,7 @@ interface LowStockRow {
 const LOW_STOCK_COLUMNS: DataTableColumn<LowStockRow>[] = [
   { key: "Branch", label: "Branch" },
   { key: "Status", label: "Status" },
-  { key: "StockCode", label: "Stock Code" },
+  { key: "StockCode", label: "Stock Code", copyable: true },
   { key: "Description", label: "Description" },
   { key: "On_Hand_Qty", label: "On Hand Qty", align: "right" },
   { key: "Days_Left", label: "Est. Days Left", align: "right" },
@@ -120,7 +120,7 @@ function formatDaysUnsold(value: unknown): string {
 
 const DEAD_STOCK_COLUMNS: DataTableColumn<DeadStockRow>[] = [
   { key: "Branch", label: "Branch" },
-  { key: "StockCode", label: "Stock Code" },
+  { key: "StockCode", label: "Stock Code", copyable: true },
   { key: "Description", label: "Description" },
   { key: "Category", label: "Category" },
   { key: "On_Hand_Qty", label: "On Hand Qty", align: "right" },

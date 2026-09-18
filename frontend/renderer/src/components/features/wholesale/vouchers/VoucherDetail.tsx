@@ -357,9 +357,12 @@ export function VoucherDetail({
               <div className="h-5 w-px bg-border" />
 
               <div className="min-w-0 flex items-center gap-2.5">
-                <h2 className="text-base font-bold text-text-primary tracking-tight truncate font-mono">
-                  {voucher.voucher_no}
-                </h2>
+                <div className="flex items-center gap-1">
+                  <h2 className="text-base font-bold text-text-primary tracking-tight truncate font-mono">
+                    {voucher.voucher_no}
+                  </h2>
+                  <CopyButton value={voucher.voucher_no} what="voucher no." />
+                </div>
                 <ReceivingBadge status={receivingStatus(voucher)} />
                 <PaymentBadge status={paymentStatus(voucher)} />
               </div>
@@ -545,6 +548,9 @@ export function VoucherDetail({
                   <TableContainer>
                     <Thead className="top-0">
                       <Tr>
+                        <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
+                          #
+                        </Th>
                         <Th className="min-w-[18rem]">Product</Th>
                         <Th className="min-w-[11rem]">Colors</Th>
                         <Th className="text-right whitespace-nowrap min-w-[12.5rem]">
@@ -571,63 +577,70 @@ export function VoucherDetail({
                         );
                         return (
                           <Tr key={field.id}>
+                            <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                              {index + 1}
+                            </Td>
                             <Td>
                               <div className="flex flex-col gap-1.5">
-                                <div className="flex items-center gap-1">
-                                  <Controller
-                                    control={control}
-                                    name={`voucher.lines.${index}.stock_code`}
-                                    render={({ field: stockField }) => (
-                                      <SuggestInput
-                                        bare
-                                        label={`Stock code for product ${index + 1}`}
-                                        placeholder="A1001"
-                                        suggestions={STOCK_CODES}
-                                        value={stockField.value}
-                                        onChange={(next) => {
-                                          stockField.onChange(next);
-                                          setStockCode(index, next);
-                                        }}
-                                        error={
-                                          duplicateStockCodeProblem(
-                                            voucher.lines,
-                                            index,
-                                          ) ?? undefined
-                                        }
-                                      />
-                                    )}
-                                  />
-                                  <CopyButton
-                                    value={line.stock_code}
-                                    what="stock code"
-                                  />
+                                <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                                    <Controller
+                                      control={control}
+                                      name={`voucher.lines.${index}.stock_code`}
+                                      render={({ field: stockField }) => (
+                                        <SuggestInput
+                                          bare
+                                          label={`Stock code for product ${index + 1}`}
+                                          placeholder="A1001"
+                                          suggestions={STOCK_CODES}
+                                          value={stockField.value}
+                                          onChange={(next) => {
+                                            stockField.onChange(next);
+                                            setStockCode(index, next);
+                                          }}
+                                          error={
+                                            duplicateStockCodeProblem(
+                                              voucher.lines,
+                                              index,
+                                            ) ?? undefined
+                                          }
+                                        />
+                                      )}
+                                    />
+                                    <CopyButton
+                                      value={line.stock_code}
+                                      what="stock code"
+                                    />
+                                  </div>
+                                  <div className="w-28 shrink-0">
+                                    <Controller
+                                      control={control}
+                                      name={`voucher.lines.${index}.product_group`}
+                                      render={({ field: groupField }) => (
+                                        <GroupSelect
+                                          label={`Group for product ${index + 1}`}
+                                          value={groupField.value}
+                                          onChange={groupField.onChange}
+                                        />
+                                      )}
+                                    />
+                                  </div>
                                 </div>
                                 <Controller
-                                    control={control}
-                                    name={`voucher.lines.${index}.description`}
-                                    render={({ field: descriptionField }) => (
-                                      <CellInput
-                                        label={`Description for product ${index + 1}`}
-                                        placeholder="Men's leather sandal"
-                                        multiline
-                                        value={descriptionField.value}
-                                        onChange={descriptionField.onChange}
-                                      />
-                                    )}
-                                  />
-                                  <Controller
-                                    control={control}
-                                    name={`voucher.lines.${index}.product_group`}
-                                    render={({ field: groupField }) => (
-                                      <GroupSelect
-                                        label={`Group for product ${index + 1}`}
-                                        value={groupField.value}
-                                        onChange={groupField.onChange}
-                                      />
-                                    )}
-                                  />
-                                </div>
-                              </Td>
+                                  control={control}
+                                  name={`voucher.lines.${index}.description`}
+                                  render={({ field: descriptionField }) => (
+                                    <CellInput
+                                      label={`Description for product ${index + 1}`}
+                                      placeholder="Men's leather sandal"
+                                      multiline
+                                      value={descriptionField.value}
+                                      onChange={descriptionField.onChange}
+                                    />
+                                  )}
+                                />
+                              </div>
+                            </Td>
                               <Td>
                                 <Controller
                                   control={control}

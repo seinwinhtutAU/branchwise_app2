@@ -15,6 +15,7 @@ import { formatBuyingPriceSource } from "@renderer/lib/buyingPriceSource";
 import { downloadCsv } from "@renderer/lib/csv";
 import { downloadExcel } from "@renderer/lib/excel";
 import { Button } from "@renderer/components/ui/Button";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
@@ -30,6 +31,7 @@ import {
 } from "@renderer/components/ui/Table";
 import { Pagination } from "@renderer/components/ui/Pagination";
 import { DownloadIcon, OverviewIcon } from "@renderer/components/ui/icons";
+import { CopyButton } from "@renderer/components/ui/CopyButton";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 import { useSettled } from "@renderer/lib/useSettled";
 import "@renderer/lib/reactTable";
@@ -299,18 +301,33 @@ function DataOverviewTable({
 
   const tableColumns = useMemo<ColumnDef<OverviewRow, unknown>[]>(
     () =>
-      visibleColumns.map((col) => ({
-        id: String(col.key),
-        accessorFn: (row: OverviewRow) => row[col.key],
-        header: () => (
-          <>
-            <SourceStrip bands={col.bands} />
-            {col.label}
-          </>
-        ),
-        cell: (info) => formatCell(col, info.getValue()),
-        meta: { align: col.align },
-      })),
+      visibleColumns.map((col) => {
+        const isCopyable = col.key === "StockCode";
+        return {
+          id: String(col.key),
+          accessorFn: (row: OverviewRow) => row[col.key],
+          header: () => (
+            <>
+              <SourceStrip bands={col.bands} />
+              {col.label}
+            </>
+          ),
+          cell: isCopyable
+            ? (info) => {
+                const val = info.getValue();
+                const str = val === null || val === undefined || val === "" ? "" : String(val);
+                if (!str) return <span className="text-text-muted">—</span>;
+                return (
+                  <div className="flex items-center gap-1 whitespace-nowrap">
+                    <span className="font-mono text-xs font-semibold text-brand">{str}</span>
+                    <CopyButton value={str} what={col.label.toLowerCase()} />
+                  </div>
+                );
+              }
+            : (info) => formatCell(col, info.getValue()),
+          meta: { align: col.align },
+        };
+      }),
     [visibleColumns],
   );
   const pagination: PaginationState = {
@@ -428,14 +445,10 @@ function DataOverviewTable({
                 <DownloadIcon className="w-4 h-4" />
                 Excel
               </Button>
-              <Button
-                variant="secondary"
-                size="sm"
+              <RefreshButton
                 onClick={reload}
-                loading={isRefreshing}
-              >
-                Refresh
-              </Button>
+                refreshing={isRefreshing}
+              />
             </div>
           }
         />

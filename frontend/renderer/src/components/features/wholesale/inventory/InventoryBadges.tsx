@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@renderer/lib/utils";
-import { Button } from "@renderer/components/ui/Button";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { EyeIcon, MoreIcon } from "@renderer/components/ui/icons";
 import {
   DotPill,
@@ -72,14 +72,10 @@ export function InventoryRefreshButton({
   refreshing: boolean;
 }): React.JSX.Element {
   return (
-    <Button
-      variant="secondary"
-      size="sm"
+    <RefreshButton
       onClick={onRefresh}
-      loading={refreshing}
-    >
-      Refresh
-    </Button>
+      refreshing={refreshing}
+    />
   );
 }
 

@@ -830,14 +830,18 @@ export function SettingsPage({
             <TableContainer>
               <Thead>
                 <Tr>
+                  <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                   <Th>Branch</Th>
                   <Th>Sale date format</Th>
                   <Th>Inventory date format</Th>
                 </Tr>
               </Thead>
               <Tbody>
-                {branches.map((branch) => (
+                {branches.map((branch, index) => (
                   <Tr key={branch.id}>
+                    <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                      {index + 1}
+                    </Td>
                     <Td>{branch.name}</Td>
                     <Td>
                       <Select

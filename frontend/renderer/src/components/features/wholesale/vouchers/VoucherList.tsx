@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from "react";
 import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
+import { cn } from "@renderer/lib/utils";
 import { Button } from "@renderer/components/ui/Button";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
+import { ColumnHeaderFilter } from "@renderer/components/ui/ColumnHeaderFilter";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
 import { Pagination } from "@renderer/components/ui/Pagination";
-import { Select } from "@renderer/components/ui/Select";
 import {
   TableContainer,
   Thead,
@@ -15,6 +17,7 @@ import {
   Td,
 } from "@renderer/components/ui/Table";
 import {
+  CheckIcon,
   CloseIcon,
   FactoryIcon,
   PlusIcon,
@@ -50,7 +53,6 @@ import {
   type PayFilter,
 } from "./types";
 import { ReceivingBadge, PaymentBadge, RowMenu } from "./VoucherBadges";
-import { SupplierVoucherTabs } from "./ToOrderView";
 
 export function VoucherList({
   vouchers,
@@ -76,7 +78,12 @@ export function VoucherList({
   const [search, setSearch] = useState("");
   const [receiving, setReceiving] = useState<ReceivingFilter>("all");
   const [pay, setPay] = useState<PayFilter>("all");
+  const [supplier, setSupplier] = useState("all");
   const [page, setPage] = useState(1);
+
+  const suppliers = useMemo(() => {
+    return [...new Set(vouchers.map((v) => v.supplier_name).filter(Boolean))].sort();
+  }, [vouchers]);
 
   const totalQty = vouchers.reduce(
     (sum, voucher) => sum + voucher.total_quantity_pairs,
@@ -117,10 +124,17 @@ export function VoucherList({
       const matchesReceiving =
         receiving === "all" || receivingStatus(voucher) === receiving;
       const matchesPay = pay === "all" || paymentStatus(voucher) === pay;
+      const matchesSupplier =
+        supplier === "all" || voucher.supplier_name === supplier;
 
-      return matchesQuery && matchesReceiving && matchesPay;
+      return (
+        matchesQuery &&
+        matchesReceiving &&
+        matchesPay &&
+        matchesSupplier
+      );
     });
-  }, [vouchers, search, receiving, pay]);
+  }, [vouchers, search, receiving, pay, supplier]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -129,15 +143,18 @@ export function VoucherList({
     safePage * PAGE_SIZE,
   );
   const isFiltered =
-    search.trim() !== "" || receiving !== "all" || pay !== "all";
+    search.trim() !== "" ||
+    receiving !== "all" ||
+    pay !== "all" ||
+    supplier !== "all";
 
   const searchInputRef = useSearchShortcut();
-  const isMac = typeof window !== "undefined" && Boolean(window.api?.isMac);
 
   function resetFilters(): void {
     setSearch("");
     setReceiving("all");
     setPay("all");
+    setSupplier("all");
     setPage(1);
   }
 
@@ -172,97 +189,72 @@ export function VoucherList({
       </CollapsibleKpiSummary>
 
       <Panel className="shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-          <div>
-            <h2 className="text-base font-semibold text-text-primary tracking-tight">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-base">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
               Supplier vouchers
             </h2>
-            <p className="text-sm text-text-muted mt-0.5">
-              Manage all supplier vouchers.
-            </p>
+            <div className="flex items-center gap-1.5 flex-wrap select-none">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium transition-all duration-150 border cursor-pointer bg-brand text-white border-brand shadow-xs"
+              >
+                <span>Vouchers</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums bg-white/20 text-white">
+                  {vouchers.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onToOrder}
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium transition-all duration-150 border cursor-pointer bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary"
+              >
+                <span>To Order</span>
+                {(toOrderCount ?? 0) > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums bg-brand-subtle text-brand font-bold">
+                    {toOrderCount}
+                  </span>
+                )}
+              </button>
+            </div>
+            {isFiltered && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={resetFilters}
+                className="text-xs h-6 px-1.5 text-text-muted hover:text-error"
+              >
+                <CloseIcon className="w-3.5 h-3.5" />
+                Clear
+              </Button>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
+
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-48 sm:w-64">
+              <Input
+                ref={searchInputRef}
+                aria-label="Search vouchers"
+                placeholder="Search vouchers… (/)"
+                startIcon={<SearchIcon className="w-3.5 h-3.5" />}
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+                className="h-8 text-xs"
+              />
+            </div>
+            <RefreshButton
               onClick={onRefresh}
-              loading={refreshing}
-            >
-              Refresh
-            </Button>
-            <Button onClick={onNew}>
-              <PlusIcon className="w-4 h-4" />
+              refreshing={refreshing}
+            />
+            <Button onClick={onNew} size="sm" className="h-8 text-xs">
+              <PlusIcon className="w-3.5 h-3.5" />
               New voucher
             </Button>
           </div>
-        </div>
-
-        <SupplierVoucherTabs
-          active="vouchers"
-          onVouchers={() => undefined}
-          onToOrder={onToOrder}
-          toOrderCount={toOrderCount}
-        />
-
-        <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-bg-subtle">
-          <div className="w-full sm:w-[28rem] lg:w-[32rem]">
-            <Input
-              ref={searchInputRef}
-              aria-label="Search vouchers"
-              placeholder="Search voucher no., supplier, cargo or product (/ or ⌘F)"
-              startIcon={<SearchIcon className="w-4 h-4" />}
-              endIcon={
-                <span className="text-[10px] text-text-muted/60 border border-border rounded px-1.5 py-0.5 select-none hidden sm:inline">
-                  {isMac ? "⌘F" : "Ctrl+F"}
-                </span>
-              }
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setPage(1);
-              }}
-            />
-          </div>
-          <div className="w-full sm:w-52">
-            <Select
-              aria-label="Filter by receiving status"
-              value={receiving}
-              onChange={(event) => {
-                setReceiving(event.target.value as ReceivingFilter);
-                setPage(1);
-              }}
-            >
-              <option value="all">Any receiving status</option>
-              {RECEIVING_STATUSES.map((option) => (
-                <option key={option} value={option}>
-                  {RECEIVING_LABELS[option]}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="w-full sm:w-48">
-            <Select
-              aria-label="Filter by payment"
-              value={pay}
-              onChange={(event) => {
-                setPay(event.target.value as PayFilter);
-                setPage(1);
-              }}
-            >
-              <option value="all">Any payment</option>
-              {PAYMENT_STATUSES.map((option) => (
-                <option key={option} value={option}>
-                  {PAYMENT_LABELS[option]}
-                </option>
-              ))}
-            </Select>
-          </div>
-          {isFiltered && (
-            <Button variant="ghost" size="sm" onClick={resetFilters}>
-              <CloseIcon className="w-4 h-4" />
-              Clear filters
-            </Button>
-          )}
         </div>
 
         {visible.length === 0 ? (
@@ -292,19 +284,192 @@ export function VoucherList({
             <TableContainer className="border-0 rounded-none">
               <Thead>
                 <Tr>
+                  <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                   <Th className="whitespace-nowrap min-w-[10rem]">Voucher no.</Th>
-                  <Th className="whitespace-nowrap min-w-[12rem]">Supplier / Factory</Th>
+                  <Th className="whitespace-nowrap min-w-[12rem]">
+                    {suppliers.length > 1 ? (
+                      <ColumnHeaderFilter
+                        label="Supplier / Factory"
+                        isActive={supplier !== "all"}
+                      >
+                        {(close) => (
+                          <div className="flex flex-col gap-1.5">
+                            <div className="font-semibold text-text-primary text-[11px] uppercase tracking-wider pb-1 border-b border-border">
+                              Filter Supplier
+                            </div>
+                            <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSupplier("all");
+                                  setPage(1);
+                                  close();
+                                }}
+                                className={cn(
+                                  "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                  supplier === "all"
+                                    ? "bg-brand/10 font-bold text-brand"
+                                    : "hover:bg-bg-subtle text-text-secondary",
+                                )}
+                              >
+                                <span>All suppliers</span>
+                                {supplier === "all" && (
+                                  <CheckIcon className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                              {suppliers.map((name) => (
+                                <button
+                                  key={name}
+                                  type="button"
+                                  onClick={() => {
+                                    setSupplier(name);
+                                    setPage(1);
+                                    close();
+                                  }}
+                                  className={cn(
+                                    "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                    supplier === name
+                                      ? "bg-brand/10 font-bold text-brand"
+                                      : "hover:bg-bg-subtle text-text-secondary",
+                                  )}
+                                >
+                                  <span>{name}</span>
+                                  {supplier === name && (
+                                    <CheckIcon className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </ColumnHeaderFilter>
+                    ) : (
+                      "Supplier / Factory"
+                    )}
+                  </Th>
                   <Th className="whitespace-nowrap">Date</Th>
                   <Th className="min-w-[17.5rem] whitespace-nowrap">
                     Received / Ordered
                   </Th>
-                  <Th className="whitespace-nowrap">Receiving status</Th>
-                  <Th className="whitespace-nowrap">Payment status</Th>
+                  <Th className="whitespace-nowrap">
+                    <ColumnHeaderFilter
+                      label="Receiving status"
+                      isActive={receiving !== "all"}
+                    >
+                      {(close) => (
+                        <div className="flex flex-col gap-1.5">
+                          <div className="font-semibold text-text-primary text-[11px] uppercase tracking-wider pb-1 border-b border-border">
+                            Filter Receiving Status
+                          </div>
+                          <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReceiving("all");
+                                setPage(1);
+                                close();
+                              }}
+                              className={cn(
+                                "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                receiving === "all"
+                                  ? "bg-brand/10 font-bold text-brand"
+                                  : "hover:bg-bg-subtle text-text-secondary",
+                              )}
+                            >
+                              <span>Any receiving status</span>
+                              {receiving === "all" && (
+                                <CheckIcon className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                            {RECEIVING_STATUSES.map((option) => (
+                              <button
+                                key={option}
+                                type="button"
+                                onClick={() => {
+                                  setReceiving(option);
+                                  setPage(1);
+                                  close();
+                                }}
+                                className={cn(
+                                  "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                  receiving === option
+                                    ? "bg-brand/10 font-bold text-brand"
+                                    : "hover:bg-bg-subtle text-text-secondary",
+                                )}
+                              >
+                                <span>{RECEIVING_LABELS[option]}</span>
+                                {receiving === option && (
+                                  <CheckIcon className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </ColumnHeaderFilter>
+                  </Th>
+                  <Th className="whitespace-nowrap">
+                    <ColumnHeaderFilter
+                      label="Payment status"
+                      isActive={pay !== "all"}
+                    >
+                      {(close) => (
+                        <div className="flex flex-col gap-1.5">
+                          <div className="font-semibold text-text-primary text-[11px] uppercase tracking-wider pb-1 border-b border-border">
+                            Filter Payment Status
+                          </div>
+                          <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPay("all");
+                                setPage(1);
+                                close();
+                              }}
+                              className={cn(
+                                "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                pay === "all"
+                                  ? "bg-brand/10 font-bold text-brand"
+                                  : "hover:bg-bg-subtle text-text-secondary",
+                              )}
+                            >
+                              <span>Any payment</span>
+                              {pay === "all" && (
+                                <CheckIcon className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                            {PAYMENT_STATUSES.map((option) => (
+                              <button
+                                key={option}
+                                type="button"
+                                onClick={() => {
+                                  setPay(option);
+                                  setPage(1);
+                                  close();
+                                }}
+                                className={cn(
+                                  "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                  pay === option
+                                    ? "bg-brand/10 font-bold text-brand"
+                                    : "hover:bg-bg-subtle text-text-secondary",
+                                )}
+                              >
+                                <span>{PAYMENT_LABELS[option]}</span>
+                                {pay === option && (
+                                  <CheckIcon className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </ColumnHeaderFilter>
+                  </Th>
                   <Th className="w-12 text-right" aria-label="Actions" />
                 </Tr>
               </Thead>
               <Tbody>
-                {visible.map((voucher) => {
+                {visible.map((voucher, index) => {
                   const remaining = remainingQty(voucher);
                   const receivedPairs = voucher.received_quantity_pairs ?? 0;
                   const orderedPairs = voucher.total_quantity_pairs;
@@ -312,8 +477,12 @@ export function VoucherList({
                   const canDelete = voucher.allowed_actions
                     ? voucher.allowed_actions.includes("delete")
                     : true;
+                  const rowNum = (safePage - 1) * PAGE_SIZE + index + 1;
                   return (
                     <Tr key={voucher.voucher_id}>
+                      <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                        {rowNum}
+                      </Td>
                       <Td className="whitespace-nowrap">
                         <Reference
                           value={voucher.voucher_no}
@@ -390,7 +559,7 @@ export function VoucherList({
                 })}
               </Tbody>
             </TableContainer>
-            <div className="px-6 py-3 border-t border-border">
+            <div className="px-4 py-1.5 border-t border-border">
               <Pagination
                 page={safePage}
                 totalPages={totalPages}

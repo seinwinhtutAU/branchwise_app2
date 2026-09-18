@@ -5,6 +5,7 @@ import { useUrlQueries } from "@renderer/lib/queryClient";
 import type { BranchOption } from "@renderer/lib/useBranches";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Select } from "@renderer/components/ui/Select";
@@ -442,14 +443,10 @@ export function BusinessAlertsPage({
         title="Business Alerts"
         description="How every retail branch is doing, and the sales, profit, inventory and customer problems found in this period."
         action={
-          <Button
-            variant="secondary"
-            size="sm"
+          <RefreshButton
             onClick={reload}
-            loading={isRefreshing}
-          >
-            Refresh
-          </Button>
+            refreshing={isRefreshing}
+          />
         }
       />
 

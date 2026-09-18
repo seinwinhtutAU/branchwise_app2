@@ -2,11 +2,12 @@ import { useMemo, useState } from "react";
 import { cn } from "@renderer/lib/utils";
 import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import { Button } from "@renderer/components/ui/Button";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
+import { ColumnHeaderFilter } from "@renderer/components/ui/ColumnHeaderFilter";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
 import { Pagination } from "@renderer/components/ui/Pagination";
-import { Select } from "@renderer/components/ui/Select";
 import {
   TableContainer,
   Tbody,
@@ -148,7 +149,6 @@ export function OrderList({
     quickView !== "all";
 
   const searchInputRef = useSearchShortcut();
-  const isMac = typeof window !== "undefined" && Boolean(window.api?.isMac);
 
   // Quick filter counts based on actionable operational status
   const countAll = orders.length;
@@ -203,167 +203,118 @@ export function OrderList({
       </CollapsibleKpiSummary>
 
       <Panel className="shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-          <div>
-            <h2 className="text-base font-semibold text-text-primary tracking-tight">
-              Customer orders
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-base">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
+              Orders
             </h2>
-            <p className="text-sm text-text-muted mt-0.5">
-              Manage all customer orders.
-            </p>
+            <div className="flex items-center gap-1.5 flex-wrap select-none">
+              <button
+                type="button"
+                onClick={() => handleQuickFilter("all")}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium transition-all duration-150 border cursor-pointer",
+                  quickView === "all" && status === "all" && pay === "all"
+                    ? "bg-brand text-white border-brand shadow-xs"
+                    : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
+                )}
+              >
+                <span>All</span>
+                <span
+                  className={cn(
+                    "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
+                    quickView === "all" && status === "all" && pay === "all"
+                      ? "bg-white/20 text-white"
+                      : "bg-bg-raised text-text-muted",
+                  )}
+                >
+                  {countAll}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleQuickFilter("ready_to_deliver")}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium transition-all duration-150 border cursor-pointer",
+                  quickView === "ready_to_deliver"
+                    ? "bg-brand text-white border-brand shadow-xs"
+                    : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
+                )}
+              >
+                <span>Ready to Deliver</span>
+                <span
+                  className={cn(
+                    "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
+                    quickView === "ready_to_deliver"
+                      ? "bg-white/20 text-white"
+                      : "bg-brand-subtle text-brand font-bold",
+                  )}
+                >
+                  {countReadyToDeliver}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleQuickFilter("unpaid")}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium transition-all duration-150 border cursor-pointer",
+                  quickView === "unpaid"
+                    ? "bg-error text-white border-error shadow-xs"
+                    : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
+                )}
+              >
+                <span>Unpaid</span>
+                <span
+                  className={cn(
+                    "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
+                    quickView === "unpaid"
+                      ? "bg-white/20 text-white"
+                      : "bg-error-subtle text-error font-bold",
+                  )}
+                >
+                  {countUnpaid}
+                </span>
+              </button>
+            </div>
+            {isFiltered && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={resetFilters}
+                className="text-xs h-6 px-1.5 text-text-muted hover:text-error"
+              >
+                <CloseIcon className="w-3.5 h-3.5" />
+                Clear
+              </Button>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
+
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-48 sm:w-56">
+              <Input
+                ref={searchInputRef}
+                aria-label="Search orders"
+                placeholder="Search orders… (/)"
+                startIcon={<SearchIcon className="w-3.5 h-3.5" />}
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+                className="h-8 text-xs"
+              />
+            </div>
+            <RefreshButton
               onClick={onRefresh}
-              loading={refreshing}
-            >
-              Refresh
-            </Button>
-            <Button onClick={onNew}>
-              <PlusIcon className="w-4 h-4" />
+              refreshing={refreshing}
+            />
+            <Button onClick={onNew} size="sm" className="h-8 text-xs">
+              <PlusIcon className="w-3.5 h-3.5" />
               New order
             </Button>
           </div>
-        </div>
-
-        {/* Quick Filter Chips Bar */}
-        <div className="flex flex-wrap items-center gap-2 px-6 py-2.5 border-b border-border bg-bg-base select-none">
-          <span className="text-xs font-semibold uppercase tracking-wider text-text-muted mr-1">
-            Quick Views:
-          </span>
-          <button
-            type="button"
-            onClick={() => handleQuickFilter("all")}
-            className={cn(
-              "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 border",
-              quickView === "all" && status === "all" && pay === "all"
-                ? "bg-brand text-white border-brand shadow-xs"
-                : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
-            )}
-          >
-            <span>All Orders</span>
-            <span
-              className={cn(
-                "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
-                quickView === "all" && status === "all" && pay === "all"
-                  ? "bg-white/20 text-white"
-                  : "bg-bg-raised text-text-muted",
-              )}
-            >
-              {countAll}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleQuickFilter("ready_to_deliver")}
-            className={cn(
-              "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 border",
-              quickView === "ready_to_deliver"
-                ? "bg-brand text-white border-brand shadow-xs"
-                : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
-            )}
-          >
-            <span>Ready to Deliver</span>
-            <span
-              className={cn(
-                "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
-                quickView === "ready_to_deliver"
-                  ? "bg-white/20 text-white"
-                  : "bg-brand-subtle text-brand font-bold",
-              )}
-            >
-              {countReadyToDeliver}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleQuickFilter("unpaid")}
-            className={cn(
-              "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 border",
-              quickView === "unpaid"
-                ? "bg-error text-white border-error shadow-xs"
-                : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
-            )}
-          >
-            <span>Unpaid</span>
-            <span
-              className={cn(
-                "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
-                quickView === "unpaid"
-                  ? "bg-white/20 text-white"
-                  : "bg-error-subtle text-error font-bold",
-              )}
-            >
-              {countUnpaid}
-            </span>
-          </button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-bg-subtle">
-          <div className="w-full sm:w-[28rem] lg:w-[32rem]">
-            <Input
-              ref={searchInputRef}
-              aria-label="Search orders"
-              placeholder="Search customer, order no. or product (/ or ⌘F)"
-              startIcon={<SearchIcon className="w-4 h-4" />}
-              endIcon={
-                <span className="text-[10px] text-text-muted/60 border border-border rounded px-1.5 py-0.5 select-none hidden sm:inline">
-                  {isMac ? "⌘F" : "Ctrl+F"}
-                </span>
-              }
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setPage(1);
-              }}
-            />
-          </div>
-          <div className="w-full sm:w-52">
-            <Select
-              aria-label="Filter by status"
-              value={status}
-              onChange={(event) => {
-                setStatus(event.target.value as StatusFilter);
-                setQuickView("all");
-                setPage(1);
-              }}
-            >
-              <option value="all">Any order status</option>
-              {ORDER_STATUSES.map((option) => (
-                <option key={option} value={option}>
-                  {STATUS_LABELS[option]}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="w-full sm:w-48">
-            <Select
-              aria-label="Filter by payment"
-              value={pay}
-              onChange={(event) => {
-                setPay(event.target.value as PayFilter);
-                setQuickView("all");
-                setPage(1);
-              }}
-            >
-              <option value="all">Any payment</option>
-              {PAYMENT_STATUSES.map((option) => (
-                <option key={option} value={option}>
-                  {PAYMENT_LABELS[option]}
-                </option>
-              ))}
-            </Select>
-          </div>
-          {isFiltered && (
-            <Button variant="ghost" size="sm" onClick={resetFilters}>
-              <CloseIcon className="w-4 h-4" />
-              Clear filters
-            </Button>
-          )}
         </div>
 
         {visible.length === 0 ? (
@@ -393,20 +344,123 @@ export function OrderList({
             <TableContainer className="border-0 rounded-none">
               <Thead>
                 <Tr>
+                  <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                   <Th className="whitespace-nowrap">Order no.</Th>
                   <Th>Customer</Th>
                   <Th>Date</Th>
                   <Th className="min-w-[17.5rem] whitespace-nowrap">
                     Delivered / Ordered
                   </Th>
-                  <Th className="whitespace-nowrap">Order status</Th>
-                  <Th className="whitespace-nowrap">Payment status</Th>
+                  <Th className="whitespace-nowrap">
+                    <ColumnHeaderFilter
+                      label="Order status"
+                      isActive={status !== "all"}
+                    >
+                      {(close) => (
+                        <div className="flex flex-col gap-1.5">
+                          <div className="font-semibold text-text-primary text-[11px] uppercase tracking-wider pb-1 border-b border-border">
+                            Filter by Status
+                          </div>
+                          <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStatus("all");
+                                setPage(1);
+                                close();
+                              }}
+                              className={cn(
+                                "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                status === "all"
+                                  ? "bg-brand/10 font-bold text-brand"
+                                  : "hover:bg-bg-raised text-text-secondary",
+                              )}
+                            >
+                              <span>All statuses</span>
+                            </button>
+                            {ORDER_STATUSES.map((opt) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                onClick={() => {
+                                  setStatus(opt);
+                                  setQuickView("all");
+                                  setPage(1);
+                                  close();
+                                }}
+                                className={cn(
+                                  "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                  status === opt
+                                    ? "bg-brand/10 font-bold text-brand"
+                                    : "hover:bg-bg-raised text-text-secondary",
+                                )}
+                              >
+                                <span>{STATUS_LABELS[opt]}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </ColumnHeaderFilter>
+                  </Th>
+                  <Th className="whitespace-nowrap">
+                    <ColumnHeaderFilter
+                      label="Payment status"
+                      isActive={pay !== "all"}
+                    >
+                      {(close) => (
+                        <div className="flex flex-col gap-1.5">
+                          <div className="font-semibold text-text-primary text-[11px] uppercase tracking-wider pb-1 border-b border-border">
+                            Filter by Payment
+                          </div>
+                          <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPay("all");
+                                setPage(1);
+                                close();
+                              }}
+                              className={cn(
+                                "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                pay === "all"
+                                  ? "bg-brand/10 font-bold text-brand"
+                                  : "hover:bg-bg-raised text-text-secondary",
+                              )}
+                            >
+                              <span>All payments</span>
+                            </button>
+                            {PAYMENT_STATUSES.map((opt) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                onClick={() => {
+                                  setPay(opt);
+                                  setQuickView("all");
+                                  setPage(1);
+                                  close();
+                                }}
+                                className={cn(
+                                  "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                  pay === opt
+                                    ? "bg-brand/10 font-bold text-brand"
+                                    : "hover:bg-bg-raised text-text-secondary",
+                                )}
+                              >
+                                <span>{PAYMENT_LABELS[opt]}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </ColumnHeaderFilter>
+                  </Th>
                   <Th className="w-28 whitespace-nowrap">Action</Th>
                   <Th className="w-16" aria-label="Actions" />
                 </Tr>
               </Thead>
               <Tbody>
-                {visible.map((order) => {
+                {visible.map((order, index) => {
                   const remaining = remainingQty(order);
                   const action = nextAction(order);
                   const rowTint =
@@ -417,10 +471,14 @@ export function OrderList({
                     action === "deliver"
                       ? "border-l-4 border-l-brand"
                       : undefined;
+                  const rowNum = (safePage - 1) * PAGE_SIZE + index + 1;
 
                   return (
                     <Tr key={order.order_id} className={rowTint}>
-                      <Td className={cn("whitespace-nowrap", firstCellBorder)}>
+                      <Td className={cn("text-center text-xs font-mono text-text-muted tabular-nums select-none", firstCellBorder)}>
+                        {rowNum}
+                      </Td>
+                      <Td className="whitespace-nowrap">
                         <Reference
                           value={order.order_no}
                           what="order no."
@@ -513,7 +571,7 @@ export function OrderList({
               </Tbody>
             </TableContainer>
 
-            <div className="px-6 py-3 border-t border-border">
+            <div className="px-4 py-1.5 border-t border-border">
               <Pagination
                 page={safePage}
                 totalPages={totalPages}

@@ -15,6 +15,7 @@ import {
   Td,
 } from "@renderer/components/ui/Table";
 import { DashboardIcon, InventoryIcon } from "@renderer/components/ui/icons";
+import { CopyButton } from "@renderer/components/ui/CopyButton";
 import { RefreshingHint, StatTile, WarningsTile } from "./shared";
 import {
   dashboardUrl,
@@ -158,6 +159,7 @@ function LowStockTable({
       <TableContainer>
         <Thead>
           <Tr>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
             <Th>Status</Th>
             <Th>Stock Code</Th>
             <Th>Description</Th>
@@ -166,15 +168,21 @@ function LowStockTable({
           </Tr>
         </Thead>
         <Tbody>
-          {preview.map((item) => (
+          {preview.map((item, index) => (
             <Tr key={item.stock_code}>
+              <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                {index + 1}
+              </Td>
               <Td>
                 <Badge variant={STATUS_BADGE_VARIANT[item.status]}>
                   {item.status}
                 </Badge>
               </Td>
-              <Td className="font-mono text-xs whitespace-nowrap">
-                {item.stock_code}
+              <Td>
+                <div className="flex items-center gap-1 whitespace-nowrap">
+                  <span className="font-mono text-xs font-semibold text-brand">{item.stock_code}</span>
+                  <CopyButton value={item.stock_code} what="stock code" />
+                </div>
               </Td>
               <Td>{item.description}</Td>
               <Td className="text-right tabular-nums">
@@ -219,6 +227,7 @@ function DeadStockTable({
       <TableContainer>
         <Thead>
           <Tr>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
             <Th>Stock Code</Th>
             <Th>Description</Th>
             <Th>Category</Th>
@@ -227,10 +236,16 @@ function DeadStockTable({
           </Tr>
         </Thead>
         <Tbody>
-          {preview.map((item) => (
+          {preview.map((item, index) => (
             <Tr key={item.stock_code}>
-              <Td className="font-mono text-xs whitespace-nowrap">
-                {item.stock_code}
+              <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                {index + 1}
+              </Td>
+              <Td>
+                <div className="flex items-center gap-1 whitespace-nowrap">
+                  <span className="font-mono text-xs font-semibold text-brand">{item.stock_code}</span>
+                  <CopyButton value={item.stock_code} what="stock code" />
+                </div>
               </Td>
               <Td>{item.description}</Td>
               <Td className="text-text-muted">{item.category}</Td>

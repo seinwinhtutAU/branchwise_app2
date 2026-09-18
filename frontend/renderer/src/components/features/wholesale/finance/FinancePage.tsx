@@ -5,6 +5,7 @@ import { type Session } from "@renderer/lib/auth";
 import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
 import { Button } from "@renderer/components/ui/Button";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
 import { Select } from "@renderer/components/ui/Select";
@@ -31,7 +32,7 @@ import {
   WHOLESALE_FINANCE_CUSTOMERS_URL,
   type ReceivingWire,
 } from "@renderer/components/features/wholesale/shared/api";
-import { DotPill } from "@renderer/components/features/wholesale/shared/ui";
+import { DotPill, Reference } from "@renderer/components/features/wholesale/shared/ui";
 import {
   formatDate,
   formatKyat,
@@ -274,14 +275,10 @@ export default function FinancePage({
             See who owes what, and whether it is paid.
           </p>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
+        <RefreshButton
           onClick={refreshFinance}
-          loading={isRefreshing}
-        >
-          Refresh
-        </Button>
+          refreshing={isRefreshing}
+        />
       </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <MoneyCard
@@ -511,6 +508,7 @@ function FinanceTable({
         <TableContainer className="rounded-none border-0">
           <Thead>
             <Tr>
+              <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
               <Th>Name</Th>
               <Th>Reference</Th>
               <Th className="text-right">Total Amount</Th>
@@ -521,17 +519,19 @@ function FinanceTable({
             </Tr>
           </Thead>
           <Tbody>
-            {rows.map((row) => (
+            {rows.map((row, index) => (
               <Tr key={row.order_id}>
+                <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                  {index + 1}
+                </Td>
                 <Td className="font-medium">{row.customer_name}</Td>
-                <Td>
-                  <button
-                    type="button"
+                <Td className="whitespace-nowrap">
+                  <Reference
+                    value={row.order_no}
+                    what="order no."
                     onClick={() => onOpenReference(row.order_id)}
-                    className="font-semibold text-brand hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-                  >
-                    {row.order_no}
-                  </button>
+                    singleLine
+                  />
                 </Td>
                 <Td className="text-right tabular-nums whitespace-nowrap">
                   {formatKyat(row.total_amount)}
@@ -615,6 +615,7 @@ function SupplierTable({
         <TableContainer className="rounded-none border-0">
           <Thead>
             <Tr>
+              <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
               <Th>Name</Th>
               <Th>Reference</Th>
               <Th className="text-right">Total Amount</Th>
@@ -625,17 +626,19 @@ function SupplierTable({
             </Tr>
           </Thead>
           <Tbody>
-            {rows.map((row) => (
+            {rows.map((row, index) => (
               <Tr key={row.voucher.voucher_id}>
+                <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                  {index + 1}
+                </Td>
                 <Td className="font-medium">{row.voucher.supplier_name}</Td>
-                <Td>
-                  <button
-                    type="button"
+                <Td className="whitespace-nowrap">
+                  <Reference
+                    value={row.voucher.voucher_no}
+                    what="voucher no."
                     onClick={() => onOpenReference(row.voucher.voucher_id)}
-                    className="font-semibold text-brand hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-                  >
-                    {row.voucher.voucher_no}
-                  </button>
+                    singleLine
+                  />
                 </Td>
                 <Td className="text-right tabular-nums whitespace-nowrap">
                   {formatKyat(row.totalAmount)}
@@ -708,6 +711,7 @@ function ShipmentCostTable({
         <TableContainer className="rounded-none border-0">
           <Thead>
             <Tr>
+              <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
               <Th>Receiving</Th>
               <Th>Date</Th>
               <Th>Shipment</Th>
@@ -720,13 +724,24 @@ function ShipmentCostTable({
             </Tr>
           </Thead>
           <Tbody>
-            {rows.map((row) => (
+            {rows.map((row, index) => (
               <Tr key={row.id}>
-                <Td className="font-semibold text-brand">{row.receivingNo}</Td>
+                <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                  {index + 1}
+                </Td>
+                <Td className="whitespace-nowrap">
+                  <Reference value={row.receivingNo} what="receiving no." singleLine />
+                </Td>
                 <Td className="whitespace-nowrap">
                   {row.costDate ? formatDate(row.costDate) : "—"}
                 </Td>
-                <Td>{row.shipmentNo}</Td>
+                <Td className="whitespace-nowrap">
+                  {row.shipmentNo ? (
+                    <Reference value={row.shipmentNo} what="shipment no." singleLine />
+                  ) : (
+                    "—"
+                  )}
+                </Td>
                 <Td className="font-medium">{row.supplierName}</Td>
                 <Td>{row.stage}</Td>
                 <Td>{row.carrier}</Td>
@@ -740,7 +755,7 @@ function ShipmentCostTable({
           </Tbody>
           <tfoot>
             <Tr className="bg-bg-subtle">
-              <Td colSpan={7} className="text-right font-semibold">
+              <Td colSpan={8} className="text-right font-semibold">
                 Total
               </Td>
               <Td className="text-right font-bold tabular-nums whitespace-nowrap">

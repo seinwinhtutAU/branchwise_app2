@@ -195,6 +195,7 @@ export function PaymentsTable({
       <TableContainer>
         <Thead className="top-0">
           <Tr>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
             <Th className="w-40">Date</Th>
             <Th className="text-right w-44">Amount</Th>
             <Th>Note</Th>
@@ -205,7 +206,7 @@ export function PaymentsTable({
           {formPayments.length === 0 && (
             <Tr>
               <Td
-                colSpan={readOnly ? 3 : 4}
+                colSpan={readOnly ? 4 : 5}
                 className="text-text-muted text-sm"
               >
                 Nothing paid yet.
@@ -217,6 +218,9 @@ export function PaymentsTable({
             if (!payment) return null;
             return (
               <Tr key={field.id}>
+                <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                  {index + 1}
+                </Td>
                 {onUpdate && !readOnly ? (
                   <Td>
                     <Controller
@@ -308,7 +312,7 @@ export function PaymentsTable({
             );
           })}
           <Tr className="bg-bg-subtle hover:bg-bg-subtle">
-            <Td className="font-semibold">Paid so far</Td>
+            <Td colSpan={2} className="font-semibold">Paid so far</Td>
             <Td className="text-right tabular-nums font-semibold text-success">
               {formatKyat(
                 formPayments.reduce((sum, payment) => sum + payment.amount, 0),

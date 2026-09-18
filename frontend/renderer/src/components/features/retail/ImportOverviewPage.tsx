@@ -6,6 +6,7 @@ import { useToast } from "@renderer/lib/useToast";
 import { cn } from "@renderer/lib/utils";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Select } from "@renderer/components/ui/Select";
@@ -264,17 +265,13 @@ function ImportOverviewPage({
         title="Import Overview"
         description="Is this import pipeline actually working: are branches uploading on schedule, and when they do, did cleaning and confirm handle the file correctly — separate from Warning, which checks data already saved."
         action={
-          <Button
-            variant="secondary"
-            size="sm"
+          <RefreshButton
             onClick={() => {
               loadFreshness();
               loadHealth();
             }}
-            loading={freshnessRefreshing || healthRefreshing}
-          >
-            Refresh
-          </Button>
+            refreshing={freshnessRefreshing || healthRefreshing}
+          />
         }
       />
 
@@ -325,6 +322,7 @@ function ImportOverviewPage({
             <TableContainer>
               <Thead>
                 <Tr>
+                  <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                   <Th>Branch</Th>
                   <Th>Sales</Th>
                   <Th>Inventory</Th>
@@ -337,8 +335,11 @@ function ImportOverviewPage({
                 </Tr>
               </Thead>
               <Tbody>
-                {freshness.map((row) => (
+                {freshness.map((row, index) => (
                   <Tr key={row.branch_id}>
+                    <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                      {index + 1}
+                    </Td>
                     <Td>{row.branch_name}</Td>
                     <Td>
                       <FreshnessCell iso={row.sales_last_imported_at} />
@@ -418,6 +419,7 @@ function ImportOverviewPage({
                   <TableContainer>
                     <Thead>
                       <Tr>
+                        <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                         <Th>Confirmed</Th>
                         <Th>Type</Th>
                         <Th>Branch</Th>
@@ -428,8 +430,11 @@ function ImportOverviewPage({
                       </Tr>
                     </Thead>
                     <Tbody>
-                      {health.batches_to_review.map((row) => (
+                      {health.batches_to_review.map((row, index) => (
                         <Tr key={row.batch_id}>
+                          <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                            {index + 1}
+                          </Td>
                           <Td className="whitespace-nowrap">
                             {formatDate(row.confirmed_at)}
                           </Td>
@@ -496,6 +501,7 @@ function ImportOverviewPage({
                   <TableContainer>
                     <Thead>
                       <Tr>
+                        <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                         <Th>Slip ID</Th>
                         <Th>Branch</Th>
                         <Th>Date</Th>
@@ -506,8 +512,11 @@ function ImportOverviewPage({
                       </Tr>
                     </Thead>
                     <Tbody>
-                      {health.slip_total_mismatches.map((row) => (
+                      {health.slip_total_mismatches.map((row, index) => (
                         <Tr key={`${row.batch_id}-${row.slip_id}`}>
+                          <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                            {index + 1}
+                          </Td>
                           <Td className="font-mono text-xs">{row.slip_id}</Td>
                           <Td className="font-medium">{row.branch_name}</Td>
                           <Td className="whitespace-nowrap">

@@ -12,6 +12,7 @@ import {
 } from "@renderer/components/ui/Table";
 import { ChevronLeftIcon } from "@renderer/components/ui/icons";
 import {
+  CopyButton,
   DotPill,
   Panel,
   ReadOnlyField,
@@ -209,9 +210,12 @@ export function StockDetail({
         <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-4 pb-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-semibold text-text-primary tracking-tight">
-                {line.stock_code}
-              </h2>
+              <div className="flex items-center gap-1">
+                <h2 className="text-lg font-semibold text-text-primary tracking-tight">
+                  {line.stock_code}
+                </h2>
+                <CopyButton value={line.stock_code} what="stock code" />
+              </div>
               <DotPill
                 label={health}
                 className={HEALTH_STYLES[health].bg}
@@ -312,6 +316,7 @@ export function StockDetail({
               <TableContainer>
                 <Thead className="top-0">
                   <Tr>
+                    <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                     <Th className="whitespace-nowrap">Order</Th>
                     <Th>Date</Th>
                     <Th>Ordered colors</Th>
@@ -331,7 +336,7 @@ export function StockDetail({
                   {relatedOrders.length === 0 ? (
                     <Tr>
                       <Td
-                        colSpan={7}
+                        colSpan={8}
                         className="py-8 text-center text-text-muted"
                       >
                         No customer orders use this stock code.
@@ -340,7 +345,7 @@ export function StockDetail({
                   ) : (
                     <>
                       {relatedOrders.map(
-                        ({ order, ordered, received, remaining }) => {
+                        ({ order, ordered, received, remaining }, index) => {
                           const colorCheck = colorAvailabilityForOrder(
                             order,
                             line.stock_code,
@@ -359,6 +364,9 @@ export function StockDetail({
                             RELATED_ORDER_STATUS_STYLES.waiting_for_stock;
                           return (
                             <Tr key={order.order_id}>
+                              <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                                {index + 1}
+                              </Td>
                               <Td className="whitespace-nowrap">
                                 <Reference
                                   value={order.order_no}
@@ -447,6 +455,7 @@ export function StockDetail({
               <TableContainer>
                 <Thead className="top-0">
                   <Tr>
+                    <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                     <Th className="whitespace-nowrap">Date</Th>
                     <Th>Color</Th>
                     <Th>Movement</Th>
@@ -458,7 +467,7 @@ export function StockDetail({
                   </Tr>
                 </Thead>
                 <Tbody>
-                  {movements.map((movement) => {
+                  {movements.map((movement, index) => {
                     const movementStyle = MOVEMENT_STYLES[
                       movement.movement_type
                     ] ?? {
@@ -467,6 +476,9 @@ export function StockDetail({
                     };
                     return (
                       <Tr key={movement.movement_id}>
+                        <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                          {index + 1}
+                        </Td>
                         <Td className="text-text-muted whitespace-nowrap">
                           {formatDate(movement.moved_on)}
                         </Td>

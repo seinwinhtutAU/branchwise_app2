@@ -549,7 +549,7 @@ export function AppShell({
             page is open — and so no page has to know about the network to explain itself. */}
           <ConnectionBanner />
         </div>
-        <main className="w-full px-4 sm:px-5 py-5 flex flex-col gap-5 flex-1">
+        <main className="w-full px-3.5 sm:px-4.5 py-3 sm:py-3.5 flex flex-col gap-3 sm:gap-3.5 flex-1">
           {children}
         </main>
       </div>

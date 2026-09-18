@@ -5,6 +5,7 @@ import { useUrlQuery } from "@renderer/lib/queryClient";
 import { cn } from "@renderer/lib/utils";
 import { useImportFilePicker } from "@renderer/lib/useImportFilePicker";
 import { Button } from "@renderer/components/ui/Button";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { Badge } from "@renderer/components/ui/Badge";
 import { CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
@@ -845,14 +846,10 @@ function WarningsPage({
           title="Warning"
           description={`Short, actionable data problems, grouped by area — open a row's Details for the full record. The Sale "fix these numbers" check (and the missing-inventory-record check's sale side) covers the last ${saleWindowDays === 1 ? "day" : `${saleWindowDays} days`}; Purchase (and its purchase side) covers the last ${purchaseWindowDays === 1 ? "day" : `${purchaseWindowDays} days`} (business-wide — an admin can change these in Settings).`}
           action={
-            <Button
-              variant="secondary"
-              size="sm"
+            <RefreshButton
               onClick={reload}
-              loading={isRefreshing}
-            >
-              Refresh
-            </Button>
+              refreshing={isRefreshing}
+            />
           }
         />
       </div>

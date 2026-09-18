@@ -26,7 +26,6 @@ import {
   EDITABLE,
   GroupSelect,
   Panel,
-  ProductCell,
   ReadOnlyField,
   Required,
   ReviewFact,
@@ -536,6 +535,7 @@ export function NewVoucherForm({
                   <TableContainer className="rounded-none border-0 border-t border-border">
                     <Thead>
                       <Tr>
+                        <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                         <Th className="whitespace-nowrap">Order no.</Th>
                         <Th>Customer</Th>
                         <Th className="min-w-[12rem]">Product</Th>
@@ -549,6 +549,9 @@ export function NewVoucherForm({
                     <Tbody>
                       {orderLines.map((row, index) => (
                         <Tr key={`${row.order_no}-${row.stock_code}-${index}`}>
+                          <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                            {index + 1}
+                          </Td>
                           <Td className="whitespace-nowrap">
                             <Reference value={row.order_no} what="order no." />
                           </Td>
@@ -557,7 +560,7 @@ export function NewVoucherForm({
                           </Td>
                           <Td>
                             <div className="flex min-w-0 flex-col items-start gap-0.5">
-                              <div className="flex min-w-0 items-center gap-1">
+                              <div className="flex min-w-0 items-center gap-1.5 flex-wrap">
                                 <span className="break-words font-semibold text-brand">
                                   {row.stock_code || "No stock code"}
                                 </span>
@@ -567,12 +570,12 @@ export function NewVoucherForm({
                                     what="stock code"
                                   />
                                 )}
+                                <span className="text-xs text-text-muted">
+                                  · {GROUP_LABELS[row.product_group]}
+                                </span>
                               </div>
                               <span className="break-words text-text-primary">
                                 {row.description || "—"}
-                              </span>
-                              <span className="text-xs text-text-muted">
-                                {GROUP_LABELS[row.product_group]}
                               </span>
                             </div>
                           </Td>
@@ -603,6 +606,7 @@ export function NewVoucherForm({
             <TableContainer>
               <Thead className="top-0">
                 <Tr>
+                  <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                   <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[13rem]">Colors</Th>
                   <Th className="text-right whitespace-nowrap">
@@ -624,33 +628,51 @@ export function NewVoucherForm({
                   );
                   return (
                     <Tr key={field.id}>
+                      <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                        {index + 1}
+                      </Td>
                       <Td className="min-w-[18rem]">
-                        <div className="flex min-w-0 flex-col gap-1.5">
-                          <div className="flex min-w-0 items-start gap-1">
-                            <Controller
-                              control={control}
-                              name={`lines.${index}.stock_code`}
-                              render={() => (
-                                <SuggestInput
-                                  bare
-                                  label={`Stock code for product ${index + 1}`}
-                                  placeholder="A1001"
-                                  suggestions={STOCK_CODES}
-                                  value={line.stock_code}
-                                  onChange={(next) => setStockCode(index, next)}
-                                  error={
-                                    errors.lines?.[index]?.stock_code
-                                      ?.message ??
-                                    duplicateStockCodeProblem(lines, index) ??
-                                    undefined
-                                  }
-                                />
-                              )}
-                            />
-                            <CopyButton
-                              value={line.stock_code}
-                              what="stock code"
-                            />
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1 flex-1 min-w-0">
+                              <Controller
+                                control={control}
+                                name={`lines.${index}.stock_code`}
+                                render={() => (
+                                  <SuggestInput
+                                    bare
+                                    label={`Stock code for product ${index + 1}`}
+                                    placeholder="A1001"
+                                    suggestions={STOCK_CODES}
+                                    value={line.stock_code}
+                                    onChange={(next) => setStockCode(index, next)}
+                                    error={
+                                      errors.lines?.[index]?.stock_code
+                                        ?.message ??
+                                      duplicateStockCodeProblem(lines, index) ??
+                                      undefined
+                                    }
+                                  />
+                                )}
+                              />
+                              <CopyButton
+                                value={line.stock_code}
+                                what="stock code"
+                              />
+                            </div>
+                            <div className="w-28 shrink-0">
+                              <Controller
+                                control={control}
+                                name={`lines.${index}.product_group`}
+                                render={({ field: groupField }) => (
+                                  <GroupSelect
+                                    label={`Group for product ${index + 1}`}
+                                    value={groupField.value}
+                                    onChange={groupField.onChange}
+                                  />
+                                )}
+                              />
+                            </div>
                           </div>
                           <Controller
                             control={control}
@@ -665,17 +687,6 @@ export function NewVoucherForm({
                                 error={
                                   errors.lines?.[index]?.description?.message
                                 }
-                              />
-                            )}
-                          />
-                          <Controller
-                            control={control}
-                            name={`lines.${index}.product_group`}
-                            render={({ field: groupField }) => (
-                              <GroupSelect
-                                label={`Group for product ${index + 1}`}
-                                value={groupField.value}
-                                onChange={groupField.onChange}
                               />
                             )}
                           />
@@ -872,6 +883,7 @@ export function NewVoucherForm({
             <TableContainer>
               <Thead className="top-0">
                 <Tr>
+                  <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                   <Th className="min-w-[18rem]">Product</Th>
                   <Th className="min-w-[13rem]">Colors</Th>
                   <Th className="text-right whitespace-nowrap">
@@ -891,11 +903,14 @@ export function NewVoucherForm({
                   const qty = draftPairs(line);
                   return (
                     <Tr key={index}>
+                      <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                        {index + 1}
+                      </Td>
                       <Td className="min-w-[18rem]">
-                        <div className="flex min-w-0 flex-col gap-1.5">
-                          <div className="flex items-center gap-1">
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="font-semibold text-brand break-words">
-                              {line.stock_code}
+                              {line.stock_code || "—"}
                             </span>
                             {line.stock_code && (
                               <CopyButton
@@ -903,11 +918,13 @@ export function NewVoucherForm({
                                 what="stock code"
                               />
                             )}
+                            <span className="text-xs text-text-muted">
+                              · {GROUP_LABELS[line.product_group]}
+                            </span>
                           </div>
-                          <ProductCell
-                            description={line.description}
-                            product_group={line.product_group}
-                          />
+                          <span className="break-words text-text-primary text-sm">
+                            {line.description || "—"}
+                          </span>
                         </div>
                       </Td>
                       <Td className="font-mono text-xs text-text-secondary break-words">

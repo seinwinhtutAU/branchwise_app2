@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from "react";
 import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
+import { cn } from "@renderer/lib/utils";
 import { Button } from "@renderer/components/ui/Button";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
+import { ColumnHeaderFilter } from "@renderer/components/ui/ColumnHeaderFilter";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
 import { Pagination } from "@renderer/components/ui/Pagination";
-import { Select } from "@renderer/components/ui/Select";
 import {
   TableContainer,
   Tbody,
@@ -15,6 +17,8 @@ import {
   Tr,
 } from "@renderer/components/ui/Table";
 import {
+  CheckIcon,
+  CloseIcon,
   PlusIcon,
   ReceivingIcon,
   SearchIcon,
@@ -126,7 +130,7 @@ export function ReceivingList({
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       {owedToCustomersPairs > 0 && onOpenOrders && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-success/40 bg-success-subtle px-5 py-4">
           <div className="min-w-0">
@@ -160,67 +164,48 @@ export function ReceivingList({
       </CollapsibleKpiSummary>
 
       <Panel>
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
-          <div>
-            <h2 className="text-base font-semibold text-text-primary tracking-tight">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-base">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
               Receiving
             </h2>
-            <p className="text-sm text-text-muted mt-0.5">
-              Manage all deliveries received at the gate.
-            </p>
+            {isFiltered && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={resetFilters}
+                className="text-xs h-6 px-1.5 text-text-muted hover:text-error"
+              >
+                <CloseIcon className="w-3.5 h-3.5" />
+                Clear
+              </Button>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
+
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-48 sm:w-64">
+              <Input
+                ref={searchInputRef}
+                aria-label="Search receivings"
+                placeholder="Search receiving, shipment, voucher, supplier… (/)"
+                startIcon={<SearchIcon className="w-3.5 h-3.5" />}
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+                className="h-8 text-xs"
+              />
+            </div>
+            <RefreshButton
               onClick={onRefresh}
-              loading={refreshing}
-            >
-              Refresh
-            </Button>
-            <Button onClick={onNew}>
-              <PlusIcon className="w-4 h-4" />
+              refreshing={refreshing}
+            />
+            <Button onClick={onNew} size="sm" className="h-8 text-xs">
+              <PlusIcon className="w-3.5 h-3.5" />
               New receiving
             </Button>
           </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-bg-subtle">
-          <div className="w-full sm:w-[28rem] lg:w-[32rem]">
-            <Input
-              ref={searchInputRef}
-              aria-label="Search receivings"
-              placeholder="Search receiving, shipment, voucher, supplier or gate"
-              startIcon={<SearchIcon className="w-4 h-4" />}
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setPage(1);
-              }}
-            />
-          </div>
-          <div className="w-full sm:w-52">
-            <Select
-              aria-label="Filter by status"
-              value={status}
-              onChange={(event) => {
-                setStatus(event.target.value as StatusFilter);
-                setPage(1);
-              }}
-            >
-              <option value="all">Any status</option>
-              {RECEIVING_STATUSES.map((option) => (
-                <option key={option} value={option}>
-                  {STATUS_LABELS[option]}
-                </option>
-              ))}
-            </Select>
-          </div>
-          {isFiltered && (
-            <Button variant="ghost" size="sm" onClick={resetFilters}>
-              Clear filters
-            </Button>
-          )}
         </div>
 
         {visible.length === 0 ? (
@@ -250,6 +235,7 @@ export function ReceivingList({
             <TableContainer className="border-0 rounded-none">
               <Thead>
                 <Tr>
+                  <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
                   <Th className="whitespace-nowrap">Receiving no.</Th>
                   <Th className="whitespace-nowrap">Shipment no.</Th>
                   <Th className="whitespace-nowrap">Date</Th>
@@ -258,12 +244,68 @@ export function ReceivingList({
                   <Th className="whitespace-nowrap min-w-[16.5rem]">
                     Received / Ordered
                   </Th>
-                  <Th>Status</Th>
+                  <Th className="whitespace-nowrap">
+                    <ColumnHeaderFilter
+                      label="Status"
+                      isActive={status !== "all"}
+                    >
+                      {(close) => (
+                        <div className="flex flex-col gap-1.5">
+                          <div className="font-semibold text-text-primary text-[11px] uppercase tracking-wider pb-1 border-b border-border">
+                            Filter Status
+                          </div>
+                          <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStatus("all");
+                                setPage(1);
+                                close();
+                              }}
+                              className={cn(
+                                "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                status === "all"
+                                  ? "bg-brand/10 font-bold text-brand"
+                                  : "hover:bg-bg-subtle text-text-secondary",
+                              )}
+                            >
+                              <span>Any status</span>
+                              {status === "all" && (
+                                <CheckIcon className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                            {RECEIVING_STATUSES.map((option) => (
+                              <button
+                                key={option}
+                                type="button"
+                                onClick={() => {
+                                  setStatus(option);
+                                  setPage(1);
+                                  close();
+                                }}
+                                className={cn(
+                                  "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                  status === option
+                                  ? "bg-brand/10 font-bold text-brand"
+                                  : "hover:bg-bg-subtle text-text-secondary",
+                                )}
+                              >
+                                <span>{STATUS_LABELS[option]}</span>
+                                {status === option && (
+                                  <CheckIcon className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </ColumnHeaderFilter>
+                  </Th>
                   <Th className="w-12" aria-label="Actions" />
                 </Tr>
               </Thead>
               <Tbody>
-                {visible.map((receiving) => {
+                {visible.map((receiving, index) => {
                   const difference = pairsDifference(receiving);
                   const counted = countedPairs(receiving);
                   const expectedQuantity = expectedPairs(receiving);
@@ -289,8 +331,12 @@ export function ReceivingList({
                   const canDelete = receiving.allowed_actions
                     ? receiving.allowed_actions.includes("delete")
                     : openedCount(receiving) === 0;
+                  const rowNum = (safePage - 1) * PAGE_SIZE + index + 1;
                   return (
                     <Tr key={receiving.receiving_id}>
+                      <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                        {rowNum}
+                      </Td>
                       <Td className="whitespace-nowrap">
                         <Reference
                           value={receiving.receiving_no}
@@ -384,7 +430,7 @@ export function ReceivingList({
                 })}
               </Tbody>
             </TableContainer>
-            <div className="px-6 py-3 border-t border-border">
+            <div className="px-4 py-1.5 border-t border-border">
               <Pagination
                 page={safePage}
                 totalPages={totalPages}

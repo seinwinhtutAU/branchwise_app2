@@ -14,6 +14,7 @@ import {
   Reference,
   SuggestInput,
 } from "@renderer/components/features/wholesale/shared/ui";
+import { CopyButton } from "@renderer/components/ui/CopyButton";
 import {
   DEFAULT_CURRENCY,
   previewKyatAmount,
@@ -531,9 +532,12 @@ export function ReceivingDetail({
               <div className="h-5 w-px bg-border" />
 
               <div className="flex items-center gap-2 min-w-0">
-                <h2 className="text-base font-semibold text-text-primary truncate">
-                  {receiving.receiving_no}
-                </h2>
+                <div className="flex items-center gap-1">
+                  <h2 className="text-base font-semibold text-text-primary truncate">
+                    {receiving.receiving_no}
+                  </h2>
+                  <CopyButton value={receiving.receiving_no} what="receiving no." />
+                </div>
                 <StatusBadge
                   status={receivingStatus(receiving, shipment?.total_packages)}
                 />

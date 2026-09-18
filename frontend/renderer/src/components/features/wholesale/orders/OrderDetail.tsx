@@ -408,9 +408,12 @@ export function OrderDetail({
               <div className="h-5 w-px bg-border" />
 
               <div className="min-w-0 flex items-center gap-2.5">
-                <h2 className="text-base font-bold text-text-primary tracking-tight truncate">
-                  {order.order_no}
-                </h2>
+                <div className="flex items-center gap-1">
+                  <h2 className="text-base font-bold text-text-primary tracking-tight truncate">
+                    {order.order_no}
+                  </h2>
+                  <CopyButton value={order.order_no} what="order no." />
+                </div>
                 <StatusBadge status={order.order_status} />
                 <PaymentBadge status={paymentStatus(order)} />
                 <span className="hidden md:inline text-xs text-text-muted truncate">
@@ -647,6 +650,9 @@ export function OrderDetail({
                 <TableContainer>
                   <Thead className="top-0">
                     <Tr>
+                      <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
+                        #
+                      </Th>
                       <Th className="min-w-[10rem] whitespace-nowrap">
                         Supplier / Factory
                       </Th>
@@ -674,6 +680,9 @@ export function OrderDetail({
                       );
                       return (
                         <Tr key={field.id}>
+                          <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                            {index + 1}
+                          </Td>
                           <Td>
                             <Controller
                               control={control}
@@ -692,34 +701,49 @@ export function OrderDetail({
                           </Td>
                           <Td className="min-w-[18rem]">
                             <div className="flex flex-col gap-1.5">
-                              <div className="flex items-center gap-1">
-                                <Controller
-                                  control={control}
-                                  name={`order.lines.${index}.stock_code`}
-                                  render={({ field: stockField }) => (
-                                    <SuggestInput
-                                      bare
-                                      label={`Stock code for product ${index + 1}`}
-                                      placeholder="A1001"
-                                      suggestions={STOCK_CODES}
-                                      value={stockField.value}
-                                      onChange={(next) => {
-                                        stockField.onChange(next);
-                                        setStockCode(index, next);
-                                      }}
-                                      error={
-                                        duplicateStockCodeProblem(
-                                          order.lines,
-                                          index,
-                                        ) ?? undefined
-                                      }
-                                    />
-                                  )}
-                                />
-                                <CopyButton
-                                  value={line.stock_code}
-                                  what="stock code"
-                                />
+                              <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1 flex-1 min-w-0">
+                                  <Controller
+                                    control={control}
+                                    name={`order.lines.${index}.stock_code`}
+                                    render={({ field: stockField }) => (
+                                      <SuggestInput
+                                        bare
+                                        label={`Stock code for product ${index + 1}`}
+                                        placeholder="A1001"
+                                        suggestions={STOCK_CODES}
+                                        value={stockField.value}
+                                        onChange={(next) => {
+                                          stockField.onChange(next);
+                                          setStockCode(index, next);
+                                        }}
+                                        error={
+                                          duplicateStockCodeProblem(
+                                            order.lines,
+                                            index,
+                                          ) ?? undefined
+                                        }
+                                      />
+                                    )}
+                                  />
+                                  <CopyButton
+                                    value={line.stock_code}
+                                    what="stock code"
+                                  />
+                                </div>
+                                <div className="w-28 shrink-0">
+                                  <Controller
+                                    control={control}
+                                    name={`order.lines.${index}.product_group`}
+                                    render={({ field: groupField }) => (
+                                      <GroupSelect
+                                        label={`Group for product ${index + 1}`}
+                                        value={groupField.value}
+                                        onChange={groupField.onChange}
+                                      />
+                                    )}
+                                  />
+                                </div>
                               </div>
                               <Controller
                                 control={control}
@@ -731,17 +755,6 @@ export function OrderDetail({
                                     multiline
                                     value={descriptionField.value}
                                     onChange={descriptionField.onChange}
-                                  />
-                                )}
-                              />
-                              <Controller
-                                control={control}
-                                name={`order.lines.${index}.product_group`}
-                                render={({ field: groupField }) => (
-                                  <GroupSelect
-                                    label={`Group for product ${index + 1}`}
-                                    value={groupField.value}
-                                    onChange={groupField.onChange}
                                   />
                                 )}
                               />

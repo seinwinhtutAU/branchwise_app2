@@ -15,6 +15,7 @@ import {
   Td,
 } from "@renderer/components/ui/Table";
 import { DashboardIcon, ScaleIcon } from "@renderer/components/ui/icons";
+import { CopyButton } from "@renderer/components/ui/CopyButton";
 import {
   RefreshingHint,
   ChartViewToggle,
@@ -94,8 +95,11 @@ function TopProfitProductsTable({
         {products.map((product, i) => (
           <Tr key={product.stock_code}>
             <Td className="text-text-muted">{i + 1}</Td>
-            <Td className="font-mono text-xs whitespace-nowrap">
-              {product.stock_code}
+            <Td>
+              <div className="flex items-center gap-1 whitespace-nowrap">
+                <span className="font-mono text-xs font-semibold text-brand">{product.stock_code}</span>
+                <CopyButton value={product.stock_code} what="stock code" />
+              </div>
             </Td>
             <Td>{product.description}</Td>
             <Td className="text-right tabular-nums">

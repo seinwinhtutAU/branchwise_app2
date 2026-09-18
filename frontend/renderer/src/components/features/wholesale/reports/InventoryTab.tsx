@@ -1,5 +1,6 @@
 import type { WholesaleInventoryReport } from "@renderer/components/features/wholesale/shared/api";
 import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
+import { CopyButton } from "@renderer/components/ui/CopyButton";
 import {
   ReportError,
   ReportLoading,
@@ -160,6 +161,7 @@ export function InventoryTab(props: ReportTabProps): React.JSX.Element {
       >
         <ReportTable>
           <ReportTableHeader>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
             <Th>Product</Th>
             <Th>Location</Th>
             <Th className="text-right">On hand</Th>
@@ -168,55 +170,54 @@ export function InventoryTab(props: ReportTabProps): React.JSX.Element {
             <Th className="text-right">Incoming</Th>
           </ReportTableHeader>
           <ReportTableBody>
-            {data.products.flatMap((product) =>
-              product.locations.length
-                ? product.locations.map((location) => (
-                    <tr key={`${product.stock_code}-${location.location}`}>
-                      <Td>
-                        <span className="font-mono text-xs">
-                          {product.stock_code}
-                        </span>{" "}
-                        {product.description}
-                      </Td>
-                      <Td>{location.location}</Td>
-                      <Td className="text-right tabular-nums">
-                        {formatSets(location.on_hand_pairs)}
-                      </Td>
-                      <Td className="text-right tabular-nums">
-                        {formatSets(product.available_pairs)}
-                      </Td>
-                      <Td className="text-right tabular-nums">
-                        {formatSets(product.allocated_pairs)}
-                      </Td>
-                      <Td className="text-right tabular-nums">
-                        {formatSets(product.incoming_pairs)}
-                      </Td>
-                    </tr>
-                  ))
-                : [
-                    <tr key={product.stock_code}>
-                      <Td>
-                        <span className="font-mono text-xs">
-                          {product.stock_code}
-                        </span>{" "}
-                        {product.description}
-                      </Td>
-                      <Td>—</Td>
-                      <Td className="text-right tabular-nums">
-                        {formatSets(product.on_hand_pairs)}
-                      </Td>
-                      <Td className="text-right tabular-nums">
-                        {formatSets(product.available_pairs)}
-                      </Td>
-                      <Td className="text-right tabular-nums">
-                        {formatSets(product.allocated_pairs)}
-                      </Td>
-                      <Td className="text-right tabular-nums">
-                        {formatSets(product.incoming_pairs)}
-                      </Td>
-                    </tr>,
-                  ],
-            )}
+            {(() => {
+              const flatRows = data.products.flatMap((product) =>
+                product.locations.length
+                  ? product.locations.map((location) => ({
+                      key: `${product.stock_code}-${location.location}`,
+                      product,
+                      location: location.location,
+                      on_hand: location.on_hand_pairs,
+                    }))
+                  : [
+                      {
+                        key: product.stock_code,
+                        product,
+                        location: "—",
+                        on_hand: product.on_hand_pairs,
+                      },
+                    ],
+              );
+              return flatRows.map((item, index) => (
+                <tr key={item.key}>
+                  <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                    {index + 1}
+                  </Td>
+                  <Td>
+                    <div className="flex items-center gap-1 whitespace-nowrap mb-0.5">
+                      <span className="font-mono text-xs font-semibold text-brand">
+                        {item.product.stock_code}
+                      </span>
+                      <CopyButton value={item.product.stock_code} what="stock code" />
+                    </div>
+                    <span className="text-xs text-text-secondary">{item.product.description}</span>
+                  </Td>
+                  <Td>{item.location}</Td>
+                  <Td className="text-right tabular-nums">
+                    {formatSets(item.on_hand)}
+                  </Td>
+                  <Td className="text-right tabular-nums">
+                    {formatSets(item.product.available_pairs)}
+                  </Td>
+                  <Td className="text-right tabular-nums">
+                    {formatSets(item.product.allocated_pairs)}
+                  </Td>
+                  <Td className="text-right tabular-nums">
+                    {formatSets(item.product.incoming_pairs)}
+                  </Td>
+                </tr>
+              ));
+            })()}
           </ReportTableBody>
         </ReportTable>
       </ReportSection>
@@ -227,15 +228,23 @@ export function InventoryTab(props: ReportTabProps): React.JSX.Element {
         >
           <ReportTable>
             <ReportTableHeader>
+              <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
               <Th>Product</Th>
               <Th className="text-right">Customers waiting</Th>
             </ReportTableHeader>
             <ReportTableBody>
               {data.cannot_supply.length ? (
-                data.cannot_supply.map((row) => (
+                data.cannot_supply.map((row, index) => (
                   <tr key={row.stock_code}>
+                    <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                      {index + 1}
+                    </Td>
                     <Td>
-                      {row.stock_code} {row.description}
+                      <div className="flex items-center gap-1 whitespace-nowrap mb-0.5">
+                        <span className="font-mono text-xs font-semibold text-brand">{row.stock_code}</span>
+                        <CopyButton value={row.stock_code} what="stock code" />
+                      </div>
+                      <span className="text-xs text-text-secondary">{row.description}</span>
                     </Td>
                     <Td className="text-right tabular-nums">
                       {formatSets(row.owed_to_customers_pairs)}
@@ -243,7 +252,7 @@ export function InventoryTab(props: ReportTabProps): React.JSX.Element {
                   </tr>
                 ))
               ) : (
-                <EmptyRow colSpan={2}>
+                <EmptyRow colSpan={3}>
                   Nothing is currently impossible to supply.
                 </EmptyRow>
               )}
@@ -256,16 +265,24 @@ export function InventoryTab(props: ReportTabProps): React.JSX.Element {
         >
           <ReportTable>
             <ReportTableHeader>
+              <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
               <Th>Product</Th>
               <Th>Date last moved</Th>
               <Th className="text-right">Days since</Th>
             </ReportTableHeader>
             <ReportTableBody>
               {data.not_moving.length ? (
-                data.not_moving.map((row) => (
+                data.not_moving.map((row, index) => (
                   <tr key={row.stock_code}>
+                    <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                      {index + 1}
+                    </Td>
                     <Td>
-                      {row.stock_code} {row.description}
+                      <div className="flex items-center gap-1 whitespace-nowrap mb-0.5">
+                        <span className="font-mono text-xs font-semibold text-brand">{row.stock_code}</span>
+                        <CopyButton value={row.stock_code} what="stock code" />
+                      </div>
+                      <span className="text-xs text-text-secondary">{row.description}</span>
                     </Td>
                     <Td>
                       {row.last_movement_on
@@ -280,7 +297,7 @@ export function InventoryTab(props: ReportTabProps): React.JSX.Element {
                   </tr>
                 ))
               ) : (
-                <EmptyRow colSpan={3}>
+                <EmptyRow colSpan={4}>
                   Every on-hand product has moved recently.
                 </EmptyRow>
               )}

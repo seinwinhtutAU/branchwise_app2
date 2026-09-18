@@ -39,20 +39,21 @@ export function Pagination({
   }
 
   return (
-    <div className="flex items-center justify-between gap-4 pt-3 flex-wrap">
-      <span className="text-sm text-text-muted">
+    <div className="flex items-center justify-between gap-3 py-1 px-0.5 flex-wrap text-xs">
+      <span className="text-xs text-text-muted">
         Showing {start}–{end} of {totalItems}
       </span>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         <Button
           variant="secondary"
           size="sm"
+          className="h-7 px-2.5 text-xs"
           onClick={() => onPageChange(page - 1)}
           disabled={page <= 1}
         >
           Previous
         </Button>
-        <span className="flex items-center gap-1.5 text-sm text-text-secondary tabular-nums">
+        <span className="flex items-center gap-1 text-xs text-text-secondary tabular-nums">
           Page
           <Input
             type="text"
@@ -66,13 +67,14 @@ export function Pagination({
             onKeyDown={(e) => {
               if (e.key === "Enter") e.currentTarget.blur();
             }}
-            className="h-8 w-14 px-1.5 text-center"
+            className="h-7 w-12 px-1 text-center text-xs"
           />
           of {totalPages}
         </span>
         <Button
           variant="secondary"
           size="sm"
+          className="h-7 px-2.5 text-xs"
           onClick={() => onPageChange(page + 1)}
           disabled={page >= totalPages}
         >

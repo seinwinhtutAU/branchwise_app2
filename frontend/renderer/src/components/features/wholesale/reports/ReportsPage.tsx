@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useIsFetching } from "@tanstack/react-query";
 import type { Session } from "@renderer/lib/auth";
 import { refreshEverything } from "@renderer/lib/queryClient";
-import { Button } from "@renderer/components/ui/Button";
+import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { CardHeader } from "@renderer/components/ui/Card";
 import { PeriodControls } from "@renderer/components/features/dashboard/shared";
 import { usePeriodRange } from "@renderer/components/features/dashboard/usePeriodRange";
@@ -72,14 +72,10 @@ export default function ReportsPage({
         title="Reports"
         description="Revenue, cost, inventory and customer detail for the wholesale business."
         action={
-          <Button
-            variant="secondary"
-            size="sm"
+          <RefreshButton
             onClick={refreshEverything}
-            loading={isFetching}
-          >
-            Refresh
-          </Button>
+            refreshing={isFetching}
+          />
         }
       />
       <div className="flex flex-wrap items-end justify-between gap-3">
