@@ -187,13 +187,10 @@ export function AppShell({
   function renderSidebar(isCollapsed: boolean): React.JSX.Element {
     return (
       <div className="flex flex-col h-full select-none">
-        {/* macOS Traffic Lights spacer on desktop */}
-        {isMac && <div className="h-9 shrink-0 app-drag-region" />}
-
         {/* Header row */}
         <div
           className={cn(
-            "flex items-center h-14 shrink-0 border-b border-border app-drag-region",
+            "flex items-center h-14 shrink-0 border-b border-border",
             isCollapsed
               ? "justify-center px-2 relative"
               : "justify-between px-4",
@@ -444,41 +441,68 @@ export function AppShell({
   return (
     <div
       className={cn(
-        "min-h-screen bg-bg-base flex",
+        "min-h-screen bg-bg-base flex flex-col",
         // Wholesale repaints the shared tokens blue for everything inside it — see
         // globals.css's .workspace-wholesale block.
         activeWorkspace === "wholesale" && "workspace-wholesale",
       )}
     >
-      {/* Desktop sidebar */}
-      <aside
-        className={cn(
-          "shrink-0 border-r border-border bg-bg-subtle transition-[width] duration-200 select-none",
-          collapsed ? "w-[4.5rem]" : "w-64",
-        )}
-      >
+      {/* Top Window Titlebar (for macOS traffic lights and Windows window controls) */}
+      {(isMac || isWindows) && (
         <div
           className={cn(
-            "fixed h-screen transition-[width] duration-200 z-30",
+            "h-10 shrink-0 w-full flex items-center justify-between px-4 app-drag-region select-none bg-bg-subtle border-b border-border/70 text-xs text-text-muted z-40",
+            isMac && "pl-[78px]",
+            isWindows && "pr-[140px]",
+          )}
+        >
+          <div className="flex items-center gap-2 font-medium">
+            <span className="text-text-secondary font-semibold">
+              Branch<span className="text-brand">Wise</span>
+            </span>
+            <span className="text-border">/</span>
+            <span className="capitalize">{activeWorkspace ?? "workspace"}</span>
+            {currentSectionLabel && (
+              <>
+                <span className="text-border">/</span>
+                <span className="text-text-primary">{currentSectionLabel}</span>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-3 app-no-drag">
+            <span className="text-[11px] text-text-muted/70 hidden sm:inline-block">
+              {isMac
+                ? "⌘B Sidebar · ⌘, Settings"
+                : "Ctrl+B Sidebar · Ctrl+, Settings"}
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 flex min-h-0">
+        {/* Desktop sidebar */}
+        <aside
+          className={cn(
+            "shrink-0 border-r border-border bg-bg-subtle transition-[width] duration-200 select-none",
             collapsed ? "w-[4.5rem]" : "w-64",
           )}
         >
-          {renderSidebar(collapsed)}
-        </div>
-      </aside>
-
-      <div className="flex-1 min-w-0 flex flex-col">
-        {/* Sticky so the titlebar and connection banner stay put while a long page's
-            content scrolls underneath them, instead of scrolling away with it. */}
-        <div className="sticky top-0 z-20 flex flex-col shrink-0">
-          {/* Header & Titlebar (Desktop and Web) */}
           <div
             className={cn(
-              "h-14 shrink-0 flex items-center justify-between px-6 border-b border-border/60 text-sm text-text-muted select-none bg-bg-subtle",
-              (isMac || isWindows) && "app-drag-region",
-              isWindows && "pr-[140px]",
+              "fixed transition-[width] duration-200 z-30",
+              (isMac || isWindows) ? "top-10 h-[calc(100vh-2.5rem)]" : "top-0 h-screen",
+              collapsed ? "w-[4.5rem]" : "w-64",
             )}
           >
+            {renderSidebar(collapsed)}
+          </div>
+        </aside>
+
+        <div className="flex-1 min-w-0 flex flex-col">
+          {/* Sticky so the header and connection banner stay put while page scrolls */}
+          <div className="sticky top-0 z-20 flex flex-col shrink-0">
+            {/* Header Bar */}
+            <div className="h-14 shrink-0 flex items-center justify-between px-6 border-b border-border/60 text-sm text-text-muted select-none bg-bg-subtle">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="text-base font-semibold text-text-secondary truncate">
                 Branch<span className="text-brand">Wise</span>
@@ -570,5 +594,7 @@ export function AppShell({
         </main>
       </div>
     </div>
+  </div>
   );
 }
+
