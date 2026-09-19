@@ -1,0 +1,67 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: branchwise-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: backend/.env
+        required: false
+      - path: .env
+        required: false
+    environment:
+      - PORT=8000
+      - RUN_MIGRATIONS=${RUN_MIGRATIONS:-true}
+    volumes:
+      - backend_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # Leave blank for Nginx reverse proxy (/api) or set to http://localhost:8000
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+    container_name: branchwise-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Optional local PostgreSQL database service.
+  # Start with: docker compose --profile local-db up -d
+  # And set DATABASE_URL=postgresql://postgres:postgres@postgres:5432/branchwise
+  postgres:
+    image: postgres:16-alpine
+    container_name: branchwise-postgres
+    profiles:
+      - local-db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=branchwise
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d branchwise"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  backend_data:
+  postgres_data:

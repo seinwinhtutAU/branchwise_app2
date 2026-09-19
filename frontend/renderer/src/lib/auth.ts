@@ -11,7 +11,9 @@
 // file rather than fifty call sites.
 
 export const apiBaseUrl =
-  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  import.meta.env.VITE_API_BASE_URL !== undefined
+    ? import.meta.env.VITE_API_BASE_URL
+    : "http://127.0.0.1:8000";
 
 const STORAGE_KEY = "branchwise:session";
 
@@ -260,7 +262,9 @@ export function installAuthRetry(
         : input instanceof URL
           ? input.href
           : input.url;
-    const ours = url.startsWith(apiBaseUrl) && !url.includes("/api/auth/");
+    const ours =
+      (apiBaseUrl ? url.startsWith(apiBaseUrl) : url.startsWith("/api/")) &&
+      !url.includes("/api/auth/");
 
     // A session restored from a previous run almost always carries a dead token, so
     // renew it before spending a request on a 401 that is already known to be coming.

@@ -125,7 +125,6 @@ function setupAppMenu(window: BrowserWindow): void {
 }
 
 function createWindow(): void {
-  const isMac = process.platform === "darwin";
   const isWin = process.platform === "win32";
 
   mainWindow = new BrowserWindow({
@@ -135,8 +134,11 @@ function createWindow(): void {
     minHeight: 700,
     show: false,
     autoHideMenuBar: true,
-    titleBarStyle: isMac ? "hiddenInset" : isWin ? "hidden" : "default",
-    trafficLightPosition: isMac ? { x: 18, y: 16 } : undefined,
+    // Keep macOS's native title bar visible. With `hiddenInset`, the traffic-light
+    // controls are drawn over the renderer, which can cover the app when the
+    // preload bridge or a fixed sidebar is not ready yet. The native title bar
+    // also gives the window a reliable drag area.
+    titleBarStyle: isWin ? "hidden" : "default",
     titleBarOverlay: isWin
       ? {
           color: "#ffffff",

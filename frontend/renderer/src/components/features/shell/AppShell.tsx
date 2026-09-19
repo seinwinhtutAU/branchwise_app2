@@ -99,6 +99,10 @@ export function AppShell({
   const isMac = typeof window !== "undefined" && Boolean(window.api?.isMac);
   const isWindows =
     typeof window !== "undefined" && Boolean(window.api?.isWindows);
+  // Windows needs a renderer-owned title bar because its native controls are
+  // hidden into the overlay. macOS keeps the native title bar so traffic lights
+  // never sit on top of the app content.
+  const hasCustomTitleBar = isWindows;
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
@@ -447,12 +451,11 @@ export function AppShell({
         activeWorkspace === "wholesale" && "workspace-wholesale",
       )}
     >
-      {/* Top Window Titlebar (for macOS traffic lights and Windows window controls) */}
-      {(isMac || isWindows) && (
+      {/* Windows custom title bar; macOS uses its native title bar. */}
+      {hasCustomTitleBar && (
         <div
           className={cn(
             "h-10 shrink-0 w-full flex items-center justify-between px-4 app-drag-region select-none bg-bg-subtle border-b border-border/70 text-xs text-text-muted z-40",
-            isMac && "pl-[78px]",
             isWindows && "pr-[140px]",
           )}
         >
@@ -490,7 +493,9 @@ export function AppShell({
           <div
             className={cn(
               "fixed transition-[width] duration-200 z-30",
-              (isMac || isWindows) ? "top-10 h-[calc(100vh-2.5rem)]" : "top-0 h-screen",
+              hasCustomTitleBar
+                ? "top-10 h-[calc(100vh-2.5rem)]"
+                : "top-0 h-screen",
               collapsed ? "w-[4.5rem]" : "w-64",
             )}
           >
@@ -503,98 +508,97 @@ export function AppShell({
           <div className="sticky top-0 z-20 flex flex-col shrink-0">
             {/* Header Bar */}
             <div className="h-14 shrink-0 flex items-center justify-between px-6 border-b border-border/60 text-sm text-text-muted select-none bg-bg-subtle">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <span className="text-base font-semibold text-text-secondary truncate">
-                Branch<span className="text-brand">Wise</span>
-              </span>
-              <span className="text-base text-border font-light">/</span>
-              <span className="capitalize text-base text-text-muted shrink-0">
-                {activeWorkspace ?? "workspace"}
-              </span>
-              {currentSectionLabel && (
-                <>
-                  <span className="text-base text-border font-light">/</span>
-                  <span className="text-base font-medium text-text-primary truncate">
-                    {currentSectionLabel}
-                  </span>
-                </>
-              )}
-            </div>
-            <div className="flex items-center gap-3 app-no-drag">
-              {(isMac || isWindows) && (
-                <span className="text-xs text-text-muted/70 hidden sm:inline-block">
-                  {isMac
-                    ? "⌘B Sidebar · ⌘, Settings"
-                    : "Ctrl+B Sidebar · Ctrl+, Settings"}
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="text-base font-semibold text-text-secondary truncate">
+                  Branch<span className="text-brand">Wise</span>
                 </span>
-              )}
-              <div className="relative" ref={accountMenuRef}>
-                <button
-                  type="button"
-                  aria-label="Open account menu"
-                  aria-haspopup="menu"
-                  aria-expanded={accountMenuOpen}
-                  onClick={() => setAccountMenuOpen((open) => !open)}
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-brand text-xs font-bold text-white shadow-xs transition-colors hover:bg-brand/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base"
-                >
-                  {accountInitials(profile, email)}
-                </button>
-                {accountMenuOpen && (
-                  <div
-                    role="menu"
-                    aria-label="Account menu"
-                    className="absolute right-0 top-full z-50 mt-2 w-52 rounded-lg border border-border bg-bg-base p-1.5 text-sm shadow-lg"
-                  >
-                    <div className="border-b border-border px-2.5 pb-2 pt-1">
-                      <p className="truncate font-medium text-text-primary">
-                        {profile?.name || email || "User"}
-                      </p>
-                      {profile?.role && (
-                        <p className="mt-0.5 text-xs capitalize text-text-muted">
-                          {profile.role}
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setAccountMenuOpen(false);
-                        onSectionChange("settings");
-                      }}
-                      className="mt-1 flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-text-secondary transition-colors hover:bg-bg-raised hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-                    >
-                      <SettingsIcon className="h-4 w-4" />
-                      Settings
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setAccountMenuOpen(false);
-                        onSignOut();
-                      }}
-                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-error transition-colors hover:bg-error-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error"
-                    >
-                      <LogOutIcon className="h-4 w-4" />
-                      Sign out
-                    </button>
-                  </div>
+                <span className="text-base text-border font-light">/</span>
+                <span className="capitalize text-base text-text-muted shrink-0">
+                  {activeWorkspace ?? "workspace"}
+                </span>
+                {currentSectionLabel && (
+                  <>
+                    <span className="text-base text-border font-light">/</span>
+                    <span className="text-base font-medium text-text-primary truncate">
+                      {currentSectionLabel}
+                    </span>
+                  </>
                 )}
               </div>
+              <div className="flex items-center gap-3 app-no-drag">
+                {(isMac || isWindows) && (
+                  <span className="text-xs text-text-muted/70 hidden sm:inline-block">
+                    {isMac
+                      ? "⌘B Sidebar · ⌘, Settings"
+                      : "Ctrl+B Sidebar · Ctrl+, Settings"}
+                  </span>
+                )}
+                <div className="relative" ref={accountMenuRef}>
+                  <button
+                    type="button"
+                    aria-label="Open account menu"
+                    aria-haspopup="menu"
+                    aria-expanded={accountMenuOpen}
+                    onClick={() => setAccountMenuOpen((open) => !open)}
+                    className="flex h-9 w-9 items-center justify-center rounded-full bg-brand text-xs font-bold text-white shadow-xs transition-colors hover:bg-brand/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base"
+                  >
+                    {accountInitials(profile, email)}
+                  </button>
+                  {accountMenuOpen && (
+                    <div
+                      role="menu"
+                      aria-label="Account menu"
+                      className="absolute right-0 top-full z-50 mt-2 w-52 rounded-lg border border-border bg-bg-base p-1.5 text-sm shadow-lg"
+                    >
+                      <div className="border-b border-border px-2.5 pb-2 pt-1">
+                        <p className="truncate font-medium text-text-primary">
+                          {profile?.name || email || "User"}
+                        </p>
+                        {profile?.role && (
+                          <p className="mt-0.5 text-xs capitalize text-text-muted">
+                            {profile.role}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAccountMenuOpen(false);
+                          onSectionChange("settings");
+                        }}
+                        className="mt-1 flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-text-secondary transition-colors hover:bg-bg-raised hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                      >
+                        <SettingsIcon className="h-4 w-4" />
+                        Settings
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAccountMenuOpen(false);
+                          onSignOut();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-error transition-colors hover:bg-error-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error"
+                      >
+                        <LogOutIcon className="h-4 w-4" />
+                        Sign out
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
 
-          {/* Above the content rather than inside it, so it is the same one line whichever
+            {/* Above the content rather than inside it, so it is the same one line whichever
             page is open — and so no page has to know about the network to explain itself. */}
-          <ConnectionBanner />
+            <ConnectionBanner />
+          </div>
+          <main className="w-full px-3.5 sm:px-4.5 py-3 sm:py-3.5 flex flex-col gap-3 sm:gap-3.5 flex-1">
+            {children}
+          </main>
         </div>
-        <main className="w-full px-3.5 sm:px-4.5 py-3 sm:py-3.5 flex flex-col gap-3 sm:gap-3.5 flex-1">
-          {children}
-        </main>
       </div>
     </div>
-  </div>
   );
 }
-
