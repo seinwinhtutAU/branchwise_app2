@@ -9,6 +9,7 @@ import type {
   EarlyWarningThresholds,
 } from "@renderer/lib/appSettings";
 import type { ThemeMode } from "@renderer/lib/theme";
+import { Button } from "@renderer/components/ui/Button";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { Input } from "@renderer/components/ui/Input";
 import { Select } from "@renderer/components/ui/Select";
@@ -383,6 +384,50 @@ export function SettingsPage({
   // set rather than one flag per field, so saving one control doesn't disable another's.
   const [savingKeys, setSavingKeys] = useState<Set<string>>(new Set());
 
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+
+  useEffect(() => {
+    if (window.api?.getVersion) {
+      window.api
+        .getVersion()
+        .then((v) => setAppVersion(v))
+        .catch(() => {});
+    }
+  }, []);
+
+  async function handleCheckForUpdates(): Promise<void> {
+    if (!window.api?.checkForUpdates) return;
+    setCheckingUpdate(true);
+    try {
+      const res = await window.api.checkForUpdates();
+      if (res.status === "dev") {
+        showToast(
+          "info",
+          `Running in development mode (v${res.version ?? "1.0.0"})`,
+        );
+      } else if (res.status === "ok") {
+        if (res.updateVersion && res.updateVersion !== res.currentVersion) {
+          showToast(
+            "success",
+            `New version v${res.updateVersion} is downloading in background...`,
+          );
+        } else {
+          showToast(
+            "success",
+            `BranchWise is up to date (v${res.currentVersion})`,
+          );
+        }
+      } else {
+        showToast("error", res.message || "Failed to check for updates");
+      }
+    } catch {
+      showToast("error", "Error checking for updates");
+    } finally {
+      setCheckingUpdate(false);
+    }
+  }
+
   useEffect(() => {
     if (!isAdmin) return;
     let cancelled = false;
@@ -477,33 +522,113 @@ export function SettingsPage({
       )}
 
       {!isAdmin && (
-        <Card>
-          <CardHeader
-            title="Admin Access Required"
-            description="These business-wide settings can only be modified by an administrator."
-          />
-        </Card>
+        <div className="flex flex-col gap-6">
+          <Card>
+            <CardHeader
+              title="Admin Access Required"
+              description="These business-wide settings can only be modified by an administrator."
+            />
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Application & Updates"
+              description="Desktop software version and automatic update checks."
+            />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-1">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-bg-raised text-brand font-bold text-sm">
+                  BW
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-text-primary">
+                    BranchWise Desktop
+                  </p>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    Version:{" "}
+                    <span className="font-mono font-medium text-text-secondary">
+                      {appVersion ? `v${appVersion}` : "Web"}
+                    </span>
+                  </p>
+                </div>
+              </div>
+
+              {window.api && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleCheckForUpdates}
+                  disabled={checkingUpdate}
+                >
+                  {checkingUpdate
+                    ? "Checking for updates..."
+                    : "Check for Updates"}
+                </Button>
+              )}
+            </div>
+          </Card>
+        </div>
       )}
 
       {isAdmin && tab === "general" && (
-        <Card>
-          <CardHeader
-            title="Appearance"
-            description="Select the interface color theme across all devices."
-          />
-          <ThemeSwitcher
-            theme={settings?.theme ?? "system"}
-            disabled={!settings || savingKeys.has("theme")}
-            onThemeChange={(theme: ThemeMode) =>
-              handleSettingChange(
-                "theme",
-                theme,
-                "Theme updated",
-                "Couldn't update theme",
-              )
-            }
-          />
-        </Card>
+        <>
+          <Card>
+            <CardHeader
+              title="Appearance"
+              description="Select the interface color theme across all devices."
+            />
+            <ThemeSwitcher
+              theme={settings?.theme ?? "system"}
+              disabled={!settings || savingKeys.has("theme")}
+              onThemeChange={(theme: ThemeMode) =>
+                handleSettingChange(
+                  "theme",
+                  theme,
+                  "Theme updated",
+                  "Couldn't update theme",
+                )
+              }
+            />
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Application & Updates"
+              description="Desktop software version and automatic update checks."
+            />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-1">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-bg-raised text-brand font-bold text-sm">
+                  BW
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-text-primary">
+                    BranchWise Desktop
+                  </p>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    Version:{" "}
+                    <span className="font-mono font-medium text-text-secondary">
+                      {appVersion ? `v${appVersion}` : "Web"}
+                    </span>
+                  </p>
+                </div>
+              </div>
+
+              {window.api && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleCheckForUpdates}
+                  disabled={checkingUpdate}
+                >
+                  {checkingUpdate
+                    ? "Checking for updates..."
+                    : "Check for Updates"}
+                </Button>
+              )}
+            </div>
+          </Card>
+        </>
       )}
 
       {isAdmin && !isWholesale && tab === "reorder" && (

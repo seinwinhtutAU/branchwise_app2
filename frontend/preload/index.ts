@@ -23,6 +23,17 @@ const api = {
       ipcRenderer.removeListener("menu:toggle-sidebar", handleSidebar);
     };
   },
+  getVersion: (): Promise<string> => ipcRenderer.invoke("app:get-version"),
+  checkForUpdates: (): Promise<{
+    status: string;
+    version?: string;
+    currentVersion?: string;
+    updateVersion?: string;
+    message?: string;
+  }> => ipcRenderer.invoke("app:check-for-updates"),
+  restartAndInstall: (): void => {
+    ipcRenderer.send("app:restart-and-install");
+  },
 };
 
 if (process.contextIsolated) {

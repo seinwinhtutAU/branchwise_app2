@@ -6,7 +6,6 @@ import type { BranchOption } from "@renderer/lib/useBranches";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
 import { Panel } from "@renderer/components/ui/Panel";
-import { FigureCard } from "@renderer/components/features/wholesale/shared/ui";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Skeleton } from "@renderer/components/ui/Skeleton";
 import {
@@ -483,20 +482,14 @@ function BranchDetailView({
       );
     }
     return (
-      <div className="flex flex-col gap-4">
-        <Skeleton className="h-20" />
-        <Skeleton className="h-96" />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Skeleton className="h-64" />
+        <Skeleton className="h-64" />
+        <Skeleton className="h-64" />
+        <Skeleton className="h-64" />
       </div>
     );
   }
-
-  // Find strongest and weakest areas
-  const scoredDimensions = data.dimensions.filter((d) => d.score !== null);
-  const sortedDimensions = [...scoredDimensions].sort(
-    (a, b) => (b.score ?? 0) - (a.score ?? 0),
-  );
-  const strongest = sortedDimensions[0] ?? null;
-  const weakest = sortedDimensions[sortedDimensions.length - 1] ?? null;
 
   const actionableAlerts = data.alerts.filter(
     (a) =>
@@ -546,46 +539,8 @@ function BranchDetailView({
         </div>
       </div>
 
-      {/* 4 Summary FigureCards for this branch */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <FigureCard
-          label="Overall Health Score"
-          value={`${data.overall_score === null ? "—" : Math.round(data.overall_score)} / 100`}
-          sub={data.status ? STATUS_META[data.status].label : "Not scored"}
-          tone={
-            (data.overall_score ?? 0) >= 80
-              ? "success"
-              : (data.overall_score ?? 0) >= 60
-                ? "warning"
-                : "error"
-          }
-        />
-        <FigureCard
-          label="Strongest Dimension"
-          value={strongest ? `${Math.round(strongest.score ?? 0)} / 100` : "—"}
-          sub={strongest ? `${strongest.label} leading performance` : "No data"}
-          tone="brand"
-        />
-        <FigureCard
-          label="Weakest Bottleneck"
-          value={weakest ? `${Math.round(weakest.score ?? 0)} / 100` : "—"}
-          sub={weakest ? `${weakest.label} area requires attention` : "No issues"}
-          tone={weakest && (weakest.score ?? 100) < 70 ? "warning" : "neutral"}
-        />
-        <FigureCard
-          label="Active Alerts"
-          value={String(actionableAlerts.length)}
-          sub={
-            actionableAlerts.length > 0
-              ? "operational issues requiring review"
-              : "all indicators clear"
-          }
-          tone={actionableAlerts.length > 0 ? "error" : "success"}
-        />
-      </div>
-
-      {/* 5 Dimension Matrix Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* 5 Dimension Matrix Cards (2 grids per row) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {data.dimensions.map((dim) => (
           <DimensionMatrixCard
             key={dim.key}

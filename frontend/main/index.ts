@@ -3,10 +3,12 @@ import {
   shell,
   BrowserWindow,
   ipcMain,
+  dialog,
   Menu,
   MenuItem,
   type MenuItemConstructorOptions,
 } from "electron";
+import { autoUpdater } from "electron-updater";
 import { join } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 // The BranchWise app icon (see brand/). Windows and Linux take it from the window
@@ -36,6 +38,12 @@ function setupAppMenu(window: BrowserWindow): void {
             label: app.name,
             submenu: [
               { role: "about" },
+              {
+                label: "Check for Updates...",
+                click: (): void => {
+                  checkForUpdates(true);
+                },
+              },
               { type: "separator" },
               {
                 label: "Preferences...",
@@ -117,6 +125,17 @@ function setupAppMenu(window: BrowserWindow): void {
           ? [{ type: "separator" }, { role: "front" }]
           : [{ role: "close" }]),
       ] as MenuItemConstructorOptions[],
+    },
+    {
+      role: "help",
+      submenu: [
+        {
+          label: "Check for Updates...",
+          click: (): void => {
+            checkForUpdates(true);
+          },
+        },
+      ],
     },
   ];
 
@@ -236,9 +255,133 @@ app.whenReady().then(() => {
 
   createWindow();
 
+  setupAutoUpdater();
+
+  // Check for updates automatically in production after launch
+  if (!is.dev) {
+    setTimeout(() => {
+      checkForUpdates(false);
+    }, 4000);
+  }
+
   app.on("activate", function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+let manualCheckInProgress = false;
+
+function setupAutoUpdater(): void {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("checking-for-update", () => {
+    console.log("[AutoUpdater] Checking for updates...");
+  });
+
+  autoUpdater.on("update-available", (info) => {
+    console.log("[AutoUpdater] Update available:", info.version);
+    mainWindow?.webContents.send("update:available", info);
+  });
+
+  autoUpdater.on("update-not-available", (info) => {
+    console.log("[AutoUpdater] Application is up to date:", info.version);
+    if (manualCheckInProgress && mainWindow && !mainWindow.isDestroyed()) {
+      manualCheckInProgress = false;
+      dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "No Updates Available",
+        message: "You are running the latest version of BranchWise.",
+        detail: `Version ${app.getVersion()} is currently the newest version available.`,
+      });
+    }
+  });
+
+  autoUpdater.on("download-progress", (progress) => {
+    mainWindow?.webContents.send("update:download-progress", progress);
+  });
+
+  autoUpdater.on("update-downloaded", (info) => {
+    console.log("[AutoUpdater] Update downloaded:", info.version);
+    mainWindow?.webContents.send("update:downloaded", info);
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      dialog
+        .showMessageBox(mainWindow, {
+          type: "info",
+          title: "Update Ready",
+          message: `BranchWise version ${info.version} has been downloaded.`,
+          detail: "Restart the application now to apply the update.",
+          buttons: ["Restart and Update", "Later"],
+          defaultId: 0,
+          cancelId: 1,
+        })
+        .then(({ response }) => {
+          if (response === 0) {
+            autoUpdater.quitAndInstall();
+          }
+        });
+    }
+  });
+
+  autoUpdater.on("error", (err) => {
+    console.error("[AutoUpdater] Error during update check:", err);
+    if (manualCheckInProgress && mainWindow && !mainWindow.isDestroyed()) {
+      manualCheckInProgress = false;
+      dialog.showMessageBox(mainWindow, {
+        type: "error",
+        title: "Update Check Failed",
+        message: "Could not check for updates.",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+}
+
+function checkForUpdates(isManual = false): void {
+  if (is.dev) {
+    if (isManual && mainWindow && !mainWindow.isDestroyed()) {
+      dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "Development Mode",
+        message: "Automatic updates are disabled in development mode.",
+        detail: `Current version: ${app.getVersion()}`,
+      });
+    }
+    return;
+  }
+
+  manualCheckInProgress = isManual;
+  autoUpdater.checkForUpdates().catch((err) => {
+    console.error("[AutoUpdater] checkForUpdates error:", err);
+    manualCheckInProgress = false;
+  });
+}
+
+// IPC Handlers for Version & Updates
+ipcMain.handle("app:get-version", () => app.getVersion());
+
+ipcMain.handle("app:check-for-updates", async () => {
+  if (is.dev) {
+    return { status: "dev", version: app.getVersion() };
+  }
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    return {
+      status: "ok",
+      currentVersion: app.getVersion(),
+      updateVersion: result?.updateInfo?.version,
+    };
+  } catch (err: unknown) {
+    return {
+      status: "error",
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
+ipcMain.on("app:restart-and-install", () => {
+  autoUpdater.quitAndInstall();
 });
 
 app.on("window-all-closed", () => {

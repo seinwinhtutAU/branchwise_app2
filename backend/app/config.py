@@ -37,6 +37,10 @@ class Settings(BaseSettings):
         "http://127.0.0.1",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
+        # A packaged Electron renderer loaded with BrowserWindow.loadFile() sends
+        # requests with the opaque `null` origin. Keep this explicit so the desktop
+        # build can reach the local/remote API without weakening CORS globally.
+        "null",
         "https://branchwise-app2.vercel.app",
         "app://-",
     ]

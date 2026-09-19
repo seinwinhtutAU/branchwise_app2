@@ -8,6 +8,15 @@ export interface BranchWiseApi {
   onMenuAction: (
     callback: (action: "open-settings" | "toggle-sidebar") => void,
   ) => () => void;
+  getVersion: () => Promise<string>;
+  checkForUpdates: () => Promise<{
+    status: string;
+    version?: string;
+    currentVersion?: string;
+    updateVersion?: string;
+    message?: string;
+  }>;
+  restartAndInstall: () => void;
 }
 
 declare global {

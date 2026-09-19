@@ -43,5 +43,7 @@ appImage:
   artifactName: ${productName}-${version}.${ext}
 npmRebuild: false
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: github
+  owner: seinwinhtutAU
+  repo: branchwise_app2
+  releaseType: release
