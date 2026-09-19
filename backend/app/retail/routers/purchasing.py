@@ -129,8 +129,13 @@ def export_recommendations(
 
     writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
     writer.writeheader()
+    formula_prefixes = ("=", "+", "-", "@", "\t", "\r")
     for row in rows:
-        writer.writerow(row)
+        sanitized_row = {
+            k: (f"'{v}" if isinstance(v, str) and v.startswith(formula_prefixes) else v)
+            for k, v in row.items()
+        }
+        writer.writerow(sanitized_row)
 
     filename_prefix = "reorder_list" if reorder_only else "purchasing_decision"
     safe_branch = "".join(c for c in b_name if c.isalnum() or c in ("-", "_")).lower()

@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import get_settings
 from app.routers import auth, branches, health, settings
 from app.retail.routers import (
     chat,
@@ -30,12 +31,14 @@ from app.wholesale.routers import (
 
 def create_app() -> FastAPI:
     app = FastAPI(title="branchwise-app2 backend")
+    app_settings = get_settings()
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=app_settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "User-Agent"],
     )
 
     app.include_router(health.router)

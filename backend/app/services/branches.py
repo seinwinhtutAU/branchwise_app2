@@ -64,7 +64,10 @@ def list_retail_branches(db: Session) -> Query:
     display label that can be renamed freely (e.g. "Retail 1" became
     "AungThitSar") and shouldn't be relied on to mean anything structurally.
     """
-    wholesale_branch_ids = db.query(User.branch_id).filter(User.role == UserRole.WHOLESALE)
+    wholesale_branch_ids = (
+        db.query(User.branch_id)
+        .filter(User.role == UserRole.WHOLESALE, User.branch_id.isnot(None))
+    )
     return db.query(Branch).filter(~Branch.id.in_(wholesale_branch_ids)).order_by(Branch.name)
 
 
@@ -73,5 +76,8 @@ def list_wholesale_branches(db: Session) -> Query:
     assigned. Used for the branch picker in the customer-order/factory-voucher forms,
     which an admin account (no fixed branch_id) needs to say which branch a new record
     belongs to."""
-    wholesale_branch_ids = db.query(User.branch_id).filter(User.role == UserRole.WHOLESALE)
+    wholesale_branch_ids = (
+        db.query(User.branch_id)
+        .filter(User.role == UserRole.WHOLESALE, User.branch_id.isnot(None))
+    )
     return db.query(Branch).filter(Branch.id.in_(wholesale_branch_ids)).order_by(Branch.name)

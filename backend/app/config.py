@@ -25,6 +25,16 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_chat_model: str = "gpt-4o-mini"
 
+    # Restrict CORS to known origins (local dev, Electron, and web deployments)
+    cors_origins: list[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "https://branchwise-app2.vercel.app",
+        "app://-",
+    ]
+
 
 @lru_cache
 def get_settings() -> Settings:

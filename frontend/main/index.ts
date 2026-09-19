@@ -147,7 +147,7 @@ function createWindow(): void {
     icon: platformIcon,
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
-      sandbox: false,
+      sandbox: true,
     },
   });
 
@@ -158,7 +158,14 @@ function createWindow(): void {
   });
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url);
+    try {
+      const parsed = new URL(details.url);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        shell.openExternal(details.url);
+      }
+    } catch {
+      // Ignore malformed URLs
+    }
     return { action: "deny" };
   });
 

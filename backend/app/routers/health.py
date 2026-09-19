@@ -25,5 +25,5 @@ def health_db() -> dict:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
         return {"status": "ok", "database": "ok"}
-    except Exception as exc:  # noqa: BLE001 — any failure here means "not reachable"
-        return {"status": "degraded", "database": "unreachable", "detail": str(exc)[:200]}
+    except Exception:  # noqa: BLE001 — any failure here means "not reachable"
+        return {"status": "degraded", "database": "unreachable"}

@@ -18,13 +18,15 @@ interface AuthScreenProps {
   showDemoLogins?: boolean;
 }
 
-const DEMO_ACCOUNTS = [
-  { email: "admin@branchwise.app", label: "Admin" },
-  { email: "wholesale@branchwise.app", label: "Wholesale" },
-  { email: "aungthitsar@branchwise.app", label: "AungThitSar" },
-  { email: "ashley@branchwise.app", label: "Ashley" },
-  { email: "retail3@branchwise.app", label: "Retail 3" },
-];
+const DEMO_ACCOUNTS = import.meta.env.DEV
+  ? [
+      { email: "admin@branchwise.app", label: "Admin" },
+      { email: "wholesale@branchwise.app", label: "Wholesale" },
+      { email: "aungthitsar@branchwise.app", label: "AungThitSar" },
+      { email: "ashley@branchwise.app", label: "Ashley" },
+      { email: "retail3@branchwise.app", label: "Retail 3" },
+    ]
+  : [];
 
 // No skeleton/empty state — this IS the entry/loading screen, not a data view.
 //
@@ -120,11 +122,11 @@ export function AuthScreen({
               ))}
             </div>
 
-            <form onSubmit={onSubmit} className="flex flex-col gap-4">
+            <form onSubmit={onSubmit} className="space-y-4">
               <Input
                 type="email"
                 label="Email"
-                placeholder="you@branchwise.app"
+                placeholder="name@branchwise.app"
                 value={email}
                 onChange={(e) => onEmailChange(e.target.value)}
                 autoComplete="email"
@@ -147,10 +149,10 @@ export function AuthScreen({
               </Button>
             </form>
 
-            {showDemoLogins && onDemoLogin && (
+            {import.meta.env.DEV && showDemoLogins && onDemoLogin && (
               <div className="mt-8 pt-6 border-t border-border">
                 <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">
-                  Demo accounts · password 12345678
+                  Demo accounts
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {DEMO_ACCOUNTS.map((account) => (

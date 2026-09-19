@@ -31,6 +31,18 @@ from app.retail.services.sales_persist import persist_sales
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
 
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
+
+
+async def _read_upload(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> bytes:
+    contents = await file.read(max_bytes + 1)
+    if len(contents) > max_bytes:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"File too large — maximum upload size is {max_bytes // (1024 * 1024)} MB",
+        )
+    return contents
+
 
 def _check_extension(filename: str | None) -> None:
     ext = Path(filename or "").suffix.lower()
@@ -165,7 +177,7 @@ async def import_sales_file(
     _check_extension(file.filename)
     branch = _resolve_branch_for_preview(user, branch_id, db)
 
-    contents = await file.read()
+    contents = await _read_upload(file)
     origin_rows, clean_df = _parse_or_400(
         parse_pos_sale_upload, contents, file.filename, "sale",
         branch.sale_date_format if branch else "MDY",
@@ -185,7 +197,7 @@ async def confirm_sales_file(
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
     branch = db.get(Branch, resolved_branch_id)
 
-    contents = await file.read()
+    contents = await _read_upload(file)
     origin_rows, clean_df = _parse_or_400(
         parse_pos_sale_upload, contents, file.filename, "sale",
         branch.sale_date_format if branch else "MDY",
@@ -215,7 +227,7 @@ async def import_inventory_file(
     _check_extension(file.filename)
     branch = _resolve_branch_for_preview(user, branch_id, db)
 
-    contents = await file.read()
+    contents = await _read_upload(file)
     origin_rows, clean_df = _parse_or_400(
         parse_inventory_upload, contents, file.filename, "inventory",
         branch.inventory_date_format if branch else "MDY",
@@ -237,7 +249,7 @@ async def confirm_inventory_file(
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
     branch = db.get(Branch, resolved_branch_id)
 
-    contents = await file.read()
+    contents = await _read_upload(file)
     origin_rows, clean_df = _parse_or_400(
         parse_inventory_upload, contents, file.filename, "inventory",
         branch.inventory_date_format if branch else "MDY",
@@ -259,11 +271,12 @@ async def confirm_inventory_file(
 
 @router.post("/purchase")
 async def import_purchase_file(
-    file: UploadFile = File(...), user=Depends(get_current_user)
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_app_user),
 ) -> dict:
     _check_extension(file.filename)
 
-    contents = await file.read()
+    contents = await _read_upload(file)
     origin_rows, clean_df = _parse_or_400(
         parse_purchase_upload, contents, file.filename, "purchase"
     )
@@ -291,7 +304,7 @@ async def confirm_purchase_file(
         except ValueError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "purchase_date must be YYYY-MM-DD") from exc
 
-    contents = await file.read()
+    contents = await _read_upload(file)
     origin_rows, clean_df = _parse_or_400(
         parse_purchase_upload, contents, file.filename, "purchase"
     )
