@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/sales", tags=["sales"])
 
 # Mirrors Data Overview's PAGE_SIZE — a page of results here is exactly one page of the
 # table on screen, so SimpleDataTable never has to hold more than that in memory either.
-PAGE_SIZE = 50
+PAGE_SIZE = 20
 
 
 @router.get("")

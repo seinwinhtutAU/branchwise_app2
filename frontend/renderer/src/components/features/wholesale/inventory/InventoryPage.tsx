@@ -169,13 +169,11 @@ function legacyStockRecords(
 export default function InventoryPage({
   session,
   onOpenReceiving,
-  onOpenOrders,
   initialStockCode,
   onInitialStockOpened,
 }: {
   session: Session;
   onOpenReceiving: (receivingNo: string) => void;
-  onOpenOrders?: () => void;
   initialStockCode?: string | null;
   onInitialStockOpened?: () => void;
 }): React.JSX.Element {
@@ -291,7 +289,6 @@ export default function InventoryPage({
       }}
       onRefresh={reload}
       refreshing={isRefreshing || isStockRefreshing}
-      onOpenOrders={onOpenOrders}
     />
   );
 }

@@ -40,8 +40,8 @@ function InventoryDonutChart({
   activeCount: number;
   totalCount: number;
 }): React.JSX.Element {
-  const size = 140;
-  const strokeWidth = 24;
+  const size = 116;
+  const strokeWidth = 18;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
 
@@ -49,7 +49,7 @@ function InventoryDonutChart({
   const deadStrokeDash = (deadPctClamped / 100) * circumference;
 
   return (
-    <div className="flex items-center justify-between gap-4 py-2">
+    <div className="flex items-center justify-between gap-3 py-1">
       {/* SVG Donut */}
       <div className="relative flex items-center justify-center shrink-0">
         <svg
@@ -83,14 +83,14 @@ function InventoryDonutChart({
         </svg>
         {/* Center Percentage Label */}
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <span className="text-xl font-extrabold text-text-primary tracking-tight">
+          <span className="text-lg font-extrabold text-text-primary tracking-tight">
             {deadStockPct.toFixed(1)}%
           </span>
         </div>
       </div>
 
       {/* Legend */}
-      <div className="flex flex-col gap-2.5 text-xs text-text-secondary">
+      <div className="flex flex-col gap-2 text-xs text-text-secondary">
         <div className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full bg-brand shrink-0" />
           <span className="font-semibold text-text-primary">
@@ -105,7 +105,7 @@ function InventoryDonutChart({
           </span>{" "}
           <span>active</span>
         </div>
-        <div className="text-[11px] text-text-muted mt-1 pt-1 border-t border-border">
+        <div className="text-[11px] text-text-muted mt-0.5 pt-1 border-t border-border">
           {totalCount.toLocaleString()} products tracked
         </div>
       </div>
@@ -126,18 +126,18 @@ function HourlyDemandBarChart({
 
   if (hourly.length === 0) {
     return (
-      <div className="h-32 flex items-center justify-center text-xs text-text-muted">
+      <div className="h-28 flex items-center justify-center text-xs text-text-muted">
         No hourly demand recorded in this period.
       </div>
     );
   }
 
   const maxCount = Math.max(...hourly.map((h) => h.count), 0);
-  const chartHeight = 90;
+  const chartHeight = 72;
   const chartWidth = 360;
   const barCount = hourly.length;
   const slotWidth = chartWidth / barCount;
-  const barWidth = Math.max(6, Math.min(18, slotWidth - 4));
+  const barWidth = Math.max(5, Math.min(16, slotWidth - 4));
 
   const hovered = hoverIndex !== null ? hourly[hoverIndex] : null;
 
@@ -307,33 +307,30 @@ export function SummaryTab({
   else periodSubtitle = "period sales";
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       <RefreshingHint show={isRefreshing} />
 
       {/* Main Executive Container */}
-      <div className="p-5 lg:p-6 rounded-xl bg-bg-base border border-border shadow-xs space-y-4">
+      <div className="p-3.5 sm:p-4.5 rounded-xl bg-bg-base border border-border shadow-xs space-y-3">
         
         {/* Header Row */}
-        <div className="flex flex-wrap items-start justify-between gap-4 pb-2 border-b border-border">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-text-primary">
-              {data.branch_name} Footwear
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-2 border-b border-border">
+          <div className="flex items-baseline gap-2">
+            <h1 className="text-base sm:text-lg font-bold tracking-tight text-text-primary">
+              {data.branch_name} Retail
             </h1>
-            <p className="text-xs font-medium text-text-muted mt-0.5">
-              Business Insight Dashboard · {data.branch_name} Branch
-            </p>
           </div>
 
-          <div className="text-right text-xs text-text-muted space-y-0.5">
+          <div className="flex items-center gap-3 text-xs text-text-muted flex-wrap">
             <div>
-              <span>Sales period: </span>
+              <span>Period: </span>
               <span className="font-semibold text-text-primary">
                 {formatExecutivePeriod(data.date_from, data.date_to)}
               </span>
             </div>
             {data.as_of && (
               <div>
-                <span>Inventory snapshot: </span>
+                <span>Snapshot: </span>
                 <span className="font-semibold text-text-primary">
                   {formatExecutiveDate(data.as_of)}
                 </span>
@@ -343,130 +340,130 @@ export function SummaryTab({
         </div>
 
         {/* 6 Top KPI Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
           {/* 1. Net Revenue */}
-          <div className="bg-bg-subtle p-4 rounded-lg border border-border flex flex-col justify-between">
-            <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+          <div className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between">
+            <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
               Net Revenue
             </span>
-            <div className="my-1.5">
-              <span className="text-2xl font-bold tracking-tight text-text-primary">
+            <div className="my-0.5">
+              <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
                 {formatCompactMmk(kpis.net_revenue)}
               </span>
             </div>
-            <span className="text-[11px] text-text-muted truncate">
+            <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
               MMK · {periodSubtitle}
             </span>
           </div>
 
           {/* 2. Gross Profit */}
-          <div className="bg-bg-subtle p-4 rounded-lg border border-border flex flex-col justify-between">
-            <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+          <div className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between">
+            <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
               Gross Profit
             </span>
-            <div className="my-1.5">
-              <span className="text-2xl font-bold tracking-tight text-text-primary">
+            <div className="my-0.5">
+              <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
                 {formatCompactMmk(kpis.gross_profit)}
               </span>
             </div>
-            <span className="text-[11px] text-text-muted truncate">
-              MMK · before operating costs
+            <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
+              MMK · before op. costs
             </span>
           </div>
 
           {/* 3. Profit Margin */}
-          <div className="bg-bg-subtle p-4 rounded-lg border border-border flex flex-col justify-between">
-            <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+          <div className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between">
+            <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
               Profit Margin
             </span>
-            <div className="my-1.5">
-              <span className="text-2xl font-bold tracking-tight text-text-primary">
+            <div className="my-0.5">
+              <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
                 {kpis.profit_margin_pct.toFixed(1)}%
               </span>
             </div>
-            <span className="text-[11px] text-text-muted truncate">
+            <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
               Profit ÷ net revenue
             </span>
           </div>
 
           {/* 4. Transactions */}
-          <div className="bg-bg-subtle p-4 rounded-lg border border-border flex flex-col justify-between">
-            <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+          <div className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between">
+            <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
               Transactions
             </span>
-            <div className="my-1.5">
-              <span className="text-2xl font-bold tracking-tight text-text-primary">
+            <div className="my-0.5">
+              <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
                 {kpis.transaction_count.toLocaleString()}
               </span>
             </div>
-            <span className="text-[11px] text-text-muted truncate">
-              Average sale: {formatCompactMmk(kpis.avg_sale)} MMK
+            <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
+              Avg sale: {formatCompactMmk(kpis.avg_sale)} MMK
             </span>
           </div>
 
           {/* 5. Quantity Sold */}
-          <div className="bg-bg-subtle p-4 rounded-lg border border-border flex flex-col justify-between">
-            <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+          <div className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between">
+            <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
               Quantity Sold
             </span>
-            <div className="my-1.5">
-              <span className="text-2xl font-bold tracking-tight text-text-primary">
+            <div className="my-0.5">
+              <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
                 {kpis.quantity_sold.toLocaleString()}
               </span>
             </div>
-            <span className="text-[11px] text-text-muted truncate">
-              Across {kpis.selling_sku_count.toLocaleString()} selling SKUs
+            <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
+              Across {kpis.selling_sku_count.toLocaleString()} SKUs
             </span>
           </div>
 
           {/* 6. Dead Stock */}
-          <div className="bg-bg-subtle p-4 rounded-lg border border-border flex flex-col justify-between">
-            <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+          <div className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between">
+            <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
               Dead Stock
             </span>
-            <div className="my-1.5">
-              <span className="text-2xl font-bold tracking-tight text-text-primary">
+            <div className="my-0.5">
+              <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
                 {kpis.dead_stock_count.toLocaleString()}
               </span>
             </div>
-            <span className="text-[11px] text-text-muted truncate">
-              {kpis.dead_stock_pct.toFixed(1)}% of {kpis.total_products_count.toLocaleString()} products
+            <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
+              {kpis.dead_stock_pct.toFixed(1)}% of {kpis.total_products_count.toLocaleString()} items
             </span>
           </div>
         </div>
 
         {/* Middle Row - 3 Cards */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
           {/* Card 1: Revenue by product category */}
-          <div className="bg-bg-subtle p-5 rounded-lg border border-border flex flex-col justify-between">
+          <div className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border flex flex-col justify-between">
             <div>
-              <h2 className="text-base font-semibold text-text-primary">
+              <h2 className="text-sm font-semibold text-text-primary">
                 Revenue by product category
               </h2>
-              <p className="text-xs text-text-muted mb-4">
+              <p className="text-[11px] text-text-muted mb-2.5">
                 Net sales value in MMK
               </p>
 
               {category_revenue.length === 0 ? (
-                <p className="text-xs text-text-muted py-8 text-center">
+                <p className="text-xs text-text-muted py-6 text-center">
                   No categorized sales in this period.
                 </p>
               ) : (
-                <div className="flex flex-col gap-3 py-1">
+                <div className="flex flex-col gap-2 py-0.5">
                   {category_revenue.slice(0, 6).map((cat) => {
                     const fillPct = (cat.net_revenue / maxCategoryRevenue) * 100;
                     return (
-                      <div key={cat.category} className="flex items-center gap-3">
+                      <div key={cat.category} className="flex items-center gap-2.5">
                         <span className="w-14 shrink-0 text-xs font-medium text-text-secondary truncate">
                           {cat.category}
                         </span>
-                        <div className="flex-1 h-2.5 rounded-full bg-bg-raised overflow-hidden">
+                        <div className="flex-1 h-2 rounded-full bg-bg-raised overflow-hidden">
                           <div
                             className="h-full rounded-full bg-brand transition-all duration-500"
                             style={{ width: `${Math.max(fillPct, 1.5)}%` }}
                           />
                         </div>
-                        <span className="w-16 shrink-0 text-right text-xs font-semibold tabular-nums text-text-primary">
+                        <span className="w-14 shrink-0 text-right text-xs font-semibold tabular-nums text-text-primary">
                           {formatCompactMmk(cat.net_revenue)}
                         </span>
                       </div>
@@ -478,12 +475,12 @@ export function SummaryTab({
           </div>
 
           {/* Card 2: Inventory condition */}
-          <div className="bg-bg-subtle p-5 rounded-lg border border-border flex flex-col justify-between gap-3">
+          <div className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border flex flex-col justify-between gap-2.5">
             <div>
-              <h2 className="text-base font-semibold text-text-primary">
+              <h2 className="text-sm font-semibold text-text-primary">
                 Inventory condition
               </h2>
-              <p className="text-xs text-text-muted mb-2">
+              <p className="text-[11px] text-text-muted mb-1">
                 No sales in the last 90 days
               </p>
 
@@ -496,18 +493,18 @@ export function SummaryTab({
             </div>
 
             {/* Risk Callout */}
-            <div className="bg-brand-subtle text-brand border border-brand/20 rounded-md p-3 text-xs leading-relaxed">
+            <div className="bg-brand-subtle text-brand border border-brand/20 rounded-md p-2 text-xs leading-relaxed">
               {inventory_condition.risk_alert}
             </div>
           </div>
 
           {/* Card 3: Customer demand by hour */}
-          <div className="bg-bg-subtle p-5 rounded-lg border border-border flex flex-col justify-between gap-3">
+          <div className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border flex flex-col justify-between gap-2.5">
             <div>
-              <h2 className="text-base font-semibold text-text-primary">
+              <h2 className="text-sm font-semibold text-text-primary">
                 Customer demand by hour
               </h2>
-              <p className="text-xs text-text-muted mb-1">
+              <p className="text-[11px] text-text-muted mb-0.5 truncate">
                 {customer_demand.summary}
               </p>
 
@@ -515,11 +512,11 @@ export function SummaryTab({
             </div>
 
             {/* Peak Period Callout */}
-            <div className="bg-brand-subtle text-brand border border-brand/20 rounded-md p-3 text-xs space-y-0.5">
+            <div className="bg-brand-subtle text-brand border border-brand/20 rounded-md p-2 text-xs space-y-0.5">
               <div className="font-semibold text-brand">
                 Peak period: {customer_demand.peak_period}
               </div>
-              <div className="text-[11px] text-text-secondary">
+              <div className="text-[11px] text-text-secondary truncate">
                 {customer_demand.peak_hour_desc}
               </div>
             </div>
@@ -527,15 +524,15 @@ export function SummaryTab({
         </div>
 
         {/* Bottom Row - 2 Cards */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {/* Card 1: Top products by revenue */}
-          <div className="bg-bg-subtle p-5 rounded-lg border border-border">
-            <h2 className="text-base font-semibold text-text-primary mb-4">
+          <div className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border">
+            <h2 className="text-sm font-semibold text-text-primary mb-2.5">
               Top products by revenue
             </h2>
 
             {top_products.length === 0 ? (
-              <p className="text-xs text-text-muted py-8 text-center">
+              <p className="text-xs text-text-muted py-6 text-center">
                 No products sold in this period.
               </p>
             ) : (
@@ -543,7 +540,7 @@ export function SummaryTab({
                 {top_products.map((product) => (
                   <div
                     key={product.stock_code}
-                    className="py-2.5 first:pt-0 last:pb-0 flex items-center justify-between gap-3 text-sm"
+                    className="py-1.5 first:pt-0 last:pb-0 flex items-center justify-between gap-2.5 text-xs sm:text-sm"
                   >
                     <div className="truncate font-medium text-text-secondary">
                       <span className="font-mono text-xs font-semibold text-brand mr-1.5">{product.stock_code}</span>
@@ -563,18 +560,18 @@ export function SummaryTab({
           </div>
 
           {/* Card 2: Recommended decisions */}
-          <div className="bg-bg-subtle p-5 rounded-lg border border-border">
-            <h2 className="text-base font-semibold text-text-primary mb-4">
+          <div className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border">
+            <h2 className="text-sm font-semibold text-text-primary mb-2.5">
               Recommended decisions
             </h2>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               {recommendations.map((rec) => (
                 <div
                   key={rec.id}
-                  className="bg-bg-base p-3.5 rounded-lg border border-border flex flex-col justify-between hover:border-brand/30 transition-colors"
+                  className="bg-bg-base p-3 rounded-lg border border-border flex flex-col justify-between hover:border-brand/30 transition-colors"
                 >
-                  <h3 className="text-xs font-bold text-text-primary mb-1.5">
+                  <h3 className="text-xs font-bold text-text-primary mb-1">
                     {rec.title}
                   </h3>
                   <p className="text-[11px] leading-relaxed text-text-secondary">

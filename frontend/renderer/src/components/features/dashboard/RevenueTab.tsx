@@ -2,7 +2,6 @@ import { useState } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { useUrlQuery } from "@renderer/lib/queryClient";
 import { Button } from "@renderer/components/ui/Button";
-import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Skeleton } from "@renderer/components/ui/Skeleton";
@@ -181,32 +180,30 @@ export function RevenueTab({
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       <RefreshingHint show={isRefreshing} />
-      <CollapsibleKpiSummary storageKey="dashboard_revenue" title="Revenue KPIs">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <StatTile
-            label="Net Revenue"
-            value={formatMoney(data.net_revenue.value)}
-            deltaPct={data.net_revenue.delta_pct}
-            previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
-          />
-          <StatTile
-            label="Transactions"
-            value={formatCount(data.transaction_count.value)}
-            deltaPct={data.transaction_count.delta_pct}
-            previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
-          />
-          <StatTile
-            label="Average Sale Value"
-            value={formatMoney(data.avg_basket.value)}
-            deltaPct={data.avg_basket.delta_pct}
-            previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
-          />
-        </div>
-      </CollapsibleKpiSummary>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
+        <StatTile
+          label="Net Revenue"
+          value={formatMoney(data.net_revenue.value)}
+          deltaPct={data.net_revenue.delta_pct}
+          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+        />
+        <StatTile
+          label="Transactions"
+          value={formatCount(data.transaction_count.value)}
+          deltaPct={data.transaction_count.delta_pct}
+          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+        />
+        <StatTile
+          label="Average Sale Value"
+          value={formatMoney(data.avg_basket.value)}
+          deltaPct={data.avg_basket.delta_pct}
+          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+        />
+      </div>
 
-      <Card>
+      <Card className="p-3.5 sm:p-4">
         <CardHeader
           title="Sales trend"
           description="Daily net revenue over the selected period."
@@ -221,7 +218,7 @@ export function RevenueTab({
         />
       </Card>
 
-      <Card>
+      <Card className="p-3.5 sm:p-4">
         <CardHeader
           title="Sales by day & hour"
           description="Revenue concentration by weekday and time of day — useful for staffing decisions."
@@ -233,25 +230,27 @@ export function RevenueTab({
         />
       </Card>
 
-      <Card>
-        <CardHeader
-          title="Top products"
-          description="Ranked by net revenue in the selected period."
-        />
-        <TopProductsTable products={data.top_products} />
-      </Card>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-start">
+        <Card className="p-3.5 sm:p-4 lg:col-span-2">
+          <CardHeader
+            title="Top products"
+            description="Ranked by net revenue in the selected period."
+          />
+          <TopProductsTable products={data.top_products} />
+        </Card>
 
-      <Card>
-        <CardHeader
-          title="Sale data quality"
-          description="Bad values on sale lines in the selected period."
-        />
-        <WarningsTile
-          warnings={data.sale_warnings}
-          label="Sale"
-          onViewWarnings={onViewWarnings}
-        />
-      </Card>
+        <Card className="p-3.5 sm:p-4 lg:col-span-1">
+          <CardHeader
+            title="Sale data quality"
+            description="Bad values on sale lines in the selected period."
+          />
+          <WarningsTile
+            warnings={data.sale_warnings}
+            label="Sale"
+            onViewWarnings={onViewWarnings}
+          />
+        </Card>
+      </div>
     </div>
   );
 }

@@ -88,7 +88,7 @@ def test_voucher_line_foreign_currency_requires_original_amount_and_rate(
     _user(db_session, UserRole.WHOLESALE, branch.id)
 
     payload = _payload()
-    payload["lines"][0] |= {"currency_code": "USD"}
+    payload["lines"][0] |= {"currency_code": "THB"}
     response = authed_client.post("/api/wholesale/supplier-vouchers", json=payload)
     assert response.status_code == 422
 

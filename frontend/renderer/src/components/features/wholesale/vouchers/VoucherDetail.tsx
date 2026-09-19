@@ -53,6 +53,7 @@ import {
   formatIn,
   PAIRS_PER,
   pricedAmount,
+  unitName,
 } from "@renderer/components/features/wholesale/shared/units";
 import {
   paidPct,
@@ -558,9 +559,6 @@ export function VoucherDetail({
                         </Th>
                         <Th className="text-right min-w-[7rem]">
                           Buying price
-                          <span className="block text-[10px] font-normal text-text-muted">
-                            per set
-                          </span>
                         </Th>
                         <Th className="text-right">Amount</Th>
                         <Th>Customers</Th>
@@ -781,34 +779,39 @@ export function VoucherDetail({
                                         }}
                                       />
                                       <p className="text-xs text-text-muted text-right tabular-nums">
-                                        {formatKyat(line.buying_price)}
+                                        = {formatKyat(line.buying_price)} per {unitName(line.unit, 1)}
                                       </p>
                                     </>
                                   ) : (
-                                    <Controller
-                                      control={control}
-                                      name={`voucher.lines.${index}.buying_price`}
-                                      render={({ field: priceField }) => (
-                                        <CellInput
-                                          label={`Buying price for product ${index + 1}`}
-                                          placeholder="0"
-                                          numeric
-                                          className="text-right"
-                                          value={String(priceField.value)}
-                                          onChange={(next) => {
-                                            const buyingPrice = Number(next) || 0;
-                                            priceField.onChange(buyingPrice);
-                                            setLine(index, {
-                                              buying_price: buyingPrice,
-                                            });
-                                          }}
-                                          error={
-                                            errors.voucher?.lines?.[index]
-                                              ?.buying_price?.message
-                                          }
-                                        />
-                                      )}
-                                    />
+                                    <>
+                                      <Controller
+                                        control={control}
+                                        name={`voucher.lines.${index}.buying_price`}
+                                        render={({ field: priceField }) => (
+                                          <CellInput
+                                            label={`Buying price for product ${index + 1}`}
+                                            placeholder="0"
+                                            numeric
+                                            className="text-right"
+                                            value={String(priceField.value)}
+                                            onChange={(next) => {
+                                              const buyingPrice = Number(next) || 0;
+                                              priceField.onChange(buyingPrice);
+                                              setLine(index, {
+                                                buying_price: buyingPrice,
+                                              });
+                                            }}
+                                            error={
+                                              errors.voucher?.lines?.[index]
+                                                ?.buying_price?.message
+                                            }
+                                          />
+                                        )}
+                                      />
+                                      <span className="text-right text-[10px] text-text-muted">
+                                        per {unitName(line.unit, 1)}
+                                      </span>
+                                    </>
                                   )}
                                 </div>
                               </Td>

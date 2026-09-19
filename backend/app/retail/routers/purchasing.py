@@ -12,7 +12,7 @@ from app.services.branches import list_retail_branches, resolve_branch_id
 
 router = APIRouter(prefix="/api/purchasing", tags=["purchasing"])
 
-PAGE_SIZE = 50
+PAGE_SIZE = 20
 
 
 def _resolve_target_branch(user: User, branch_id: str | None, db: Session) -> tuple[str, str]:
@@ -41,7 +41,7 @@ def _resolve_target_branch(user: User, branch_id: str | None, db: Session) -> tu
 @router.get("/recommendations")
 def get_recommendations(
     branch_id: str | None = Query(None, description="Branch ID (admin only)"),
-    target_months: int = Query(3, ge=1, le=12, description="Target stock coverage buffer in months"),
+    target_months: float | None = Query(None, ge=0.1, le=24.0, description="Optional override for target buffer in months"),
     search: str | None = Query(None, description="Filter by stock code or description"),
     recommendation: str | None = Query(None, description="Filter by recommendation category"),
     abc_class: str | None = Query(None, description="Filter by ABC class (A, B, C, N)"),
@@ -83,7 +83,6 @@ def get_recommendations(
     return {
         "branch_id": resolved_id,
         "branch_name": b_name,
-        "target_months": target_months,
         "summary": data["summary"],
         "total": total,
         "rows": page_rows,
@@ -93,7 +92,7 @@ def get_recommendations(
 @router.get("/export")
 def export_recommendations(
     branch_id: str | None = Query(None, description="Branch ID (admin only)"),
-    target_months: int = Query(3, ge=1, le=12),
+    target_months: float | None = Query(None, ge=0.1, le=24.0),
     reorder_only: bool = Query(True, description="If true, only export Urgent Reorder and Reorder items"),
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
@@ -118,6 +117,7 @@ def export_recommendations(
         "TotalSalesValue",
         "AvgMonthlySales",
         "OnHandQty",
+        "TargetBufferMonths",
         "StockCoverageMonths",
         "StockStatus",
         "SuggestedReorderQty",

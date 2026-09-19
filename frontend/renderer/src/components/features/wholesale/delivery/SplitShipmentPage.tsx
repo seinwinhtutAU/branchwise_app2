@@ -18,8 +18,8 @@ import {
   shipmentPairs,
   type Shipment,
 } from "./shipments";
-import { EDITABLE, JourneyArrow, JourneyCard, JourneyRow, QuantityInput, Required, SectionLabel, SuggestInput } from "../shared/ui";
-import { formatIn, type Unit } from "../shared/units";
+import { EDITABLE, JourneyArrow, JourneyCard, JourneyRow, Required, SectionLabel, SuggestInput } from "../shared/ui";
+import { formatIn, fromPairs, unitName, type Unit } from "../shared/units";
 
 /**
  * The Split shipment tab — the shipment's real journey (the same row the Shipment tab
@@ -34,9 +34,7 @@ import { formatIn, type Unit } from "../shared/units";
  * balance, silently contradicting a count a Receiving may already refer to (see
  * backend/app/services/wholesale_shipments.py::split_shipment). Quantity is optional and
  * only checked against the shipment's own total, since what's actually inside a package
- * isn't known for certain until it's opened and counted at the receiving gate — it's
- * typed in the shipment's own unit (set/dozen/pair) and converted to real pairs before
- * it's compared or sent, the same way every other quantity field in this app does.
+ * isn't known for certain until it's opened and counted at the receiving gate.
  */
 
 type SelectedPoint = { kind: "cargo" } | { kind: "leg"; legOrder: number };
@@ -63,7 +61,7 @@ function buildStages(shipment: Shipment): Stage[] {
       journeyStage: "supplier",
       rows: [
         { label: "Packages", value: formatQty(shipment.total_packages) },
-        { label: "Quantity", value: formatIn(shipmentPairs(shipment), unit) },
+        { label: "Quantity", value: `${Math.round(fromPairs(shipmentPairs(shipment), unit))} ${unitName(unit, Math.round(fromPairs(shipmentPairs(shipment), unit)))}` },
       ],
     },
     {
@@ -117,22 +115,28 @@ function samePoint(a: SelectedPoint, b: SelectedPoint): boolean {
 export function SplitShipmentPage({
   shipment,
   destinationSuggestions,
+  gateSuggestions = [],
   carrierSuggestions,
   onCancel,
   onSubmit,
 }: {
   shipment: Shipment;
   destinationSuggestions: string[];
+  gateSuggestions?: string[];
   carrierSuggestions: string[];
   onCancel: () => void;
   onSubmit: (
     packages: number,
     quantity: number | undefined,
+    destination: string,
     finalDestination: string,
     carrierName: string,
     splitLegOrder: number | undefined,
   ) => Promise<void>;
 }): React.JSX.Element {
+  const totalQuantity = shipmentPairs(shipment);
+  const unit: Unit = shipment.total_unit;
+
   const stages = useMemo(() => buildStages(shipment), [shipment]);
   const firstSplittable = stages.find((stage) => (stage.point?.available ?? 0) > 0)?.point;
   const [selected, setSelected] = useState<SelectedPoint | null>(firstSplittable?.selected ?? null);
@@ -140,38 +144,40 @@ export function SplitShipmentPage({
   // typing a figure that briefly exceeds the limit (try typing "15" one digit at a time
   // when the max is 10). The limit still applies at submit time via packagesWrong.
   const [packagesText, setPackagesText] = useState(() => (firstSplittable?.available ? "1" : "0"));
-  // Blank means "not known yet" — left out of the request entirely rather than sent as
-  // a guess.
   const [quantityText, setQuantityText] = useState("");
   const [destination, setDestination] = useState("");
+  const [receivingGate, setReceivingGate] = useState(shipment.final_destination);
   const [carrierName, setCarrierName] = useState("");
   const [touchedDestination, setTouchedDestination] = useState(false);
+  const [touchedGate, setTouchedGate] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
 
-  const totalQuantity = shipmentPairs(shipment);
-  const unit: Unit = shipment.total_unit;
   const packages = Number(packagesText) || 0;
+
+  function handlePackagesChange(val: string): void {
+    const digits = onlyDigits(val);
+    setPackagesText(digits);
+  }
 
   const selectedStage = stages.find((stage) => stage.point && selected && samePoint(stage.point.selected, selected));
   const availablePackages = selectedStage?.point?.available ?? 0;
 
   const quantityEntered = quantityText.trim() !== "";
-  // Typed in the shipment's own unit by default, or in whatever a piece names its own
-  // ("83p", "1s3p") — the same shorthand the colour boxes use — converted to real pairs
-  // before it means anything next to `totalQuantity` or gets sent to the server, which
-  // only ever deals in real pairs.
-  const quantityFormatProblem = quantityEntered
-    ? quantityShorthandProblem(quantityText)
-    : null;
+  const shorthandProblem = quantityEntered ? quantityShorthandProblem(quantityText) : null;
   const quantity =
-    quantityEntered && !quantityFormatProblem
-      ? quantityShorthandPairs(quantityText, unit)
-      : undefined;
+    quantityEntered && !shorthandProblem ? quantityShorthandPairs(quantityText, unit) : undefined;
+
+  const gateWrong =
+    receivingGate.trim() === "" ? "Say which gate this shipment lands at." : undefined;
+  const gateError =
+    gateWrong && (touchedGate || submitAttempted) ? gateWrong : undefined;
 
   const destinationWrong =
-    destination.trim() === "" ? "Say where this part is going." : undefined;
+    destination.trim() === "" && receivingGate.trim() === shipment.final_destination
+      ? "Say where this part is going (enter a destination or choose a different gate)."
+      : undefined;
   const destinationError =
     destinationWrong && (touchedDestination || submitAttempted)
       ? destinationWrong
@@ -183,12 +189,18 @@ export function SplitShipmentPage({
         ? `Only ${availablePackages} packages are still at ${selectedStage?.title}.`
         : undefined;
   const quantityWrong =
-    quantityFormatProblem ??
+    shorthandProblem ??
     (quantity !== undefined && quantity > totalQuantity
-      ? `That is more than the shipment's own ${formatIn(totalQuantity, unit)}.`
+      ? `Cannot exceed the shipment's own ${formatIn(totalQuantity, unit)}.`
       : undefined);
 
-  const canSubmit = !!selected && !packagesWrong && !quantityWrong && !destinationWrong && !saving;
+  const canSubmit =
+    !!selected &&
+    !packagesWrong &&
+    !quantityWrong &&
+    !destinationWrong &&
+    !gateWrong &&
+    !saving;
 
   async function submit(): Promise<void> {
     setSubmitAttempted(true);
@@ -200,6 +212,7 @@ export function SplitShipmentPage({
         packages,
         quantity,
         destination.trim(),
+        receivingGate.trim(),
         carrierName.trim(),
         selected.kind === "leg" ? selected.legOrder : undefined,
       );
@@ -249,7 +262,8 @@ export function SplitShipmentPage({
                       onClick={() => {
                         const point = stage.point!.selected;
                         setSelected(point);
-                        setPackagesText(stage.point!.available > 0 ? "1" : "0");
+                        const nextPkgs = stage.point!.available > 0 ? "1" : "0";
+                        setPackagesText(nextPkgs);
                       }}
                       aria-pressed={isSelected}
                       className={cn(
@@ -264,69 +278,105 @@ export function SplitShipmentPage({
                   )}
                   {isSelected && (
                     <>
-                      <ArrowRightIcon className="h-5 w-5 rotate-90 text-text-muted" aria-hidden />
-                      <JourneyCard
-                        stage="stop"
-                        title="New shipment"
-                        subtitle={destination.trim() || "Pick a destination"}
-                      >
-                        <JourneyRow label="Packages" value={formatQty(packages)} />
-                        <JourneyRow
-                          label="Quantity"
-                          value={quantity === undefined ? "Not yet known" : formatIn(quantity, unit)}
-                        />
-                      </JourneyCard>
+                      <div className="flex w-44 justify-center py-0.5">
+                        <ArrowRightIcon className="h-5 w-5 rotate-90 text-text-muted" aria-hidden />
+                      </div>
+                      <div className="flex items-center gap-0">
+                        <JourneyCard
+                          stage="stop"
+                          title="New shipment"
+                          subtitle={destination.trim() || "In transit"}
+                        >
+                          <JourneyRow label="Packages" value={formatQty(packages)} />
+                          <JourneyRow
+                            label="Quantity"
+                            value={
+                              quantityEntered && !shorthandProblem && quantity !== undefined
+                                ? formatIn(quantity, unit)
+                                : "Not specified"
+                            }
+                          />
+                        </JourneyCard>
+                        <JourneyArrow />
+                        <JourneyCard
+                          stage="final"
+                          title="Final received"
+                          subtitle={receivingGate.trim() || "Receiving gate"}
+                        >
+                          <JourneyRow label="Packages" value={formatQty(packages)} />
+                          <JourneyRow
+                            label="Quantity"
+                            value={
+                              quantityEntered && !shorthandProblem && quantity !== undefined
+                                ? formatIn(quantity, unit)
+                                : "Not specified"
+                            }
+                          />
+                        </JourneyCard>
+                      </div>
                     </>
                   )}
                 </div>
-              </Fragment>
-            );
-          })}
-        </div>
+            </Fragment>
+          );
+        })}
       </div>
+    </div>
 
-      {selected ? (
-        <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Input
-              label={<Required>Packages to split</Required>}
-              className={EDITABLE}
-              type="text"
-              inputMode="numeric"
-              value={packagesText}
-              onChange={(event) => setPackagesText(onlyDigits(event.target.value))}
-              aria-label="Packages going to the new place"
-              error={packagesWrong}
-              hint={packagesWrong ? undefined : `${availablePackages} at ${selectedStage?.title}`}
-            />
-            <QuantityInput
-              label="Quantity to split"
-              unit={unit}
-              placeholder="Not known yet"
-              value={quantityText}
-              onChange={setQuantityText}
-              error={quantityWrong}
-              hint={quantityWrong ? undefined : "Optional, until counted"}
-            />
-            <SuggestInput
-              label={<Required>New destination</Required>}
-              placeholder="Where is this part going?"
-              value={destination}
-              onChange={(next) => {
-                setDestination(next);
-                setTouchedDestination(true);
-              }}
-              suggestions={destinationSuggestions}
-              error={destinationError}
-            />
-            <SuggestInput
-              label="Carrier"
-              placeholder="Same carrier if left blank"
-              value={carrierName}
-              onChange={setCarrierName}
-              suggestions={carrierSuggestions}
-            />
-          </div>
+    {selected ? (
+      <>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 items-start">
+          <Input
+            label={<Required>Packages to split</Required>}
+            className={EDITABLE}
+            type="text"
+            inputMode="numeric"
+            value={packagesText}
+            onChange={(event) => handlePackagesChange(event.target.value)}
+            aria-label="Packages going to the new place"
+            error={packagesWrong}
+            hint={packagesWrong ? undefined : `${availablePackages} at ${selectedStage?.title}`}
+          />
+          <Input
+            label="Quantity to split"
+            className={EDITABLE}
+            type="text"
+            placeholder="Optional"
+            value={quantityText}
+            onChange={(event) => setQuantityText(event.target.value)}
+            error={quantityWrong}
+            hint={quantityWrong ? undefined : "Optional"}
+          />
+          <SuggestInput
+            label="New destination"
+            placeholder="e.g. Mandalay (transit stop)"
+            value={destination}
+            onChange={(next) => {
+              setDestination(next);
+              setTouchedDestination(true);
+            }}
+            suggestions={destinationSuggestions}
+            error={destinationError}
+          />
+          <SuggestInput
+            label={<Required>Receiving gate</Required>}
+            placeholder="Final receiving gate"
+            value={receivingGate}
+            onChange={(next) => {
+              setReceivingGate(next);
+              setTouchedGate(true);
+            }}
+            suggestions={gateSuggestions}
+            error={gateError}
+          />
+          <SuggestInput
+            label="Carrier"
+            placeholder="Same carrier if left blank"
+            value={carrierName}
+            onChange={setCarrierName}
+            suggestions={carrierSuggestions}
+          />
+        </div>
 
           {error && <p className="text-sm text-error">{error}</p>}
 

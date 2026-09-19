@@ -1,14 +1,18 @@
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import { useQuery } from "@tanstack/react-query";
 import { type Session } from "@renderer/lib/auth";
 import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
+import { cn } from "@renderer/lib/utils";
 import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
+import { TabBar } from "@renderer/components/ui/Tabs";
+import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
+import { ColumnHeaderFilter } from "@renderer/components/ui/ColumnHeaderFilter";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
-import { Select } from "@renderer/components/ui/Select";
+import { Pagination } from "@renderer/components/ui/Pagination";
 import { Spinner } from "@renderer/components/ui/Spinner";
 import {
   TableContainer,
@@ -19,9 +23,10 @@ import {
   Tr,
 } from "@renderer/components/ui/Table";
 import {
+  CheckIcon,
   CloseIcon,
+  DollarIcon,
   SearchIcon,
-  WarehouseIcon,
 } from "@renderer/components/ui/icons";
 import {
   addCustomerOrderPayment,
@@ -32,10 +37,17 @@ import {
   WHOLESALE_FINANCE_CUSTOMERS_URL,
   type ReceivingWire,
 } from "@renderer/components/features/wholesale/shared/api";
-import { DotPill, Reference } from "@renderer/components/features/wholesale/shared/ui";
+import {
+  DotPill,
+  FigureCard,
+  PAGE_SIZE,
+  Panel,
+  Reference,
+} from "@renderer/components/features/wholesale/shared/ui";
 import {
   formatDate,
   formatKyat,
+  formatQty,
   todayIso,
 } from "@renderer/components/features/wholesale/shared/shared";
 import {
@@ -60,11 +72,36 @@ type Tab = "customers" | "suppliers" | "shipment-costs";
 type StatusFilter = "all" | "unpaid" | "partial" | "paid";
 type PaymentStatus = Exclude<StatusFilter, "all">;
 
+interface FinanceTabItem {
+  id: Tab;
+  label: string;
+  description: string;
+}
+
+const FINANCE_TABS: FinanceTabItem[] = [
+  {
+    id: "customers",
+    label: "Customer Receivables",
+    description: "Track customer orders, payments received, and outstanding balances",
+  },
+  {
+    id: "suppliers",
+    label: "Supplier Payables",
+    description: "Track supplier vouchers, settlement payments, and unpaid balances",
+  },
+  {
+    id: "shipment-costs",
+    label: "Shipment Costs",
+    description: "Overview of freight, customs, gate, and transportation costs across shipments",
+  },
+];
+
 const STATUS_LABELS: Record<PaymentStatus, string> = {
   unpaid: "Unpaid",
   partial: "Part paid",
   paid: "Paid",
 };
+
 const STATUS_STYLES: Record<PaymentStatus, { bg: string; dot: string }> = {
   unpaid: {
     bg: "bg-error-subtle text-error border border-error-pill",
@@ -120,11 +157,10 @@ export default function FinancePage({
   const showToast = useToast();
   const [tab, setTab] = useState<Tab>("customers");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const searchInputRef = useSearchShortcut();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [paymentTarget, setPaymentTarget] = useState<PaymentTarget | null>(
-    null,
-  );
+  const [paymentTarget, setPaymentTarget] = useState<PaymentTarget | null>(null);
 
   const customerQuery = useQuery({
     queryKey: ["wholesale", "finance", "customers"],
@@ -164,6 +200,7 @@ export default function FinancePage({
     () => customerQuery.data ?? [],
     [customerQuery.data],
   );
+
   const suppliers = useMemo<SupplierFinanceRow[]>(
     () =>
       (supplierQuery.data ?? []).map((voucher) => {
@@ -188,6 +225,7 @@ export default function FinancePage({
       }),
     [supplierQuery.data],
   );
+
   const shipmentCosts = useMemo<ShipmentCostRow[]>(
     () =>
       (receivingQuery.data ?? []).flatMap((receiving) =>
@@ -206,21 +244,27 @@ export default function FinancePage({
       ),
     [receivingQuery.data],
   );
+
   const totalCustomerReceivable = customers.reduce(
     (sum, row) => sum + row.balance,
     0,
   );
+  const unpaidCustomersCount = customers.filter((row) => row.balance > 0).length;
+
   const totalSupplierPayable = suppliers.reduce(
     (sum, row) => sum + row.balance,
     0,
   );
+  const unpaidSuppliersCount = suppliers.filter((row) => row.balance > 0).length;
+
   const totalShipmentCost = shipmentCosts.reduce(
     (sum, row) => sum + row.amount,
     0,
   );
+
   const queryText = search.trim().toLowerCase();
 
-  const visibleCustomers = useMemo(
+  const filteredCustomers = useMemo(
     () =>
       customers.filter((row) => {
         const matchesSearch =
@@ -234,7 +278,8 @@ export default function FinancePage({
       }),
     [customers, queryText, statusFilter],
   );
-  const visibleSuppliers = useMemo(
+
+  const filteredSuppliers = useMemo(
     () =>
       suppliers.filter(({ voucher, status }) => {
         const matchesSearch =
@@ -247,7 +292,8 @@ export default function FinancePage({
       }),
     [queryText, statusFilter, suppliers],
   );
-  const visibleShipmentCosts = useMemo(
+
+  const filteredShipmentCosts = useMemo(
     () =>
       shipmentCosts.filter((row) => {
         if (!queryText) return true;
@@ -264,119 +310,182 @@ export default function FinancePage({
     [queryText, shipmentCosts],
   );
 
+  const isFiltered = search.trim() !== "" || (tab !== "shipment-costs" && statusFilter !== "all");
+
+  function resetFilters(): void {
+    setSearch("");
+    setStatusFilter("all");
+    setPage(1);
+  }
+
+  function handleTabChange(nextTab: Tab): void {
+    setTab(nextTab);
+    setPage(1);
+  }
+
+  const activeTab = FINANCE_TABS.find((item) => item.id === tab) ?? FINANCE_TABS[0];
+
+  const tabCounts: Record<Tab, number> = {
+    customers: customers.length,
+    suppliers: suppliers.length,
+    "shipment-costs": shipmentCosts.length,
+  };
+
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight text-text-primary">
-            Finance
-          </h2>
-          <p className="mt-1 text-sm text-text-muted">
-            See who owes what, and whether it is paid.
-          </p>
-        </div>
-        <RefreshButton
-          onClick={refreshFinance}
-          refreshing={isRefreshing}
-        />
-      </div>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <MoneyCard
-          label="Total Customer Receivable"
-          value={formatKyat(totalCustomerReceivable)}
-        />
-        <MoneyCard
-          label="Total Supplier Payable"
-          value={formatKyat(totalSupplierPayable)}
-        />
-        <MoneyCard
-          label="Total Shipment Cost"
-          value={formatKyat(totalShipmentCost)}
-        />
-      </div>
-      <div className="flex border-b border-border">
-        <TabButton
-          active={tab === "customers"}
-          onClick={() => setTab("customers")}
-        >
-          Customer Receivables
-        </TabButton>
-        <TabButton
-          active={tab === "suppliers"}
-          onClick={() => setTab("suppliers")}
-        >
-          Supplier Payables
-        </TabButton>
-        <TabButton
-          active={tab === "shipment-costs"}
-          onClick={() => setTab("shipment-costs")}
-        >
-          Shipment Costs
-        </TabButton>
-      </div>
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="w-full md:w-72">
-          <Input
-            ref={searchInputRef}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search name or reference"
-            startIcon={<SearchIcon className="h-4 w-4" />}
-            aria-label="Search name or reference"
+    <div className="flex flex-col gap-4">
+      <CollapsibleKpiSummary storageKey="wholesale_finance" title="Finance Summary">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <FigureCard
+            label="Customer Receivables"
+            value={formatKyat(totalCustomerReceivable)}
+            sub={`${formatQty(unpaidCustomersCount)} order${unpaidCustomersCount === 1 ? "" : "s"} with balance`}
+            tone={totalCustomerReceivable > 0 ? "error" : "success"}
+          />
+          <FigureCard
+            label="Supplier Payables"
+            value={formatKyat(totalSupplierPayable)}
+            sub={`${formatQty(unpaidSuppliersCount)} voucher${unpaidSuppliersCount === 1 ? "" : "s"} with balance`}
+            tone={totalSupplierPayable > 0 ? "error" : "success"}
+          />
+          <FigureCard
+            label="Shipment Costs"
+            value={formatKyat(totalShipmentCost)}
+            sub={`${formatQty(shipmentCosts.length)} recorded entry${shipmentCosts.length === 1 ? "" : "ies"}`}
           />
         </div>
-        {tab !== "shipment-costs" && (
-          <div className="w-full md:w-48">
-            <Select
-              value={statusFilter}
-              onChange={(event) =>
-                setStatusFilter(event.target.value as StatusFilter)
-              }
-            >
-              <option value="all">Any status</option>
-              <option value="unpaid">Unpaid</option>
-              <option value="partial">Part paid</option>
-              <option value="paid">Paid</option>
-            </Select>
+      </CollapsibleKpiSummary>
+
+      <TabBar<Tab>
+        tabs={FINANCE_TABS.map((item) => ({
+          id: item.id,
+          label: item.label,
+          count: tabCounts[item.id],
+        }))}
+        activeTab={tab}
+        onSelect={handleTabChange}
+      />
+
+      <Panel className="shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-base">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
+              {activeTab.label}
+            </h2>
+            <span className="text-xs text-text-muted hidden sm:inline">
+              {activeTab.description}
+            </span>
+
+            {isFiltered && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={resetFilters}
+                className="text-xs h-6 px-1.5 text-text-muted hover:text-error"
+              >
+                <CloseIcon className="w-3.5 h-3.5" />
+                Clear
+              </Button>
+            )}
           </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-48 sm:w-64">
+              <Input
+                ref={searchInputRef}
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search name or reference… (/)"
+                startIcon={<SearchIcon className="w-3.5 h-3.5" />}
+                aria-label="Search name or reference"
+                className="h-8 text-xs"
+              />
+            </div>
+            <RefreshButton
+              onClick={refreshFinance}
+              refreshing={isRefreshing}
+            />
+          </div>
+        </div>
+
+        {tab === "customers" ? (
+          <FinanceTable
+            loading={customerQuery.isLoading}
+            emptyTitle={isFiltered ? "No customer receivables match" : "No customer receivables yet"}
+            emptyDescription={
+              isFiltered
+                ? "Nothing here matches what you searched for. Try adjusting your search or status filter."
+                : "Unpaid balances from customer orders will appear here."
+            }
+            rows={filteredCustomers}
+            page={page}
+            onPageChange={setPage}
+            statusFilter={statusFilter}
+            onStatusFilterChange={(val) => {
+              setStatusFilter(val);
+              setPage(1);
+            }}
+            onResetFilters={resetFilters}
+            isFiltered={isFiltered}
+            onRecordPayment={(row) =>
+              setPaymentTarget({
+                id: row.order_id,
+                name: row.customer_name,
+                reference: row.order_no,
+                kind: "customer",
+              })
+            }
+            onOpenReference={onOpenOrder}
+          />
+        ) : tab === "suppliers" ? (
+          <SupplierTable
+            loading={supplierQuery.isLoading}
+            emptyTitle={isFiltered ? "No supplier payables match" : "No supplier payables yet"}
+            emptyDescription={
+              isFiltered
+                ? "Nothing here matches what you searched for. Try adjusting your search or status filter."
+                : "Outstanding balances owed to suppliers will appear here."
+            }
+            rows={filteredSuppliers}
+            page={page}
+            onPageChange={setPage}
+            statusFilter={statusFilter}
+            onStatusFilterChange={(val) => {
+              setStatusFilter(val);
+              setPage(1);
+            }}
+            onResetFilters={resetFilters}
+            isFiltered={isFiltered}
+            onRecordPayment={(row) =>
+              setPaymentTarget({
+                id: row.voucher.voucher_id,
+                name: row.voucher.supplier_name,
+                reference: row.voucher.voucher_no,
+                kind: "supplier",
+              })
+            }
+            onOpenReference={onOpenVoucher}
+          />
+        ) : (
+          <ShipmentCostTable
+            loading={receivingQuery.isLoading}
+            emptyTitle={isFiltered ? "No shipment costs match" : "No shipment costs yet"}
+            emptyDescription={
+              isFiltered
+                ? "Nothing here matches what you searched for."
+                : "Recorded receiving and transport costs will appear here."
+            }
+            rows={filteredShipmentCosts}
+            page={page}
+            onPageChange={setPage}
+            onResetFilters={resetFilters}
+            isFiltered={isFiltered}
+          />
         )}
-      </div>
-      {tab === "customers" ? (
-        <FinanceTable
-          loading={customerQuery.isLoading}
-          emptyTitle="No customer receivables"
-          emptyDescription="Orders matching these filters will appear here."
-          rows={visibleCustomers}
-          onRecordPayment={(row) =>
-            setPaymentTarget({
-              id: row.order_id,
-              name: row.customer_name,
-              reference: row.order_no,
-              kind: "customer",
-            })
-          }
-          onOpenReference={onOpenOrder}
-        />
-      ) : tab === "suppliers" ? (
-        <SupplierTable
-          loading={supplierQuery.isLoading}
-          rows={visibleSuppliers}
-          onRecordPayment={(row) =>
-            setPaymentTarget({
-              id: row.voucher.voucher_id,
-              name: row.voucher.supplier_name,
-              reference: row.voucher.voucher_no,
-              kind: "supplier",
-            })
-          }
-          onOpenReference={onOpenVoucher}
-        />
-      ) : (
-        <ShipmentCostTable
-          loading={receivingQuery.isLoading}
-          rows={visibleShipmentCosts}
-        />
-      )}
+      </Panel>
+
       {paymentTarget && (
         <RecordPaymentModal
           session={session}
@@ -384,50 +493,12 @@ export default function FinancePage({
           onClose={() => setPaymentTarget(null)}
           onSaved={() => {
             setPaymentTarget(null);
+            refreshFinance();
             showToast("success", "Payment recorded");
           }}
         />
       )}
     </div>
-  );
-}
-
-function MoneyCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}): React.JSX.Element {
-  return (
-    <div className="rounded-xl border border-border bg-bg-base p-5">
-      <span className="block text-xs font-semibold uppercase tracking-wide text-text-muted">
-        {label}
-      </span>
-      <span className="mt-2 block text-2xl font-bold tabular-nums text-brand">
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`border-b-2 px-4 py-3 text-left text-sm font-semibold leading-tight ${active ? "border-brand text-brand" : "border-transparent text-text-muted hover:text-text-primary"}`}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -446,33 +517,17 @@ function PaymentStatusBadge({
   );
 }
 
-function Panel({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}): React.JSX.Element {
-  return (
-    <section className="overflow-hidden rounded-xl border border-border bg-bg-base">
-      <div className="border-b border-border px-5 py-4">
-        <h3 className="font-semibold text-text-primary">{title}</h3>
-        {description && (
-          <p className="mt-1 text-sm text-text-muted">{description}</p>
-        )}
-      </div>
-      {children}
-    </section>
-  );
-}
-
 function FinanceTable({
   loading,
   emptyTitle,
   emptyDescription,
   rows,
+  page,
+  onPageChange,
+  statusFilter,
+  onStatusFilterChange,
+  onResetFilters,
+  isFiltered,
   onRecordPayment,
   onOpenReference,
 }: {
@@ -480,51 +535,134 @@ function FinanceTable({
   emptyTitle: string;
   emptyDescription: string;
   rows: FinanceCustomerRow[];
+  page: number;
+  onPageChange: (page: number) => void;
+  statusFilter: StatusFilter;
+  onStatusFilterChange: (status: StatusFilter) => void;
+  onResetFilters: () => void;
+  isFiltered: boolean;
   onRecordPayment: (row: FinanceCustomerRow) => void;
   onOpenReference: (referenceId: string) => void;
 }): React.JSX.Element {
-  const totals = rows.reduce(
-    (summary, row) => ({
-      total: summary.total + row.total_amount,
-      paid: summary.paid + row.paid_amount,
-      balance: summary.balance + row.balance,
-    }),
-    { total: 0, paid: 0, balance: 0 },
+  const totals = useMemo(
+    () =>
+      rows.reduce(
+        (summary, row) => ({
+          total: summary.total + row.total_amount,
+          paid: summary.paid + row.paid_amount,
+          balance: summary.balance + row.balance,
+        }),
+        { total: 0, paid: 0, balance: 0 },
+      ),
+    [rows],
   );
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const visible = rows.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE,
+  );
+
+  if (loading) {
+    return <Loading />;
+  }
+
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={<DollarIcon />}
+        title={emptyTitle}
+        description={emptyDescription}
+        action={
+          isFiltered ? (
+            <Button variant="secondary" onClick={onResetFilters}>
+              Clear filters
+            </Button>
+          ) : undefined
+        }
+      />
+    );
+  }
+
   return (
-    <Panel
-      title="Customer Receivables"
-      description="Unpaid balances from customer orders."
-    >
-      {loading ? (
-        <Loading />
-      ) : rows.length === 0 ? (
-        <EmptyState
-          icon={<WarehouseIcon />}
-          title={emptyTitle}
-          description={emptyDescription}
-        />
-      ) : (
-        <TableContainer className="rounded-none border-0">
-          <Thead>
-            <Tr>
-              <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
-              <Th>Name</Th>
-              <Th>Reference</Th>
-              <Th className="text-right">Total Amount</Th>
-              <Th className="text-right">Paid Amount</Th>
-              <Th className="text-right">Balance</Th>
-              <Th>Status</Th>
-              <Th>Actions</Th>
-            </Tr>
-          </Thead>
-          <Tbody>
-            {rows.map((row, index) => (
+    <>
+      <TableContainer className="rounded-none border-0">
+        <Thead>
+          <Tr>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
+            <Th className="whitespace-nowrap">Customer</Th>
+            <Th className="whitespace-nowrap">Order no.</Th>
+            <Th className="text-right whitespace-nowrap">Total Amount</Th>
+            <Th className="text-right whitespace-nowrap">Paid Amount</Th>
+            <Th className="text-right whitespace-nowrap">Balance</Th>
+            <Th className="whitespace-nowrap">
+              <ColumnHeaderFilter
+                label="Status"
+                isActive={statusFilter !== "all"}
+              >
+                {(close) => (
+                  <div className="flex flex-col gap-1.5">
+                    <div className="font-semibold text-text-primary text-[11px] uppercase tracking-wider pb-1 border-b border-border">
+                      Filter Status
+                    </div>
+                    <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onStatusFilterChange("all");
+                          close();
+                        }}
+                        className={cn(
+                          "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                          statusFilter === "all"
+                            ? "bg-brand/10 font-bold text-brand"
+                            : "hover:bg-bg-subtle text-text-secondary",
+                        )}
+                      >
+                        <span>Any status</span>
+                        {statusFilter === "all" && (
+                          <CheckIcon className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                      {(["unpaid", "partial", "paid"] as const).map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => {
+                            onStatusFilterChange(option);
+                            close();
+                          }}
+                          className={cn(
+                            "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                            statusFilter === option
+                              ? "bg-brand/10 font-bold text-brand"
+                              : "hover:bg-bg-subtle text-text-secondary",
+                          )}
+                        >
+                          <span>{STATUS_LABELS[option]}</span>
+                          {statusFilter === option && (
+                            <CheckIcon className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </ColumnHeaderFilter>
+            </Th>
+            <Th className="w-28 text-right whitespace-nowrap">Actions</Th>
+          </Tr>
+        </Thead>
+        <Tbody>
+          {visible.map((row, index) => {
+            const rowNum = (safePage - 1) * PAGE_SIZE + index + 1;
+            return (
               <Tr key={row.order_id}>
                 <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
-                  {index + 1}
+                  {rowNum}
                 </Td>
-                <Td className="font-medium">{row.customer_name}</Td>
+                <Td className="font-medium whitespace-nowrap">{row.customer_name}</Td>
                 <Td className="whitespace-nowrap">
                   <Reference
                     value={row.order_no}
@@ -536,102 +674,212 @@ function FinanceTable({
                 <Td className="text-right tabular-nums whitespace-nowrap">
                   {formatKyat(row.total_amount)}
                 </Td>
-                <Td className="text-right tabular-nums whitespace-nowrap">
+                <Td className="text-right tabular-nums whitespace-nowrap text-text-secondary">
                   {formatKyat(row.paid_amount)}
                 </Td>
                 <Td
-                  className={`text-right tabular-nums whitespace-nowrap ${row.balance > 0 ? "text-warning font-semibold" : "text-success"}`}
+                  className={cn(
+                    "text-right tabular-nums whitespace-nowrap font-semibold",
+                    row.balance > 0 ? "text-warning" : "text-success",
+                  )}
                 >
                   {formatKyat(row.balance)}
                 </Td>
-                <Td>
+                <Td className="whitespace-nowrap">
                   <PaymentStatusBadge status={row.payment_status} />
                 </Td>
-                <Td>
-                  <Button size="sm" onClick={() => onRecordPayment(row)}>
-                    Record Payment
+                <Td className="text-right whitespace-nowrap">
+                  <Button
+                    size="sm"
+                    variant={row.balance > 0 ? "primary" : "secondary"}
+                    onClick={() => onRecordPayment(row)}
+                    className="h-7 text-xs"
+                  >
+                    Record payment
                   </Button>
                 </Td>
               </Tr>
-            ))}
-          </Tbody>
-          <tfoot>
-            <Tr className="bg-bg-subtle">
-              <Td colSpan={2} className="text-right font-semibold">
-                Total
-              </Td>
-              <Td className="text-right font-bold tabular-nums whitespace-nowrap">
-                {formatKyat(totals.total)}
-              </Td>
-              <Td className="text-right font-bold tabular-nums whitespace-nowrap">
-                {formatKyat(totals.paid)}
-              </Td>
-              <Td className="text-right font-bold tabular-nums whitespace-nowrap">
-                {formatKyat(totals.balance)}
-              </Td>
-              <Td />
-              <Td />
-            </Tr>
-          </tfoot>
-        </TableContainer>
-      )}
-    </Panel>
+            );
+          })}
+        </Tbody>
+        <tfoot>
+          <Tr className="bg-bg-subtle font-semibold">
+            <Td colSpan={3} className="text-right">
+              Total ({formatQty(rows.length)} items)
+            </Td>
+            <Td className="text-right font-bold tabular-nums whitespace-nowrap">
+              {formatKyat(totals.total)}
+            </Td>
+            <Td className="text-right font-bold tabular-nums whitespace-nowrap">
+              {formatKyat(totals.paid)}
+            </Td>
+            <Td className="text-right font-bold tabular-nums whitespace-nowrap text-warning">
+              {formatKyat(totals.balance)}
+            </Td>
+            <Td />
+            <Td />
+          </Tr>
+        </tfoot>
+      </TableContainer>
+      <div className="px-4 py-1.5 border-t border-border">
+        <Pagination
+          page={safePage}
+          totalPages={totalPages}
+          totalItems={rows.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={onPageChange}
+        />
+      </div>
+    </>
   );
 }
 
 function SupplierTable({
   loading,
+  emptyTitle,
+  emptyDescription,
   rows,
+  page,
+  onPageChange,
+  statusFilter,
+  onStatusFilterChange,
+  onResetFilters,
+  isFiltered,
   onRecordPayment,
   onOpenReference,
 }: {
   loading: boolean;
+  emptyTitle: string;
+  emptyDescription: string;
   rows: SupplierFinanceRow[];
+  page: number;
+  onPageChange: (page: number) => void;
+  statusFilter: StatusFilter;
+  onStatusFilterChange: (status: StatusFilter) => void;
+  onResetFilters: () => void;
+  isFiltered: boolean;
   onRecordPayment: (row: SupplierFinanceRow) => void;
   onOpenReference: (referenceId: string) => void;
 }): React.JSX.Element {
-  const totals = rows.reduce(
-    (summary, row) => ({
-      total: summary.total + row.totalAmount,
-      paid: summary.paid + row.paidAmount,
-      balance: summary.balance + row.balance,
-    }),
-    { total: 0, paid: 0, balance: 0 },
+  const totals = useMemo(
+    () =>
+      rows.reduce(
+        (summary, row) => ({
+          total: summary.total + row.totalAmount,
+          paid: summary.paid + row.paidAmount,
+          balance: summary.balance + row.balance,
+        }),
+        { total: 0, paid: 0, balance: 0 },
+      ),
+    [rows],
   );
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const visible = rows.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE,
+  );
+
+  if (loading) {
+    return <Loading />;
+  }
+
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={<DollarIcon />}
+        title={emptyTitle}
+        description={emptyDescription}
+        action={
+          isFiltered ? (
+            <Button variant="secondary" onClick={onResetFilters}>
+              Clear filters
+            </Button>
+          ) : undefined
+        }
+      />
+    );
+  }
+
   return (
-    <Panel
-      title="Supplier Payables"
-      description="Outstanding balances owed to suppliers."
-    >
-      {loading ? (
-        <Loading />
-      ) : rows.length === 0 ? (
-        <EmptyState
-          icon={<WarehouseIcon />}
-          title="No supplier payables"
-          description="Supplier vouchers matching these filters will appear here."
-        />
-      ) : (
-        <TableContainer className="rounded-none border-0">
-          <Thead>
-            <Tr>
-              <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
-              <Th>Name</Th>
-              <Th>Reference</Th>
-              <Th className="text-right">Total Amount</Th>
-              <Th className="text-right">Paid Amount</Th>
-              <Th className="text-right">Balance</Th>
-              <Th>Status</Th>
-              <Th>Actions</Th>
-            </Tr>
-          </Thead>
-          <Tbody>
-            {rows.map((row, index) => (
+    <>
+      <TableContainer className="rounded-none border-0">
+        <Thead>
+          <Tr>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
+            <Th className="whitespace-nowrap">Supplier</Th>
+            <Th className="whitespace-nowrap">Voucher no.</Th>
+            <Th className="text-right whitespace-nowrap">Total Amount</Th>
+            <Th className="text-right whitespace-nowrap">Paid Amount</Th>
+            <Th className="text-right whitespace-nowrap">Balance</Th>
+            <Th className="whitespace-nowrap">
+              <ColumnHeaderFilter
+                label="Status"
+                isActive={statusFilter !== "all"}
+              >
+                {(close) => (
+                  <div className="flex flex-col gap-1.5">
+                    <div className="font-semibold text-text-primary text-[11px] uppercase tracking-wider pb-1 border-b border-border">
+                      Filter Status
+                    </div>
+                    <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onStatusFilterChange("all");
+                          close();
+                        }}
+                        className={cn(
+                          "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                          statusFilter === "all"
+                            ? "bg-brand/10 font-bold text-brand"
+                            : "hover:bg-bg-subtle text-text-secondary",
+                        )}
+                      >
+                        <span>Any status</span>
+                        {statusFilter === "all" && (
+                          <CheckIcon className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                      {(["unpaid", "partial", "paid"] as const).map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => {
+                            onStatusFilterChange(option);
+                            close();
+                          }}
+                          className={cn(
+                            "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                            statusFilter === option
+                              ? "bg-brand/10 font-bold text-brand"
+                              : "hover:bg-bg-subtle text-text-secondary",
+                          )}
+                        >
+                          <span>{STATUS_LABELS[option]}</span>
+                          {statusFilter === option && (
+                            <CheckIcon className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </ColumnHeaderFilter>
+            </Th>
+            <Th className="w-28 text-right whitespace-nowrap">Actions</Th>
+          </Tr>
+        </Thead>
+        <Tbody>
+          {visible.map((row, index) => {
+            const rowNum = (safePage - 1) * PAGE_SIZE + index + 1;
+            return (
               <Tr key={row.voucher.voucher_id}>
                 <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
-                  {index + 1}
+                  {rowNum}
                 </Td>
-                <Td className="font-medium">{row.voucher.supplier_name}</Td>
+                <Td className="font-medium whitespace-nowrap">{row.voucher.supplier_name}</Td>
                 <Td className="whitespace-nowrap">
                   <Reference
                     value={row.voucher.voucher_no}
@@ -643,96 +891,147 @@ function SupplierTable({
                 <Td className="text-right tabular-nums whitespace-nowrap">
                   {formatKyat(row.totalAmount)}
                 </Td>
-                <Td className="text-right tabular-nums whitespace-nowrap">
+                <Td className="text-right tabular-nums whitespace-nowrap text-text-secondary">
                   {formatKyat(row.paidAmount)}
                 </Td>
                 <Td
-                  className={`text-right tabular-nums whitespace-nowrap ${row.balance > 0 ? "text-warning font-semibold" : "text-success"}`}
+                  className={cn(
+                    "text-right tabular-nums whitespace-nowrap font-semibold",
+                    row.balance > 0 ? "text-warning" : "text-success",
+                  )}
                 >
                   {formatKyat(row.balance)}
                 </Td>
-                <Td>
+                <Td className="whitespace-nowrap">
                   <PaymentStatusBadge status={row.status} />
                 </Td>
-                <Td>
-                  <Button size="sm" onClick={() => onRecordPayment(row)}>
-                    Record Payment
+                <Td className="text-right whitespace-nowrap">
+                  <Button
+                    size="sm"
+                    variant={row.balance > 0 ? "primary" : "secondary"}
+                    onClick={() => onRecordPayment(row)}
+                    className="h-7 text-xs"
+                  >
+                    Record payment
                   </Button>
                 </Td>
               </Tr>
-            ))}
-          </Tbody>
-          <tfoot>
-            <Tr className="bg-bg-subtle">
-              <Td colSpan={2} className="text-right font-semibold">
-                Total
-              </Td>
-              <Td className="text-right font-bold tabular-nums whitespace-nowrap">
-                {formatKyat(totals.total)}
-              </Td>
-              <Td className="text-right font-bold tabular-nums whitespace-nowrap">
-                {formatKyat(totals.paid)}
-              </Td>
-              <Td className="text-right font-bold tabular-nums whitespace-nowrap">
-                {formatKyat(totals.balance)}
-              </Td>
-              <Td />
-              <Td />
-            </Tr>
-          </tfoot>
-        </TableContainer>
-      )}
-    </Panel>
+            );
+          })}
+        </Tbody>
+        <tfoot>
+          <Tr className="bg-bg-subtle font-semibold">
+            <Td colSpan={3} className="text-right">
+              Total ({formatQty(rows.length)} items)
+            </Td>
+            <Td className="text-right font-bold tabular-nums whitespace-nowrap">
+              {formatKyat(totals.total)}
+            </Td>
+            <Td className="text-right font-bold tabular-nums whitespace-nowrap">
+              {formatKyat(totals.paid)}
+            </Td>
+            <Td className="text-right font-bold tabular-nums whitespace-nowrap text-warning">
+              {formatKyat(totals.balance)}
+            </Td>
+            <Td />
+            <Td />
+          </Tr>
+        </tfoot>
+      </TableContainer>
+      <div className="px-4 py-1.5 border-t border-border">
+        <Pagination
+          page={safePage}
+          totalPages={totalPages}
+          totalItems={rows.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={onPageChange}
+        />
+      </div>
+    </>
   );
 }
 
 function ShipmentCostTable({
   loading,
+  emptyTitle,
+  emptyDescription,
   rows,
+  page,
+  onPageChange,
+  onResetFilters,
+  isFiltered,
 }: {
   loading: boolean;
+  emptyTitle: string;
+  emptyDescription: string;
   rows: ShipmentCostRow[];
+  page: number;
+  onPageChange: (page: number) => void;
+  onResetFilters: () => void;
+  isFiltered: boolean;
 }): React.JSX.Element {
-  const total = rows.reduce((sum, row) => sum + row.amount, 0);
+  const total = useMemo(
+    () => rows.reduce((sum, row) => sum + row.amount, 0),
+    [rows],
+  );
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const visible = rows.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE,
+  );
+
+  if (loading) {
+    return <Loading />;
+  }
+
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={<DollarIcon />}
+        title={emptyTitle}
+        description={emptyDescription}
+        action={
+          isFiltered ? (
+            <Button variant="secondary" onClick={onResetFilters}>
+              Clear filters
+            </Button>
+          ) : undefined
+        }
+      />
+    );
+  }
+
   return (
-    <Panel
-      title="Shipment Costs"
-      description="Cargo and receiving costs recorded for shipments."
-    >
-      {loading ? (
-        <Loading />
-      ) : rows.length === 0 ? (
-        <EmptyState
-          icon={<WarehouseIcon />}
-          title="No shipment costs"
-          description="Recorded receiving and transport costs will appear here."
-        />
-      ) : (
-        <TableContainer className="rounded-none border-0">
-          <Thead>
-            <Tr>
-              <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
-              <Th>Receiving</Th>
-              <Th>Date</Th>
-              <Th>Shipment</Th>
-              <Th>Supplier</Th>
-              <Th>Stage</Th>
-              <Th>Carrier</Th>
-              <Th>Type</Th>
-              <Th className="text-right">Amount</Th>
-              <Th>Note</Th>
-            </Tr>
-          </Thead>
-          <Tbody>
-            {rows.map((row, index) => (
+    <>
+      <TableContainer className="rounded-none border-0">
+        <Thead>
+          <Tr>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
+            <Th className="whitespace-nowrap">Receiving</Th>
+            <Th className="whitespace-nowrap">Date</Th>
+            <Th className="whitespace-nowrap">Shipment</Th>
+            <Th className="whitespace-nowrap">Supplier</Th>
+            <Th className="whitespace-nowrap">Stage</Th>
+            <Th className="whitespace-nowrap">Carrier</Th>
+            <Th className="whitespace-nowrap">Type</Th>
+            <Th className="text-right whitespace-nowrap">Amount</Th>
+            <Th className="whitespace-nowrap">Note</Th>
+          </Tr>
+        </Thead>
+        <Tbody>
+          {visible.map((row, index) => {
+            const rowNum = (safePage - 1) * PAGE_SIZE + index + 1;
+            return (
               <Tr key={row.id}>
                 <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
-                  {index + 1}
+                  {rowNum}
                 </Td>
                 <Td className="whitespace-nowrap">
                   <Reference value={row.receivingNo} what="receiving no." singleLine />
                 </Td>
-                <Td className="whitespace-nowrap">
+                <Td className="whitespace-nowrap text-text-muted">
                   {row.costDate ? formatDate(row.costDate) : "—"}
                 </Td>
                 <Td className="whitespace-nowrap">
@@ -742,31 +1041,40 @@ function ShipmentCostTable({
                     "—"
                   )}
                 </Td>
-                <Td className="font-medium">{row.supplierName}</Td>
-                <Td>{row.stage}</Td>
-                <Td>{row.carrier}</Td>
-                <Td>{row.kind}</Td>
-                <Td className="text-right font-semibold tabular-nums whitespace-nowrap">
+                <Td className="font-medium whitespace-nowrap">{row.supplierName}</Td>
+                <Td className="whitespace-nowrap">{row.stage}</Td>
+                <Td className="whitespace-nowrap">{row.carrier}</Td>
+                <Td className="whitespace-nowrap">{row.kind}</Td>
+                <Td className="text-right font-semibold tabular-nums whitespace-nowrap text-text-primary">
                   {formatKyat(row.amount)}
                 </Td>
-                <Td className="max-w-xs">{row.note || "—"}</Td>
+                <Td className="max-w-xs truncate text-text-secondary">{row.note || "—"}</Td>
               </Tr>
-            ))}
-          </Tbody>
-          <tfoot>
-            <Tr className="bg-bg-subtle">
-              <Td colSpan={8} className="text-right font-semibold">
-                Total
-              </Td>
-              <Td className="text-right font-bold tabular-nums whitespace-nowrap">
-                {formatKyat(total)}
-              </Td>
-              <Td />
-            </Tr>
-          </tfoot>
-        </TableContainer>
-      )}
-    </Panel>
+            );
+          })}
+        </Tbody>
+        <tfoot>
+          <Tr className="bg-bg-subtle font-semibold">
+            <Td colSpan={8} className="text-right">
+              Total ({formatQty(rows.length)} entries)
+            </Td>
+            <Td className="text-right font-bold tabular-nums whitespace-nowrap">
+              {formatKyat(total)}
+            </Td>
+            <Td />
+          </Tr>
+        </tfoot>
+      </TableContainer>
+      <div className="px-4 py-1.5 border-t border-border">
+        <Pagination
+          page={safePage}
+          totalPages={totalPages}
+          totalItems={rows.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={onPageChange}
+        />
+      </div>
+    </>
   );
 }
 
@@ -839,7 +1147,7 @@ function RecordPaymentModal({
       >
         <div className="flex items-start justify-between">
           <div>
-            <h3 id="record-payment-title" className="text-lg font-semibold">
+            <h3 id="record-payment-title" className="text-lg font-semibold text-text-primary">
               Record Payment
             </h3>
             <p className="mt-1 text-sm text-text-muted">
@@ -891,3 +1199,4 @@ function RecordPaymentModal({
     </div>
   );
 }
+

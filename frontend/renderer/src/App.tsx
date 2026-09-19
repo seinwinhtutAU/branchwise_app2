@@ -34,7 +34,6 @@ import {
   type NavItem,
   type WorkspaceTab,
 } from "@renderer/components/features/shell/AppShell";
-import FileImportCard from "@renderer/components/features/retail/FileImportCard";
 import {
   SimpleDataTable,
   type DataTableColumn,
@@ -53,8 +52,6 @@ import { ErrorBoundary } from "@renderer/components/ui/ErrorBoundary";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import {
   UploadIcon,
-  HistoryIcon,
-  HeartPulseIcon,
   OverviewIcon,
   BellIcon,
   DashboardIcon,
@@ -79,14 +76,11 @@ import {
 const ImportReviewPage = lazy(
   () => import("@renderer/components/features/retail/ImportReviewPage"),
 );
-const ImportHistoryTable = lazy(
-  () => import("@renderer/components/features/retail/ImportHistoryTable"),
+const ImportHubPage = lazy(
+  () => import("@renderer/components/features/retail/ImportHubPage"),
 );
 const ImportHistoryDetailPage = lazy(
   () => import("@renderer/components/features/retail/ImportHistoryDetailPage"),
-);
-const ImportOverviewPage = lazy(
-  () => import("@renderer/components/features/retail/ImportOverviewPage"),
 );
 const DataOverviewTable = lazy(
   () => import("@renderer/components/features/retail/DataOverviewTable"),
@@ -180,18 +174,6 @@ const RETAIL_NAV_ITEMS: NavItem[] = [
     icon: <BellIcon />,
   },
   { id: "import", label: "Import", icon: <UploadIcon /> },
-  {
-    id: "history",
-    label: "Import History",
-    shortLabel: "History",
-    icon: <HistoryIcon />,
-  },
-  {
-    id: "importOverview",
-    label: "Import Overview",
-    shortLabel: "Imports",
-    icon: <HeartPulseIcon />,
-  },
   {
     id: "overview",
     label: "Data Overview",
@@ -465,6 +447,9 @@ function App(): React.JSX.Element {
   const pendingImport = pendingImportQueue[0] ?? null;
   const [viewingBatchId, setViewingBatchId] = useState<string | null>(null);
   const [highlightBatchId, setHighlightBatchId] = useState<string | null>(null);
+  const [importInitialTab, setImportInitialTab] = useState<
+    "import" | "history" | "freshness"
+  >("import");
   const [warningCount, setWarningCount] = useState(0);
   // Business-wide (app_settings table) — same values for every account and device.
   // `settings` is null until the fetch resolves, so every read below falls back to the
@@ -872,6 +857,16 @@ function App(): React.JSX.Element {
     setViewingBatchId(null);
     setHighlightBatchId(null);
     if (id !== "receiving") setReceivingTarget(null);
+    if (id === "history") {
+      setImportInitialTab("history");
+      setSection("import");
+      return;
+    }
+    if (id === "importOverview") {
+      setImportInitialTab("freshness");
+      setSection("import");
+      return;
+    }
     setSection(id as Section);
   }
 
@@ -897,7 +892,8 @@ function App(): React.JSX.Element {
     setPendingImportQueueTotal(0);
     setViewingBatchId(null);
     setHighlightBatchId(batchId);
-    setSection("history");
+    setImportInitialTab("history");
+    setSection("import");
   }
 
   function handleImportConfirmed(): void {
@@ -1042,63 +1038,19 @@ function App(): React.JSX.Element {
                 />
               )}
 
-              {section === "import" && (
-                <div>
-                  <h2 className="text-lg font-semibold text-text-primary tracking-tight mb-1">
-                    {SECTION_TITLES[section]}
-                  </h2>
-                  <p className="text-sm text-text-muted mb-4">
-                    Upload a POS export to preview the cleaned data before
-                    saving it.
-                  </p>
-                </div>
-              )}
-
-              {section === "import" && (
-                <div className="flex flex-col gap-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <FileImportCard
-                      session={session}
-                      label="Sales"
-                      description="Daily sales slip exports"
-                      endpoint="/api/imports/sales"
-                      icon={<SalesIcon />}
-                      onFilesReady={handleFilesReady}
-                    />
-                    <FileImportCard
-                      session={session}
-                      label="Purchase"
-                      description="Stock purchase records"
-                      endpoint="/api/imports/purchase"
-                      icon={<PurchaseIcon />}
-                      onFilesReady={handleFilesReady}
-                    />
-                  </div>
-                  <FileImportCard
-                    session={session}
-                    label="Inventory"
-                    description="Monthly stock snapshots"
-                    endpoint="/api/imports/inventory"
-                    icon={<InventoryIcon />}
-                    onFilesReady={handleFilesReady}
-                  />
-                </div>
-              )}
-
-              {section === "history" && (
-                <ImportHistoryTable
+              {(section === "import" ||
+                section === "history" ||
+                section === "importOverview") && (
+                <ImportHubPage
                   session={session}
-                  onViewBatch={setViewingBatchId}
-                  branchOptions={branchOptions}
                   profile={profile}
-                  highlightBatchId={highlightBatchId}
+                  branchOptions={branchOptions}
+                  onFilesReady={handleFilesReady}
                   onFileReady={handleFileReady}
-                />
-              )}
-              {section === "importOverview" && (
-                <ImportOverviewPage
-                  session={session}
+                  onViewBatch={setViewingBatchId}
+                  highlightBatchId={highlightBatchId}
                   onViewImportBatch={handleViewImportBatch}
+                  initialTab={importInitialTab}
                 />
               )}
               {section === "overview" && (
@@ -1112,8 +1064,8 @@ function App(): React.JSX.Element {
                 <SimpleDataTable<SaleRow>
                   session={session}
                   endpoint="/api/sales"
-                  title="Sale"
-                  description="Sale lines from the last 90 days, with profit and margin from the buying price on record as of each sale's own date. Set a date to look further back."
+                  title="Sales"
+                  description="Recent sales transactions and line-item profitability."
                   icon={<SalesIcon />}
                   columns={saleColumns}
                   filters={saleFilters}
@@ -1142,8 +1094,8 @@ function App(): React.JSX.Element {
                 <SimpleDataTable<PurchaseRow>
                   session={session}
                   endpoint="/api/purchases"
-                  title="Purchase"
-                  description="Purchase lines from the last 90 days. Set a date to look further back."
+                  title="Purchases"
+                  description="Supplier purchase orders and receiving history."
                   icon={<PurchaseIcon />}
                   columns={PURCHASE_COLUMNS}
                   filters={purchaseFilters}
@@ -1195,7 +1147,6 @@ function App(): React.JSX.Element {
                   settings={settings}
                   initialReceivingNo={receivingTarget}
                   onInitialReceivingOpened={() => setReceivingTarget(null)}
-                  onOpenOrders={() => handleSectionChange("orders")}
                 />
               )}
               {section === "stock" && (
@@ -1207,7 +1158,6 @@ function App(): React.JSX.Element {
                     setReceivingTarget(receivingNo);
                     setSection("receiving");
                   }}
-                  onOpenOrders={() => handleSectionChange("orders")}
                 />
               )}
               {section === "monitoring" && (

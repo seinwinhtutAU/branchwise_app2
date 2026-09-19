@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/data-overview", tags=["data-overview"])
 
 # Matches the frontend's usePagination default, so a page of results here is exactly
 # one page of the table on screen.
-PAGE_SIZE = 50
+PAGE_SIZE = 20
 
 
 def _scoped_query(db: Session, user: User) -> ORMQuery:

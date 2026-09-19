@@ -52,6 +52,14 @@ class EarlyWarningThresholds(BaseModel):
     traffic_decline_warning_pct: float = Field(ge=-100, le=0)
 
 
+class PurchasingBufferMonths(BaseModel):
+    """The target stock buffer in months for each ABC classification tier."""
+
+    a: float = Field(ge=0.1, le=24.0)
+    b: float = Field(ge=0.1, le=24.0)
+    c: float = Field(ge=0.1, le=24.0)
+
+
 class AppSettingsUpdate(BaseModel):
     # Every field is optional so a PUT can update just one setting without having to
     # resend every other one — omitted fields are left untouched.
@@ -71,6 +79,7 @@ class AppSettingsUpdate(BaseModel):
     # See docs/branch_health.md. Whole-set updates (see each model's docstring).
     branch_health_weights: BranchHealthWeights | None = None
     early_warning_thresholds: EarlyWarningThresholds | None = None
+    purchasing_buffer_months: PurchasingBufferMonths | None = None
     # Today's MMK rate for each non-MMK currency the wholesale screens deal in — MMK
     # per 1 unit of that currency, e.g. {"THB": "120.000000000000"}. A whole-set update,
     # same as the two settings above: a currency left out of the payload simply has no

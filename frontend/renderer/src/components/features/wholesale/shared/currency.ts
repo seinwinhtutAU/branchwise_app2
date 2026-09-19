@@ -11,7 +11,7 @@ export const DEFAULT_CURRENCY = "MMK";
  *  step with backend/app/services/wholesale/currency.py::SUPPORTED_CURRENCIES and
  *  Settings' exchange-rate section — adding one here without the backend change means
  *  a line can be typed but never saved. */
-export const FOREIGN_CURRENCIES = ["THB", "USD"] as const;
+export const FOREIGN_CURRENCIES = ["THB"] as const;
 export type ForeignCurrency = (typeof FOREIGN_CURRENCIES)[number];
 export type CurrencyCode = "MMK" | ForeignCurrency;
 export const CURRENCY_CODES: CurrencyCode[] = [DEFAULT_CURRENCY, ...FOREIGN_CURRENCIES];

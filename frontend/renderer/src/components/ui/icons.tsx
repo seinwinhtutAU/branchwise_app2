@@ -1256,4 +1256,22 @@ export function RefreshIcon({
   );
 }
 
-
+export function HelpCircleIcon({
+  className = "w-3.5 h-3.5",
+}: {
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="17" r="0.8" fill="currentColor" />
+    </svg>
+  );
+}

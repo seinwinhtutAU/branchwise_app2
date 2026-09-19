@@ -193,19 +193,34 @@ function RateField({
   }
 
   return (
-    <Input
-      type="text"
-      inputMode="decimal"
-      label={label}
-      hint="MMK per 1 unit"
-      value={draft}
-      disabled={disabled}
-      onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ""))}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-      }}
-    />
+    <div className="flex flex-col gap-1.5">
+      <span className="text-sm font-medium text-text-secondary">
+        {label}
+      </span>
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-semibold text-text-primary whitespace-nowrap">
+          1 {label} =
+        </span>
+        <div className="w-36">
+          <Input
+            type="text"
+            inputMode="decimal"
+            value={draft}
+            disabled={disabled}
+            placeholder="0"
+            onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ""))}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+            className="font-mono text-right"
+          />
+        </div>
+        <span className="text-sm font-semibold text-text-primary whitespace-nowrap">
+          MMK
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -290,6 +305,7 @@ const WARNING_THRESHOLD_FIELDS: {
 
 type SettingsTab =
   | "general"
+  | "reorder"
   | "checks"
   | "pricing"
   | "health"
@@ -305,6 +321,7 @@ const SETTINGS_TABS: {
   retailOnly?: boolean;
 }[] = [
   { id: "general", label: "General" },
+  { id: "reorder", label: "Reorder Buffer", retailOnly: true },
   { id: "checks", label: "Data checks", retailOnly: true },
   { id: "pricing", label: "Buying price" },
   { id: "health", label: "Branch health", retailOnly: true },
@@ -446,7 +463,7 @@ export function SettingsPage({
     <div className="flex flex-col gap-6">
       <CardHeader
         title="Settings"
-        description="Business-wide preferences — the same for every account and every device."
+        description="Business-wide system preferences and operational parameters."
       />
 
       {isAdmin && (
@@ -462,8 +479,8 @@ export function SettingsPage({
       {!isAdmin && (
         <Card>
           <CardHeader
-            title="Nothing to configure here"
-            description="These settings (theme, check windows, pricing windows) are business-wide — ask an admin account to change them."
+            title="Admin Access Required"
+            description="These business-wide settings can only be modified by an administrator."
           />
         </Card>
       )}
@@ -472,7 +489,7 @@ export function SettingsPage({
         <Card>
           <CardHeader
             title="Appearance"
-            description="Business-wide — applies to every signed-in account."
+            description="Select the interface color theme across all devices."
           />
           <ThemeSwitcher
             theme={settings?.theme ?? "system"}
@@ -489,11 +506,99 @@ export function SettingsPage({
         </Card>
       )}
 
+      {isAdmin && !isWholesale && tab === "reorder" && (
+        <Card>
+          <CardHeader
+            title="ABC Inventory Buffer Months"
+            description="Target stock buffer coverage in months for replenishment calculations across ABC tiers."
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              {!settings ? (
+                <Skeleton className="h-10 w-full" />
+              ) : (
+                <NumberField
+                  label="A-Tier (Core fast-movers)"
+                  hint="months (default: 3.0)"
+                  value={settings.purchasing_buffer_months?.a ?? 3.0}
+                  min={0.1}
+                  max={24}
+                  disabled={savingKeys.has("purchasing_buffer_months")}
+                  onCommit={(val) =>
+                    handleSettingChange(
+                      "purchasing_buffer_months",
+                      {
+                        ...settings.purchasing_buffer_months,
+                        a: val,
+                      },
+                      "A-tier stock buffer updated",
+                      "Couldn't update A-tier stock buffer",
+                    )
+                  }
+                />
+              )}
+            </div>
+
+            <div>
+              {!settings ? (
+                <Skeleton className="h-10 w-full" />
+              ) : (
+                <NumberField
+                  label="B-Tier (Mid-tier steady sellers)"
+                  hint="months (default: 2.5)"
+                  value={settings.purchasing_buffer_months?.b ?? 2.5}
+                  min={0.1}
+                  max={24}
+                  disabled={savingKeys.has("purchasing_buffer_months")}
+                  onCommit={(val) =>
+                    handleSettingChange(
+                      "purchasing_buffer_months",
+                      {
+                        ...settings.purchasing_buffer_months,
+                        b: val,
+                      },
+                      "B-tier stock buffer updated",
+                      "Couldn't update B-tier stock buffer",
+                    )
+                  }
+                />
+              )}
+            </div>
+
+            <div>
+              {!settings ? (
+                <Skeleton className="h-10 w-full" />
+              ) : (
+                <NumberField
+                  label="C-Tier (Long-tail items)"
+                  hint="months (default: 1.0)"
+                  value={settings.purchasing_buffer_months?.c ?? 1.0}
+                  min={0.1}
+                  max={24}
+                  disabled={savingKeys.has("purchasing_buffer_months")}
+                  onCommit={(val) =>
+                    handleSettingChange(
+                      "purchasing_buffer_months",
+                      {
+                        ...settings.purchasing_buffer_months,
+                        c: val,
+                      },
+                      "C-tier stock buffer updated",
+                      "Couldn't update C-tier stock buffer",
+                    )
+                  }
+                />
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
+
       {isAdmin && !isWholesale && tab === "checks" && (
         <Card>
           <CardHeader
             title="Daily check windows"
-            description="How far back the Sale and Purchase warning checks each look — independently of each other. Inventory always checks only the latest stock snapshot, so there's nothing to configure there."
+            description="Number of lookback days for automated sale and purchase anomaly checks."
           />
           <div className="flex flex-col gap-4">
             <div className="max-w-xs">
@@ -546,7 +651,7 @@ export function SettingsPage({
         <Card>
           <CardHeader
             title="Sale & Purchase list default range"
-            description="How far back the Sale and Purchase pages (left nav) load by default — independently of each other. Older rows aren't hidden, just not loaded until you widen or clear the date filter on that page."
+            description="Default date range loaded upon opening Sale and Purchase list pages."
           />
           <div className="flex flex-col gap-4">
             <div className="max-w-xs">
@@ -599,7 +704,7 @@ export function SettingsPage({
         <Card>
           <CardHeader
             title="Buying Price Source column"
-            description="Show or hide the column that says where each Buying Price came from (a purchase record, a stock count, or a later recount) on the Sale and Data Overview tables — for every account."
+            description="Display the buying price source column on sale and data tables."
           />
           <div className="max-w-xs">
             {!settings ? (
@@ -630,7 +735,7 @@ export function SettingsPage({
         <Card>
           <CardHeader
             title="Purchase price lookback days"
-            description="When pricing a sale, a purchase record's buying price is only used if it's dated no more than this many days before the sale — an older purchase price is treated as too stale to trust, and the lookup falls through to inventory instead."
+            description="Maximum days before a sale to use a purchase record for cost matching."
           />
           <div className="max-w-xs">
             {!settings ? (
@@ -661,7 +766,7 @@ export function SettingsPage({
         <Card>
           <CardHeader
             title="Inventory price lookback days"
-            description="When pricing a sale that has no usable purchase price, an inventory snapshot's buying price is only used if it's dated no more than this many days before the sale — an older snapshot is treated as too stale to trust, and the lookup falls through to the inventory price forward days recount fallback instead."
+            description="Maximum days before a sale to use an inventory snapshot for cost matching."
           />
           <div className="max-w-xs">
             {!settings ? (
@@ -692,7 +797,7 @@ export function SettingsPage({
         <Card>
           <CardHeader
             title="Inventory price forward days"
-            description="When a sale has no purchase or inventory buying price on record within their own lookback windows, an inventory snapshot recorded up to this many days after the sale can still be used as that sale's buying price."
+            description="Maximum days after a sale to fall back to an inventory snapshot for cost matching."
           />
           <div className="max-w-xs">
             {!settings ? (
@@ -723,7 +828,7 @@ export function SettingsPage({
         <Card>
           <CardHeader
             title="Branch health weights"
-            description="How much each part of the Dashboard's Overview score counts. They don't have to add up to 100% — the score always divides by whatever could actually be measured for the branch and period on screen — but keeping them close to it makes the numbers easier to read."
+            description="Weight distribution for calculating overall branch health scores."
           />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {HEALTH_WEIGHT_FIELDS.map((field) => (
@@ -782,7 +887,7 @@ export function SettingsPage({
         <Card>
           <CardHeader
             title="Early warning thresholds"
-            description="When each alert is raised. Normal is a notice that needs no decision, warning needs a decision but you choose when, critical needs one now. Lower the numbers to hear about problems sooner; raise them to only be told about the serious ones."
+            description="Thresholds that trigger operational alerts and warnings."
           />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {WARNING_THRESHOLD_FIELDS.map((field) => (
@@ -822,7 +927,7 @@ export function SettingsPage({
         <Card>
           <CardHeader
             title="Branch date formats"
-            description={`Per branch, not business-wide — different branches' POS terminals can print dates in a different order. For Sale, each file's own dates settle month-first vs day-first automatically whenever any date in it is decisive (e.g. day 13 or higher can't be a month); a branch's setting here only applies to the rare file where every date is ambiguous throughout. Inventory has just one date per file (the report's own "Printed" timestamp), which is essentially never decisive on its own, so a branch's Inventory setting here is used directly, for every one of its files.`}
+            description="Date order format (MDY or DMY) used when parsing branch POS reports."
           />
           {branches === null ? (
             <Skeleton className="h-24 w-full" />
@@ -903,7 +1008,7 @@ export function SettingsPage({
         <Card>
           <CardHeader
             title="Exchange rates"
-            description="Today's MMK rate for each foreign currency, used only to prefill a new customer-order line, supplier-voucher line, or receiving cost — a line already saved keeps its own rate forever, so changing this never rewrites a past order or voucher."
+            description="Current MMK exchange rates used to prefill new foreign currency transactions."
           />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {FOREIGN_CURRENCIES.map((code) => (

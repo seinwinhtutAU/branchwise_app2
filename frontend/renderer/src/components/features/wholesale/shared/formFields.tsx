@@ -19,7 +19,6 @@ import {
 } from "@renderer/components/features/wholesale/shared/products";
 import {
   formatSets,
-  UNIT_LABELS,
   type Unit,
   type UnitConversions,
 } from "@renderer/components/features/wholesale/shared/units";
@@ -174,11 +173,8 @@ export function CountField({
   );
 }
 
-/** A quantity and the unit it is counted in, as one box rather than two controls side by
- *  side. The unit is part of the figure — "50" means nothing until you know whether it is
- *  sets or pairs — so it sits inside the same frame, to the right of the number, the way
- *  a currency sits beside an amount. Two separate fields also never lined up: the number
- *  carried a hint underneath and the unit did not, which pushed one below the other. */
+/** A quantity input that accepts standard numbers or shorthand pieces like "1s 1p", "13p".
+ *  Renders as a clean input box without any fixed unit badge attached. */
 export function QuantityInput({
   label,
   value,
@@ -189,11 +185,12 @@ export function QuantityInput({
   error,
   compact = false,
   readOnly = false,
+  className,
   onChange,
 }: {
-  label: string;
+  label?: React.ReactNode;
   value: string;
-  unit: Unit;
+  unit?: Unit;
   conversions?: UnitConversions;
   placeholder?: string;
   hint?: string;
@@ -202,64 +199,31 @@ export function QuantityInput({
   compact?: boolean;
   /** When true, the quantity is derived from another field and cannot be typed directly. */
   readOnly?: boolean;
+  className?: string;
   onChange: (text: string) => void;
 }): React.JSX.Element {
-  // The line beneath the box only earns its place once a letter has actually been used —
-  // a plain "10" already reads fully next to the unit badge, and repeating "10 Sets"
-  // underneath it would just be noise. It appears the moment a piece names its own unit,
-  // whether that agrees with the badge (confirms the reading) or overrides it (says what
-  // changed) or there is more than one piece (nothing else shows the combined total).
   const pieces = value.trim() === "" ? [] : parseQuantityShorthand(value);
   const showsItsOwnUnit =
     pieces.length > 1 || (pieces.length === 1 && pieces[0].unit !== undefined);
 
+  const calculatedHint =
+    !error && showsItsOwnUnit && unit
+      ? `= ${formatSets(quantityShorthandPairs(value, unit, conversions), conversions)}`
+      : hint;
+
   return (
-    <div className="flex flex-col gap-1.5">
-      {!compact && (
-        <span className="text-sm font-medium text-text-secondary">{label}</span>
-      )}
-      <div
-        className={cn(
-          "flex items-stretch rounded-md border overflow-hidden",
-          EDITABLE,
-          compact ? "h-9" : "h-10",
-          "transition-all duration-150",
-          "focus-within:ring-2 focus-within:ring-brand focus-within:ring-offset-1 focus-within:ring-offset-bg-base focus-within:border-transparent",
-          error
-            ? "border-error focus-within:ring-error"
-            : "border-border hover:border-border-strong",
-        )}
-      >
-        <input
-          aria-label={label}
-          type="text"
-          placeholder={placeholder}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          aria-invalid={!!error}
-          className={cn(
-            "w-full min-w-0 bg-transparent px-3 text-sm text-right text-text-primary",
-            "placeholder:text-text-muted focus:outline-none",
-            readOnly && "cursor-default",
-          )}
-          readOnly={readOnly}
-        />
-        {/* The unit shown here is only what a bare number — one with no letter of its
-            own — is read in; typing a letter (10p) or several pieces (1s3p) names a
-            different or mixed unit for that box, the same shorthand the colour boxes
-            already use, so nothing has to pick a unit for the whole box up front. */}
-        <span className="flex shrink-0 items-center border-l border-border pl-2 pr-3 text-sm text-text-secondary">
-          {UNIT_LABELS[unit]}
-        </span>
-      </div>
-      {error && <p className="text-xs text-error">{error}</p>}
-      {!error && showsItsOwnUnit && (
-        <p className="text-xs text-text-muted">
-          = {formatSets(quantityShorthandPairs(value, unit, conversions), conversions)}
-        </p>
-      )}
-      {hint && !error && <p className="text-xs text-text-muted">{hint}</p>}
-    </div>
+    <Input
+      label={label}
+      type="text"
+      placeholder={placeholder}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      error={error}
+      hint={calculatedHint}
+      className={cn(EDITABLE, className)}
+      readOnly={readOnly}
+      size={compact ? "sm" : "md"}
+    />
   );
 }
 
@@ -361,7 +325,8 @@ export function SuggestInput({
   onBlur?: () => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const query = value.trim().toLowerCase();
   const matches = suggestions.filter((name) =>
@@ -371,7 +336,7 @@ export function SuggestInput({
   useEffect(() => {
     if (!open) return;
     function handlePointer(event: MouseEvent): void {
-      if (ref.current && !ref.current.contains(event.target as Node))
+      if (containerRef.current && !containerRef.current.contains(event.target as Node))
         setOpen(false);
     }
     document.addEventListener("mousedown", handlePointer);
@@ -379,8 +344,9 @@ export function SuggestInput({
   }, [open]);
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative" ref={containerRef}>
       <Input
+        ref={inputRef}
         label={bare ? undefined : label}
         aria-label={bare && typeof label === "string" ? label : undefined}
         className={EDITABLE}
@@ -402,7 +368,7 @@ export function SuggestInput({
       />
       {open && matches.length > 0 && (
         <FloatingLayer
-          anchorRef={ref}
+          anchorRef={inputRef}
           matchAnchorWidth
           className="bg-bg-base border border-border rounded-md shadow-lg animate-fade-in"
         >

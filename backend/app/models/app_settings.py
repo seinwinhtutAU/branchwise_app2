@@ -58,6 +58,15 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # changing this later never rewrites a historical amount. Empty by default — there
     # is no safe placeholder rate, so a currency has no prefill until an admin sets one.
     "today_exchange_rates": {},
+    # Purchasing / Reorder target buffer stock months per ABC classification tier.
+    # A-tier (core fast-movers): higher buffer (e.g. 3.0 months) to prevent out-of-stock.
+    # B-tier (mid-tier steady sellers): moderate buffer (e.g. 2.5 months).
+    # C-tier (slow-moving/long-tail): lean buffer (e.g. 1.0 month) to avoid tying up working capital.
+    "purchasing_buffer_months": {
+        "a": 3.0,
+        "b": 2.5,
+        "c": 1.0,
+    },
 }
 
 

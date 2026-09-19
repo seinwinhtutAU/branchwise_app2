@@ -121,3 +121,11 @@ def get_early_warning_thresholds(db: Session) -> dict[str, float]:
     return {
         name: float(value) for name, value in _merged_over_default(db, "early_warning_thresholds").items()
     }
+
+
+def get_purchasing_buffer_months(db: Session) -> dict[str, float]:
+    """The target inventory buffer months for each ABC classification tier."""
+    return {
+        name: float(value) for name, value in _merged_over_default(db, "purchasing_buffer_months").items()
+    }
+

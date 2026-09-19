@@ -14,7 +14,7 @@ from app.services.settings import get_purchase_list_window_days
 router = APIRouter(prefix="/api/purchases", tags=["purchases"])
 
 # See sales.py's PAGE_SIZE comment.
-PAGE_SIZE = 50
+PAGE_SIZE = 20
 
 
 @router.get("")

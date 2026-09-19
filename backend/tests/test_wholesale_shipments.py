@@ -254,13 +254,11 @@ def test_splitting_a_shipment_moves_the_undispatched_remainder_into_a_new_shipme
     assert new_shipment["shipment_no"] == f"SHP-{today}-0002"
 
 
-def test_split_with_no_quantity_leaves_the_originals_quantity_untouched(
+def test_split_with_no_quantity_allocates_proportionally(
     authed_client: TestClient, db_session: Session
 ):
-    """quantity_pairs is optional — what's actually inside a box isn't known for
-    certain until it's opened and counted at the receiving gate, so a split shouldn't
-    have to guess at it. Leaving it out moves packages only; neither shipment's own
-    quantity total is touched until a real count settles it."""
+    """quantity_pairs is optional — when left unset, quantity is proportionally
+    allocated based on split packages to total packages, preventing 0 set counts at receiving."""
     branch = _make_branch(db_session)
     _make_user(db_session, role=UserRole.WHOLESALE, branch_id=branch.id)
 
@@ -283,12 +281,48 @@ def test_split_with_no_quantity_leaves_the_originals_quantity_untouched(
     assert split.status_code == 201
     body = split.json()
 
+    # 4 of 10 packages = 40% of 300 = 120 pairs allocated to new shipment, 180 remaining on original
     assert body["original"]["total_packages"] == 6
-    assert body["original"]["total_quantity_pairs"] == 300
+    assert body["original"]["total_quantity_pairs"] == 180
 
     new_shipment = body["new_shipment"]
     assert new_shipment["total_packages"] == 4
-    assert new_shipment["total_quantity_pairs"] == 0
+    assert new_shipment["total_quantity_pairs"] == 120
+
+
+def test_split_with_intermediate_destination_creates_stop_leg(
+    authed_client: TestClient, db_session: Session
+):
+    """When destination is specified distinct from final_destination, an intermediate
+    stop leg is added to the new shipment's route."""
+    branch = _make_branch(db_session)
+    _make_user(db_session, role=UserRole.WHOLESALE, branch_id=branch.id)
+
+    created = authed_client.post(
+        "/api/wholesale/shipments",
+        json=_shipment_payload(
+            total_packages=10, total_quantity_pairs=300, packages_sent_by_cargo=6, legs=[]
+        ),
+    )
+    shipment_id = created.json()["shipment_id"]
+
+    split = authed_client.post(
+        f"/api/wholesale/shipments/{shipment_id}/split",
+        json={
+            "packages": 4,
+            "destination": "Mandalay",
+            "final_destination": "Bogyoke Rd, Mawlamyine",
+            "carrier_name": "Ko Zaw Lin",
+        },
+    )
+    assert split.status_code == 201
+    body = split.json()
+    new_shipment = body["new_shipment"]
+
+    assert new_shipment["final_destination"] == "Bogyoke Rd, Mawlamyine"
+    assert len(new_shipment["legs"]) == 1
+    assert new_shipment["legs"][0]["stop_name"] == "Mandalay"
+    assert new_shipment["legs"][0]["carrier_name"] == "Ko Zaw Lin"
 
 
 def test_split_cannot_exceed_the_undispatched_remainder(

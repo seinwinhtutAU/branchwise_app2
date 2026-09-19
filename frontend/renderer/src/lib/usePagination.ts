@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 20;
 
 export function usePagination<T>(
   items: T[] | null,

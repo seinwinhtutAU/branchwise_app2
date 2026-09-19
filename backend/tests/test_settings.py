@@ -45,6 +45,11 @@ DEFAULT_SETTINGS_RESPONSE = {
         "traffic_decline_warning_pct": -10.0,
     },
     "today_exchange_rates": {},
+    "purchasing_buffer_months": {
+        "a": 3.0,
+        "b": 2.5,
+        "c": 1.0,
+    },
 }
 
 
@@ -207,13 +212,13 @@ def test_admin_can_set_today_exchange_rates(authed_client: TestClient, db_sessio
 
     put_response = authed_client.put(
         "/api/settings",
-        json={"today_exchange_rates": {"thb": "120.5", "USD": "3500"}},
+        json={"today_exchange_rates": {"thb": "120.5"}},
     )
     assert put_response.status_code == 200
-    assert put_response.json()["today_exchange_rates"] == {"THB": "120.5", "USD": "3500"}
+    assert put_response.json()["today_exchange_rates"] == {"THB": "120.5"}
 
     get_response = authed_client.get("/api/settings")
-    assert get_response.json()["today_exchange_rates"] == {"THB": "120.5", "USD": "3500"}
+    assert get_response.json()["today_exchange_rates"] == {"THB": "120.5"}
 
 
 def test_today_exchange_rates_rejects_mmk_and_unsupported_currencies(
@@ -227,6 +232,9 @@ def test_today_exchange_rates_rejects_mmk_and_unsupported_currencies(
     response = authed_client.put("/api/settings", json={"today_exchange_rates": {"EUR": "1"}})
     assert response.status_code == 422
 
+    response = authed_client.put("/api/settings", json={"today_exchange_rates": {"USD": "1"}})
+    assert response.status_code == 422
+
 
 def test_today_exchange_rates_rejects_non_positive_rate(
     authed_client: TestClient, db_session: Session
@@ -238,3 +246,20 @@ def test_today_exchange_rates_rejects_non_positive_rate(
 
     response = authed_client.put("/api/settings", json={"today_exchange_rates": {"THB": "-5"}})
     assert response.status_code == 422
+
+
+def test_admin_can_set_purchasing_buffer_months(
+    authed_client: TestClient, db_session: Session
+):
+    _make_user(db_session, role=UserRole.ADMIN)
+
+    put_response = authed_client.put(
+        "/api/settings",
+        json={"purchasing_buffer_months": {"a": 4.0, "b": 2.0, "c": 0.5}},
+    )
+    assert put_response.status_code == 200
+    assert put_response.json()["purchasing_buffer_months"] == {"a": 4.0, "b": 2.0, "c": 0.5}
+
+    get_response = authed_client.get("/api/settings")
+    assert get_response.json()["purchasing_buffer_months"] == {"a": 4.0, "b": 2.0, "c": 0.5}
+

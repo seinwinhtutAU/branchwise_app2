@@ -110,6 +110,7 @@ export function ShipmentDetail({
     finalDestination: string,
     carrierName: string,
     splitLegOrder: number | undefined,
+    destination?: string,
   ) => Promise<void>;
 }): React.JSX.Element {
   const [saving, setSaving] = useState(false);
@@ -1032,12 +1033,27 @@ export function ShipmentDetail({
             {activeTab === "split" && (
               <SplitShipmentPage
                 shipment={shipment}
-                destinationSuggestions={[...RECEIVING_GATES, ...DESTINATION_NAMES]}
+                destinationSuggestions={DESTINATION_NAMES}
+                gateSuggestions={RECEIVING_GATES}
                 carrierSuggestions={CARRIER_NAMES}
                 onCancel={() => setActiveTab("shipment")}
-                onSubmit={async (packages, quantity, finalDestination, carrierName, splitLegOrder) => {
+                onSubmit={async (
+                  packages,
+                  quantity,
+                  destination,
+                  finalDestination,
+                  carrierName,
+                  splitLegOrder,
+                ) => {
                   if (onSplit) {
-                    await onSplit(packages, quantity, finalDestination, carrierName, splitLegOrder);
+                    await onSplit(
+                      packages,
+                      quantity,
+                      finalDestination,
+                      carrierName,
+                      splitLegOrder,
+                      destination,
+                    );
                     setActiveTab("shipment");
                   }
                 }}

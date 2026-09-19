@@ -3,6 +3,7 @@ import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import { cn } from "@renderer/lib/utils";
 import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
+import { TabBar } from "@renderer/components/ui/Tabs";
 import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { ColumnHeaderFilter } from "@renderer/components/ui/ColumnHeaderFilter";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
@@ -188,36 +189,35 @@ export function VoucherList({
         </div>
       </CollapsibleKpiSummary>
 
+      <TabBar<"vouchers" | "to_order">
+        tabs={[
+          {
+            id: "vouchers",
+            label: "Supplier Vouchers",
+            count: vouchers.length,
+          },
+          {
+            id: "to_order",
+            label: "To Order",
+            count: toOrderCount,
+          },
+        ]}
+        activeTab="vouchers"
+        onSelect={(tabId) => {
+          if (tabId === "to_order") onToOrder();
+        }}
+      />
+
       <Panel className="shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-base">
           <div className="flex items-center gap-2 flex-wrap min-w-0">
             <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
-              Supplier vouchers
+              Supplier Vouchers
             </h2>
-            <div className="flex items-center gap-1.5 flex-wrap select-none">
-              <button
-                type="button"
-                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium transition-all duration-150 border cursor-pointer bg-brand text-white border-brand shadow-xs"
-              >
-                <span>Vouchers</span>
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums bg-white/20 text-white">
-                  {vouchers.length}
-                </span>
-              </button>
+            <span className="text-xs text-text-muted hidden sm:inline">
+              Track supplier procurement vouchers, payments, and arrivals
+            </span>
 
-              <button
-                type="button"
-                onClick={onToOrder}
-                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium transition-all duration-150 border cursor-pointer bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary"
-              >
-                <span>To Order</span>
-                {(toOrderCount ?? 0) > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums bg-brand-subtle text-brand font-bold">
-                    {toOrderCount}
-                  </span>
-                )}
-              </button>
-            </div>
             {isFiltered && (
               <Button
                 variant="ghost"

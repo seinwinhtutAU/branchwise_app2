@@ -38,14 +38,12 @@ export function StockList({
   onOpen,
   onRefresh,
   refreshing,
-  onOpenOrders,
 }: {
   records: StockRecord[];
   movements: StockMovement[];
   onOpen: (stockCode: string) => void;
   onRefresh: () => void;
   refreshing: boolean;
-  onOpenOrders?: () => void;
 }): React.JSX.Element {
   const [search, setSearch] = useState("");
   const [location, setLocation] = useState("all");
@@ -53,15 +51,6 @@ export function StockList({
   const [page, setPage] = useState(1);
   const searchInputRef = useSearchShortcut();
   const [section, setSection] = useState<"overview" | "locations" | "movement">("overview");
-
-  const onShelfPairs = records.reduce(
-    (sum, record) => sum + Math.max(0, record.available_pairs),
-    0,
-  );
-  const owedToCustomersPairs = records.reduce(
-    (sum, record) => sum + Math.max(0, record.owed_to_customers_pairs),
-    0,
-  );
 
   const locations = [
     ...new Set(records.flatMap((record) => stockPlaces(record).map((place) => place.label))),
@@ -114,25 +103,9 @@ export function StockList({
 
       {section === "overview" && (
         <>
-          {owedToCustomersPairs > 0 && onOpenOrders && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-success/40 bg-success-subtle px-5 py-4">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-text-primary">
-                  {formatSets(onShelfPairs)} on the shelf, ready to go out.
-                </p>
-                <p className="mt-0.5 text-sm text-text-secondary">
-                  {`Customers are still waiting for ${formatSets(owedToCustomersPairs)}.`}
-                </p>
-              </div>
-              <Button size="sm" onClick={onOpenOrders}>
-                Deliver to customer
-              </Button>
-            </div>
-          )}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold text-text-primary tracking-tight">Inventory Overview</h2>
-              <p className="text-sm text-text-muted mt-0.5">A quick view of stock, availability, and movement.</p>
             </div>
             <InventoryRefreshButton onRefresh={onRefresh} refreshing={refreshing} />
           </div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Session } from "@renderer/lib/auth";
 import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
@@ -17,7 +17,6 @@ import {
 import {
   RECEIVINGS_URL,
   SHIPMENTS_URL,
-  WHOLESALE_STOCK_URL,
   WholesaleApiError,
   createReceiving as apiCreateReceiving,
   deleteReceiving as apiDeleteReceiving,
@@ -27,16 +26,13 @@ import {
   updateReceiving as apiUpdateReceiving,
   updateReceivingPackage,
   type NewReceivingInput,
-  stockRecordsFromWire,
   type ReceivingWire,
   type ShipmentWire,
-  type StockRecordWire,
 } from "@renderer/components/features/wholesale/shared/api";
 import { useHydrateMasterData } from "@renderer/components/features/wholesale/masterData/masterData";
 import {
   RECEIVINGS_QUERY_KEY,
   SHIPMENTS_QUERY_KEY,
-  STOCK_QUERY_KEY,
   nextReceivingNo,
   type View,
 } from "./types";
@@ -49,15 +45,11 @@ export default function ReceivingGatePage({
   settings,
   initialReceivingNo,
   onInitialReceivingOpened,
-  onOpenOrders,
 }: {
   session: Session;
   settings: AppSettings | null;
   initialReceivingNo?: string | null;
   onInitialReceivingOpened?: () => void;
-  /** Sends the user on to Customer Orders — receiving goods is only half the job; the
-   *  stock still has to be shared out, and nothing else on this screen says so. */
-  onOpenOrders?: () => void;
 }): React.JSX.Element {
   const showToast = useToast();
   useHydrateMasterData(session);
@@ -80,24 +72,6 @@ export default function ReceivingGatePage({
     queryFn: () => fetchJson<ShipmentWire[]>(SHIPMENTS_URL, session),
   });
   useLoadErrorToast(shipmentsFailed, "shipments for receivings");
-  // What the gate has already put on the shelf. Read here only to answer the question
-  // this screen leaves hanging: the packages are counted, so what happens next?
-  const { data: stockWire } = useQuery({
-    queryKey: STOCK_QUERY_KEY,
-    queryFn: () => fetchJson<StockRecordWire[]>(WHOLESALE_STOCK_URL, session),
-  });
-  const stockRecords = useMemo(
-    () => (stockWire ? stockRecordsFromWire(stockWire) : []),
-    [stockWire],
-  );
-  const readyToDeliverPairs = stockRecords.reduce(
-    (sum, record) => sum + Math.max(0, record.available_pairs),
-    0,
-  );
-  const owedToCustomersPairs = stockRecords.reduce(
-    (sum, record) => sum + Math.max(0, record.owed_to_customers_pairs),
-    0,
-  );
   useEffect(() => {
     if (wire) hydrateReceivings(receivingsFromWire(wire));
   }, [wire]);
@@ -262,9 +236,6 @@ export default function ReceivingGatePage({
       onNew={() => setView("new")}
       onRefresh={refreshPage}
       refreshing={isRefreshing || shipmentsRefreshing}
-      readyToDeliverPairs={readyToDeliverPairs}
-      owedToCustomersPairs={owedToCustomersPairs}
-      onOpenOrders={onOpenOrders}
     />
   );
 }

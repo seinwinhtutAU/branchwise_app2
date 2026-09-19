@@ -181,7 +181,7 @@ export const draftLineSchema = z
     selling_price: z
       .string()
       .regex(/^\d*$/, "Selling price can only contain numbers."),
-    currency_code: z.enum(["MMK", "THB", "USD"]),
+    currency_code: z.enum(["MMK", "THB"]),
     original_selling_price: z
       .string()
       .regex(/^\d*\.?\d*$/, "Original price can only contain numbers."),

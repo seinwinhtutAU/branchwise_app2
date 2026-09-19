@@ -31,6 +31,12 @@ export interface EarlyWarningThresholds {
   traffic_decline_warning_pct: number;
 }
 
+export interface PurchasingBufferMonths {
+  a: number;
+  b: number;
+  c: number;
+}
+
 export interface AppSettings {
   stock_forward_fallback_window_days: number;
   purchase_lookback_window_days: number;
@@ -43,6 +49,7 @@ export interface AppSettings {
   show_buying_price_source: boolean;
   branch_health_weights: BranchHealthWeights;
   early_warning_thresholds: EarlyWarningThresholds;
+  purchasing_buffer_months: PurchasingBufferMonths;
   // Today's MMK rate for each non-MMK currency the wholesale screens deal in — MMK per
   // 1 unit of that currency, e.g. { THB: "120.000000000000" }. Only prefills a new
   // foreign-currency order/voucher line or receiving cost; a saved line keeps its own

@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { cn } from "@renderer/lib/utils";
 import { useUrlQueries } from "@renderer/lib/queryClient";
@@ -6,10 +6,10 @@ import type { BranchOption } from "@renderer/lib/useBranches";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
-import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Select } from "@renderer/components/ui/Select";
 import { Skeleton } from "@renderer/components/ui/Skeleton";
+import { Panel } from "@renderer/components/ui/Panel";
 import {
   TableContainer,
   Thead,
@@ -21,6 +21,7 @@ import {
 import {
   ChevronDownIcon,
   ChevronUpIcon,
+  CloseIcon,
   WarningIcon,
 } from "@renderer/components/ui/icons";
 import {
@@ -29,47 +30,20 @@ import {
 } from "@renderer/components/features/dashboard/shared";
 import { usePeriodRange } from "@renderer/components/features/dashboard/usePeriodRange";
 import {
-  ACTIONABLE_SEVERITIES,
   SEVERITY_META,
-  STATUS_META,
   dashboardUrl,
   type AlertSeverity,
   type EvidenceTarget,
   type HealthAlert,
-  type HealthStatus,
   type OverviewData,
 } from "@renderer/components/features/dashboard/helpers";
 import type { Profile } from "@renderer/components/features/types";
 
-// Every business warning the Early Warning engine raised, for every retail branch, in one
-// table — the "what needs my attention today" page, as opposed to the Dashboard's
-// Overview, which answers "how is this branch doing".
-//
-// Its own nav section rather than a Dashboard tab: a manager should be able to open it
-// directly. It sits beside Dashboard rather than beside Warning even though both list
-// things that are wrong — this one is the business going wrong, Warning is the imported
-// data being wrong.
-//
-// Alerts come at three severities. Critical and warning ask for a decision and are what
-// every count in the app counts; `normal` is the drift that asks for nothing today (see
-// app/services/early_warning.py) and appears only as a row here, so the list can show a
-// branch's whole picture without inflating the number beside the nav item.
-//
-// A branch with nothing wrong still appears, as a tile in the strip above the table
-// carrying its health score and status band. Without it the page is a list of problems in
-// which a healthy branch is simply absent, and "not listed" reads as "not loaded" rather
-// than "nothing to act on" — the one question a list of problems can never answer is
-// "who is fine?".
-//
-// Data-quality alerts are deliberately excluded. The Warning page already lists those row
-// by row with the tools to fix them, so a summary of them here would split one job across
-// two screens.
-//
-// It issues no requests of its own: it reads the same per-branch overview payloads the
-// Dashboard's branch cards fetch, through the shared cache (see lib/queryClient.ts).
-
 const EXCLUDED_DIMENSION = "data_quality";
-const COLUMN_COUNT = 5;
+const COLUMN_COUNT = 6;
+
+type Tab = "all" | "sales" | "profit" | "inventory" | "customer";
+type SeverityFilter = "all" | AlertSeverity;
 
 const CATEGORY_LABEL: Record<string, string> = {
   sales: "Sales",
@@ -78,10 +52,9 @@ const CATEGORY_LABEL: Record<string, string> = {
   customer: "Customer",
 };
 
-const CATEGORY_ORDER = ["sales", "profit", "inventory", "customer"];
+const CATEGORY_ORDER = ["sales", "profit", "inventory", "customer"] as const;
 
-// Worst first. `normal` alerts sit at the end of a branch's rows: they are the notices
-// that ask for nothing today, so they must never push a decision off the top of the list.
+// Worst first. `normal` alerts sit at the end of a branch's rows.
 const SEVERITY_RANK: Record<AlertSeverity, number> = {
   critical: 0,
   warning: 1,
@@ -93,45 +66,15 @@ interface BranchAlert extends HealthAlert {
   branchName: string;
 }
 
-function FilterChip({
-  label,
-  count,
-  active,
-  onClick,
-}: {
-  label: string;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "h-8 px-3 rounded-full text-sm font-medium border transition-colors duration-150",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1",
-        active
-          ? "bg-brand-subtle text-brand border-border-brand"
-          : "bg-bg-base text-text-secondary border-border hover:border-border-strong",
-      )}
-    >
-      {label} <span className="tabular-nums text-text-muted">{count}</span>
-    </button>
-  );
-}
-
 /**
- * One alert as a table row, plus its expanded detail row — the same shape the Warning
- * page uses (severity badge, a Details toggle in the last column, an expanded row
- * spanning every column), so the app's two lists of "things that are wrong" read the same
- * way even though one is about the business and the other about the data.
+ * One alert as a table row, plus its expanded detail row.
  */
 function AlertRow({
+  index,
   alert,
   onOpenEvidence,
 }: {
+  index: number;
   alert: BranchAlert;
   onOpenEvidence: (target: EvidenceTarget, branchId: string) => void;
 }): React.JSX.Element {
@@ -140,22 +83,27 @@ function AlertRow({
 
   return (
     <>
-      <Tr>
-        <Td>
-          <Badge variant={meta.badge}>{meta.label}</Badge>
+      <Tr className="hover:bg-bg-subtle/50 transition-colors">
+        <Td className="w-12 text-center text-xs font-mono text-text-muted">
+          {index}
         </Td>
-        <Td className="whitespace-nowrap text-text-muted">
-          {CATEGORY_LABEL[alert.dimension]}
+        <Td className="w-28">
+          <Badge variant={meta.badge} dot>
+            {meta.label}
+          </Badge>
         </Td>
-        <Td className="font-medium text-text-primary">{alert.title}</Td>
-        <Td className={cn("font-medium", meta.text)}>{alert.summary}</Td>
-        <Td>
+        <Td className="w-28 whitespace-nowrap text-xs font-medium text-text-muted">
+          {CATEGORY_LABEL[alert.dimension] ?? alert.dimension}
+        </Td>
+        <Td className="font-medium text-text-primary text-xs">{alert.title}</Td>
+        <Td className={cn("text-xs font-medium", meta.text)}>{alert.summary}</Td>
+        <Td className="w-20 text-right">
           <button
             type="button"
             onClick={() => setExpanded((value) => !value)}
-            className="inline-flex items-center gap-1 text-xs text-brand hover:text-brand-hover"
+            className="inline-flex items-center gap-1 text-xs text-brand hover:text-brand-hover font-medium cursor-pointer"
           >
-            Details
+            {expanded ? "Hide" : "Details"}
             {expanded ? (
               <ChevronUpIcon className="w-3 h-3" />
             ) : (
@@ -166,18 +114,13 @@ function AlertRow({
       </Tr>
       {expanded && (
         <Tr>
-          {/* Same white as the rows above it, so the panel reads as part of the list
-              rather than as a grey box dropped into it — the row's own borders are all
-              the separation it needs. */}
-          <Td colSpan={COLUMN_COUNT} className="bg-bg-base">
-            <div className="py-1">
-              <AlertExplanation
-                alert={alert}
-                onOpenEvidence={(target) =>
-                  onOpenEvidence(target, alert.branchId)
-                }
-              />
-            </div>
+          <Td colSpan={COLUMN_COUNT} className="bg-bg-subtle/40 px-6 py-4 border-y border-border/70">
+            <AlertExplanation
+              alert={alert}
+              onOpenEvidence={(target) =>
+                onOpenEvidence(target, alert.branchId)
+              }
+            />
           </Td>
         </Tr>
       )}
@@ -187,28 +130,24 @@ function AlertRow({
 
 /**
  * The row a branch gets when it raised nothing at all.
- *
- * Without it a clean branch is simply missing from the table, and a reader cannot tell
- * "nothing wrong" from "not loaded" or "filtered out". It is only shown when no category
- * chip is active: under a chip, "everything normal" would be a claim about one category
- * dressed up as a claim about the branch.
  */
 function AllClearRow(): React.JSX.Element {
   return (
     <Tr>
-      <Td>
-        <Badge variant={SEVERITY_META.normal.badge}>
+      <Td className="w-12 text-center text-xs font-mono text-text-muted">—</Td>
+      <Td className="w-28">
+        <Badge variant={SEVERITY_META.normal.badge} dot>
           {SEVERITY_META.normal.label}
         </Badge>
       </Td>
-      <Td className="text-text-muted">—</Td>
-      <Td className="font-medium text-text-primary">
+      <Td className="w-28 text-text-muted text-xs">—</Td>
+      <Td className="font-medium text-text-primary text-xs">
         Everything normal this period
       </Td>
-      <Td className="text-text-muted">
+      <Td className="text-text-muted text-xs">
         No sales, profit, inventory or customer problems found.
       </Td>
-      <Td />
+      <Td className="w-20" />
     </Tr>
   );
 }
@@ -225,87 +164,20 @@ function BranchHeaderRow({
     <tr>
       <td
         colSpan={COLUMN_COUNT}
-        className="bg-brand-subtle px-4 py-2 border-b border-border"
+        className="bg-bg-subtle px-4 py-2 border-b border-border/80 font-medium"
       >
-        <div className="flex items-center gap-2 text-sm">
-          <span className="font-medium text-text-primary">{name}</span>
-          {count > 0 && <Badge>{count}</Badge>}
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-semibold text-text-primary">{name}</span>
+          {count > 0 ? (
+            <Badge variant="brand" className="text-[11px] px-1.5 py-0">
+              {count} {count === 1 ? "alert" : "alerts"}
+            </Badge>
+          ) : (
+            <span className="text-[11px] text-text-muted">All clear</span>
+          )}
         </div>
       </td>
     </tr>
-  );
-}
-
-/** One branch's standing on this page, whether or not it raised anything. */
-interface BranchStatus {
-  branchId: string;
-  branchName: string;
-  score: number | null;
-  status: HealthStatus | null;
-  alertCount: number;
-  hasCritical: boolean;
-}
-
-/**
- * A branch as a tile: its health score, the band that score falls in, and how many alerts
- * it has here — so the branches with none are visible instead of missing.
- *
- * The score and the band come from the same payload the Dashboard's Overview reads, so
- * "Healthy" here is the same judgement, in the same words and the same green, as there.
- * The count is the branch's whole alert count on this page, not the count under the
- * category chips: the tile describes the branch, and the chips describe the filter.
- *
- * Clicking one filters the table to that branch (and again clears it), sharing its state
- * with the Branch selector, so a healthy tile is a control rather than decoration.
- */
-function BranchStatusTile({
-  branch,
-  active,
-  onClick,
-}: {
-  branch: BranchStatus;
-  active: boolean;
-  onClick: () => void;
-}): React.JSX.Element {
-  const meta = branch.status ? STATUS_META[branch.status] : null;
-
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "flex flex-col gap-1 min-w-[11rem] px-3 py-2 rounded-lg border text-left transition-colors duration-150",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1",
-        active
-          ? "bg-brand-subtle border-border-brand"
-          : "bg-bg-base border-border hover:border-border-strong",
-      )}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium text-text-primary">
-          {branch.branchName}
-        </span>
-        <Badge variant={meta?.badge ?? "default"}>
-          {meta?.label ?? "Not scored"}
-        </Badge>
-      </div>
-      <div className="flex items-baseline gap-2">
-        <span
-          className={cn(
-            "text-xl font-semibold tabular-nums",
-            meta?.text ?? "text-text-muted",
-          )}
-        >
-          {branch.score === null ? "\u2013" : Math.round(branch.score)}
-        </span>
-        <span className="text-xs text-text-muted">
-          {branch.alertCount === 0
-            ? "nothing to act on"
-            : `${branch.alertCount} alert${branch.alertCount === 1 ? "" : "s"}`}
-        </span>
-      </div>
-    </button>
   );
 }
 
@@ -322,13 +194,12 @@ export function BusinessAlertsPage({
   branchOptions,
   onOpenEvidence,
 }: Props): React.JSX.Element {
-  // Admin has no fixed branch — same convention as everywhere else in the app.
   const isAdmin = profile !== null && profile.branch_id === null;
   const range = usePeriodRange("30d");
   const [branchFilter, setBranchFilter] = useState("");
-  const [category, setCategory] = useState("");
+  const [activeTab, setActiveTab] = useState<Tab>("all");
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
 
-  // Admin reads every retail branch; a branch account reads only its own.
   const branchIds = isAdmin
     ? branchOptions.map((branch) => branch.id)
     : profile?.branch_id
@@ -345,244 +216,331 @@ export function BusinessAlertsPage({
     useUrlQueries<OverviewData>(urls, session, "alerts");
 
   const branches = Object.values(data);
-  const allAlerts: BranchAlert[] = branches
-    .flatMap((branch) =>
-      branch.alerts
-        .filter((alert) => alert.dimension !== EXCLUDED_DIMENSION)
-        .map((alert) => ({
-          ...alert,
+  const allAlerts: BranchAlert[] = useMemo(
+    () =>
+      branches
+        .flatMap((branch) =>
+          branch.alerts
+            .filter((alert) => alert.dimension !== EXCLUDED_DIMENSION)
+            .map((alert) => ({
+              ...alert,
+              branchId: branch.branch_id,
+              branchName: branch.branch_name,
+            })),
+        )
+        .sort(
+          (a, b) =>
+            SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] ||
+            CATEGORY_ORDER.indexOf(a.dimension as (typeof CATEGORY_ORDER)[number]) -
+              CATEGORY_ORDER.indexOf(b.dimension as (typeof CATEGORY_ORDER)[number]) ||
+            a.branchName.localeCompare(b.branchName),
+        ),
+    [branches],
+  );
+
+  const inBranch = useMemo(
+    () =>
+      allAlerts.filter(
+        (alert) => !branchFilter || alert.branchId === branchFilter,
+      ),
+    [allAlerts, branchFilter],
+  );
+
+  const category = activeTab === "all" ? "" : activeTab;
+
+  const shown = useMemo(() => {
+    return inBranch.filter((alert) => {
+      const matchCategory = !category || alert.dimension === category;
+      const matchSeverity =
+        severityFilter === "all" || alert.severity === severityFilter;
+      return matchCategory && matchSeverity;
+    });
+  }, [inBranch, category, severityFilter]);
+
+  const categoryCounts = useMemo(
+    () => ({
+      all: inBranch.length,
+      sales: inBranch.filter((a) => a.dimension === "sales").length,
+      profit: inBranch.filter((a) => a.dimension === "profit").length,
+      inventory: inBranch.filter((a) => a.dimension === "inventory").length,
+      customer: inBranch.filter((a) => a.dimension === "customer").length,
+    }),
+    [inBranch],
+  );
+
+  const severityCounts = useMemo(
+    () => ({
+      all: inBranch.length,
+      critical: inBranch.filter((a) => a.severity === "critical").length,
+      warning: inBranch.filter((a) => a.severity === "warning").length,
+      normal: inBranch.filter((a) => a.severity === "normal").length,
+    }),
+    [inBranch],
+  );
+
+  const isFiltered =
+    branchFilter !== "" ||
+    activeTab !== "all" ||
+    severityFilter !== "all";
+
+  const resetFilters = (): void => {
+    setBranchFilter("");
+    setActiveTab("all");
+    setSeverityFilter("all");
+  };
+
+  const groups = useMemo(() => {
+    return branches
+      .filter((branch) => !branchFilter || branch.branch_id === branchFilter)
+      .map((branch) => {
+        const groupAlerts = shown.filter(
+          (alert) => alert.branchId === branch.branch_id,
+        );
+        return {
           branchId: branch.branch_id,
           branchName: branch.branch_name,
-        })),
-    )
-    // Critical first, then by category so the same kind of problem reads together, then by
-    // branch — a stable order, so nothing jumps around between refreshes.
-    .sort(
-      (a, b) =>
-        SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] ||
-        CATEGORY_ORDER.indexOf(a.dimension) -
-          CATEGORY_ORDER.indexOf(b.dimension) ||
-        a.branchName.localeCompare(b.branchName),
-    );
-
-  // Each chip counts what it would show given the branch filter, so a chip's number always
-  // matches what clicking it produces.
-  const inBranch = allAlerts.filter(
-    (alert) => !branchFilter || alert.branchId === branchFilter,
-  );
-  const shown = inBranch.filter(
-    (alert) => !category || alert.dimension === category,
-  );
-
-  // Every branch, including the ones that raised nothing — ordered the same way the table
-  // is, worst first, so the strip and the list below it read in the same direction and a
-  // healthy branch sits at the end rather than in the middle.
-  const branchStatuses: BranchStatus[] = branches
-    .map((branch) => {
-      // What the tile counts is what needs a decision — the same rule the nav badge and
-      // the Dashboard's branch cards follow. A branch whose only rows are `normal`
-      // notices reads as "nothing to act on", which is exactly what it is.
-      const branchAlerts = allAlerts.filter(
-        (alert) =>
-          alert.branchId === branch.branch_id &&
-          ACTIONABLE_SEVERITIES.includes(alert.severity),
+          alerts: groupAlerts,
+          allClear:
+            !category &&
+            severityFilter === "all" &&
+            groupAlerts.length === 0 &&
+            allAlerts.every((alert) => alert.branchId !== branch.branch_id),
+        };
+      })
+      .filter((group) => group.alerts.length > 0 || group.allClear)
+      .sort(
+        (a, b) =>
+          SEVERITY_RANK[a.alerts[0]?.severity ?? "normal"] -
+            SEVERITY_RANK[b.alerts[0]?.severity ?? "normal"] ||
+          a.branchName.localeCompare(b.branchName),
       );
-      return {
-        branchId: branch.branch_id,
-        branchName: branch.branch_name,
-        score: branch.overall_score,
-        status: branch.status,
-        alertCount: branchAlerts.length,
-        hasCritical: branchAlerts.some(
-          (alert) => alert.severity === "critical",
-        ),
-      };
-    })
-    .sort(
-      (a, b) =>
-        Number(b.hasCritical) - Number(a.hasCritical) ||
-        b.alertCount - a.alertCount ||
-        // An unscored branch sorts last rather than as a 0, for the same reason a score
-        // that could not be measured is never reported as 0.
-        (a.score ?? 101) - (b.score ?? 101) ||
-        a.branchName.localeCompare(b.branchName),
-    );
-
-  // Branch order follows the worst alert each one has, so the branch needing attention
-  // first is at the top — same principle as the row order inside a group.
-  const groups = branches
-    .filter((branch) => !branchFilter || branch.branch_id === branchFilter)
-    .map((branch) => {
-      const groupAlerts = shown.filter(
-        (alert) => alert.branchId === branch.branch_id,
-      );
-      return {
-        branchId: branch.branch_id,
-        branchName: branch.branch_name,
-        alerts: groupAlerts,
-        // Only a branch that raised nothing whatsoever gets the all-clear row, and only
-        // with no category chip active — under a chip it would be a claim about one
-        // category worded as a claim about the branch.
-        allClear:
-          !category &&
-          groupAlerts.length === 0 &&
-          allAlerts.every((alert) => alert.branchId !== branch.branch_id),
-      };
-    })
-    .filter((group) => group.alerts.length > 0 || group.allClear)
-    .sort(
-      (a, b) =>
-        SEVERITY_RANK[a.alerts[0]?.severity ?? "normal"] -
-          SEVERITY_RANK[b.alerts[0]?.severity ?? "normal"] ||
-        a.branchName.localeCompare(b.branchName),
-    );
+  }, [branches, branchFilter, shown, category, severityFilter, allAlerts]);
 
   return (
-    <div className="flex flex-col">
-      <CardHeader
-        title="Business Alerts"
-        description="How every retail branch is doing, and the sales, profit, inventory and customer problems found in this period."
-        action={
-          <RefreshButton
-            onClick={reload}
-            refreshing={isRefreshing}
-          />
-        }
-      />
+    <div className="flex flex-col gap-6">
+      {/* Unified Table Panel */}
+      <Panel className="shadow-xs">
+        <div className="sticky top-14 lg:top-0 z-30 bg-bg-base px-4 py-2.5 border-b border-border space-y-2.5">
+          {/* Top Bar: Title & Branch Controls */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
+                Branch Anomaly Alerts
+              </h2>
+              <span className="text-xs text-text-muted hidden sm:inline">
+                {shown.length} alert{shown.length === 1 ? "" : "s"} across {groups.length} branch{groups.length === 1 ? "" : "es"}.
+              </span>
+              {isFiltered && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={resetFilters}
+                  className="text-xs h-6 px-1.5 text-text-muted hover:text-error"
+                >
+                  <CloseIcon className="w-3.5 h-3.5" />
+                  Clear
+                </Button>
+              )}
+            </div>
 
-      {/* Every control in one row under the header, same as the Sale/Inventory/Data
-          Overview pages, so the page furniture is where a reader already expects it. */}
-      <div className="flex flex-wrap items-end gap-3 pb-4 -mt-1">
-        <PeriodControls range={range} />
-        {branches.length > 1 && (
-          <div className="w-48">
-            <Select
-              label="Branch"
-              value={branchFilter}
-              onChange={(e) => setBranchFilter(e.target.value)}
-            >
-              <option value="">All branches</option>
-              {branches.map((branch) => (
-                <option key={branch.branch_id} value={branch.branch_id}>
-                  {branch.branch_name}
-                </option>
-              ))}
-            </Select>
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
+              <PeriodControls range={range} />
+              {branches.length > 1 && (
+                <div className="w-36 sm:w-44">
+                  <Select
+                    size="sm"
+                    value={branchFilter}
+                    onChange={(e) => setBranchFilter(e.target.value)}
+                    className="h-8 text-xs"
+                  >
+                    <option value="">All branches</option>
+                    {branches.map((branch) => (
+                      <option key={branch.branch_id} value={branch.branch_id}>
+                        {branch.branch_name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
+              <RefreshButton onClick={reload} refreshing={isRefreshing} />
+            </div>
+          </div>
+
+          {/* Filter Row: Categories and Severities */}
+          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/60">
+            {/* Category Tab Pills */}
+            <div className="flex items-center gap-1 bg-bg-subtle/70 p-0.5 rounded-md border border-border text-xs">
+              {(["all", "sales", "profit", "inventory", "customer"] as Tab[]).map((tab) => {
+                const count = categoryCounts[tab];
+                const active = activeTab === tab;
+                const label = tab === "all" ? "All" : CATEGORY_LABEL[tab];
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setActiveTab(tab)}
+                    className={cn(
+                      "px-2 py-0.5 rounded font-medium transition-colors text-xs whitespace-nowrap cursor-pointer",
+                      active
+                        ? "bg-brand text-white font-semibold shadow-xs"
+                        : "text-text-muted hover:text-text-primary",
+                    )}
+                  >
+                    {label} ({count})
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Severity Filter Pills */}
+            <div className="flex items-center gap-1 bg-bg-subtle/70 p-0.5 rounded-md border border-border text-xs">
+              <button
+                type="button"
+                onClick={() => setSeverityFilter("all")}
+                className={cn(
+                  "px-2 py-0.5 rounded font-medium transition-colors text-xs whitespace-nowrap cursor-pointer",
+                  severityFilter === "all"
+                    ? "bg-brand text-white font-semibold shadow-xs"
+                    : "text-text-muted hover:text-text-primary",
+                )}
+              >
+                All Severities ({severityCounts.all})
+              </button>
+              <button
+                type="button"
+                onClick={() => setSeverityFilter("critical")}
+                className={cn(
+                  "px-2 py-0.5 rounded font-medium transition-colors text-xs whitespace-nowrap cursor-pointer",
+                  severityFilter === "critical"
+                    ? "bg-error text-white font-semibold shadow-xs"
+                    : "text-text-muted hover:text-error",
+                )}
+              >
+                Critical ({severityCounts.critical})
+              </button>
+              <button
+                type="button"
+                onClick={() => setSeverityFilter("warning")}
+                className={cn(
+                  "px-2 py-0.5 rounded font-medium transition-colors text-xs whitespace-nowrap cursor-pointer",
+                  severityFilter === "warning"
+                    ? "bg-warning text-white font-semibold shadow-xs"
+                    : "text-text-muted hover:text-warning",
+                )}
+              >
+                Warning ({severityCounts.warning})
+              </button>
+              <button
+                type="button"
+                onClick={() => setSeverityFilter("normal")}
+                className={cn(
+                  "px-2 py-0.5 rounded font-medium transition-colors text-xs whitespace-nowrap cursor-pointer",
+                  severityFilter === "normal"
+                    ? "bg-brand text-white font-semibold shadow-xs"
+                    : "text-text-muted hover:text-text-primary",
+                )}
+              >
+                Normal ({severityCounts.normal})
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Content Body */}
+        {isAdmin && branchOptions.length === 0 ? (
+          <div className="p-8 text-center text-sm text-text-muted">
+            Add a retail branch before there is anything to check.
+          </div>
+        ) : isLoading ? (
+          <div className="p-6 flex flex-col gap-4">
+            <Skeleton className="h-10 w-96" />
+            <Skeleton className="h-64" />
+          </div>
+        ) : branches.length === 0 ? (
+          <div className="p-8">
+            <EmptyState
+              icon={<WarningIcon />}
+              title="Couldn't load alerts"
+              description="Something went wrong reaching the backend."
+              action={
+                <Button variant="secondary" size="sm" onClick={reload}>
+                  Try again
+                </Button>
+              }
+            />
+          </div>
+        ) : (
+          <div>
+            {failedCount > 0 && (
+              <div className="p-3 bg-warning/10 text-xs text-warning border-b border-warning/20">
+                {failedCount} branch{failedCount === 1 ? "" : "es"} couldn&apos;t
+                be loaded, so this list may be incomplete.
+              </div>
+            )}
+
+            {groups.length === 0 ? (
+              <div className="p-8">
+                <EmptyState
+                  icon={<WarningIcon />}
+                  title="No alerts match this filter"
+                  description="No alerts found for the selected branch or category."
+                  action={
+                    isFiltered ? (
+                      <Button variant="secondary" size="sm" onClick={resetFilters}>
+                        Reset Filters
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              </div>
+            ) : (
+              <TableContainer>
+                <Thead>
+                  <Tr>
+                    <Th className="w-12 text-center font-mono">#</Th>
+                    <Th className="w-28">Severity</Th>
+                    <Th className="w-28">Category</Th>
+                    <Th className="min-w-[180px]">Alert</Th>
+                    <Th className="min-w-[240px]">Detail</Th>
+                    <Th className="w-20 text-right" />
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {groups.map((group) => {
+                    let rowCounter = 0;
+                    return (
+                      <Fragment key={group.branchId}>
+                        <BranchHeaderRow
+                          name={group.branchName}
+                          count={group.alerts.length}
+                        />
+                        {group.allClear ? (
+                          <AllClearRow />
+                        ) : (
+                          group.alerts.map((alert) => {
+                            rowCounter += 1;
+                            return (
+                              <AlertRow
+                                key={`${alert.branchId}:${alert.id}`}
+                                index={rowCounter}
+                                alert={alert}
+                                onOpenEvidence={onOpenEvidence}
+                              />
+                            );
+                          })
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </Tbody>
+              </TableContainer>
+            )}
           </div>
         )}
-      </div>
-
-      {isAdmin && branchOptions.length === 0 ? (
-        <p className="text-sm text-text-muted">
-          Add a retail branch before there is anything to check.
-        </p>
-      ) : isLoading ? (
-        <div className="flex flex-col gap-4">
-          <Skeleton className="h-10 w-96" />
-          <Skeleton className="h-64" />
-        </div>
-      ) : branches.length === 0 ? (
-        <EmptyState
-          icon={<WarningIcon />}
-          title="Couldn't load alerts"
-          description="Something went wrong reaching the backend."
-          action={
-            <Button variant="secondary" size="sm" onClick={reload}>
-              Try again
-            </Button>
-          }
-        />
-      ) : (
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap gap-2">
-            {branchStatuses.map((branch) => (
-              <BranchStatusTile
-                key={branch.branchId}
-                branch={branch}
-                active={branchFilter === branch.branchId}
-                onClick={() =>
-                  setBranchFilter(
-                    branchFilter === branch.branchId ? "" : branch.branchId,
-                  )
-                }
-              />
-            ))}
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            <FilterChip
-              label="All"
-              count={inBranch.length}
-              active={!category}
-              onClick={() => setCategory("")}
-            />
-            {CATEGORY_ORDER.map((key) => (
-              <FilterChip
-                key={key}
-                label={CATEGORY_LABEL[key]}
-                count={
-                  inBranch.filter((alert) => alert.dimension === key).length
-                }
-                active={category === key}
-                onClick={() => setCategory(category === key ? "" : key)}
-              />
-            ))}
-          </div>
-
-          {failedCount > 0 && (
-            <p className="text-sm text-warning">
-              {failedCount} branch{failedCount === 1 ? "" : "es"} couldn&apos;t
-              be loaded, so this list may be incomplete.
-            </p>
-          )}
-
-          {groups.length === 0 ? (
-            <Card>
-              <p className="text-sm text-text-secondary">
-                No alerts match these filters.
-              </p>
-            </Card>
-          ) : (
-            <TableContainer>
-              <Thead>
-                <Tr>
-                  <Th>Severity</Th>
-                  <Th>Category</Th>
-                  <Th>Alert</Th>
-                  <Th>Detail</Th>
-                  <Th />
-                </Tr>
-              </Thead>
-              <Tbody>
-                {/* Grouped by branch rather than carrying a Branch column: with several
-                    branches on screen the column repeats the same name down every row, and
-                    a band that says it once is easier to read against. */}
-                {groups.map((group) => (
-                  <Fragment key={group.branchId}>
-                    <BranchHeaderRow
-                      name={group.branchName}
-                      count={group.alerts.length}
-                    />
-                    {group.allClear ? (
-                      <AllClearRow />
-                    ) : (
-                      group.alerts.map((alert) => (
-                        <AlertRow
-                          key={`${alert.branchId}:${alert.id}`}
-                          alert={alert}
-                          onOpenEvidence={onOpenEvidence}
-                        />
-                      ))
-                    )}
-                  </Fragment>
-                ))}
-              </Tbody>
-            </TableContainer>
-          )}
-        </div>
-      )}
+      </Panel>
     </div>
   );
 }
 
 export default BusinessAlertsPage;
+

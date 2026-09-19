@@ -16,7 +16,6 @@ import { downloadCsv } from "@renderer/lib/csv";
 import { downloadExcel } from "@renderer/lib/excel";
 import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
-import { CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
 import { DateInput } from "@renderer/components/ui/DateInput";
@@ -149,7 +148,7 @@ const BAND_LABEL: Record<Band, string> = {
 // idea, and same delay, as DashboardPage's custom date range: a native date input fires
 // a change per keystroke, and this table's search box shouldn't refetch per letter typed.
 const FILTER_SETTLE_MS = 400;
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 20;
 const EMPTY_ROWS: never[] = [];
 
 function SourceLegend(): React.JSX.Element {
@@ -420,12 +419,22 @@ function DataOverviewTable({
 
   return (
     <div className="flex flex-col" style={containerStyle}>
-      <div ref={aboveRef} className="sticky top-14 lg:top-0 z-30 bg-bg-base">
-        <CardHeader
-          title="Data overview"
-          description="Sale line items merged with inventory and purchase data by stock code."
-          action={
-            <div className="flex items-center gap-2">
+      <div className="bg-bg-base border border-border rounded-md overflow-hidden shadow-xs">
+        <div
+          ref={aboveRef}
+          className="sticky top-14 lg:top-0 z-30 bg-bg-base px-4 py-2.5 border-b border-border space-y-2.5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
+                Data Overview
+              </h2>
+              <span className="text-xs text-text-muted hidden sm:inline">
+                Merged sales, inventory, and purchase records.
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
               <Button
                 variant="secondary"
                 size="sm"
@@ -451,199 +460,211 @@ function DataOverviewTable({
                 refreshing={isRefreshing}
               />
             </div>
-          }
-        />
+          </div>
 
-        <SourceLegend />
+          <SourceLegend />
 
-        {(total > 0 || hasActiveFilters) && (
-          <div className="flex flex-wrap items-center gap-2 pb-3">
-            <div className="w-56 max-w-full">
-              <Input
-                size="sm"
-                placeholder="Stock code or description"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                startIcon={<SearchIcon className="w-3.5 h-3.5" />}
+          {(total > 0 || hasActiveFilters) && (
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/60">
+              <div className="w-56 max-w-full">
+                <Input
+                  size="sm"
+                  placeholder="Stock code or description"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  startIcon={<SearchIcon className="w-3.5 h-3.5" />}
+                  className="h-8 text-xs"
+                />
+              </div>
+
+              {(() => {
+                const options =
+                  branchOptions.length > 0
+                    ? branchOptions
+                    : (data?.branches ?? []);
+                return options.length > 1 ? (
+                  <div className="w-36 max-w-full">
+                    <Select
+                      size="sm"
+                      value={branchFilter}
+                      onChange={(e) => setBranchFilter(e.target.value)}
+                      className="h-8 text-xs"
+                    >
+                      <option value="">All Branches</option>
+                      {options.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                ) : null;
+              })()}
+
+              {(() => {
+                const groupOptions = data?.groups ?? [];
+                return groupOptions.length > 1 ? (
+                  <div className="w-36 max-w-full">
+                    <Select
+                      size="sm"
+                      value={groupFilter}
+                      onChange={(e) => setGroupFilter(e.target.value)}
+                      className="h-8 text-xs"
+                    >
+                      <option value="">All Groups</option>
+                      {groupOptions.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                ) : null;
+              })()}
+
+              <div className="flex items-center gap-1.5 text-xs text-text-muted">
+                <span className="font-medium select-none">From</span>
+                <div className="w-36">
+                  <DateInput
+                    size="sm"
+                    placeholder="YYYY-MM-DD"
+                    value={dateFrom}
+                    onChange={setDateFrom}
+                  />
+                </div>
+                <span className="font-medium select-none">To</span>
+                <div className="w-36">
+                  <DateInput
+                    size="sm"
+                    placeholder="YYYY-MM-DD"
+                    value={dateTo}
+                    onChange={setDateTo}
+                  />
+                </div>
+              </div>
+
+              {hasActiveFilters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearFilters}
+                  className="text-xs h-8 px-2 text-text-muted hover:text-error transition-colors"
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {rows === null && !failed && <TableSkeleton rows={6} cols={COLUMNS.length + 1} />}
+
+        {rows === null && failed && (
+          <EmptyState
+            icon={<OverviewIcon />}
+            title="Couldn't load data overview"
+            description="Something went wrong reaching the backend."
+            action={
+              <Button variant="secondary" size="sm" onClick={reload}>
+                Try again
+              </Button>
+            }
+          />
+        )}
+
+        {rows !== null && total === 0 && !hasActiveFilters && (
+          <EmptyState
+            icon={<OverviewIcon />}
+            title="No sales data yet"
+            description="Import a sales file to see it here, merged with inventory and purchase data."
+          />
+        )}
+
+        {rows !== null && total === 0 && hasActiveFilters && (
+          <EmptyState
+            icon={<OverviewIcon />}
+            title="No rows match your filters"
+            description="Try widening the date range or clearing a filter."
+            action={
+              <Button variant="secondary" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            }
+          />
+        )}
+
+        {rows !== null && rows.length > 0 && (
+          <>
+            <TableContainer
+              className="overflow-y-auto border-0 rounded-none"
+              style={{
+                maxHeight: "calc(100vh - var(--sticky-offset, 0px) - 8rem)",
+              }}
+            >
+              <Thead className="top-0">
+                {table.getHeaderGroups().map((headerGroup) => (
+                  <Tr key={headerGroup.id}>
+                    <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
+                      #
+                    </Th>
+                    {headerGroup.headers.map((header) => (
+                      <Th
+                        key={header.id}
+                        className={
+                          header.column.columnDef.meta?.align === "right"
+                            ? "text-right"
+                            : undefined
+                        }
+                      >
+                        {header.isPlaceholder
+                          ? null
+                          : flexRender(
+                              header.column.columnDef.header,
+                              header.getContext(),
+                            )}
+                      </Th>
+                    ))}
+                  </Tr>
+                ))}
+              </Thead>
+              <Tbody>
+                {table.getRowModel().rows.map((row, idx) => (
+                  <Tr key={row.id}>
+                    <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                      {(page - 1) * PAGE_SIZE + idx + 1}
+                    </Td>
+                    {row.getVisibleCells().map((cell) => (
+                      <Td
+                        key={cell.id}
+                        className={cn(
+                          "whitespace-nowrap",
+                          cell.column.columnDef.meta?.align === "right" &&
+                            "text-right tabular-nums",
+                        )}
+                      >
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext(),
+                        )}
+                      </Td>
+                    ))}
+                  </Tr>
+                ))}
+              </Tbody>
+            </TableContainer>
+
+            <div className="border-t border-border bg-bg-base">
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                totalItems={total}
+                pageSize={PAGE_SIZE}
+                onPageChange={(nextPage) => table.setPageIndex(nextPage - 1)}
               />
             </div>
-
-            {(() => {
-              const options =
-                branchOptions.length > 0
-                  ? branchOptions
-                  : (data?.branches ?? []);
-              return options.length > 1 ? (
-                <div className="w-36 max-w-full">
-                  <Select
-                    size="sm"
-                    value={branchFilter}
-                    onChange={(e) => setBranchFilter(e.target.value)}
-                  >
-                    <option value="">All Branches</option>
-                    {options.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              ) : null;
-            })()}
-
-            {(() => {
-              const groupOptions = data?.groups ?? [];
-              return groupOptions.length > 1 ? (
-                <div className="w-36 max-w-full">
-                  <Select
-                    size="sm"
-                    value={groupFilter}
-                    onChange={(e) => setGroupFilter(e.target.value)}
-                  >
-                    <option value="">All Groups</option>
-                    {groupOptions.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              ) : null;
-            })()}
-
-            <div className="flex items-center gap-1.5">
-              <div className="w-32">
-                <DateInput
-                  size="sm"
-                  placeholder="Date from"
-                  value={dateFrom}
-                  onChange={setDateFrom}
-                />
-              </div>
-              <span className="text-text-muted text-xs select-none">–</span>
-              <div className="w-32">
-                <DateInput
-                  size="sm"
-                  placeholder="Date to"
-                  value={dateTo}
-                  onChange={setDateTo}
-                />
-              </div>
-            </div>
-
-            {hasActiveFilters && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={clearFilters}
-                className="text-xs h-8 px-2 text-text-muted hover:text-error transition-colors"
-              >
-                Clear
-              </Button>
-            )}
-          </div>
+          </>
         )}
       </div>
-
-      {rows === null && !failed && <TableSkeleton rows={6} cols={8} />}
-
-      {rows === null && failed && (
-        <EmptyState
-          icon={<OverviewIcon />}
-          title="Couldn't load data overview"
-          description="Something went wrong reaching the backend."
-          action={
-            <Button variant="secondary" size="sm" onClick={reload}>
-              Try again
-            </Button>
-          }
-        />
-      )}
-
-      {rows !== null && total === 0 && !hasActiveFilters && (
-        <EmptyState
-          icon={<OverviewIcon />}
-          title="No sales data yet"
-          description="Import a sales file to see it here, merged with inventory and purchase data."
-        />
-      )}
-
-      {rows !== null && total === 0 && hasActiveFilters && (
-        <EmptyState
-          icon={<OverviewIcon />}
-          title="No rows match your filters"
-          description="Try widening the date range or clearing a filter."
-          action={
-            <Button variant="secondary" size="sm" onClick={clearFilters}>
-              Clear filters
-            </Button>
-          }
-        />
-      )}
-
-      {rows !== null && rows.length > 0 && (
-        <>
-          <TableContainer
-            className="overflow-y-auto border-0 rounded-none"
-            style={{
-              maxHeight: "calc(100vh - var(--sticky-offset, 0px) - 5rem)",
-            }}
-          >
-            <Thead className="top-0">
-              {table.getHeaderGroups().map((headerGroup) => (
-                <Tr key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => (
-                    <Th
-                      key={header.id}
-                      className={
-                        header.column.columnDef.meta?.align === "right"
-                          ? "text-right"
-                          : undefined
-                      }
-                    >
-                      {header.isPlaceholder
-                        ? null
-                        : flexRender(
-                            header.column.columnDef.header,
-                            header.getContext(),
-                          )}
-                    </Th>
-                  ))}
-                </Tr>
-              ))}
-            </Thead>
-            <Tbody>
-              {table.getRowModel().rows.map((row) => (
-                <Tr key={row.id}>
-                  {row.getVisibleCells().map((cell) => (
-                    <Td
-                      key={cell.id}
-                      className={cn(
-                        "whitespace-nowrap",
-                        cell.column.columnDef.meta?.align === "right" &&
-                          "text-right tabular-nums",
-                      )}
-                    >
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext(),
-                      )}
-                    </Td>
-                  ))}
-                </Tr>
-              ))}
-            </Tbody>
-          </TableContainer>
-
-          <Pagination
-            page={page}
-            totalPages={totalPages}
-            totalItems={total}
-            pageSize={PAGE_SIZE}
-            onPageChange={(nextPage) => table.setPageIndex(nextPage - 1)}
-          />
-        </>
-      )}
     </div>
   );
 }

@@ -2,7 +2,6 @@ import type { Session } from "@renderer/lib/auth";
 import { useUrlQuery } from "@renderer/lib/queryClient";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
-import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Skeleton } from "@renderer/components/ui/Skeleton";
@@ -77,28 +76,28 @@ function CategoryQtyList({
   categories: CategoryQty[];
 }): React.JSX.Element {
   if (categories.length === 0) {
-    return <p className="text-sm text-text-muted">No categorized stock yet.</p>;
+    return <p className="text-xs text-text-muted py-4 text-center">No categorized stock yet.</p>;
   }
   const maxQty = Math.max(...categories.map((c) => c.qty), 0);
   return (
-    <div className="flex flex-col gap-2.5">
+    <div className="flex flex-col gap-2 py-0.5">
       {categories.map((row) => (
-        <div key={row.category} className="flex items-center gap-3">
+        <div key={row.category} className="flex items-center gap-2.5">
           <span
-            className="w-28 shrink-0 truncate text-sm text-text-secondary"
+            className="w-24 shrink-0 truncate text-xs text-text-secondary font-medium"
             title={row.category}
           >
             {row.category}
           </span>
-          <div className="flex-1 h-2.5 rounded-full bg-bg-raised overflow-hidden">
+          <div className="flex-1 h-2 rounded-full bg-bg-raised overflow-hidden">
             <div
-              className="h-full rounded-full bg-brand"
+              className="h-full rounded-full bg-brand transition-all duration-500"
               style={{
-                width: maxQty > 0 ? `${(row.qty / maxQty) * 100}%` : "0%",
+                width: maxQty > 0 ? `${Math.max((row.qty / maxQty) * 100, 1.5)}%` : "0%",
               }}
             />
           </div>
-          <span className="w-24 shrink-0 text-right text-sm tabular-nums text-text-primary">
+          <span className="w-20 shrink-0 text-right text-xs tabular-nums text-text-primary font-medium">
             {formatCount(row.qty)}
           </span>
         </div>
@@ -108,9 +107,9 @@ function CategoryQtyList({
 }
 
 // The dashboard is a glance, not a browse — a hundred-plus-row table here would defeat
-// that. Ten rows is enough to see whether it's worth acting on; "View all" hands off to
+// that. 6 rows is enough to see whether it's worth acting on; "View all" hands off to
 // the full, paginated, filterable list on the Inventory nav page for the rest.
-const PREVIEW_ROWS = 10;
+const PREVIEW_ROWS = 6;
 
 function ViewAllLink({
   totalCount,
@@ -328,49 +327,47 @@ export function InventoryTab({
   const lowStockCount = data.critical_count + data.low_count + data.watch_count;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       <RefreshingHint show={isRefreshing} />
-      <p className="text-sm text-text-muted">
+      <p className="text-xs text-text-muted">
         {data.as_of
-          ? `Current stock as of the latest inventory snapshot — ${formatShortDate(data.as_of.slice(0, 10), true)}.`
+          ? `Current stock as of snapshot — ${formatShortDate(data.as_of.slice(0, 10), true)}.`
           : "No inventory snapshot on record for this branch yet."}
       </p>
 
-      <CollapsibleKpiSummary storageKey="dashboard_inventory" title="Inventory KPIs">
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-          <StatTile
-            label="SKUs Tracked"
-            value={data.sku_count.toLocaleString()}
-          />
-          <StatTile
-            label="Low / Critical Stock"
-            value={lowStockCount.toLocaleString()}
-            sub={`${data.critical_count} critical, ${data.low_count} low, ${data.watch_count} watch`}
-          />
-          <StatTile
-            label="Estimated Stock Value"
-            value={formatMoney(data.estimated_stock_value)}
-          />
-          <StatTile
-            label="Dead Stock"
-            value={data.dead_stock_count.toLocaleString()}
-            sub="On hand, no sales in 90 days"
-          />
-        </div>
-      </CollapsibleKpiSummary>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+        <StatTile
+          label="SKUs Tracked"
+          value={data.sku_count.toLocaleString()}
+        />
+        <StatTile
+          label="Low / Critical Stock"
+          value={lowStockCount.toLocaleString()}
+          sub={`${data.critical_count} critical, ${data.low_count} low, ${data.watch_count} watch`}
+        />
+        <StatTile
+          label="Estimated Stock Value"
+          value={formatMoney(data.estimated_stock_value)}
+        />
+        <StatTile
+          label="Dead Stock"
+          value={data.dead_stock_count.toLocaleString()}
+          sub="No sales in 90 days"
+        />
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-        <Card>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+        <Card className="p-3.5 sm:p-4">
           <CardHeader
             title="Stock on hand by category"
             description="On-hand quantity, grouped by product category."
           />
           <CategoryQtyList categories={data.stock_qty_by_category} />
         </Card>
-        <Card>
+        <Card className="p-3.5 sm:p-4">
           <CardHeader
             title="Inventory data quality"
-            description="Bad values, missing records, and reconciliation mismatches for this branch."
+            description="Bad values, missing records, and reconciliation mismatches."
           />
           <WarningsTile
             warnings={data.warnings}
@@ -380,29 +377,31 @@ export function InventoryTab({
         </Card>
       </div>
 
-      <Card>
-        <CardHeader
-          title="Low stock"
-          description="Estimated to run out soonest, based on the last 30 days' sales velocity."
-        />
-        <LowStockTable
-          items={data.low_stock_items}
-          totalCount={lowStockCount}
-          onViewAll={() => onViewInventoryList("lowStock")}
-        />
-      </Card>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+        <Card className="p-3.5 sm:p-4">
+          <CardHeader
+            title="Low stock"
+            description="Estimated to run out soonest, based on 30-day sales velocity."
+          />
+          <LowStockTable
+            items={data.low_stock_items}
+            totalCount={lowStockCount}
+            onViewAll={() => onViewInventoryList("lowStock")}
+          />
+        </Card>
 
-      <Card>
-        <CardHeader
-          title="Dead stock"
-          description="Still on hand, but hasn't sold at all in the last 90 days — worth a look before restocking or marking it down."
-        />
-        <DeadStockTable
-          items={data.dead_stock_items}
-          totalCount={data.dead_stock_count}
-          onViewAll={() => onViewInventoryList("deadStock")}
-        />
-      </Card>
+        <Card className="p-3.5 sm:p-4">
+          <CardHeader
+            title="Dead stock"
+            description="Still on hand, but no sales in the last 90 days."
+          />
+          <DeadStockTable
+            items={data.dead_stock_items}
+            totalCount={data.dead_stock_count}
+            onViewAll={() => onViewInventoryList("deadStock")}
+          />
+        </Card>
+      </div>
     </div>
   );
 }

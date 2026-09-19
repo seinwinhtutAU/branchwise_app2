@@ -130,7 +130,7 @@ interface Props<T extends object> {
   showTitle?: boolean;
 }
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 20;
 const FILTER_SETTLE_MS = 400;
 // A stable reference for "no data yet" so the table's `data` prop doesn't get a fresh
 // array identity — and therefore a needless row-model recompute — on every render.
@@ -501,211 +501,252 @@ export function SimpleDataTable<T extends object>({
     </div>
   );
 
-  return (
-    <div className="flex flex-col" style={containerStyle}>
-      <div
-        ref={aboveRef}
-        className="sticky top-14 lg:top-0 z-30 bg-bg-base py-2 border-b border-border"
-      >
-        {showHeading && showTitle && title && (
-          <div className="flex items-baseline gap-2 mb-2">
-            <h3 className="text-base font-semibold text-text-primary tracking-tight">
-              {title}
-            </h3>
-            {description && (
-              <p className="text-xs text-text-muted">{description}</p>
-            )}
+  const hasTitle = Boolean(showHeading && showTitle && title);
+  const hasAnyFilter = Boolean(searchFilter || selectFilters.length > 0 || dateRangeFilter);
+
+  const filterControls = (
+    <>
+      {searchFilter && (
+        <div className="w-48 sm:w-56 max-w-full">
+          <Input
+            size="sm"
+            placeholder={searchFilter.placeholder || "Search…"}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            startIcon={<SearchIcon className="w-3.5 h-3.5" />}
+            className="h-8 text-xs"
+          />
+        </div>
+      )}
+
+      {selectFilters.map((filter) => {
+        const options =
+          filter.options ??
+          (rows ? distinctValues(rows, filter.key) : []);
+        if (options.length <= 1 && !filter.options) return null;
+        const val = selectValues[String(filter.key)] ?? "";
+        const pluralLabel =
+          filter.label.endsWith("h") ||
+          filter.label.endsWith("s") ||
+          filter.label.endsWith("x")
+            ? `${filter.label}es`
+            : `${filter.label}s`;
+        return (
+          <div key={String(filter.key)} className="w-36 max-w-full">
+            <Select
+              size="sm"
+              value={val}
+              onChange={(e) =>
+                setSelectValues((prev) => ({
+                  ...prev,
+                  [String(filter.key)]: e.target.value,
+                }))
+              }
+              className="h-8 text-xs"
+            >
+              <option value="">All {pluralLabel}</option>
+              {options.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </Select>
           </div>
-        )}
+        );
+      })}
 
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">
-            {searchFilter && (
-              <div className="w-56 max-w-full">
-                <Input
-                  size="sm"
-                  placeholder={searchFilter.placeholder || "Search…"}
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  startIcon={<SearchIcon className="w-3.5 h-3.5" />}
-                />
-              </div>
-            )}
-
-            {selectFilters.map((filter) => {
-              const options =
-                filter.options ??
-                (rows ? distinctValues(rows, filter.key) : []);
-              if (options.length <= 1 && !filter.options) return null;
-              const val = selectValues[String(filter.key)] ?? "";
-              return (
-                <div key={String(filter.key)} className="w-36 max-w-full">
-                  <Select
-                    size="sm"
-                    value={val}
-                    onChange={(e) =>
-                      setSelectValues((prev) => ({
-                        ...prev,
-                        [String(filter.key)]: e.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">All {filter.label}s</option>
-                    {options.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              );
-            })}
-
-            {dateRangeFilter && (
-              <div className="flex items-center gap-1.5">
-                <div className="w-32">
-                  <DateInput
-                    size="sm"
-                    placeholder="Date from"
-                    value={dateFrom}
-                    onChange={setDateFrom}
-                  />
-                </div>
-                <span className="text-text-muted text-xs select-none">–</span>
-                <div className="w-32">
-                  <DateInput
-                    size="sm"
-                    placeholder="Date to"
-                    value={dateTo}
-                    onChange={setDateTo}
-                  />
-                </div>
-              </div>
-            )}
-
-            {hasActiveFilters && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={clearFilters}
-                className="text-xs h-8 px-2 text-text-muted hover:text-error transition-colors"
-              >
-                Clear
-              </Button>
-            )}
+      {dateRangeFilter && (
+        <div className="flex items-center gap-1.5 text-xs text-text-muted">
+          <span className="font-medium select-none">From</span>
+          <div className="w-36">
+            <DateInput
+              size="sm"
+              placeholder="YYYY-MM-DD"
+              value={dateFrom}
+              onChange={setDateFrom}
+            />
           </div>
-
-          <div className="flex items-center gap-1.5 shrink-0 ml-auto">
-            {actionButtons}
+          <span className="font-medium select-none">To</span>
+          <div className="w-36">
+            <DateInput
+              size="sm"
+              placeholder="YYYY-MM-DD"
+              value={dateTo}
+              onChange={setDateTo}
+            />
           </div>
         </div>
-      </div>
-
-      {rows === null && !failed && (
-        <TableSkeleton rows={6} cols={columns.length + 1} />
       )}
 
-      {rows === null && failed && (
-        <EmptyState
-          icon={icon}
-          title={`Couldn't load ${title.toLowerCase()}`}
-          description="Something went wrong reaching the backend."
-          action={
-            <Button variant="secondary" size="sm" onClick={reload}>
-              Try again
-            </Button>
-          }
-        />
+      {hasActiveFilters && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={clearFilters}
+          className="text-xs h-8 px-2 text-text-muted hover:text-error transition-colors"
+        >
+          Clear
+        </Button>
       )}
+    </>
+  );
 
-      {rows !== null && totalItems === 0 && !hasActiveFilters && (
-        <EmptyState
-          icon={icon}
-          title={emptyTitle}
-          description={emptyDescription}
-        />
-      )}
+  return (
+    <div className="flex flex-col" style={containerStyle}>
+      <div className="bg-bg-base border border-border rounded-md overflow-hidden shadow-xs">
+        <div
+          ref={aboveRef}
+          className={cn(
+            "sticky top-14 lg:top-0 z-30 bg-bg-base px-4 py-2.5 border-b border-border",
+            hasTitle && "space-y-2.5",
+          )}
+        >
+          {hasTitle ? (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
+                    {title}
+                  </h2>
+                  {description && (
+                    <span className="text-xs text-text-muted hidden sm:inline">
+                      {description}
+                    </span>
+                  )}
+                </div>
 
-      {rows !== null && totalItems === 0 && hasActiveFilters && (
-        <EmptyState
-          icon={icon}
-          title="No rows match your filters"
-          description="Try widening the date range or clearing a filter."
-          action={
-            <Button variant="secondary" size="sm" onClick={clearFilters}>
-              Clear filters
-            </Button>
-          }
-        />
-      )}
+                <div className="flex items-center gap-2 shrink-0">
+                  {actionButtons}
+                </div>
+              </div>
 
-      {rows !== null && totalItems > 0 && (
-        <>
-          <TableContainer
-            className="overflow-y-auto border-0 rounded-none"
-            style={{
-              maxHeight: "calc(100vh - var(--sticky-offset, 0px) - 5rem)",
-            }}
-          >
-            <Thead className="top-0">
-              {table.getHeaderGroups().map((headerGroup) => (
-                <Tr key={headerGroup.id}>
-                  <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
-                    #
-                  </Th>
-                  {headerGroup.headers.map((header) => {
-                    const align = header.column.columnDef.meta?.align;
-                    return (
-                      <Th
-                        key={header.id}
-                        className={
-                          align === "right" ? "text-right" : undefined
-                        }
-                      >
-                        {header.isPlaceholder
-                          ? null
-                          : flexRender(
-                              header.column.columnDef.header,
-                              header.getContext(),
-                            )}
-                      </Th>
-                    );
-                  })}
-                </Tr>
-              ))}
-            </Thead>
-            <Tbody>
-              {renderedRows.map((row, idx) => (
-                <Tr key={rowKey(row.original, row.index)}>
-                  <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
-                    {(currentPage - 1) * PAGE_SIZE + idx + 1}
-                  </Td>
-                  {row.getVisibleCells().map((cell) => (
-                    <Td
-                      key={cell.id}
-                      className={cn(
-                        "whitespace-nowrap",
-                        cell.column.columnDef.meta?.align === "right" &&
-                          "text-right tabular-nums",
-                      )}
-                    >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </Td>
-                  ))}
-                </Tr>
-              ))}
-            </Tbody>
-          </TableContainer>
+              {hasAnyFilter && (
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/60">
+                  {filterControls}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">
+                {filterControls}
+              </div>
 
-          <Pagination
-            page={currentPage}
-            totalPages={totalPages}
-            totalItems={totalItems}
-            pageSize={PAGE_SIZE}
-            onPageChange={setCurrentPage}
+              <div className="flex items-center gap-2 shrink-0 ml-auto">
+                {actionButtons}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {rows === null && !failed && (
+          <TableSkeleton rows={6} cols={columns.length + 1} />
+        )}
+
+        {rows === null && failed && (
+          <EmptyState
+            icon={icon}
+            title={`Couldn't load ${title.toLowerCase()}`}
+            description="Something went wrong reaching the backend."
+            action={
+              <Button variant="secondary" size="sm" onClick={reload}>
+                Try again
+              </Button>
+            }
           />
-        </>
-      )}
+        )}
+
+        {rows !== null && totalItems === 0 && !hasActiveFilters && (
+          <EmptyState
+            icon={icon}
+            title={emptyTitle}
+            description={emptyDescription}
+          />
+        )}
+
+        {rows !== null && totalItems === 0 && hasActiveFilters && (
+          <EmptyState
+            icon={icon}
+            title="No rows match your filters"
+            description="Try widening the date range or clearing a filter."
+            action={
+              <Button variant="secondary" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            }
+          />
+        )}
+
+        {rows !== null && totalItems > 0 && (
+          <>
+            <TableContainer
+              className="overflow-y-auto border-0 rounded-none"
+              style={{
+                maxHeight: "calc(100vh - var(--sticky-offset, 0px) - 8rem)",
+              }}
+            >
+              <Thead className="top-0">
+                {table.getHeaderGroups().map((headerGroup) => (
+                  <Tr key={headerGroup.id}>
+                    <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
+                      #
+                    </Th>
+                    {headerGroup.headers.map((header) => {
+                      const align = header.column.columnDef.meta?.align;
+                      return (
+                        <Th
+                          key={header.id}
+                          className={
+                            align === "right" ? "text-right" : undefined
+                          }
+                        >
+                          {header.isPlaceholder
+                            ? null
+                            : flexRender(
+                                header.column.columnDef.header,
+                                header.getContext(),
+                              )}
+                        </Th>
+                      );
+                    })}
+                  </Tr>
+                ))}
+              </Thead>
+              <Tbody>
+                {renderedRows.map((row, idx) => (
+                  <Tr key={rowKey(row.original, row.index)}>
+                    <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                      {(currentPage - 1) * PAGE_SIZE + idx + 1}
+                    </Td>
+                    {row.getVisibleCells().map((cell) => (
+                      <Td
+                        key={cell.id}
+                        className={cn(
+                          "whitespace-nowrap",
+                          cell.column.columnDef.meta?.align === "right" &&
+                            "text-right tabular-nums",
+                        )}
+                      >
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </Td>
+                    ))}
+                  </Tr>
+                ))}
+              </Tbody>
+            </TableContainer>
+
+            <div className="border-t border-border bg-bg-base">
+              <Pagination
+                page={currentPage}
+                totalPages={totalPages}
+                totalItems={totalItems}
+                pageSize={PAGE_SIZE}
+                onPageChange={setCurrentPage}
+              />
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

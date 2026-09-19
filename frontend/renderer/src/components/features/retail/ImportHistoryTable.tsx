@@ -16,9 +16,8 @@ import { useImportFilePicker } from "@renderer/lib/useImportFilePicker";
 import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { Badge } from "@renderer/components/ui/Badge";
-import { CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
-import { Input } from "@renderer/components/ui/Input";
+import { DateInput } from "@renderer/components/ui/DateInput";
 import { Select } from "@renderer/components/ui/Select";
 import { TableSkeleton } from "@renderer/components/ui/Skeleton";
 import {
@@ -40,6 +39,7 @@ import type {
 } from "@renderer/components/features/types";
 
 const RETAIL_REVERT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const PAGE_SIZE = 20;
 
 function isRetailRevertLocked(
   row: ImportBatchRow,
@@ -235,7 +235,7 @@ function ImportHistoryTable({
 
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
-    pageSize: 50,
+    pageSize: PAGE_SIZE,
   });
 
   const tableColumns = useMemo<ColumnDef<ImportBatchRow, unknown>[]>(
@@ -356,33 +356,51 @@ function ImportHistoryTable({
   const currentPage = pagination.pageIndex + 1;
   const pageSize = pagination.pageSize;
 
+  const typeOptions = useMemo(() => (rows ? distinctValues(rows, "import_type") : []), [rows]);
+  const statusOptions = useMemo(() => (rows ? distinctValues(rows, "status") : []), [rows]);
+  const branchOptionsList = useMemo(() => {
+    if (!rows) return [];
+    return branchOptions.length > 0 ? branchOptions : distinctValues(rows, "branch_name");
+  }, [rows, branchOptions]);
+
   return (
     <div className="flex flex-col" style={containerStyle}>
       {filePickerInput}
-      <div ref={aboveRef} className="sticky top-14 lg:top-0 z-30 bg-bg-subtle">
-        <CardHeader
-          title="Import history"
-          description="Every confirmed upload — reimport a corrected file to replace a mistaken one, or remove it outright."
-          action={
-            <RefreshButton
-              onClick={reload}
-              refreshing={isRefreshing}
-            />
-          }
-        />
+      <div className="bg-bg-base border border-border rounded-md overflow-hidden shadow-xs">
+        <div
+          ref={aboveRef}
+          className="sticky top-14 lg:top-0 z-30 bg-bg-base px-4 py-2.5 border-b border-border space-y-2.5"
+        >
+          {/* Top Row: Title & Actions */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
+                Import History
+              </h2>
+              <span className="text-xs text-text-muted hidden sm:inline">
+                Every confirmed upload — reimport a corrected file to replace a mistaken one, or remove it outright.
+              </span>
+            </div>
 
-        {rows && rows.length > 0 && (
-          <div className="flex flex-wrap items-end gap-3 pb-4 -mt-1">
-            {(() => {
-              const typeOptions = distinctValues(rows, "import_type");
-              return typeOptions.length > 1 ? (
-                <div className="w-36">
+            <div className="flex items-center gap-2 shrink-0">
+              <RefreshButton
+                onClick={reload}
+                refreshing={isRefreshing}
+              />
+            </div>
+          </div>
+
+          {/* Filter Row: Compact inline filters */}
+          {rows && rows.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/60">
+              {typeOptions.length > 1 && (
+                <div className="w-32 max-w-full">
                   <Select
-                    label="Type"
+                    size="sm"
                     value={typeFilter}
                     onChange={(e) => setTypeFilter(e.target.value)}
                   >
-                    <option value="">All</option>
+                    <option value="">All types</option>
                     {typeOptions.map((opt) => (
                       <option key={opt} value={opt} className="capitalize">
                         {opt}
@@ -390,19 +408,16 @@ function ImportHistoryTable({
                     ))}
                   </Select>
                 </div>
-              ) : null;
-            })()}
+              )}
 
-            {(() => {
-              const statusOptions = distinctValues(rows, "status");
-              return statusOptions.length > 1 ? (
-                <div className="w-36">
+              {statusOptions.length > 1 && (
+                <div className="w-32 max-w-full">
                   <Select
-                    label="Status"
+                    size="sm"
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
                   >
-                    <option value="">All</option>
+                    <option value="">All statuses</option>
                     {statusOptions.map((opt) => (
                       <option key={opt} value={opt}>
                         {statusLabel(opt)}
@@ -410,177 +425,191 @@ function ImportHistoryTable({
                     ))}
                   </Select>
                 </div>
-              ) : null;
-            })()}
+              )}
 
-            {(() => {
-              const options =
-                branchOptions.length > 0
-                  ? branchOptions
-                  : distinctValues(rows, "branch_name");
-              return options.length > 1 ? (
-                <div className="w-40">
+              {branchOptionsList.length > 1 && (
+                <div className="w-36 max-w-full">
                   <Select
-                    label="Branch"
+                    size="sm"
                     value={branchFilter}
                     onChange={(e) => setBranchFilter(e.target.value)}
                   >
-                    <option value="">All</option>
-                    {options.map((opt) => (
+                    <option value="">All branches</option>
+                    {branchOptionsList.map((opt) => (
                       <option key={opt} value={opt}>
                         {opt}
                       </option>
                     ))}
                   </Select>
                 </div>
-              ) : null;
-            })()}
+              )}
 
-            <div className="flex items-end gap-2">
-              <Input
-                type="date"
-                label="Created from"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-              />
-              <Input
-                type="date"
-                label="Created to"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-              />
+              <div className="flex items-center gap-1.5 text-xs text-text-muted">
+                <span className="font-medium select-none">From</span>
+                <div className="w-36">
+                  <DateInput
+                    size="sm"
+                    placeholder="YYYY-MM-DD"
+                    value={dateFrom}
+                    onChange={setDateFrom}
+                  />
+                </div>
+                <span className="font-medium select-none">To</span>
+                <div className="w-36">
+                  <DateInput
+                    size="sm"
+                    placeholder="YYYY-MM-DD"
+                    value={dateTo}
+                    onChange={setDateTo}
+                  />
+                </div>
+              </div>
+
+              {hasActiveFilters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearFilters}
+                  className="text-xs h-8 px-2 text-text-muted hover:text-error transition-colors"
+                >
+                  Clear
+                </Button>
+              )}
             </div>
+          )}
+        </div>
 
-            {hasActiveFilters && (
-              <Button variant="ghost" size="sm" onClick={clearFilters}>
-                Clear filters
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
+        {rows === null && !failed && <TableSkeleton rows={6} cols={8} />}
 
-      {rows === null && !failed && <TableSkeleton rows={4} cols={7} />}
-
-      {rows === null && failed && (
-        <EmptyState
-          icon={<HistoryIcon />}
-          title="Couldn't load import history"
-          description="Something went wrong reaching the backend."
-          action={
-            <Button variant="secondary" size="sm" onClick={reload}>
-              Try again
-            </Button>
-          }
-        />
-      )}
-
-      {rows !== null && rows.length === 0 && (
-        <EmptyState
-          icon={<HistoryIcon />}
-          title="No imports yet"
-          description="Confirmed sales, inventory, and purchase imports will show up here."
-        />
-      )}
-
-      {rows !== null &&
-        rows.length > 0 &&
-        filteredRows !== null &&
-        filteredRows.length === 0 && (
+        {rows === null && failed && (
           <EmptyState
             icon={<HistoryIcon />}
-            title="No imports match your filters"
-            description="Try widening the date range or clearing a filter."
+            title="Couldn't load import history"
+            description="Something went wrong reaching the backend."
             action={
-              <Button variant="secondary" size="sm" onClick={clearFilters}>
-                Clear filters
+              <Button variant="secondary" size="sm" onClick={reload}>
+                Try again
               </Button>
             }
           />
         )}
 
-      {filteredRows !== null && filteredRows.length > 0 && (
-        <>
-          <TableContainer
-            className="overflow-y-auto border-0 rounded-none"
-            style={{
-              maxHeight: "calc(100vh - var(--sticky-offset, 0px) - 5rem)",
-            }}
-          >
-            <Thead className="top-0">
-              {table.getHeaderGroups().map((headerGroup) => (
-                <Tr key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => (
-                    <Th
-                      key={header.id}
-                      className={
-                        header.column.columnDef.meta?.align === "right"
-                          ? "text-right"
-                          : undefined
-                      }
-                    >
-                      {header.isPlaceholder
-                        ? null
-                        : flexRender(
-                            header.column.columnDef.header,
-                            header.getContext(),
-                          )}
-                    </Th>
-                  ))}
-                </Tr>
-              ))}
-            </Thead>
-            <Tbody>
-              {table.getRowModel().rows.map((row) => (
-                <Tr
-                  key={row.original.id}
-                  ref={
-                    row.original.id === highlightBatchId
-                      ? highlightRowRef
-                      : undefined
-                  }
-                  onClick={() => onViewBatch(row.original.id)}
-                  className={cn(
-                    "cursor-pointer",
-                    row.original.id === highlightBatchId &&
-                      "ring-2 ring-inset ring-brand bg-brand-subtle",
-                  )}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <Td
-                      key={cell.id}
-                      className={cn(
-                        cell.column.id === "type" && "capitalize",
-                        cell.column.id === "filename" &&
-                          "max-w-[12rem] truncate",
-                        cell.column.id === "created" &&
-                          "text-text-muted whitespace-nowrap",
-                        cell.column.columnDef.meta?.align === "right" &&
-                          "text-right tabular-nums",
-                      )}
-                    >
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext(),
-                      )}
-                    </Td>
-                  ))}
-                </Tr>
-              ))}
-            </Tbody>
-          </TableContainer>
-
-          <Pagination
-            page={currentPage}
-            totalPages={totalPages}
-            totalItems={filteredRows.length}
-            pageSize={pageSize}
-            onPageChange={(nextPage) => table.setPageIndex(nextPage - 1)}
+        {rows !== null && rows.length === 0 && (
+          <EmptyState
+            icon={<HistoryIcon />}
+            title="No imports yet"
+            description="Confirmed sales, inventory, and purchase imports will show up here."
           />
-        </>
-      )}
+        )}
+
+        {rows !== null &&
+          rows.length > 0 &&
+          filteredRows !== null &&
+          filteredRows.length === 0 && (
+            <EmptyState
+              icon={<HistoryIcon />}
+              title="No imports match your filters"
+              description="Try widening the date range or clearing a filter."
+              action={
+                <Button variant="secondary" size="sm" onClick={clearFilters}>
+                  Clear filters
+                </Button>
+              }
+            />
+          )}
+
+        {filteredRows !== null && filteredRows.length > 0 && (
+          <>
+            <TableContainer
+              className="overflow-y-auto border-0 rounded-none"
+              style={{
+                maxHeight: "calc(100vh - var(--sticky-offset, 0px) - 8rem)",
+              }}
+            >
+              <Thead className="top-0">
+                {table.getHeaderGroups().map((headerGroup) => (
+                  <Tr key={headerGroup.id}>
+                    <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
+                      #
+                    </Th>
+                    {headerGroup.headers.map((header) => (
+                      <Th
+                        key={header.id}
+                        className={
+                          header.column.columnDef.meta?.align === "right"
+                            ? "text-right"
+                            : undefined
+                        }
+                      >
+                        {header.isPlaceholder
+                          ? null
+                          : flexRender(
+                              header.column.columnDef.header,
+                              header.getContext(),
+                            )}
+                      </Th>
+                    ))}
+                  </Tr>
+                ))}
+              </Thead>
+              <Tbody>
+                {table.getRowModel().rows.map((row, idx) => (
+                  <Tr
+                    key={row.original.id}
+                    ref={
+                      row.original.id === highlightBatchId
+                        ? highlightRowRef
+                        : undefined
+                    }
+                    onClick={() => onViewBatch(row.original.id)}
+                    className={cn(
+                      "cursor-pointer hover:bg-bg-subtle/50 transition-colors",
+                      row.original.id === highlightBatchId &&
+                        "ring-2 ring-inset ring-brand bg-brand-subtle",
+                    )}
+                  >
+                    <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                      {(currentPage - 1) * pageSize + idx + 1}
+                    </Td>
+                    {row.getVisibleCells().map((cell) => (
+                      <Td
+                        key={cell.id}
+                        className={cn(
+                          cell.column.id === "type" && "capitalize font-medium",
+                          cell.column.id === "filename" &&
+                            "max-w-[14rem] truncate font-mono text-xs",
+                          cell.column.id === "created" &&
+                            "text-text-muted whitespace-nowrap text-xs",
+                          cell.column.columnDef.meta?.align === "right" &&
+                            "text-right tabular-nums",
+                        )}
+                      >
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext(),
+                        )}
+                      </Td>
+                    ))}
+                  </Tr>
+                ))}
+              </Tbody>
+            </TableContainer>
+
+            <div className="border-t border-border bg-bg-base">
+              <Pagination
+                page={currentPage}
+                totalPages={totalPages}
+                totalItems={filteredRows.length}
+                pageSize={pageSize}
+                onPageChange={(nextPage) => table.setPageIndex(nextPage - 1)}
+              />
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
 export default ImportHistoryTable;
+

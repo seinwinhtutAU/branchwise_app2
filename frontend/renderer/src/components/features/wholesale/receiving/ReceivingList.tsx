@@ -57,9 +57,6 @@ export function ReceivingList({
   onNew,
   onRefresh,
   refreshing,
-  readyToDeliverPairs,
-  owedToCustomersPairs,
-  onOpenOrders,
 }: {
   receivings: Receiving[];
   onOpen: (receivingId: string, focus?: "packages" | "costs") => void;
@@ -67,9 +64,6 @@ export function ReceivingList({
   onNew: () => void;
   onRefresh: () => void;
   refreshing: boolean;
-  readyToDeliverPairs: number;
-  owedToCustomersPairs: number;
-  onOpenOrders?: () => void;
 }): React.JSX.Element {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -131,21 +125,6 @@ export function ReceivingList({
 
   return (
     <div className="flex flex-col gap-4">
-      {owedToCustomersPairs > 0 && onOpenOrders && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-success/40 bg-success-subtle px-5 py-4">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-text-primary">
-              {formatSets(readyToDeliverPairs)} on the shelf, ready to go out.
-            </p>
-            <p className="mt-0.5 text-sm text-text-secondary">
-              {`Customers are still waiting for ${formatSets(owedToCustomersPairs)}.`}
-            </p>
-          </div>
-          <Button size="sm" onClick={onOpenOrders}>
-            Deliver to customer
-          </Button>
-        </div>
-      )}
       <CollapsibleKpiSummary storageKey="wholesale_receivings" title="Receiving Summary">
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
           <FigureCard

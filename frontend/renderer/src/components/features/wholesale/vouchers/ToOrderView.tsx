@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { cn } from "@renderer/lib/utils";
 import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
+import { TabBar } from "@renderer/components/ui/Tabs";
 import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import {
@@ -42,58 +43,7 @@ import {
 } from "./types";
 import { supplierDemandGroups } from "./voucherOrderUtils";
 
-export function SupplierVoucherTabs({
-  active,
-  onVouchers,
-  onToOrder,
-  toOrderCount = 0,
-}: {
-  active: "vouchers" | "to_order";
-  onVouchers: () => void;
-  onToOrder: () => void;
-  toOrderCount?: number;
-}): React.JSX.Element {
-  return (
-    <div className="flex items-center gap-1 px-6 pt-3 border-b border-border">
-      <button
-        type="button"
-        onClick={onVouchers}
-        className={cn(
-          "border-b-2 px-3 pb-3 text-sm font-semibold transition-colors duration-150",
-          active === "vouchers"
-            ? "border-brand text-brand"
-            : "border-transparent text-text-muted hover:text-text-primary",
-        )}
-      >
-        Supplier vouchers
-      </button>
-      <button
-        type="button"
-        onClick={onToOrder}
-        className={cn(
-          "inline-flex items-center gap-2 border-b-2 px-3 pb-3 text-sm font-semibold transition-colors duration-150",
-          active === "to_order"
-            ? "border-brand text-brand"
-            : "border-transparent text-text-muted hover:text-text-primary",
-        )}
-      >
-        <span>Create from customer orders</span>
-        {toOrderCount > 0 && (
-          <span
-            className={cn(
-              "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold leading-none tabular-nums",
-              active === "to_order"
-                ? "bg-brand text-white"
-                : "bg-brand-subtle text-brand border border-brand-pill",
-            )}
-          >
-            {toOrderCount}
-          </span>
-        )}
-      </button>
-    </div>
-  );
-}
+
 
 export function ToOrderView({
   orders,
@@ -194,36 +144,34 @@ export function ToOrderView({
         </div>
       </CollapsibleKpiSummary>
 
+      <TabBar<"vouchers" | "to_order">
+        tabs={[
+          {
+            id: "vouchers",
+            label: "Supplier Vouchers",
+            count: vouchers.length,
+          },
+          {
+            id: "to_order",
+            label: "To Order",
+            count: groups.reduce((sum, g) => sum + g.lines.length, 0),
+          },
+        ]}
+        activeTab="to_order"
+        onSelect={(tabId) => {
+          if (tabId === "vouchers") onOpenVouchers();
+        }}
+      />
+
       <Panel>
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-base">
           <div className="flex items-center gap-2 flex-wrap min-w-0">
             <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
-              Supplier vouchers
+              To Order
             </h2>
-            <div className="flex items-center gap-1.5 flex-wrap select-none">
-              <button
-                type="button"
-                onClick={onOpenVouchers}
-                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium transition-all duration-150 border cursor-pointer bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary"
-              >
-                <span>Vouchers</span>
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums bg-bg-raised text-text-muted">
-                  {vouchers.length}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium transition-all duration-150 border cursor-pointer bg-brand text-white border-brand shadow-xs"
-              >
-                <span>To Order</span>
-                {groups.reduce((sum, g) => sum + g.lines.length, 0) > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums bg-white/20 text-white">
-                    {groups.reduce((sum, g) => sum + g.lines.length, 0)}
-                  </span>
-                )}
-              </button>
-            </div>
+            <span className="text-xs text-text-muted hidden sm:inline">
+              Create factory procurement vouchers directly from customer demand
+            </span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <RefreshButton

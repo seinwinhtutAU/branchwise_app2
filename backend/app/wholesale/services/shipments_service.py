@@ -253,6 +253,7 @@ def split_shipment(
     final_destination: str,
     carrier_name: str,
     split_leg_order: int | None = None,
+    destination: str | None = None,
     operator_id: str | None = None,
 ) -> tuple[Shipment, Shipment]:
     """Carves `packages` (and, if known, `quantity_pairs`) out of a shipment's
@@ -267,12 +268,14 @@ def split_shipment(
     packages for the chosen stop) precisely so a split can never rewrite an already-sent
     figure a Receiving may already refer to.
 
-    `quantity_pairs` gets a looser rule: it's optional, and when given is only checked
-    against the shipment's own total, not against a per-stop share of it. Quantity isn't
-    tracked per stop the way packages are, and what's actually inside a box isn't known
-    for certain until it's opened and counted at the receiving gate, so this doesn't try
-    to pin it down — the original's own quantity is simply left untouched when it's left
-    unset.
+    `quantity_pairs` is optional: when specified, it is deducted from the original and
+    allocated to the new shipment. When left unset, quantity is proportionally allocated
+    based on the ratio of split packages to total packages, ensuring neither side ends
+    up with 0 items at the receiving gate.
+
+    If an intermediate `destination` is specified (e.g. Mandalay) distinct from the
+    receiving gate (`final_destination`), a new stop leg is added to the new shipment's
+    route.
 
     A leg-stage split carries the new shipment's already-travelled route with it rather
     than starting it blank: every stop up to and including the split point is copied
@@ -320,14 +323,25 @@ def split_shipment(
             "Split quantity cannot exceed the shipment's own total quantity",
         )
 
+    dest = destination.strip() if destination else ""
+    final_dest = final_destination.strip()
+
     def attempt() -> Shipment:
         # Reloaded fresh each attempt: a prior try's rollback (on a reference collision)
         # expires this session's objects, so the pending subtraction below must be
         # re-applied against the current committed state, not a stale in-memory value.
         current = _load(db, shipment_id, branch_id)
-        current.total_packages = max(0, current.total_packages - packages)
         if quantity_pairs is not None:
-            current.total_quantity_pairs = max(0, current.total_quantity_pairs - quantity_pairs)
+            allocated_pairs = quantity_pairs
+        else:
+            if current.total_packages > 0:
+                allocated_pairs = round(current.total_quantity_pairs * (packages / current.total_packages))
+            else:
+                allocated_pairs = 0
+            allocated_pairs = min(allocated_pairs, current.total_quantity_pairs)
+
+        current.total_packages = max(0, current.total_packages - packages)
+        current.total_quantity_pairs = max(0, current.total_quantity_pairs - allocated_pairs)
 
         travelled_legs: list[ShipmentLeg] = []
         new_packages_sent_by_cargo = 0
@@ -366,6 +380,31 @@ def split_shipment(
                             packages_sent=0,
                         )
                     )
+            # If an intermediate destination is specified and different from the split stop
+            # and final destination, add it as a new leg on the new shipment's route.
+            if dest and dest != current.legs[leg_index].stop_name and dest != final_dest:
+                travelled_legs.append(
+                    ShipmentLeg(
+                        leg_order=len(travelled_legs) + 1,
+                        stop_name=dest,
+                        carrier_name=carrier_name.strip() or current.legs[leg_index].carrier_name,
+                        packages_received=0,
+                        packages_sent=0,
+                    )
+                )
+        else:
+            # Split directly from cargo: if an intermediate destination is specified and
+            # different from the final destination (gate), add it as the first stop leg.
+            if dest and dest != final_dest:
+                travelled_legs.append(
+                    ShipmentLeg(
+                        leg_order=1,
+                        stop_name=dest,
+                        carrier_name=carrier_name.strip() or current.carrier_name,
+                        packages_received=0,
+                        packages_sent=0,
+                    )
+                )
 
         shipment_no = allocate_reference(db, Shipment.shipment_no, current.branch_id, "SHP", date.today())
         new_shipment = Shipment(
@@ -374,10 +413,10 @@ def split_shipment(
             voucher_no=current.voucher_no,
             supplier_name=current.supplier_name,
             carrier_name=new_cargo_carrier,
-            final_destination=final_destination,
+            final_destination=final_dest,
             sent_on=current.sent_on,
             total_packages=packages,
-            total_quantity_pairs=quantity_pairs or 0,
+            total_quantity_pairs=allocated_pairs,
             total_unit=current.total_unit,
             packages_sent_by_cargo=new_packages_sent_by_cargo,
             final_received_packages=0,
@@ -392,13 +431,14 @@ def split_shipment(
             entity_id=current.id,
             action="split",
             operator_id=operator_id,
-            summary=f"Split {packages} packages into {new_shipment.shipment_no} to {final_destination}",
+            summary=f"Split {packages} packages into {new_shipment.shipment_no} to {final_dest}",
             payload={
                 "new_shipment_id": new_shipment.id,
                 "new_shipment_no": new_shipment.shipment_no,
                 "packages": packages,
-                "quantity_pairs": quantity_pairs,
-                "final_destination": final_destination,
+                "quantity_pairs": allocated_pairs,
+                "destination": dest or None,
+                "final_destination": final_dest,
                 "carrier_name": carrier_name,
                 "split_leg_order": split_leg_order,
             },

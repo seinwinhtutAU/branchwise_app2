@@ -4,11 +4,13 @@ import { apiBaseUrl } from "@renderer/lib/auth";
 import { useUrlQuery } from "@renderer/lib/queryClient";
 import { cn } from "@renderer/lib/utils";
 import { useImportFilePicker } from "@renderer/lib/useImportFilePicker";
+import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
-import { Badge } from "@renderer/components/ui/Badge";
+import { Badge, type BadgeVariant } from "@renderer/components/ui/Badge";
 import { CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
+import { Input } from "@renderer/components/ui/Input";
 import { Select } from "@renderer/components/ui/Select";
 import { TabBar } from "@renderer/components/ui/Tabs";
 import { TableSkeleton } from "@renderer/components/ui/Skeleton";
@@ -20,10 +22,14 @@ import {
   Th,
   Td,
 } from "@renderer/components/ui/Table";
+import { downloadCsv } from "@renderer/lib/csv";
+import { downloadExcel } from "@renderer/lib/excel";
 import {
   WarningIcon,
   ChevronDownIcon,
   ChevronUpIcon,
+  SearchIcon,
+  DownloadIcon,
 } from "@renderer/components/ui/icons";
 import type {
   PendingImport,
@@ -94,23 +100,20 @@ const IMPORT_TYPE_LABEL: Record<ImportType, string> = {
   inventory: "Inventory",
 };
 
-type Category = "Sale" | "Inventory" | "Purchase" | "Daily check";
+type Category = "Inventory" | "Sale" | "Purchase";
 
-// Order used by the "All" tab — daily check surfaces first since it's the one most
-// likely to hide a real stock-count problem, ahead of the per-transaction checks.
+// Order used by the "All" tab — inventory surfaces first ahead of transaction checks.
 const ALL_TAB_ORDER: Category[] = [
-  "Daily check",
-  "Sale",
   "Inventory",
+  "Sale",
   "Purchase",
 ];
 
 type Tab = "All" | Category;
 const TAB_ORDER: Tab[] = [
   "All",
-  "Daily check",
-  "Sale",
   "Inventory",
+  "Sale",
   "Purchase",
 ];
 
@@ -123,8 +126,8 @@ const SECTION_CATEGORY: Record<string, Category> = {
   missing_product: "Inventory",
   inventory_numeric: "Inventory",
   purchase_numeric: "Purchase",
-  reconciliation_uom: "Daily check",
-  reconciliation_mismatch: "Daily check",
+  reconciliation_uom: "Inventory",
+  reconciliation_mismatch: "Inventory",
 };
 
 // Every category's rows are grouped by which import produced them (see buildBatchGroups)
@@ -134,21 +137,20 @@ const SECTION_CATEGORY: Record<string, Category> = {
 //   re-import only takes effect once that exact batch is removed first (re-confirming
 //   otherwise skips already-imported slips as duplicates for Sale, or double-counts for
 //   Purchase).
-// - Inventory/Daily check: `stock_levels` is append-only, so a bad snapshot doesn't
-//   strictly need removing — "current stock" is always just the latest one. But the
-//   daily reconciliation check compares the latest snapshot against the one right
-//   before it, so a bad value can still get used as "the prior count" for one more
-//   comparison even after being superseded by a newer, correct snapshot. Reimport-ing
-//   the specific bad batch (instead of just adding a new one alongside it) avoids that
-//   by removing it from history outright — simpler for staff than having to reason
-//   about which fix applies to which category.
+// - Inventory: `stock_levels` is append-only, so a bad snapshot doesn't strictly need
+//   removing — "current stock" is always just the latest one. But the daily
+//   reconciliation check compares the latest snapshot against the one right before it,
+//   so a bad value can still get used as "the prior count" for one more comparison even
+//   after being superseded by a newer, correct snapshot. Reimport-ing the specific bad
+//   batch (instead of just adding a new one alongside it) avoids that by removing it
+//   from history outright — simpler for staff than having to reason about which fix
+//   applies to which category.
 
 // Which upload endpoint a category's Reimport buttons parse against.
 const CATEGORY_IMPORT_TYPE: Record<Category, ImportType> = {
   Sale: "sales",
   Purchase: "purchase",
   Inventory: "inventory",
-  "Daily check": "inventory",
 };
 
 const RETAIL_REMOVE_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -160,13 +162,12 @@ function isRemoveLocked(dateIso: string, profile: Profile | null): boolean {
   );
 }
 
-const PRIMARY_LABELS = ["Branch", "Stock Code", "Description"];
-
 // Every check names its date field a little differently depending on which real list
 // page it mirrors (Sale/Purchase call it "Date", Inventory calls it "Last Updated",
-// and a missing-product row only has a "Last Date" it was seen on) — try them in order
-// so the main table can show one "Date" column regardless of which check a row is from.
-const DATE_LABELS = ["Date", "Last Updated", "Last Date"];
+// a missing-product row only has a "Last Date" it was seen on, and daily reconciliation
+// rows have an "Until" date) — try them in order so the main table can show one "Date"
+// column regardless of which check a row is from.
+const DATE_LABELS = ["Date", "Last Updated", "Last Date", "Until"];
 
 function fieldValue(fields: WarningField[], label: string): string {
   return fields.find((f) => f.label === label)?.value ?? "—";
@@ -184,29 +185,47 @@ function distinctBranches(sections: WarningSection[] | null): string[] {
   return Array.from(values).sort();
 }
 
-function filterSectionsByBranch(
+function filterSections(
   sections: WarningSection[] | null,
   branch: string,
+  severity: string,
+  search: string,
 ): WarningSection[] | null {
-  if (!sections || !branch) return sections;
-  return sections.map((section) => ({
-    ...section,
-    rows: section.rows.filter(
-      (row) => fieldValue(row.fields, "Branch") === branch,
-    ),
-  }));
+  if (!sections) return sections;
+  const q = search.trim().toLowerCase();
+
+  return sections.map((section) => {
+    if (severity && section.severity !== severity) {
+      return { ...section, rows: [] };
+    }
+
+    const filteredRows = section.rows.filter((row) => {
+      if (branch && fieldValue(row.fields, "Branch") !== branch) {
+        return false;
+      }
+      if (q) {
+        const stockCode = fieldValue(row.fields, "Stock Code").toLowerCase();
+        const desc = fieldValue(row.fields, "Description").toLowerCase();
+        const rowBranch = fieldValue(row.fields, "Branch").toLowerCase();
+        const note = row.note.toLowerCase();
+        if (
+          !stockCode.includes(q) &&
+          !desc.includes(q) &&
+          !rowBranch.includes(q) &&
+          !note.includes(q)
+        ) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    return { ...section, rows: filteredRows };
+  });
 }
 
 function dateFieldLabel(fields: WarningField[]): string | undefined {
   return DATE_LABELS.find((label) => fields.some((f) => f.label === label));
-}
-
-function chunk<T>(items: T[], size: number): T[][] {
-  const result: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    result.push(items.slice(i, i + size));
-  }
-  return result;
 }
 
 function formatDate(iso: string): string {
@@ -219,15 +238,28 @@ function formatDate(iso: string): string {
 interface FlatRow {
   key: string;
   severity: "warning" | "critical";
+  sectionId?: string;
   row: WarningRow;
 }
 
 // Critical first, so the thing most worth acting on is always at the top.
+// If same severity, newest date first, then by stock code.
 function bySeverity(a: FlatRow, b: FlatRow): number {
-  return a.severity === b.severity ? 0 : a.severity === "critical" ? -1 : 1;
+  if (a.severity !== b.severity) {
+    return a.severity === "critical" ? -1 : 1;
+  }
+  const dateLabelA = dateFieldLabel(a.row.fields);
+  const dateLabelB = dateFieldLabel(b.row.fields);
+  const dateA = dateLabelA ? fieldValue(a.row.fields, dateLabelA) : "";
+  const dateB = dateLabelB ? fieldValue(b.row.fields, dateLabelB) : "";
+  if (dateA && dateB && dateA !== "—" && dateB !== "—") {
+    const comp = dateB.localeCompare(dateA);
+    if (comp !== 0) return comp;
+  }
+  const codeA = fieldValue(a.row.fields, "Stock Code");
+  const codeB = fieldValue(b.row.fields, "Stock Code");
+  return codeA.localeCompare(codeB);
 }
-
-const SOURCE_IMPORT_LABEL = "Source Import";
 
 function formatDateLabel(iso: string): string {
   if (iso === "—") return iso;
@@ -245,59 +277,11 @@ function isReconciliationMismatch(row: WarningRow): boolean {
   return row.fields.some((f) => f.label === "Expected Qty");
 }
 
-// A plain-language, chronological walkthrough of the reconciliation math — "here's what
-// you started with, here's what sold/came in, here's what we expected vs. what's
-// actually there" — rather than the generic unordered label/value grid every other
-// check uses. Staff need to follow the story to trust the number, not just see six
-// unlabeled figures.
-// One line of the two-column grid below — an optional date caption above a
-// label/value pair, so a reader can tell at a glance which snapshot a figure is from.
-// One tile in the stat strip below — a small caption (date or nothing), a label, and a
-// prominent value. Deliberately roomier/bigger than the rest of the warnings table (this
-// is the one place worth slowing down to actually read the numbers).
-function DailyCheckStat({
-  date,
-  label,
-  value,
-  valueClass,
-  sub,
-}: {
-  date?: string;
-  label: React.ReactNode;
-  value: React.ReactNode;
-  valueClass?: string;
-  sub?: string;
-}): React.JSX.Element {
-  return (
-    <div className="px-4 py-3 min-w-0">
-      <div className="text-[10px] uppercase tracking-wide text-text-muted h-3.5">
-        {date}
-      </div>
-      <div className="text-xs text-text-secondary mt-0.5 truncate">{label}</div>
-      <div
-        className={cn(
-          "text-base font-semibold tabular-nums mt-0.5",
-          valueClass,
-        )}
-      >
-        {value}
-      </div>
-      {sub && (
-        <div className="text-[11px] text-text-muted tabular-nums mt-1">
-          {sub}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DailyCheckDetails({
+function DailyCheckDetailsCard({
   row,
-  severity,
   onViewImportBatch,
 }: {
   row: WarningRow;
-  severity: "warning" | "critical";
   onViewImportBatch?: (batchId: string) => void;
 }): React.JSX.Element {
   const since = formatDateLabel(fieldValue(row.fields, "Since"));
@@ -308,205 +292,354 @@ function DailyCheckDetails({
   const expected = fieldValue(row.fields, "Expected Qty");
   const actual = fieldValue(row.fields, "Actual Qty");
   const difference = fieldValue(row.fields, "Difference");
-  // Matches the backend's actual formula (prior + purchased − sold = expected), so the
-  // number isn't just asserted — the reader can see exactly how it was derived.
-  const calculation = `${priorQty} + ${purchased} − ${sold} = ${expected}`;
+  const diffNum = Number(difference);
 
   return (
-    <div className="w-full text-xs">
-      <div className="px-4 py-2.5 font-medium text-text-primary border-b border-border">
-        Daily Check Details
-      </div>
-      <div className="grid grid-cols-3 divide-x divide-border border-b border-border">
-        <DailyCheckStat date={since} label="On-Hand Qty" value={priorQty} />
-        <DailyCheckStat
-          date={until}
-          label="Sale Qty"
-          value={`−${sold}`}
-          valueClass="text-error"
-        />
-        <DailyCheckStat
-          date={until}
-          label="Purchase Qty"
-          value={`+${purchased}`}
-          valueClass="text-success"
-        />
-      </div>
-      <div className="grid grid-cols-3 divide-x divide-border bg-bg-raised">
-        <DailyCheckStat
-          label={`Expected Qty (${until})`}
-          value={expected}
-          sub={calculation}
-        />
-        <DailyCheckStat label={`Actual Qty (${until})`} value={actual} />
-        <DailyCheckStat
-          label="Difference"
-          value={difference}
-          valueClass={severity === "critical" ? "text-error" : "text-warning"}
-        />
-      </div>
-      {row.source_import && (
-        <div className="border-t border-border px-4 py-2.5 flex items-center justify-between gap-3">
-          <span className="text-text-secondary">Source Import</span>
-          <button
-            type="button"
-            onClick={() => onViewImportBatch?.(row.source_import!.id)}
-            className="text-brand hover:text-brand-hover underline underline-offset-2 whitespace-nowrap"
-          >
-            {row.source_import.filename ?? "View import"} →
-          </button>
+    <div className="p-3 bg-bg-subtle/40">
+      <div className="bg-bg-base border border-border rounded-lg p-3.5 space-y-2.5">
+        {/* Simple Plain-English Explanation */}
+        <div className="flex items-start gap-2 text-xs">
+          <span className="text-sm">💡</span>
+          <div className="text-text-primary leading-relaxed">
+            <span className="font-semibold">{row.note}</span>
+          </div>
         </div>
-      )}
+
+        {/* Intuitive Step-by-Step Numbers */}
+        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border text-xs text-text-primary">
+          <div className="px-2.5 py-1.5 rounded-md bg-bg-subtle border border-border/70">
+            <span className="font-medium">Start ({since}): </span>
+            <span className="font-bold font-mono">{priorQty}</span>
+          </div>
+          <span className="font-bold">+</span>
+          <div className="px-2.5 py-1.5 rounded-md bg-bg-subtle border border-border/70">
+            <span className="font-medium">Bought: </span>
+            <span className="font-bold font-mono">{purchased}</span>
+          </div>
+          <span className="font-bold">−</span>
+          <div className="px-2.5 py-1.5 rounded-md bg-bg-subtle border border-border/70">
+            <span className="font-medium">Sold: </span>
+            <span className="font-bold font-mono">{sold}</span>
+          </div>
+          <span className="font-bold">=</span>
+          <div className="px-2.5 py-1.5 rounded-md bg-bg-subtle border border-border/70">
+            <span className="font-medium">Should be: </span>
+            <span className="font-bold font-mono">{expected}</span>
+          </div>
+          <span className="font-semibold">vs</span>
+          <div className="px-2.5 py-1.5 rounded-md bg-bg-subtle border border-border/70">
+            <span className="font-medium">Counted ({until}): </span>
+            <span className="font-bold font-mono">{actual}</span>
+          </div>
+          <div className="ml-auto px-2.5 py-1.5 rounded-md font-semibold text-xs font-mono bg-warning-subtle text-warning border border-warning/30">
+            Difference: {diffNum > 0 ? `+${difference}` : difference}
+          </div>
+        </div>
+
+        {/* Source file reference link */}
+        {row.source_import && (
+          <div className="pt-1.5 text-xs text-text-muted flex items-center justify-between border-t border-border/50">
+            <span>
+              Source file:{" "}
+              <span className="font-medium text-text-secondary">
+                {row.source_import.filename ?? "Imported file"}
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => onViewImportBatch?.(row.source_import!.id)}
+              className="text-brand hover:text-brand-hover underline underline-offset-2 font-medium"
+            >
+              View imported file →
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
+function GenericWarningDetailsCard({
+  row,
+  showSourceImportLink,
+  onViewImportBatch,
+}: {
+  row: WarningRow;
+  showSourceImportLink: boolean;
+  onViewImportBatch?: (batchId: string) => void;
+}): React.JSX.Element {
+  return (
+    <div className="p-3 bg-bg-subtle/40">
+      <div className="bg-bg-base border border-border rounded-lg p-3.5 space-y-2.5">
+        {/* Simple Plain-English Explanation */}
+        <div className="flex items-start gap-2 text-xs">
+          <span className="text-sm">💡</span>
+          <div className="text-text-primary leading-relaxed">
+            <span className="font-semibold">{row.note}</span>
+          </div>
+        </div>
+
+        {/* Quick Problem Highlight */}
+        {row.highlight.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2.5 pt-2 border-t border-border text-xs">
+            {row.highlight.map((h) => {
+              const val = fieldValue(row.fields, h);
+              return (
+                <div
+                  key={h}
+                  className="px-2.5 py-1 rounded-md bg-bg-subtle border border-border/70 text-text-primary font-medium"
+                >
+                  <span className="text-text-muted">{h}: </span>
+                  <span className="font-mono font-bold text-error">{val}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Source file reference link */}
+        {showSourceImportLink && row.source_import && (
+          <div className="pt-1.5 text-xs text-text-muted flex items-center justify-between border-t border-border/50">
+            <span>
+              Source file:{" "}
+              <span className="font-medium text-text-secondary">
+                {row.source_import.filename ?? "Imported file"}
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => onViewImportBatch?.(row.source_import!.id)}
+              className="text-brand hover:text-brand-hover underline underline-offset-2 font-medium"
+            >
+              View imported file →
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const ISSUE_TEXT_COLOR: Record<BadgeVariant, string> = {
+  error: "text-error",
+  warning: "text-warning",
+  info: "text-brand",
+  brand: "text-brand",
+  success: "text-success",
+  default: "text-text-primary",
+};
+
+function parseWarningIssue(
+  row: WarningRow,
+  sectionId?: string,
+  severity?: "warning" | "critical",
+): {
+  type: string;
+  typeBadgeVariant: BadgeVariant;
+  summary: React.JSX.Element;
+} {
+  const isMismatch = isReconciliationMismatch(row);
+  if (isMismatch) {
+    const expected = fieldValue(row.fields, "Expected Qty");
+    const actual = fieldValue(row.fields, "Actual Qty");
+    const diff = fieldValue(row.fields, "Difference");
+    const diffNum = Number(diff);
+    const diffFormatted = isNaN(diffNum)
+      ? diff
+      : diffNum > 0
+        ? `+${diffNum}`
+        : `${diffNum}`;
+
+    return {
+      type: "Stock Mismatch",
+      typeBadgeVariant: severity === "critical" ? "error" : "warning",
+      summary: (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-text-muted text-xs">
+            Exp: <span className="font-mono text-text-primary font-medium">{expected}</span> → Act:{" "}
+            <span className="font-mono text-text-primary font-medium">{actual}</span>
+          </span>
+          <span
+            className={cn(
+              "font-mono font-semibold text-xs",
+              diffNum < 0 ? "text-error" : "text-warning",
+            )}
+          >
+            Diff: {diffFormatted}
+          </span>
+        </div>
+      ),
+    };
+  }
+
+  // Missing product check
+  const timesSold = fieldValue(row.fields, "Times Sold");
+  const timesPurchased = fieldValue(row.fields, "Times Purchased");
+  if (
+    timesSold !== "—" ||
+    timesPurchased !== "—" ||
+    sectionId === "missing_product" ||
+    row.note.includes("no inventory record")
+  ) {
+    let activityText = "";
+    if (timesSold !== "—" && timesPurchased !== "—") {
+      activityText = `Sold ${timesSold}x, Bought ${timesPurchased}x`;
+    } else if (timesSold !== "—") {
+      activityText = `Sold ${timesSold} time${timesSold === "1" ? "" : "s"}`;
+    } else if (timesPurchased !== "—") {
+      activityText = `Purchased ${timesPurchased} time${timesPurchased === "1" ? "" : "s"}`;
+    } else {
+      activityText = "Unregistered Item";
+    }
+
+    return {
+      type: "Missing in Inventory",
+      typeBadgeVariant: "warning",
+      summary: (
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-text-secondary font-medium">{activityText}</span>
+          <span className="text-text-muted font-normal">(no stock record)</span>
+        </div>
+      ),
+    };
+  }
+
+  // Unit mix
+  const unitsSeen = fieldValue(row.fields, "Units Seen");
+  if (unitsSeen !== "—" || sectionId === "reconciliation_uom") {
+    return {
+      type: "Multi-UOM",
+      typeBadgeVariant: "info",
+      summary: (
+        <div className="text-xs text-text-secondary">
+          Mixed units:{" "}
+          <span className="font-mono font-medium text-text-primary">
+            {unitsSeen}
+          </span>
+        </div>
+      ),
+    };
+  }
+
+  // Numeric issues
+  if (row.highlight && row.highlight.length > 0) {
+    const highlights = row.highlight;
+    let type = "Invalid Value";
+    if (
+      highlights.some(
+        (h) =>
+          h.toLowerCase().includes("qty") ||
+          h.toLowerCase().includes("quantity"),
+      )
+    ) {
+      type = "Invalid Qty";
+    } else if (highlights.some((h) => h.toLowerCase().includes("price"))) {
+      type = "Invalid Price";
+    } else if (highlights.some((h) => h.toLowerCase().includes("amount"))) {
+      type = "Invalid Amount";
+    }
+
+    return {
+      type,
+      typeBadgeVariant: severity === "critical" ? "error" : "warning",
+      summary: (
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          {highlights.map((h) => {
+            const val = fieldValue(row.fields, h);
+            return (
+              <span key={h} className="inline-flex items-center gap-1">
+                <span className="text-text-muted">{h}:</span>
+                <span className="text-error font-mono font-semibold">
+                  {val}
+                </span>
+              </span>
+            );
+          })}
+        </div>
+      ),
+    };
+  }
+
+  // Fallback
+  return {
+    type: "Warning",
+    typeBadgeVariant: severity === "critical" ? "error" : "warning",
+    summary: <span className="text-xs text-text-secondary">{row.note}</span>,
+  };
+}
+
 function WarningRowItem({
   item,
-  showDateColumn,
+  index,
   showSourceImportLink,
   onViewImportBatch,
 }: {
   item: FlatRow;
-  showDateColumn: boolean;
+  index: number;
   showSourceImportLink: boolean;
   onViewImportBatch?: (batchId: string) => void;
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
-  const { row, severity } = item;
+  const { row, severity, sectionId } = item;
   const isMismatch = isReconciliationMismatch(row);
-  const dateLabel = showDateColumn ? dateFieldLabel(row.fields) : undefined;
-  const baseExtraFields = row.fields.filter(
-    (f) => !PRIMARY_LABELS.includes(f.label) && f.label !== dateLabel,
-  );
-  // Not a real field from the backend — a synthetic entry so the source import slots
-  // into the same details grid as everything else, rendered as a link instead of text.
-  const extraFields =
-    showSourceImportLink && row.source_import
-      ? [
-          ...baseExtraFields,
-          {
-            label: SOURCE_IMPORT_LABEL,
-            value: row.source_import.filename ?? "View import",
-          },
-        ]
-      : baseExtraFields;
-  const columnCount = showDateColumn ? 7 : 6;
+  const issue = parseWarningIssue(row, sectionId, severity);
+  const columnCount = 8;
 
   return (
     <>
       <Tr>
+        <Td className="w-10 sm:w-12 text-center text-xs font-mono text-text-muted tabular-nums select-none">
+          {index + 1}
+        </Td>
         <Td>
-          <Badge variant={severity === "critical" ? "error" : "warning"}>
+          <Badge variant={severity === "critical" ? "error" : "warning"} dot>
             {severity === "critical" ? "Critical" : "Warning"}
           </Badge>
         </Td>
         <Td className="whitespace-nowrap">
           {fieldValue(row.fields, "Branch")}
         </Td>
-        {showDateColumn && (
-          <Td className="whitespace-nowrap">
-            {dateLabel ? fieldValue(row.fields, dateLabel) : "—"}
-          </Td>
-        )}
         <Td className="font-mono text-xs whitespace-nowrap">
           {fieldValue(row.fields, "Stock Code")}
         </Td>
         <Td>{fieldValue(row.fields, "Description")}</Td>
-        <Td
-          className={cn(
-            "font-medium",
-            severity === "critical" ? "text-error" : "text-warning",
-          )}
-        >
-          {row.note}
+        <Td className="whitespace-nowrap text-xs font-semibold">
+          <span className={ISSUE_TEXT_COLOR[issue.typeBadgeVariant] ?? "text-text-primary"}>
+            {issue.type}
+          </span>
+        </Td>
+        <Td title={row.note}>
+          {issue.summary}
         </Td>
         <Td>
-          {extraFields.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setExpanded((v) => !v)}
-              className="inline-flex items-center gap-1 text-xs text-brand hover:text-brand-hover"
-            >
-              Details
-              {expanded ? (
-                <ChevronUpIcon className="w-3 h-3" />
-              ) : (
-                <ChevronDownIcon className="w-3 h-3" />
-              )}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="inline-flex items-center gap-1 text-xs text-brand hover:text-brand-hover font-medium"
+          >
+            Details
+            {expanded ? (
+              <ChevronUpIcon className="w-3 h-3" />
+            ) : (
+              <ChevronDownIcon className="w-3 h-3" />
+            )}
+          </button>
         </Td>
       </Tr>
       {expanded && (
         <Tr>
-          {/* White like the rows above — see the same treatment on the Business Alerts
-              page, so the app's two lists of "things that are wrong" open the same way. */}
-          <Td colSpan={columnCount} className="bg-bg-base p-0">
+          <Td colSpan={columnCount} className="p-0 border-b border-border">
             {isMismatch ? (
-              <DailyCheckDetails
+              <DailyCheckDetailsCard
                 row={row}
-                severity={severity}
                 onViewImportBatch={onViewImportBatch}
               />
             ) : (
-              <table className="w-full border-collapse text-xs">
-                <tbody>
-                  {chunk(extraFields, 4).map((rowFields, rowIndex) => (
-                    <tr key={rowIndex}>
-                      {rowFields.map((field) => {
-                        const isBad = row.highlight.includes(field.label);
-                        const isSourceImport =
-                          field.label === SOURCE_IMPORT_LABEL &&
-                          row.source_import;
-                        return (
-                          <td
-                            key={field.label}
-                            className={cn(
-                              "border border-border px-2 py-1 align-top",
-                              isBad &&
-                                (severity === "critical"
-                                  ? "bg-error-subtle"
-                                  : "bg-warning-subtle"),
-                            )}
-                          >
-                            <div className="text-[10px] uppercase tracking-wide text-text-muted">
-                              {field.label}
-                            </div>
-                            {isSourceImport ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  onViewImportBatch?.(row.source_import!.id)
-                                }
-                                className="text-brand hover:text-brand-hover underline underline-offset-2"
-                              >
-                                {field.value} →
-                              </button>
-                            ) : (
-                              <div
-                                className={cn(
-                                  "tabular-nums",
-                                  isBad
-                                    ? cn(
-                                        "font-semibold",
-                                        severity === "critical"
-                                          ? "text-error"
-                                          : "text-warning",
-                                      )
-                                    : "text-text-secondary",
-                                )}
-                              >
-                                {field.value}
-                              </div>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <GenericWarningDetailsCard
+                row={row}
+                showSourceImportLink={showSourceImportLink}
+                onViewImportBatch={onViewImportBatch}
+              />
             )}
           </Td>
         </Tr>
@@ -543,6 +676,11 @@ function buildBatchGroups(items: FlatRow[]): BatchGroup[] {
     }
   }
   return Array.from(groups.values()).sort((a, b) => {
+    // Batches with Critical warnings come first
+    const aHasCrit = a.items.some((i) => i.severity === "critical") ? 0 : 1;
+    const bHasCrit = b.items.some((i) => i.severity === "critical") ? 0 : 1;
+    if (aHasCrit !== bHasCrit) return aHasCrit - bHasCrit;
+
     if (a.key === "no-batch") return 1;
     if (b.key === "no-batch") return -1;
     return (b.sourceImport?.date ?? "").localeCompare(
@@ -559,16 +697,19 @@ function BatchGroupHeaderRow({
   columnCount,
   profile,
   disabled,
+  category,
   onImportToFix,
 }: {
   group: BatchGroup;
   columnCount: number;
   profile: Profile | null;
   disabled?: boolean;
+  category?: Category;
   onImportToFix?: (batchId: string, filename: string | null) => void;
 }): React.JSX.Element {
   const meta = group.sourceImport;
   const locked = meta ? isRemoveLocked(meta.date, profile) : false;
+  const canReimport = category === "Sale" || category === "Purchase";
 
   return (
     <tr>
@@ -588,7 +729,7 @@ function BatchGroupHeaderRow({
               </span>
             )}
           </div>
-          {meta && (
+          {meta && canReimport && (
             <Button
               variant="primary"
               size="sm"
@@ -636,37 +777,18 @@ function WarningCategoryCard({
     section.rows.map((row, i) => ({
       key: `${section.id}:${i}`,
       severity: section.severity,
+      sectionId: section.id,
       row,
     })),
   );
 
-  // Daily check rows compare two inventory snapshots rather than describing one
-  // transaction, so a per-row Date column doesn't fit them the way it does Sale/
-  // Inventory/Purchase — instead just show the most recent snapshot date next to the
-  // card title.
-  const showDateColumn = category !== "Daily check";
-  const asOfDate = showDateColumn
-    ? null
-    : items
-        .map((item) => fieldValue(item.row.fields, "Until"))
-        .filter((v) => v !== "—")
-        .sort()
-        .at(-1);
-
-  const columnCount = showDateColumn ? 7 : 6;
+  const columnCount = 8;
   const titleBar = showTitle ? (
-    <h3 className="flex items-center gap-2 text-base font-semibold text-text-primary tracking-tight">
+    <h3 className="flex items-center gap-2 text-sm font-semibold text-text-primary">
       {category}
       <Badge>{items.length}</Badge>
-      {asOfDate && (
-        <span className="text-xs font-normal text-text-muted">
-          as of {asOfDate}
-        </span>
-      )}
     </h3>
-  ) : (
-    asOfDate && <p className="text-xs text-text-muted">as of {asOfDate}</p>
-  );
+  ) : null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -674,39 +796,63 @@ function WarningCategoryCard({
       <TableContainer>
         <Thead>
           <Tr>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
+              #
+            </Th>
             <Th>Severity</Th>
             <Th>Branch</Th>
-            {showDateColumn && <Th>Date</Th>}
             <Th>Stock Code</Th>
             <Th>Description</Th>
-            <Th className="min-w-[18rem]">What to do</Th>
+            <Th>Issue</Th>
+            <Th>Discrepancy / Details</Th>
             <Th />
           </Tr>
         </Thead>
         <Tbody>
-          {buildBatchGroups(items).flatMap((group) => [
-            <BatchGroupHeaderRow
-              key={`group:${group.key}`}
-              group={group}
-              columnCount={columnCount}
-              profile={profile}
-              disabled={disabled}
-              onImportToFix={(batchId, filename) =>
-                onImportToFix?.(importType, batchId, filename)
-              }
-            />,
-            ...[...group.items]
-              .sort(bySeverity)
-              .map((item) => (
-                <WarningRowItem
-                  key={item.key}
-                  item={item}
-                  showDateColumn={showDateColumn}
-                  showSourceImportLink
-                  onViewImportBatch={onViewImportBatch}
-                />
-              )),
-          ])}
+          {category === "Sale" || category === "Purchase"
+            ? (() => {
+                let globalIdx = 0;
+                return buildBatchGroups(items).flatMap((group) => {
+                  const sortedGroupItems = [...group.items].sort(bySeverity);
+                  const header = (
+                    <BatchGroupHeaderRow
+                      key={`group:${group.key}`}
+                      group={group}
+                      columnCount={columnCount}
+                      profile={profile}
+                      disabled={disabled}
+                      category={category}
+                      onImportToFix={(batchId, filename) =>
+                        onImportToFix?.(importType, batchId, filename)
+                      }
+                    />
+                  );
+                  const rows = sortedGroupItems.map((item) => {
+                    const rowIdx = globalIdx++;
+                    return (
+                      <WarningRowItem
+                        key={item.key}
+                        index={rowIdx}
+                        item={item}
+                        showSourceImportLink
+                        onViewImportBatch={onViewImportBatch}
+                      />
+                    );
+                  });
+                  return [header, ...rows];
+                });
+              })()
+            : [...items]
+                .sort(bySeverity)
+                .map((item, idx) => (
+                  <WarningRowItem
+                    key={item.key}
+                    index={idx}
+                    item={item}
+                    showSourceImportLink
+                    onViewImportBatch={onViewImportBatch}
+                  />
+                ))}
         </Tbody>
       </TableContainer>
     </div>
@@ -751,6 +897,7 @@ function WarningsPage({
   onViewImportBatch,
   onFileReady,
 }: Props): React.JSX.Element {
+  const { aboveRef, containerStyle } = useStickyAbove();
   // Cached like the dashboard tabs — coming back to the Warning page from somewhere
   // else shows the rows it showed last time rather than a skeleton, and refetches only
   // when the window settings change, an import is confirmed or reverted, or the entry
@@ -764,26 +911,25 @@ function WarningsPage({
   );
   const sections = data?.sections ?? null;
   const [activeTab, setActiveTab] = useState<Tab>("All");
+  const [search, setSearch] = useState("");
   const [branchFilter, setBranchFilter] = useState("");
+  const [severityFilter, setSeverityFilter] = useState("");
   const {
     trigger: triggerFilePicker,
     input: filePickerInput,
     picking,
   } = useImportFilePicker(session, onFileReady);
 
-  // Rows are always fetched for every branch this account can see; the Branch filter
-  // only narrows what's displayed/counted below — it never triggers a re-fetch, and it
-  // never touches onCountChange's total (that badge stays a business-wide count
-  // regardless of which branch is selected here).
+  // Rows are always fetched for every branch this account can see; the filters
+  // narrow what's displayed/counted below.
   const displaySections = useMemo(
-    () => filterSectionsByBranch(sections, branchFilter),
-    [sections, branchFilter],
+    () => filterSections(sections, branchFilter, severityFilter, search),
+    [sections, branchFilter, severityFilter, search],
   );
   const branchFilterOptions =
     branchOptions.length > 0 ? branchOptions : distinctBranches(sections);
 
-  // The nav badge's count follows whatever the fetch produced, cached or fresh — it is
-  // a business-wide total, so it deliberately ignores the Branch filter below.
+  // The nav badge's count follows whatever the fetch produced, cached or fresh.
   useEffect(() => {
     if (sections)
       onCountChange?.(
@@ -792,9 +938,7 @@ function WarningsPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections]);
 
-  // Opens the file picker right here on the Warning page — batchId/filename tag the
-  // resulting PendingImport so confirming it also removes that batch first (see
-  // ImportReviewPage.handleConfirm).
+  // Opens the file picker right here on the Warning page.
   function handleImportToFix(
     importType: ImportType,
     batchId: string,
@@ -808,9 +952,20 @@ function WarningsPage({
     });
   }
 
-  const totalIssues =
+  const hasActiveFilters =
+    search !== "" || branchFilter !== "" || severityFilter !== "";
+
+  function clearFilters(): void {
+    setSearch("");
+    setBranchFilter("");
+    setSeverityFilter("");
+  }
+
+  const totalFilteredIssues =
     displaySections?.reduce((sum, section) => sum + section.rows.length, 0) ??
     0;
+  const totalRawIssues =
+    sections?.reduce((sum, section) => sum + section.rows.length, 0) ?? 0;
 
   function categoryCount(category: Category): number {
     return (
@@ -821,115 +976,240 @@ function WarningsPage({
   }
 
   const tabCounts: Record<Tab, number> = {
-    All: totalIssues,
-    Sale: categoryCount("Sale"),
+    All: totalFilteredIssues,
     Inventory: categoryCount("Inventory"),
+    Sale: categoryCount("Sale"),
     Purchase: categoryCount("Purchase"),
-    "Daily check": categoryCount("Daily check"),
   };
 
+  const recountRows = useMemo(() => {
+    if (!displaySections) return [];
+    const result: { branch: string; stockCode: string; description: string }[] = [];
+    const seen = new Set<string>();
+
+    for (const section of displaySections) {
+      for (const r of section.rows) {
+        const branch = fieldValue(r.fields, "Branch") || "";
+        const stockCode = fieldValue(r.fields, "Stock Code") || "";
+        const description = fieldValue(r.fields, "Description") || "";
+        if (!stockCode && !description) continue;
+        const key = `${branch}__${stockCode}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          result.push({ branch, stockCode, description });
+        }
+      }
+    }
+    return result;
+  }, [displaySections]);
+
+  function handleExportRecountCsv(): void {
+    if (recountRows.length === 0) return;
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const branchSuffix = branchFilter
+      ? `-${branchFilter.toLowerCase().replace(/\s+/g, "-")}`
+      : "";
+    downloadCsv(
+      `recount-list${branchSuffix}-${dateStr}.csv`,
+      ["Branch", "Stock Code", "Description", "Actual Count"],
+      recountRows.map((r) => [r.branch, r.stockCode, r.description, ""]),
+    );
+  }
+
+  function handleExportRecountExcel(): void {
+    if (recountRows.length === 0) return;
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const branchSuffix = branchFilter
+      ? `-${branchFilter.toLowerCase().replace(/\s+/g, "-")}`
+      : "";
+    downloadExcel(
+      `recount-list${branchSuffix}-${dateStr}.xlsx`,
+      "Recount List",
+      ["Branch", "Stock Code", "Description", "Actual Count"],
+      recountRows.map((r) => [r.branch, r.stockCode, r.description, ""]),
+    );
+  }
+
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col" style={containerStyle}>
       {filePickerInput}
-      <div className="bg-bg-subtle overflow-hidden">
+
+      {/* Pinned top toolbar matching SimpleDataTable (Sale/Purchases/Inventory) */}
+      <div
+        ref={aboveRef}
+        className="sticky top-14 lg:top-0 z-30 bg-bg-base py-2 border-b border-border space-y-3"
+      >
         <CardHeader
-          title="Warning"
-          description={`Short, actionable data problems, grouped by area — open a row's Details for the full record. The Sale "fix these numbers" check (and the missing-inventory-record check's sale side) covers the last ${saleWindowDays === 1 ? "day" : `${saleWindowDays} days`}; Purchase (and its purchase side) covers the last ${purchaseWindowDays === 1 ? "day" : `${purchaseWindowDays} days`} (business-wide — an admin can change these in Settings).`}
+          title="Warnings"
+          description="Data-quality issues, stock discrepancies, and daily recount flags."
           action={
-            <RefreshButton
-              onClick={reload}
-              refreshing={isRefreshing}
-            />
-          }
-        />
-      </div>
-
-      {sections === null && !failed && <TableSkeleton rows={4} cols={4} />}
-
-      {sections === null && failed && (
-        <EmptyState
-          icon={<WarningIcon />}
-          title="Couldn't load warnings"
-          description="Something went wrong reaching the backend."
-          action={
-            <Button variant="secondary" size="sm" onClick={reload}>
-              Try again
-            </Button>
-          }
-        />
-      )}
-
-      {sections !== null && branchFilterOptions.length > 1 && (
-        <div className="w-48">
-          <Select
-            label="Branch"
-            value={branchFilter}
-            onChange={(e) => setBranchFilter(e.target.value)}
-          >
-            <option value="">All retail branches</option>
-            {branchFilterOptions.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </Select>
-        </div>
-      )}
-
-      {sections !== null && totalIssues === 0 && (
-        <EmptyState
-          icon={<WarningIcon />}
-          title="All clear"
-          description={
-            branchFilter
-              ? `No data-quality warnings for ${branchFilter} right now.`
-              : "No data-quality warnings right now."
-          }
-        />
-      )}
-
-      {sections !== null && totalIssues > 0 && (
-        <div className="flex flex-col gap-4">
-          <WarningTabBar
-            activeTab={activeTab}
-            onSelect={setActiveTab}
-            counts={tabCounts}
-          />
-          <div className="flex flex-col gap-6">
-            {(activeTab === "All" ? ALL_TAB_ORDER : [activeTab]).map(
-              (category) => {
-                const categorySections = (displaySections ?? []).filter(
-                  (s) =>
-                    SECTION_CATEGORY[s.id] === category && s.rows.length > 0,
-                );
-                if (categorySections.length === 0) {
-                  if (activeTab === "All") return null;
-                  return (
-                    <EmptyState
-                      key={category}
-                      icon={<WarningIcon />}
-                      title="All clear"
-                      description={`No ${category.toLowerCase()} warnings right now.`}
-                    />
-                  );
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleExportRecountCsv}
+                disabled={recountRows.length === 0}
+                title={
+                  recountRows.length === 0
+                    ? "No items to recount"
+                    : `Export ${recountRows.length} recount items to CSV`
                 }
-                return (
-                  <WarningCategoryCard
-                    key={category}
-                    category={category}
-                    sections={categorySections}
-                    showTitle={activeTab === "All"}
-                    profile={profile}
-                    disabled={picking}
-                    onViewImportBatch={onViewImportBatch}
-                    onImportToFix={handleImportToFix}
-                  />
-                );
-              },
+              >
+                <DownloadIcon className="w-4 h-4" />
+                CSV
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleExportRecountExcel}
+                disabled={recountRows.length === 0}
+                title={
+                  recountRows.length === 0
+                    ? "No items to recount"
+                    : `Export ${recountRows.length} recount items to Excel`
+                }
+              >
+                <DownloadIcon className="w-4 h-4" />
+                Excel
+              </Button>
+              <RefreshButton
+                onClick={reload}
+                refreshing={isRefreshing}
+              />
+            </div>
+          }
+        />
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">
+            <div className="w-60 max-w-full">
+              <Input
+                size="sm"
+                placeholder="Search stock code, product, note…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                startIcon={<SearchIcon className="w-3.5 h-3.5" />}
+              />
+            </div>
+
+            {branchFilterOptions.length > 1 && (
+              <div className="w-40 max-w-full">
+                <Select
+                  size="sm"
+                  value={branchFilter}
+                  onChange={(e) => setBranchFilter(e.target.value)}
+                >
+                  <option value="">All branches</option>
+                  {branchFilterOptions.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
+
+            <div className="w-36 max-w-full">
+              <Select
+                size="sm"
+                value={severityFilter}
+                onChange={(e) => setSeverityFilter(e.target.value)}
+              >
+                <option value="">All severities</option>
+                <option value="critical">Critical only</option>
+                <option value="warning">Warning only</option>
+              </Select>
+            </div>
+
+            {hasActiveFilters && (
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
             )}
           </div>
         </div>
-      )}
+      </div>
+
+      <div className="pt-4 flex flex-col gap-4">
+        {sections === null && !failed && <TableSkeleton rows={4} cols={4} />}
+
+        {sections === null && failed && (
+          <EmptyState
+            icon={<WarningIcon />}
+            title="Couldn't load warnings"
+            description="Something went wrong reaching the backend."
+            action={
+              <Button variant="secondary" size="sm" onClick={reload}>
+                Try again
+              </Button>
+            }
+          />
+        )}
+
+        {sections !== null && totalRawIssues === 0 && (
+          <EmptyState
+            icon={<WarningIcon />}
+            title="All clear"
+            description="No data-quality warnings right now."
+          />
+        )}
+
+        {sections !== null && totalRawIssues > 0 && totalFilteredIssues === 0 && (
+          <EmptyState
+            icon={<WarningIcon />}
+            title="No matching warnings"
+            description="Try adjusting or clearing your filters to see warnings."
+            action={
+              <Button variant="secondary" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            }
+          />
+        )}
+
+        {sections !== null && totalFilteredIssues > 0 && (
+          <div className="flex flex-col gap-4">
+            <WarningTabBar
+              activeTab={activeTab}
+              onSelect={setActiveTab}
+              counts={tabCounts}
+            />
+            <div className="flex flex-col gap-6">
+              {(activeTab === "All" ? ALL_TAB_ORDER : [activeTab]).map(
+                (category) => {
+                  const categorySections = (displaySections ?? []).filter(
+                    (s) =>
+                      SECTION_CATEGORY[s.id] === category && s.rows.length > 0,
+                  );
+                  if (categorySections.length === 0) {
+                    if (activeTab === "All") return null;
+                    return (
+                      <EmptyState
+                        key={category}
+                        icon={<WarningIcon />}
+                        title="All clear"
+                        description={`No ${category.toLowerCase()} warnings right now.`}
+                      />
+                    );
+                  }
+                  return (
+                    <WarningCategoryCard
+                      key={category}
+                      category={category}
+                      sections={categorySections}
+                      showTitle={activeTab === "All"}
+                      profile={profile}
+                      disabled={picking}
+                      onViewImportBatch={onViewImportBatch}
+                      onImportToFix={handleImportToFix}
+                    />
+                  );
+                },
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -2,7 +2,6 @@ import { useState } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { useUrlQuery } from "@renderer/lib/queryClient";
 import { Button } from "@renderer/components/ui/Button";
-import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { Skeleton } from "@renderer/components/ui/Skeleton";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
@@ -66,27 +65,27 @@ function ItemsPerBasketHistogram({
   const total = buckets.reduce((sum, b) => sum + b.count, 0);
   if (total === 0) {
     return (
-      <p className="text-sm text-text-muted">No transactions in this period.</p>
+      <p className="text-xs text-text-muted py-4 text-center">No transactions in this period.</p>
     );
   }
   const maxCount = Math.max(...buckets.map((b) => b.count), 0);
   return (
-    <div className="flex flex-col gap-2.5">
+    <div className="flex flex-col gap-2 py-0.5">
       {buckets.map((bucket) => (
-        <div key={bucket.items} className="flex items-center gap-3">
-          <span className="w-10 shrink-0 text-sm text-text-secondary">
+        <div key={bucket.items} className="flex items-center gap-2.5">
+          <span className="w-8 shrink-0 text-xs text-text-secondary font-medium">
             {histogramLabel(bucket.items)}
           </span>
-          <div className="flex-1 h-2.5 rounded-full bg-bg-raised overflow-hidden">
+          <div className="flex-1 h-2 rounded-full bg-bg-raised overflow-hidden">
             <div
-              className="h-full rounded-full bg-brand"
+              className="h-full rounded-full bg-brand transition-all duration-500"
               style={{
                 width:
-                  maxCount > 0 ? `${(bucket.count / maxCount) * 100}%` : "0%",
+                  maxCount > 0 ? `${Math.max((bucket.count / maxCount) * 100, 1.5)}%` : "0%",
               }}
             />
           </div>
-          <span className="w-28 shrink-0 text-right text-sm tabular-nums text-text-primary">
+          <span className="w-24 shrink-0 text-right text-xs tabular-nums text-text-primary font-medium">
             {bucket.count.toLocaleString()} (
             {((bucket.count / total) * 100).toFixed(0)}%)
           </span>
@@ -144,14 +143,14 @@ export function CustomerTab({
       );
     }
     return (
-      <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Skeleton className="h-18" />
           <Skeleton className="h-18" />
           <Skeleton className="h-18" />
         </div>
-        <Skeleton className="h-48" />
-        <Skeleton className="h-48" />
+        <Skeleton className="h-44" />
+        <Skeleton className="h-44" />
       </div>
     );
   }
@@ -159,48 +158,44 @@ export function CustomerTab({
   const busiest = data.busiest_hour;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       <RefreshingHint show={isRefreshing} />
-      <p className="text-sm text-text-muted">
-        Shopping patterns, not customer identity — the retail POS data has no
-        customer identifier, so this looks at how people shop (transactions and
-        visits) instead of who they are.
+      <p className="text-xs text-text-muted">
+        Shopping patterns, not customer identity — POS data tracks transactions and visits rather than individuals.
       </p>
 
-      <CollapsibleKpiSummary storageKey="dashboard_customer" title="Customer Behaviour KPIs">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <StatTile
-            label="Average Items per Transaction"
-            value={data.avg_items_per_basket.value.toFixed(1)}
-            deltaPct={data.avg_items_per_basket.delta_pct}
-            previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
-          />
-          <StatTile
-            label="Single-Item Transaction Share"
-            value={formatPercent(data.single_item_basket_share_pct.value)}
-            deltaPct={data.single_item_basket_share_pct.delta_pct}
-            previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
-          />
-          <StatTile
-            label="Busiest Hour"
-            value={
-              busiest
-                ? `${WEEKDAY_LABELS[busiest.weekday]} ${busiest.hour_band}`
-                : "—"
-            }
-            sub={
-              busiest
-                ? `${busiest.transaction_count.toLocaleString()} transactions`
-                : "No transactions in this period"
-            }
-          />
-        </div>
-      </CollapsibleKpiSummary>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
+        <StatTile
+          label="Average Items per Transaction"
+          value={data.avg_items_per_basket.value.toFixed(1)}
+          deltaPct={data.avg_items_per_basket.delta_pct}
+          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+        />
+        <StatTile
+          label="Single-Item Transaction Share"
+          value={formatPercent(data.single_item_basket_share_pct.value)}
+          deltaPct={data.single_item_basket_share_pct.delta_pct}
+          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+        />
+        <StatTile
+          label="Busiest Hour"
+          value={
+            busiest
+              ? `${WEEKDAY_LABELS[busiest.weekday]} ${busiest.hour_band}`
+              : "—"
+          }
+          sub={
+            busiest
+              ? `${busiest.transaction_count.toLocaleString()} transactions`
+              : "No transactions in this period"
+          }
+        />
+      </div>
 
-      <Card>
+      <Card className="p-3.5 sm:p-4">
         <CardHeader
           title="Transaction trend"
-          description="Number of transactions per day — the day-by-day footfall trend behind the Busy Hours pattern below."
+          description="Number of transactions per day over the selected period."
           action={<ChartViewToggle view={trendView} onChange={setTrendView} />}
         />
         <TrendChart
@@ -212,10 +207,10 @@ export function CustomerTab({
         />
       </Card>
 
-      <Card>
+      <Card className="p-3.5 sm:p-4">
         <CardHeader
           title="Busy hours by day & hour"
-          description="Transaction count by weekday and time of day — a more direct 'how busy was the store' signal than revenue concentration."
+          description="Transaction count by weekday and time of day — store footfall intensity."
         />
         <WeekdayHourHeatmap
           cells={data.footfall_heatmap}
@@ -224,15 +219,15 @@ export function CustomerTab({
         />
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-        <Card>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+        <Card className="p-3.5 sm:p-4">
           <CardHeader
             title="Items per transaction"
-            description="Distribution of line-item counts behind the average above."
+            description="Distribution of line-item counts per basket."
           />
           <ItemsPerBasketHistogram buckets={data.items_per_basket_histogram} />
         </Card>
-        <Card>
+        <Card className="p-3.5 sm:p-4">
           <CardHeader
             title="Sale data quality"
             description="Bad values on sale lines in the selected period."

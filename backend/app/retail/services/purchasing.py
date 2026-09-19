@@ -28,17 +28,23 @@ from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.models.sale import Sale, SaleLine
 from app.retail.models.stock_level import StockLevel
 from app.retail.services.stock import latest_stock_query
+from app.services.settings import get_purchasing_buffer_months
 
 
 def get_purchasing_recommendations(
     db: Session,
     branch_id: str | None,
-    target_months: int = 3,
+    target_months: float | None = None,
+    buffer_months: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Computes full purchasing recommendations for a specific branch (or all retail branches if branch_id is None).
 
-    Returns summary metrics and sorted product recommendation records.
+    Uses per-ABC target buffer months configured in settings (A: core 3mo, B: mid 2.5mo, C: long-tail 1mo),
+    or explicit target_months override. Returns summary metrics and sorted product recommendation records.
     """
+    if buffer_months is None:
+        buffer_months = get_purchasing_buffer_months(db)
+
     # 1. Fetch latest stock snapshots for the branch
     stock_query = latest_stock_query(db)
     if branch_id is not None:
@@ -54,6 +60,11 @@ def get_purchasing_recommendations(
                 "hold_monitor_count": 0,
                 "review_count": 0,
                 "total_suggested_units": 0,
+                "a_count": 0,
+                "b_count": 0,
+                "c_count": 0,
+                "n_count": 0,
+                "buffer_months": buffer_months,
             },
             "rows": [],
         }
@@ -224,6 +235,10 @@ def get_purchasing_recommendations(
     hold_count = 0
     review_count = 0
     total_suggested_units = 0
+    a_count = 0
+    b_count = 0
+    c_count = 0
+    n_count = 0
 
     priority_sort_order = {
         "Urgent Reorder": 1,
@@ -253,6 +268,28 @@ def get_purchasing_recommendations(
             abc_class = "N"
             avg_monthly_sales = 0.0
 
+        if abc_class == "A":
+            a_count += 1
+        elif abc_class == "B":
+            b_count += 1
+        elif abc_class == "C":
+            c_count += 1
+        elif abc_class == "N":
+            n_count += 1
+
+        # Determine target buffer months for this specific ABC category
+        if abc_class == "A":
+            product_buffer = buffer_months.get("a", 3.0)
+        elif abc_class == "B":
+            product_buffer = buffer_months.get("b", 2.5)
+        elif abc_class == "C":
+            product_buffer = buffer_months.get("c", 1.0)
+        else:
+            product_buffer = 0.0
+
+        if target_months is not None:
+            product_buffer = float(target_months)
+
         # Stock coverage in months
         if avg_monthly_sales > 0 and on_hand_qty > 0:
             stock_coverage_months = round(on_hand_qty / avg_monthly_sales, 2)
@@ -264,16 +301,16 @@ def get_purchasing_recommendations(
             stock_status = "No Sales"
         elif on_hand_qty <= 0:
             stock_status = "Out of Stock"
-        elif stock_coverage_months < 1.0:
+        elif product_buffer > 0 and stock_coverage_months < product_buffer * 0.5:
             stock_status = "Low Coverage"
-        elif stock_coverage_months <= 3.0:
+        elif product_buffer > 0 and stock_coverage_months <= product_buffer:
             stock_status = "Adequate"
         else:
             stock_status = "High Coverage"
 
-        # Suggested reorder quantity
-        if abc_class != "N":
-            target_stock = avg_monthly_sales * target_months
+        # Suggested reorder quantity based on target buffer stock
+        if abc_class != "N" and product_buffer > 0:
+            target_stock = avg_monthly_sales * product_buffer
             reorder_needed = target_stock - on_hand_qty
             suggested_reorder_qty = max(0, math.ceil(reorder_needed))
         else:
@@ -317,6 +354,7 @@ def get_purchasing_recommendations(
                 "TotalSalesValue": round(total_sales_value, 2),
                 "AvgMonthlySales": avg_monthly_sales,
                 "OnHandQty": round(on_hand_qty, 1),
+                "TargetBufferMonths": product_buffer,
                 "StockCoverageMonths": stock_coverage_months,
                 "StockStatus": stock_status,
                 "SuggestedReorderQty": suggested_reorder_qty,
@@ -343,6 +381,11 @@ def get_purchasing_recommendations(
             "hold_monitor_count": hold_count,
             "review_count": review_count,
             "total_suggested_units": total_suggested_units,
+            "a_count": a_count,
+            "b_count": b_count,
+            "c_count": c_count,
+            "n_count": n_count,
+            "buffer_months": buffer_months,
         },
         "rows": result_rows,
     }

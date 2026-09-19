@@ -182,7 +182,7 @@ export function InventoryPage({
     <div className="flex flex-col gap-2.5">
       <CardHeader
         title="Inventory"
-        description="Current stock, and the products worth a closer look — running low or not moving."
+        description="Current stock levels and inventory health overview."
         className="mb-0"
       />
       <InventoryTabBar activeTab={tab} onSelect={setTab} />
@@ -192,7 +192,7 @@ export function InventoryPage({
           session={session}
           endpoint="/api/inventory"
           title="Inventory"
-          description="Current stock on hand, as of each branch's most recent inventory count."
+          description="Current stock on hand across branches."
           icon={<InventoryIcon />}
           columns={INVENTORY_COLUMNS}
           filters={inventoryFilters}
@@ -208,7 +208,7 @@ export function InventoryPage({
           session={session}
           endpoint="/api/inventory/low-stock"
           title="Low Stock"
-          description="Every product estimated to run out soon, based on the last 30 days of sales."
+          description="Products estimated to run out soon based on sales velocity."
           icon={<InventoryIcon />}
           columns={LOW_STOCK_COLUMNS}
           filters={lowStockFilters}
@@ -225,7 +225,7 @@ export function InventoryPage({
           session={session}
           endpoint="/api/inventory/dead-stock"
           title="Dead Stock"
-          description="Everything on hand that hasn't sold in 90 days."
+          description="Products with no sales in the last 90 days."
           icon={<InventoryIcon />}
           columns={DEAD_STOCK_COLUMNS}
           filters={deadStockFilters}

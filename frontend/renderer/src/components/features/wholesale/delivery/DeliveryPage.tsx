@@ -140,10 +140,12 @@ export default function DeliveryPage({
     finalDestination: string,
     carrierName: string,
     splitLegOrder: number | undefined,
+    destination?: string,
   ): Promise<void> {
     const { newShipment } = await apiSplitShipment(session, shipmentId, {
       packages,
       quantity_pairs: quantityPairs,
+      destination,
       final_destination: finalDestination,
       carrier_name: carrierName,
       split_leg_order: splitLegOrder,
@@ -209,7 +211,7 @@ export default function DeliveryPage({
         onSave={persistShipment}
         onDelete={() => deleteShipment(selected.shipment_id)}
         onWriteOff={writeOffShipment}
-        onSplit={(packages, quantity, finalDestination, carrierName, splitLegOrder) =>
+        onSplit={(packages, quantity, finalDestination, carrierName, splitLegOrder, destination?: string) =>
           splitShipment(
             selected.shipment_id,
             packages,
@@ -217,6 +219,7 @@ export default function DeliveryPage({
             finalDestination,
             carrierName,
             splitLegOrder,
+            destination,
           )
         }
         writeOffs={writeOffs}

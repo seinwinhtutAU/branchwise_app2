@@ -26,7 +26,7 @@ DEFAULT_CURRENCY = "MMK"
 # today_exchange_rates default in app/models/app_settings.py) when a new supplier
 # currency comes up — anything else is rejected rather than silently accepted with a
 # rate of who-knows-what.
-SUPPORTED_CURRENCIES = {"MMK", "THB", "USD"}
+SUPPORTED_CURRENCIES = {"MMK", "THB"}
 
 
 def _to_decimal(value) -> Decimal:

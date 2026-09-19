@@ -160,7 +160,7 @@ export const voucherDraftLineSchema = z
       set: z.number().int().positive(),
       dozen: z.number().int().positive(),
     }),
-    currency_code: z.enum(["MMK", "THB", "USD"]),
+    currency_code: z.enum(["MMK", "THB"]),
     buying_price: z
       .string()
       .regex(/^\d*$/, "Buying price can only contain numbers."),

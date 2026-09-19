@@ -195,6 +195,7 @@ def split_shipment_endpoint(
         payload.final_destination,
         payload.carrier_name,
         payload.split_leg_order,
+        destination=payload.destination,
         operator_id=user.id,
     )
     original_overrides = final_received_by_shipment(db, [original.id])

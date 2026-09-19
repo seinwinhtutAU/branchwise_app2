@@ -35,6 +35,9 @@ class ShipmentSplitIn(BaseModel):
     # front. Left unset, the new shipment starts at 0 and the original's own total is
     # untouched — either side can be corrected once a receiving settles the real count.
     quantity_pairs: int | None = Field(default=None, ge=0)
+    # Optional transit destination / stop name (e.g. Mandalay). When provided, an
+    # intermediate leg will be added to the new shipment on its way to final_destination.
+    destination: str | None = Field(default=None, max_length=255)
     final_destination: str = Field(min_length=1, max_length=255)
     # Defaults to the original shipment's own carrier when left blank — the split-off
     # portion often travels with a different driver/agent, but doesn't have to.

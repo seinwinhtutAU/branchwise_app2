@@ -3,6 +3,7 @@ import { cn } from "@renderer/lib/utils";
 import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
+import { TabBar } from "@renderer/components/ui/Tabs";
 import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { ColumnHeaderFilter } from "@renderer/components/ui/ColumnHeaderFilter";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
@@ -56,6 +57,26 @@ import {
 } from "./types";
 import { PaymentBadge, RowMenu, StatusBadge } from "./OrderBadges";
 
+type QuickView = "all" | "ready_to_deliver" | "unpaid";
+
+const ORDER_TABS: { id: QuickView; label: string; description: string }[] = [
+  {
+    id: "all",
+    label: "All Orders",
+    description: "All customer sales and booking orders",
+  },
+  {
+    id: "ready_to_deliver",
+    label: "Ready to Deliver",
+    description: "Orders with allocated inventory ready for delivery",
+  },
+  {
+    id: "unpaid",
+    label: "Unpaid Orders",
+    description: "Orders with pending customer payments",
+  },
+];
+
 export function OrderList({
   orders,
   inventoryLines,
@@ -80,7 +101,6 @@ export function OrderList({
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [pay, setPay] = useState<PayFilter>("all");
-  type QuickView = "all" | "ready_to_deliver" | "unpaid";
   const [quickView, setQuickView] = useState<QuickView>("all");
   const [page, setPage] = useState(1);
 
@@ -172,6 +192,9 @@ export function OrderList({
     setPage(1);
   }
 
+  const activeOrderTab =
+    ORDER_TABS.find((t) => t.id === quickView) ?? ORDER_TABS[0];
+
   return (
     <div className="flex flex-col gap-4">
       <CollapsibleKpiSummary storageKey="wholesale_orders" title="Orders Summary">
@@ -202,82 +225,31 @@ export function OrderList({
         </div>
       </CollapsibleKpiSummary>
 
-      <Panel className="shadow-sm">
+      <TabBar<QuickView>
+        tabs={ORDER_TABS.map((tab) => ({
+          id: tab.id,
+          label: tab.label,
+          count:
+            tab.id === "all"
+              ? countAll
+              : tab.id === "ready_to_deliver"
+                ? countReadyToDeliver
+                : countUnpaid,
+        }))}
+        activeTab={quickView}
+        onSelect={handleQuickFilter}
+      />
+
+      <Panel className="shadow-xs">
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-base">
           <div className="flex items-center gap-2 flex-wrap min-w-0">
             <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
-              Orders
+              {activeOrderTab.label}
             </h2>
-            <div className="flex items-center gap-1.5 flex-wrap select-none">
-              <button
-                type="button"
-                onClick={() => handleQuickFilter("all")}
-                className={cn(
-                  "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium transition-all duration-150 border cursor-pointer",
-                  quickView === "all" && status === "all" && pay === "all"
-                    ? "bg-brand text-white border-brand shadow-xs"
-                    : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
-                )}
-              >
-                <span>All</span>
-                <span
-                  className={cn(
-                    "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
-                    quickView === "all" && status === "all" && pay === "all"
-                      ? "bg-white/20 text-white"
-                      : "bg-bg-raised text-text-muted",
-                  )}
-                >
-                  {countAll}
-                </span>
-              </button>
+            <span className="text-xs text-text-muted hidden sm:inline">
+              {activeOrderTab.description}
+            </span>
 
-              <button
-                type="button"
-                onClick={() => handleQuickFilter("ready_to_deliver")}
-                className={cn(
-                  "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium transition-all duration-150 border cursor-pointer",
-                  quickView === "ready_to_deliver"
-                    ? "bg-brand text-white border-brand shadow-xs"
-                    : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
-                )}
-              >
-                <span>Ready to Deliver</span>
-                <span
-                  className={cn(
-                    "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
-                    quickView === "ready_to_deliver"
-                      ? "bg-white/20 text-white"
-                      : "bg-brand-subtle text-brand font-bold",
-                  )}
-                >
-                  {countReadyToDeliver}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickFilter("unpaid")}
-                className={cn(
-                  "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium transition-all duration-150 border cursor-pointer",
-                  quickView === "unpaid"
-                    ? "bg-error text-white border-error shadow-xs"
-                    : "bg-bg-subtle text-text-secondary border-border hover:bg-bg-raised hover:text-text-primary",
-                )}
-              >
-                <span>Unpaid</span>
-                <span
-                  className={cn(
-                    "px-1.5 py-0.2 rounded-full text-[10px] font-semibold tabular-nums",
-                    quickView === "unpaid"
-                      ? "bg-white/20 text-white"
-                      : "bg-error-subtle text-error font-bold",
-                  )}
-                >
-                  {countUnpaid}
-                </span>
-              </button>
-            </div>
             {isFiltered && (
               <Button
                 variant="ghost"

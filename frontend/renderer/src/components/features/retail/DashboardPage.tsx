@@ -4,7 +4,6 @@ import type { Session } from "@renderer/lib/auth";
 import type { BranchOption } from "@renderer/lib/useBranches";
 import { refreshEverything } from "@renderer/lib/queryClient";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
-import { CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Select } from "@renderer/components/ui/Select";
 import { TabBar } from "@renderer/components/ui/Tabs";
@@ -50,10 +49,10 @@ interface Props {
 
 type Tab = "summary" | "overview" | "revenue" | "cost" | "inventory" | "customer";
 
-// Summary gives the executive dashboard snapshot; Overview gives the branch health scores.
+// Summary gives the executive dashboard snapshot; Health gives the branch health scores.
 const TABS: { id: Tab; label: string }[] = [
   { id: "summary", label: "Summary" },
-  { id: "overview", label: "Overview" },
+  { id: "overview", label: "Health" },
   { id: "revenue", label: "Revenue" },
   { id: "cost", label: "Cost" },
   { id: "inventory", label: "Inventory" },
@@ -72,6 +71,7 @@ function DashboardTabBar({
       tabs={TABS}
       activeTab={activeTab}
       onSelect={onSelect}
+      className="border-b-0 w-auto"
     />
   );
 }
@@ -120,27 +120,24 @@ export function DashboardPage({
   const isFetching = useIsFetching() > 0;
 
   return (
-    <div className="flex flex-col gap-4">
-      <CardHeader
-        title="Dashboard"
-        description="Branch health across every retail branch, and revenue, cost, inventory and customer detail one branch at a time."
-        action={
-          <RefreshButton
-            onClick={refreshEverything}
-            refreshing={isFetching}
-          />
-        }
-      />
+    <div className="flex flex-col gap-3">
+      {/* Streamlined Dashboard Navigation & Filters Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-2 border-b border-border">
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-bold tracking-tight text-text-primary shrink-0 hidden sm:block">
+            Dashboard
+          </h1>
+          <DashboardTabBar activeTab={activeTab} onSelect={setActiveTab} />
+        </div>
 
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <DashboardTabBar activeTab={activeTab} onSelect={setActiveTab} />
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           {isAdmin && branchOptions.length > 0 && activeTab !== "overview" && (
-            <div className="w-48">
+            <div className="w-36">
               <Select
-                label="Branch"
+                size="sm"
                 value={branchId}
                 onChange={(e) => setBranchId(e.target.value)}
+                aria-label="Branch"
               >
                 {branchOptions.map((branch) => (
                   <option key={branch.id} value={branch.id}>
@@ -151,6 +148,10 @@ export function DashboardPage({
             </div>
           )}
           {activeTab !== "inventory" && <PeriodControls range={range} />}
+          <RefreshButton
+            onClick={refreshEverything}
+            refreshing={isFetching}
+          />
         </div>
       </div>
 

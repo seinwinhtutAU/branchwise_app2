@@ -1,14 +1,17 @@
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useSearchShortcut } from "@renderer/lib/useSearchShortcut";
 import { useQuery } from "@tanstack/react-query";
 import type { Session } from "@renderer/lib/auth";
 import { useToast } from "@renderer/lib/useToast";
 import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
+import { cn } from "@renderer/lib/utils";
 import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
-import { CardHeader } from "@renderer/components/ui/Card";
+import { ColumnHeaderFilter } from "@renderer/components/ui/ColumnHeaderFilter";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Input } from "@renderer/components/ui/Input";
+import { Pagination } from "@renderer/components/ui/Pagination";
+import { TabBar } from "@renderer/components/ui/Tabs";
 import { Select } from "@renderer/components/ui/Select";
 import { Spinner } from "@renderer/components/ui/Spinner";
 import {
@@ -20,11 +23,12 @@ import {
   Tr,
 } from "@renderer/components/ui/Table";
 import {
+  CheckIcon,
   CloseIcon,
-  PlusIcon,
+  MasterDataIcon,
   PencilIcon,
+  PlusIcon,
   SearchIcon,
-  WarehouseIcon,
 } from "@renderer/components/ui/icons";
 import {
   createWholesaleCustomer,
@@ -48,9 +52,12 @@ import {
   type WholesaleProductWire,
 } from "../shared/api";
 import { GROUP_LABELS, PRODUCT_GROUPS, type ProductGroup } from "../shared/products";
-import { CopyButton, DotPill } from "../shared/ui";
-// Quantities are entered in sets everywhere, so a product no longer carries a unit of
-// its own — only how many pairs make up one of its sets or dozens.
+import {
+  CopyButton,
+  DotPill,
+  PAGE_SIZE,
+  Panel,
+} from "../shared/ui";
 import { type Unit } from "../shared/units";
 
 type MasterDataTab =
@@ -69,25 +76,13 @@ interface TabDefinition {
 }
 
 const TABS: TabDefinition[] = [
-  {
-    id: "products",
-    label: "Products",
-    description: "Stock codes and defaults",
-  },
+  { id: "products", label: "Products", description: "Stock codes and defaults" },
   { id: "suppliers", label: "Suppliers", description: "Factories and vendors" },
   { id: "customers", label: "Customers", description: "Customer contacts" },
-  {
-    id: "cargo-companies",
-    label: "Cargo companies",
-    description: "Transport providers",
-  },
+  { id: "cargo-companies", label: "Cargo companies", description: "Transport providers" },
   { id: "carriers", label: "Carriers", description: "People handling cargo" },
   { id: "destinations", label: "Destinations", description: "Shipment stops" },
-  {
-    id: "receiving-gates",
-    label: "Receiving gates",
-    description: "Warehouse arrival points",
-  },
+  { id: "receiving-gates", label: "Receiving gates", description: "Warehouse arrival points" },
 ];
 
 const ENTITY_ID_KEYS: Record<MasterDataTab, string> = {
@@ -174,43 +169,24 @@ export default function MasterDataPage({
   const showToast = useToast();
   const [tab, setTab] = useState<MasterDataTab>("products");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const searchInputRef = useSearchShortcut();
-  const [showInactive, setShowInactive] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [groupFilter, setGroupFilter] = useState<"all" | ProductGroup>("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [productForm, setProductForm] =
-    useState<ProductForm>(EMPTY_PRODUCT_FORM);
+  const [productForm, setProductForm] = useState<ProductForm>(EMPTY_PRODUCT_FORM);
   const [namedForm, setNamedForm] = useState<NamedForm>(EMPTY_NAMED_FORM);
   const [saving, setSaving] = useState(false);
 
-  const products = useMasterDataQuery<WholesaleProductWire>(
-    session,
-    "products",
-  );
-  const suppliers = useMasterDataQuery<WholesaleNamedEntityWire>(
-    session,
-    "suppliers",
-  );
-  const customers = useMasterDataQuery<WholesaleCustomerWire>(
-    session,
-    "customers",
-  );
-  const cargoCompanies = useMasterDataQuery<WholesaleNamedEntityWire>(
-    session,
-    "cargo-companies",
-  );
-  const carriers = useMasterDataQuery<WholesaleNamedEntityWire>(
-    session,
-    "carriers",
-  );
-  const destinations = useMasterDataQuery<WholesaleNamedEntityWire>(
-    session,
-    "destinations",
-  );
-  const receivingGates = useMasterDataQuery<WholesaleNamedEntityWire>(
-    session,
-    "receiving-gates",
-  );
+  const products = useMasterDataQuery<WholesaleProductWire>(session, "products");
+  const suppliers = useMasterDataQuery<WholesaleNamedEntityWire>(session, "suppliers");
+  const customers = useMasterDataQuery<WholesaleCustomerWire>(session, "customers");
+  const cargoCompanies = useMasterDataQuery<WholesaleNamedEntityWire>(session, "cargo-companies");
+  const carriers = useMasterDataQuery<WholesaleNamedEntityWire>(session, "carriers");
+  const destinations = useMasterDataQuery<WholesaleNamedEntityWire>(session, "destinations");
+  const receivingGates = useMasterDataQuery<WholesaleNamedEntityWire>(session, "receiving-gates");
+
   const query = {
     products,
     suppliers,
@@ -220,6 +196,17 @@ export default function MasterDataPage({
     destinations,
     "receiving-gates": receivingGates,
   }[tab];
+
+  const counts: Record<MasterDataTab, number> = {
+    products: products.data?.length ?? 0,
+    suppliers: suppliers.data?.length ?? 0,
+    customers: customers.data?.length ?? 0,
+    "cargo-companies": cargoCompanies.data?.length ?? 0,
+    carriers: carriers.data?.length ?? 0,
+    destinations: destinations.data?.length ?? 0,
+    "receiving-gates": receivingGates.data?.length ?? 0,
+  };
+
   const rows = useMemo(() => {
     const allRows = query.data ?? [];
     const normalized =
@@ -232,12 +219,32 @@ export default function MasterDataPage({
             namedRow(row, tab),
           );
     const needle = search.trim().toLowerCase();
-    return normalized.filter(
-      (row) =>
-        (showInactive || row.active) &&
-        (!needle || JSON.stringify(row).toLowerCase().includes(needle)),
-    );
-  }, [query.data, search, showInactive, tab]);
+    return normalized.filter((row) => {
+      const matchesSearch =
+        !needle || JSON.stringify(row).toLowerCase().includes(needle);
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "active" ? row.active : !row.active);
+      const matchesGroup =
+        tab !== "products" ||
+        groupFilter === "all" ||
+        ("product_group" in row && row.product_group === groupFilter);
+
+      return matchesSearch && matchesStatus && matchesGroup;
+    });
+  }, [query.data, search, statusFilter, groupFilter, tab]);
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const visibleRows = rows.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE,
+  );
+
+  const isFiltered =
+    search.trim() !== "" ||
+    statusFilter !== "all" ||
+    (tab === "products" && groupFilter !== "all");
 
   const isLoading = query.isLoading && !query.data;
   const isError = query.isError;
@@ -329,6 +336,7 @@ export default function MasterDataPage({
       );
       resetEditor();
       setEditorOpen(false);
+      void query.refetch();
     } catch (error) {
       showToast(
         "error",
@@ -358,12 +366,28 @@ export default function MasterDataPage({
         "success",
         row.active ? "Entry deactivated." : "Entry activated.",
       );
+      void query.refetch();
     } catch (error) {
       showToast(
         "error",
         error instanceof Error ? error.message : "Could not change this entry.",
       );
     }
+  }
+
+  function resetFilters(): void {
+    setSearch("");
+    setStatusFilter("all");
+    setGroupFilter("all");
+    setPage(1);
+  }
+
+  function handleTabChange(nextTab: MasterDataTab): void {
+    setTab(nextTab);
+    resetEditor();
+    setEditorOpen(false);
+    setPage(1);
+    setGroupFilter("all");
   }
 
   const activeTab = TABS.find((item) => item.id === tab) ?? TABS[0];
@@ -373,133 +397,264 @@ export default function MasterDataPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <CardHeader
-        title="Master data"
-        description="Maintain the shared product, partner and shipping lists used across wholesale workflows."
-      />
-      <div
-        role="tablist"
-        aria-label="Master data sections"
-        className="flex items-center gap-1 overflow-x-auto border-b border-border"
-      >
-        {TABS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === item.id}
-            onClick={() => {
-              setTab(item.id);
-              resetEditor();
-              setEditorOpen(false);
-            }}
-            className={`-mb-px min-w-max border-b-2 px-4 py-3 text-sm font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${tab === item.id ? "border-brand text-brand" : "border-transparent text-text-muted hover:text-text-primary"}`}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
 
-      <div className="min-w-0">
-        <section className="min-w-0 rounded-xl border border-border bg-bg-base shadow-sm">
-          <div className="flex items-center justify-between gap-3 border-b border-border p-4">
-            <div>
-              <h2 className="text-base font-semibold text-text-primary">
-                {activeTab.label}
-              </h2>
-              <p className="mt-0.5 text-xs text-text-muted">
-                {activeTab.description}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <RefreshButton
-                onClick={() => void query.refetch()}
-                refreshing={query.isFetching}
-              />
+      <TabBar<MasterDataTab>
+        tabs={TABS.map((item) => ({
+          id: item.id,
+          label: item.label,
+          count: counts[item.id],
+        }))}
+        activeTab={tab}
+        onSelect={handleTabChange}
+      />
+
+      <Panel className="shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-base">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
+              {activeTab.label}
+            </h2>
+            <span className="text-xs text-text-muted hidden sm:inline">
+              {activeTab.description}
+            </span>
+
+            {isFiltered && (
               <Button
+                variant="ghost"
                 size="sm"
-                onClick={openCreate}
-                aria-label={addLabel}
-                title={addLabel}
+                onClick={resetFilters}
+                className="text-xs h-6 px-1.5 text-text-muted hover:text-error"
               >
-                <PlusIcon className="w-4 h-4" />
-                {addLabel}
+                <CloseIcon className="w-3.5 h-3.5" />
+                Clear
               </Button>
-            </div>
+            )}
           </div>
-          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border bg-bg-subtle p-4">
-            <Input
-              ref={searchInputRef}
-              label={`Search ${activeTab.label.toLowerCase()}`}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search by name or code"
-              startIcon={<SearchIcon className="w-4 h-4" />}
-            />
-            <label className="flex h-10 items-center gap-2 text-sm text-text-secondary">
-              <input
-                type="checkbox"
-                checked={showInactive}
-                onChange={(event) => setShowInactive(event.target.checked)}
-              />{" "}
-              Show inactive
-            </label>
-          </div>
-          {isError ? (
-            <EmptyState
-              icon={<WarehouseIcon />}
-              title="Could not load master data"
-              description="Check the connection and try again."
-            />
-          ) : isLoading ? (
-            <div className="flex justify-center py-16">
-              <Spinner className="w-6 h-6 text-text-muted" />
+
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-48 sm:w-64">
+              <Input
+                ref={searchInputRef}
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+                placeholder={`Search ${activeTab.label.toLowerCase()}… (/)`}
+                startIcon={<SearchIcon className="w-3.5 h-3.5" />}
+                aria-label={`Search ${activeTab.label.toLowerCase()}`}
+                className="h-8 text-xs"
+              />
             </div>
-          ) : rows.length === 0 ? (
-            <EmptyState
-              icon={<WarehouseIcon />}
-              title={`No ${activeTab.label.toLowerCase()} found`}
-              description={
-                search
-                  ? "Try a different search."
-                  : "Add the first entry using the button."
-              }
+            <RefreshButton
+              onClick={() => void query.refetch()}
+              refreshing={query.isFetching}
             />
-          ) : (
+            <Button
+              size="sm"
+              onClick={openCreate}
+              aria-label={addLabel}
+              title={addLabel}
+              className="h-8 text-xs"
+            >
+              <PlusIcon className="w-3.5 h-3.5" />
+              {addLabel}
+            </Button>
+          </div>
+        </div>
+
+        {isError ? (
+          <EmptyState
+            icon={<MasterDataIcon />}
+            title="Could not load master data"
+            description="Check the connection and try again."
+            action={
+              <Button onClick={() => void query.refetch()} loading={query.isFetching}>
+                Try again
+              </Button>
+            }
+          />
+        ) : isLoading ? (
+          <div className="flex justify-center py-16">
+            <Spinner className="w-6 h-6 text-text-muted" />
+          </div>
+        ) : rows.length === 0 ? (
+          <EmptyState
+            icon={<MasterDataIcon />}
+            title={isFiltered ? `No ${activeTab.label.toLowerCase()} match` : `No ${activeTab.label.toLowerCase()} yet`}
+            description={
+              isFiltered
+                ? "Try adjusting your search or filter."
+                : `Add the first entry using the ${addLabel} button.`
+            }
+            action={
+              isFiltered ? (
+                <Button variant="secondary" onClick={resetFilters}>
+                  Clear filters
+                </Button>
+              ) : (
+                <Button onClick={openCreate}>
+                  <PlusIcon className="w-4 h-4" />
+                  {addLabel}
+                </Button>
+              )
+            }
+          />
+        ) : (
+          <>
             <TableContainer className="rounded-none border-0">
               <Thead>
                 <Tr>
                   <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
-                  <Th>{tab === "products" ? "Stock code" : "Name"}</Th>
+                  <Th className="whitespace-nowrap">{tab === "products" ? "Stock code" : "Name"}</Th>
                   {tab === "products" && (
                     <>
-                      <Th>Description</Th>
-                      <Th>Group</Th>
+                      <Th className="whitespace-nowrap">Description</Th>
+                      <Th className="whitespace-nowrap">
+                        <ColumnHeaderFilter
+                          label="Group"
+                          isActive={groupFilter !== "all"}
+                        >
+                          {(close) => (
+                            <div className="flex flex-col gap-1.5">
+                              <div className="font-semibold text-text-primary text-[11px] uppercase tracking-wider pb-1 border-b border-border">
+                                Filter Group
+                              </div>
+                              <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setGroupFilter("all");
+                                    setPage(1);
+                                    close();
+                                  }}
+                                  className={cn(
+                                    "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                    groupFilter === "all"
+                                      ? "bg-brand/10 font-bold text-brand"
+                                      : "hover:bg-bg-subtle text-text-secondary",
+                                  )}
+                                >
+                                  <span>All groups</span>
+                                  {groupFilter === "all" && <CheckIcon className="w-3.5 h-3.5" />}
+                                </button>
+                                {PRODUCT_GROUPS.map((group) => (
+                                  <button
+                                    key={group}
+                                    type="button"
+                                    onClick={() => {
+                                      setGroupFilter(group);
+                                      setPage(1);
+                                      close();
+                                    }}
+                                    className={cn(
+                                      "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                      groupFilter === group
+                                        ? "bg-brand/10 font-bold text-brand"
+                                        : "hover:bg-bg-subtle text-text-secondary",
+                                    )}
+                                  >
+                                    <span>{GROUP_LABELS[group]}</span>
+                                    {groupFilter === group && <CheckIcon className="w-3.5 h-3.5" />}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </ColumnHeaderFilter>
+                      </Th>
                     </>
                   )}
                   {hasDetails && tab !== "products" && (
                     <>
-                      <Th>Phone</Th>
-                      <Th>Address</Th>
+                      <Th className="whitespace-nowrap">Phone</Th>
+                      <Th className="whitespace-nowrap">Address</Th>
                     </>
                   )}
-                  <Th>Status</Th>
-                  <Th className="text-right">Actions</Th>
+                  <Th className="whitespace-nowrap">
+                    <ColumnHeaderFilter
+                      label="Status"
+                      isActive={statusFilter !== "all"}
+                    >
+                      {(close) => (
+                        <div className="flex flex-col gap-1.5">
+                          <div className="font-semibold text-text-primary text-[11px] uppercase tracking-wider pb-1 border-b border-border">
+                            Filter Status
+                          </div>
+                          <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStatusFilter("all");
+                                setPage(1);
+                                close();
+                              }}
+                              className={cn(
+                                "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                statusFilter === "all"
+                                  ? "bg-brand/10 font-bold text-brand"
+                                  : "hover:bg-bg-subtle text-text-secondary",
+                              )}
+                            >
+                              <span>All entries</span>
+                              {statusFilter === "all" && <CheckIcon className="w-3.5 h-3.5" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStatusFilter("active");
+                                setPage(1);
+                                close();
+                              }}
+                              className={cn(
+                                "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                statusFilter === "active"
+                                  ? "bg-brand/10 font-bold text-brand"
+                                  : "hover:bg-bg-subtle text-text-secondary",
+                              )}
+                            >
+                              <span>Active only</span>
+                              {statusFilter === "active" && <CheckIcon className="w-3.5 h-3.5" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStatusFilter("inactive");
+                                setPage(1);
+                                close();
+                              }}
+                              className={cn(
+                                "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                statusFilter === "inactive"
+                                  ? "bg-brand/10 font-bold text-brand"
+                                  : "hover:bg-bg-subtle text-text-secondary",
+                              )}
+                            >
+                              <span>Inactive only</span>
+                              {statusFilter === "inactive" && <CheckIcon className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </ColumnHeaderFilter>
+                  </Th>
+                  <Th className="w-36 text-right whitespace-nowrap">Actions</Th>
                 </Tr>
               </Thead>
               <Tbody>
-                {rows.map((row, index) => {
+                {visibleRows.map((row, index) => {
                   const isProduct = tab === "products";
                   const product = isProduct
                     ? (row as WholesaleProductWire & { id: string })
                     : null;
                   const named = !isProduct ? (row as NamedRow) : null;
+                  const rowNum = (safePage - 1) * PAGE_SIZE + index + 1;
                   return (
                     <Tr key={isProduct ? product?.product_id : named?.id}>
                       <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
-                        {index + 1}
+                        {rowNum}
                       </Td>
-                      <Td className="font-medium">
+                      <Td className="font-medium whitespace-nowrap">
                         {isProduct && product?.stock_code ? (
                           <div className="flex items-center gap-1">
                             <span>{product.stock_code}</span>
@@ -511,8 +666,8 @@ export default function MasterDataPage({
                       </Td>
                       {isProduct && (
                         <>
-                          <Td>{product?.description || "—"}</Td>
-                          <Td>
+                          <Td className="text-text-secondary">{product?.description || "—"}</Td>
+                          <Td className="whitespace-nowrap">
                             {product
                               ? GROUP_LABELS[product.product_group]
                               : "—"}
@@ -521,13 +676,13 @@ export default function MasterDataPage({
                       )}
                       {hasDetails && !isProduct && (
                         <>
-                          <Td>{named?.phone || "—"}</Td>
-                          <Td className="max-w-[220px] truncate">
+                          <Td className="whitespace-nowrap text-text-secondary">{named?.phone || "—"}</Td>
+                          <Td className="max-w-[220px] truncate text-text-secondary">
                             {named?.address || "—"}
                           </Td>
                         </>
                       )}
-                      <Td>
+                      <Td className="whitespace-nowrap">
                         <DotPill
                           label={row.active ? "Active" : "Inactive"}
                           className={
@@ -540,16 +695,17 @@ export default function MasterDataPage({
                           }
                         />
                       </Td>
-                      <Td>
-                        <div className="flex justify-end gap-2">
+                      <Td className="text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1.5">
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() =>
                               startEdit(row as WholesaleProductWire | NamedRow)
                             }
+                            className="h-7 text-xs px-2"
                           >
-                            <PencilIcon className="w-4 h-4" /> Edit
+                            <PencilIcon className="w-3.5 h-3.5" /> Edit
                           </Button>
                           <Button
                             variant="secondary"
@@ -559,6 +715,7 @@ export default function MasterDataPage({
                                 row as WholesaleProductWire | NamedRow,
                               )
                             }
+                            className="h-7 text-xs px-2"
                           >
                             {row.active ? "Deactivate" : "Activate"}
                           </Button>
@@ -569,174 +726,183 @@ export default function MasterDataPage({
                 })}
               </Tbody>
             </TableContainer>
-          )}
-        </section>
+            <div className="px-4 py-1.5 border-t border-border">
+              <Pagination
+                page={safePage}
+                totalPages={totalPages}
+                totalItems={rows.length}
+                pageSize={PAGE_SIZE}
+                onPageChange={setPage}
+              />
+            </div>
+          </>
+        )}
+      </Panel>
 
-        {editorOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <section
-              className="w-full max-w-md rounded-xl border border-border bg-bg-base p-5 shadow-xl"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="master-data-editor-title"
+      {editorOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <section
+            className="w-full max-w-md rounded-xl border border-border bg-bg-base p-5 shadow-xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="master-data-editor-title"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h2
+                id="master-data-editor-title"
+                className="text-base font-semibold text-text-primary"
+              >
+                {editingId ? "Edit entry" : addLabel}
+              </h2>
+              <button
+                type="button"
+                onClick={() => {
+                  resetEditor();
+                  setEditorOpen(false);
+                }}
+                className="rounded-md p-1 text-text-muted hover:bg-bg-raised"
+                aria-label="Close"
+              >
+                <CloseIcon className="h-5 w-5" />
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-text-muted">
+              {activeTab.description}. Changes apply to future forms; existing
+              transaction lines keep their saved values.
+            </p>
+            <form
+              className="mt-4 flex flex-col gap-3"
+              onSubmit={(event) => void save(event)}
             >
-              <div className="flex items-start justify-between gap-3">
-                <h2
-                  id="master-data-editor-title"
-                  className="text-base font-semibold text-text-primary"
-                >
-                  {editingId ? "Edit entry" : addLabel}
-                </h2>
-                <button
+              {tab === "products" ? (
+                <>
+                  <Input
+                    label="Stock code"
+                    value={productForm.stock_code}
+                    onChange={(event) =>
+                      setProductForm({
+                        ...productForm,
+                        stock_code: event.target.value,
+                      })
+                    }
+                    required
+                  />
+                  <Input
+                    label="Description"
+                    value={productForm.description}
+                    onChange={(event) =>
+                      setProductForm({
+                        ...productForm,
+                        description: event.target.value,
+                      })
+                    }
+                  />
+                  <Select
+                    label="Product group"
+                    value={productForm.product_group}
+                    onChange={(event) =>
+                      setProductForm({
+                        ...productForm,
+                        product_group: event.target.value as ProductGroup,
+                      })
+                    }
+                  >
+                    {PRODUCT_GROUPS.map((group) => (
+                      <option key={group} value={group}>
+                        {GROUP_LABELS[group]}
+                      </option>
+                    ))}
+                  </Select>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Input
+                      label="Pairs per set"
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={productForm.set_pairs}
+                      onChange={(event) =>
+                        setProductForm({
+                          ...productForm,
+                          set_pairs: event.target.value,
+                        })
+                      }
+                    />
+                    <Input
+                      label="Pairs per dozen"
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={productForm.dozen_pairs}
+                      onChange={(event) =>
+                        setProductForm({
+                          ...productForm,
+                          dozen_pairs: event.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Input
+                    label="Name"
+                    value={namedForm.name}
+                    onChange={(event) =>
+                      setNamedForm({
+                        ...namedForm,
+                        name: event.target.value,
+                      })
+                    }
+                    required
+                  />
+                  {(tab === "suppliers" || tab === "customers") && (
+                    <>
+                      <Input
+                        label="Phone"
+                        value={namedForm.phone}
+                        onChange={(event) =>
+                          setNamedForm({
+                            ...namedForm,
+                            phone: event.target.value,
+                          })
+                        }
+                      />
+                      <Input
+                        label="Address"
+                        value={namedForm.address}
+                        onChange={(event) =>
+                          setNamedForm({
+                            ...namedForm,
+                            address: event.target.value,
+                          })
+                        }
+                      />
+                    </>
+                  )}
+                </>
+              )}
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => {
                     resetEditor();
                     setEditorOpen(false);
                   }}
-                  className="rounded-md p-1 text-text-muted hover:bg-bg-raised"
-                  aria-label="Close"
+                  disabled={
+                    !editingId && !productForm.stock_code && !namedForm.name
+                  }
                 >
-                  <CloseIcon className="h-5 w-5" />
-                </button>
+                  Clear
+                </Button>
+                <Button type="submit" loading={saving}>
+                  {editingId ? "Save changes" : addLabel}
+                </Button>
               </div>
-              <p className="mt-1 text-xs text-text-muted">
-                {activeTab.description}. Changes apply to future forms; existing
-                transaction lines keep their saved values.
-              </p>
-              <form
-                className="mt-4 flex flex-col gap-3"
-                onSubmit={(event) => void save(event)}
-              >
-                {tab === "products" ? (
-                  <>
-                    <Input
-                      label="Stock code"
-                      value={productForm.stock_code}
-                      onChange={(event) =>
-                        setProductForm({
-                          ...productForm,
-                          stock_code: event.target.value,
-                        })
-                      }
-                      required
-                    />
-                    <Input
-                      label="Description"
-                      value={productForm.description}
-                      onChange={(event) =>
-                        setProductForm({
-                          ...productForm,
-                          description: event.target.value,
-                        })
-                      }
-                    />
-                    <Select
-                      label="Product group"
-                      value={productForm.product_group}
-                      onChange={(event) =>
-                        setProductForm({
-                          ...productForm,
-                          product_group: event.target.value as ProductGroup,
-                        })
-                      }
-                    >
-                      {PRODUCT_GROUPS.map((group) => (
-                        <option key={group} value={group}>
-                          {GROUP_LABELS[group]}
-                        </option>
-                      ))}
-                    </Select>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Input
-                        label="Pairs per set"
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={productForm.set_pairs}
-                        onChange={(event) =>
-                          setProductForm({
-                            ...productForm,
-                            set_pairs: event.target.value,
-                          })
-                        }
-                      />
-                      <Input
-                        label="Pairs per dozen"
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={productForm.dozen_pairs}
-                        onChange={(event) =>
-                          setProductForm({
-                            ...productForm,
-                            dozen_pairs: event.target.value,
-                          })
-                        }
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <Input
-                      label="Name"
-                      value={namedForm.name}
-                      onChange={(event) =>
-                        setNamedForm({
-                          ...namedForm,
-                          name: event.target.value,
-                        })
-                      }
-                      required
-                    />
-                    {(tab === "suppliers" || tab === "customers") && (
-                      <>
-                        <Input
-                          label="Phone"
-                          value={namedForm.phone}
-                          onChange={(event) =>
-                            setNamedForm({
-                              ...namedForm,
-                              phone: event.target.value,
-                            })
-                          }
-                        />
-                        <Input
-                          label="Address"
-                          value={namedForm.address}
-                          onChange={(event) =>
-                            setNamedForm({
-                              ...namedForm,
-                              address: event.target.value,
-                            })
-                          }
-                        />
-                      </>
-                    )}
-                  </>
-                )}
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => {
-                      resetEditor();
-                      setEditorOpen(false);
-                    }}
-                    disabled={
-                      !editingId && !productForm.stock_code && !namedForm.name
-                    }
-                  >
-                    Clear
-                  </Button>
-                  <Button type="submit" loading={saving}>
-                    {editingId ? "Save changes" : addLabel}
-                  </Button>
-                </div>
-              </form>
-            </section>
-          </div>
-        )}
-      </div>
+            </form>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -776,3 +942,4 @@ function getPathUrl(path: string): string {
   };
   return urls[path];
 }
+

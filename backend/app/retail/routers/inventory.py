@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/inventory", tags=["inventory"])
 # Matches the other list endpoints' page size. Low/dead stock are bounded by product x
 # branch count rather than transaction volume, so this is for a consistent page size —
 # not because either table grows unbounded the way sales/purchases do.
-PAGE_SIZE = 50
+PAGE_SIZE = 20
 
 
 def _filter_and_page(

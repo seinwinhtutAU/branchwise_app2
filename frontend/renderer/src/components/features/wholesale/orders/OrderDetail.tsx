@@ -53,6 +53,7 @@ import {
 import {
   PAIRS_PER,
   pricedAmount,
+  unitName,
 } from "@renderer/components/features/wholesale/shared/units";
 import {
   colorQtyPairs,
@@ -663,9 +664,6 @@ export function OrderDetail({
                       </Th>
                       <Th className="text-right min-w-[10rem]">
                         Selling price
-                        <span className="block text-[10px] font-normal text-text-muted">
-                          per set
-                        </span>
                       </Th>
                       <Th className="text-right">Amount</Th>
                       <Th className="text-center">Mismatch</Th>
@@ -931,33 +929,38 @@ export function OrderDetail({
                                     }}
                                   />
                                   <span className="text-right text-[10px] text-text-muted tabular-nums">
-                                    = {formatKyat(line.selling_price)}
+                                    = {formatKyat(line.selling_price)} per {unitName(line.unit, 1)}
                                   </span>
                                 </>
                               ) : (
-                                <Controller
-                                  control={control}
-                                  name={`order.lines.${index}.selling_price`}
-                                  render={({ field: priceField }) => (
-                                    <CellInput
-                                      label={`Selling price for product ${index + 1}`}
-                                      placeholder="0"
-                                      numeric
-                                      className="text-right"
-                                      value={String(priceField.value)}
-                                      onChange={(next) => {
-                                        priceField.onChange(Number(next) || 0);
-                                        setLine(index, {
-                                          selling_price: Number(next) || 0,
-                                        });
-                                      }}
-                                      error={
-                                        errors.order?.lines?.[index]
-                                          ?.selling_price?.message
-                                      }
-                                    />
-                                  )}
-                                />
+                                <>
+                                  <Controller
+                                    control={control}
+                                    name={`order.lines.${index}.selling_price`}
+                                    render={({ field: priceField }) => (
+                                      <CellInput
+                                        label={`Selling price for product ${index + 1}`}
+                                        placeholder="0"
+                                        numeric
+                                        className="text-right"
+                                        value={String(priceField.value)}
+                                        onChange={(next) => {
+                                          priceField.onChange(Number(next) || 0);
+                                          setLine(index, {
+                                            selling_price: Number(next) || 0,
+                                          });
+                                        }}
+                                        error={
+                                          errors.order?.lines?.[index]
+                                            ?.selling_price?.message
+                                        }
+                                      />
+                                    )}
+                                  />
+                                  <span className="text-right text-[10px] text-text-muted">
+                                    per {unitName(line.unit, 1)}
+                                  </span>
+                                </>
                               )}
                             </div>
                           </Td>

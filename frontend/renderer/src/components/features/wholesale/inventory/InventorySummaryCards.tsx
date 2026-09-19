@@ -101,7 +101,7 @@ export function InventoryInsights({
   ];
 
   return (
-    <Panel className="p-3.5 sm:p-4">
+    <Panel className="p-3.5 sm:p-4 w-full xl:w-1/2">
       <h3 className="text-sm font-bold text-text-primary">Stock health</h3>
       <div className="mt-2.5 space-y-1.5">
         {healthRows.map((row) => {
@@ -130,13 +130,19 @@ export function InventorySummaryCards({
 }: {
   records: StockRecord[];
 }): React.JSX.Element {
-  const physicalRows = records
-    .flatMap((record) => record.locations.map((location) => ({
-      stockCode: record.stock_code,
-      location: location.location,
-      pairs: location.on_hand_pairs,
-    })))
-    .filter((row) => row.pairs > 0)
+  const locationMap = new Map<string, number>();
+  for (const record of records) {
+    for (const loc of record.locations) {
+      if (loc.on_hand_pairs > 0) {
+        locationMap.set(
+          loc.location,
+          (locationMap.get(loc.location) ?? 0) + loc.on_hand_pairs,
+        );
+      }
+    }
+  }
+  const physicalRows = Array.from(locationMap.entries())
+    .map(([location, pairs]) => ({ location, pairs }))
     .sort((a, b) => b.pairs - a.pairs);
   const physicalPairs = records.reduce((sum, record) => sum + Math.max(0, record.on_hand_pairs), 0);
   const emptyLocations = records.filter((record) => record.locations.length === 0).length;
@@ -168,12 +174,12 @@ export function InventorySummaryCards({
         iconClassName="bg-success-subtle text-success"
         totalClassName="text-success"
       >
-        <div className="divide-y divide-border border-t border-border">
+        <div className="border-t border-border">
           {physicalRows.slice(0, 4).map((row) => (
-            <div key={`${row.stockCode}-${row.location}`} className="flex items-center gap-2.5 px-3.5 py-1.5 sm:px-4">
+            <div key={row.location} className="flex items-center gap-2.5 px-3.5 py-1.5 sm:px-4">
               <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-success" />
               <span className="min-w-0 flex-1 truncate text-xs font-semibold text-text-primary">
-                {row.stockCode} · {row.location}
+                {row.location}
               </span>
               <span className="shrink-0 rounded-full bg-bg-subtle px-2 py-0.5 text-[10px] font-medium text-text-muted">
                 On hand

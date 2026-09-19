@@ -59,6 +59,7 @@ import {
   formatIn,
   PAIRS_PER,
   pricedAmount,
+  unitName,
 } from "@renderer/components/features/wholesale/shared/units";
 import {
   CARGO_NAMES,
@@ -612,7 +613,7 @@ export function NewVoucherForm({
                   <Th className="text-right whitespace-nowrap">
                     Ordered quantity
                   </Th>
-                  <Th className="text-right min-w-[8rem]">Buying price<span className="block text-xs font-normal text-text-muted">per set</span></Th>
+                  <Th className="text-right min-w-[8rem]">Buying price</Th>
                   <Th className="text-right min-w-[8rem]">Amount</Th>
                 </Tr>
               </Thead>
@@ -766,28 +767,33 @@ export function NewVoucherForm({
                                 }
                               />
                               <p className="text-xs text-text-muted text-right tabular-nums">
-                                {formatKyat(Number(line.buying_price) || 0)}
+                                = {formatKyat(Number(line.buying_price) || 0)} per {unitName(line.unit, 1)}
                               </p>
                             </>
                           ) : (
-                            <Controller
-                              control={control}
-                              name={`lines.${index}.buying_price`}
-                              render={({ field: priceField }) => (
-                                <CellInput
-                                  label={`Buying price for product ${index + 1}`}
-                                  placeholder="0"
-                                  numeric
-                                  className="text-right"
-                                  value={priceField.value}
-                                  onChange={priceField.onChange}
-                                  error={
-                                    errors.lines?.[index]?.buying_price
-                                      ?.message
-                                  }
-                                />
-                              )}
-                            />
+                            <>
+                              <Controller
+                                control={control}
+                                name={`lines.${index}.buying_price`}
+                                render={({ field: priceField }) => (
+                                  <CellInput
+                                    label={`Buying price for product ${index + 1}`}
+                                    placeholder="0"
+                                    numeric
+                                    className="text-right"
+                                    value={priceField.value}
+                                    onChange={priceField.onChange}
+                                    error={
+                                      errors.lines?.[index]?.buying_price
+                                        ?.message
+                                    }
+                                  />
+                                )}
+                              />
+                              <span className="text-right text-[10px] text-text-muted">
+                                per {unitName(line.unit, 1)}
+                              </span>
+                            </>
                           )}
                         </div>
                       </Td>
@@ -891,9 +897,6 @@ export function NewVoucherForm({
                   </Th>
                   <Th className="text-right min-w-[8rem] whitespace-nowrap">
                     Buying price
-                    <span className="block text-[10px] font-normal text-text-muted">
-                      per set
-                    </span>
                   </Th>
                   <Th className="text-right min-w-[8rem]">Amount</Th>
                 </Tr>
@@ -932,7 +935,10 @@ export function NewVoucherForm({
                       </Td>
                       <Td className="text-right tabular-nums">{sets(qty)}</Td>
                       <Td className="text-right tabular-nums text-text-secondary">
-                        {formatKyat(Number(line.buying_price) || 0)}
+                        <div>{formatKyat(Number(line.buying_price) || 0)}</div>
+                        <div className="text-[10px] text-text-muted">
+                          per {unitName(line.unit, 1)}
+                        </div>
                         {isForeignCurrency(line.currency_code) &&
                           line.original_buying_price.trim() !== "" &&
                           line.exchange_rate.trim() !== "" && (

@@ -433,13 +433,14 @@ export function PeriodControls({
   range: PeriodRange;
 }): React.JSX.Element {
   return (
-    <>
-      <div className="w-44">
+    <div className="flex items-center gap-2">
+      <div className="w-36">
         <Select
-          label="Period"
+          size="sm"
           value={range.period}
           disabled={range.hasCustomRange}
           onChange={(e) => range.setPeriod(e.target.value as PeriodKey)}
+          aria-label="Period"
         >
           {PERIOD_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
@@ -448,26 +449,41 @@ export function PeriodControls({
           ))}
         </Select>
       </div>
-      <Input
-        type="date"
-        label="Date from"
-        value={range.dateFrom}
-        max={range.dateTo || undefined}
-        onChange={(e) => range.setDateFrom(e.target.value)}
-      />
-      <Input
-        type="date"
-        label="Date to"
-        value={range.dateTo}
-        min={range.dateFrom || undefined}
-        onChange={(e) => range.setDateTo(e.target.value)}
-      />
+      <span className="text-text-muted text-xs font-medium select-none">From</span>
+      <div className="w-32">
+        <Input
+          type="date"
+          size="sm"
+          value={range.dateFrom}
+          max={range.dateTo || undefined}
+          onChange={(e) => range.setDateFrom(e.target.value)}
+          aria-label="Date from"
+          title="Date from"
+        />
+      </div>
+      <span className="text-text-muted text-xs select-none">to</span>
+      <div className="w-32">
+        <Input
+          type="date"
+          size="sm"
+          value={range.dateTo}
+          min={range.dateFrom || undefined}
+          onChange={(e) => range.setDateTo(e.target.value)}
+          aria-label="Date to"
+          title="Date to"
+        />
+      </div>
       {(range.dateFrom || range.dateTo) && (
-        <Button variant="ghost" size="sm" onClick={range.clearCustomRange}>
-          Clear range
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={range.clearCustomRange}
+          className="h-8 text-xs px-2"
+        >
+          Clear
         </Button>
       )}
-    </>
+    </div>
   );
 }
 
@@ -502,20 +518,24 @@ export function StatTile({
   sub?: string;
 }): React.JSX.Element {
   return (
-    <Card className="flex flex-col gap-1 p-3.5 sm:p-4">
-      <div className="text-xs font-medium text-text-secondary">{label}</div>
-      <div className="text-xl font-semibold text-text-primary tracking-tight tabular-nums sm:text-2xl">
-        {value}
+    <Card className="flex flex-col justify-between p-3 sm:p-3.5 bg-bg-subtle border-border">
+      <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+        {label}
+      </span>
+      <div className="my-0.5">
+        <span className="text-xl sm:text-2xl font-bold text-text-primary tracking-tight tabular-nums">
+          {value}
+        </span>
       </div>
       {deltaPct !== undefined ? (
         <div className="flex items-center gap-1.5 flex-wrap">
           <DeltaBadge deltaPct={deltaPct} />
           {previousLabel && (
-            <span className="text-xs text-text-muted">{previousLabel}</span>
+            <span className="text-[10px] sm:text-[11px] text-text-muted">{previousLabel}</span>
           )}
         </div>
       ) : (
-        sub && <span className="text-xs text-text-muted">{sub}</span>
+        sub && <span className="text-[10px] sm:text-[11px] text-text-muted truncate">{sub}</span>
       )}
     </Card>
   );
@@ -536,7 +556,7 @@ function roundedTopBarPath(
 }
 
 const TREND_CHART_WIDTH = 720;
-const TREND_CHART_HEIGHT = 160;
+const TREND_CHART_HEIGHT = 130;
 const TREND_BAR_MAX_WIDTH = 24;
 const TREND_BAR_GAP = 3;
 

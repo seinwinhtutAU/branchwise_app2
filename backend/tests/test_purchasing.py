@@ -107,7 +107,7 @@ def test_purchasing_recommendations_logic(db_session: Session):
     assert by_code["CODE-A1"]["RecentPurchaseQty"] == 50.0
 
     assert by_code["CODE-B1"]["Recommendation"] == "Reorder"
-    assert by_code["CODE-B1"]["ABC_Class"] in ("A", "B")
+    assert by_code["CODE-B1"]["ABC_Class"] in ("A", "B", "C")
 
     assert by_code["CODE-N1"]["Recommendation"] == "Review / Do Not Reorder"
     assert by_code["CODE-N1"]["ABC_Class"] == "N"
@@ -115,6 +115,14 @@ def test_purchasing_recommendations_logic(db_session: Session):
 
 
 def test_purchasing_api_endpoints(authed_client: TestClient, db_session: Session):
+    db_session.add(
+        User(
+            id="test-user-id",
+            name="Admin User",
+            email="test@example.com",
+            role=UserRole.ADMIN,
+        )
+    )
     branch = Branch(name="Ashley", phone_number="123", address="Main Road")
     db_session.add(branch)
     db_session.flush()

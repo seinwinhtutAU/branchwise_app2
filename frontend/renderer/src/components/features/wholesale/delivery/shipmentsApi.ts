@@ -226,6 +226,7 @@ export interface SplitShipmentInput {
    *  and counted at the receiving gate, so a split doesn't have to guess at it. Left
    *  out, the new shipment starts at 0 and the original's own total is untouched. */
   quantity_pairs?: number;
+  destination?: string;
   final_destination: string;
   carrier_name: string;
   /** Which stop the split is carved out of: undefined means the cargo company's own

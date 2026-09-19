@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "@renderer/lib/utils";
 import { Badge } from "@renderer/components/ui/Badge";
 import {
@@ -109,6 +109,13 @@ export function AppShell({
   });
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
+
+  const currentSectionLabel = useMemo(() => {
+    if (activeSection === "settings") return "Settings";
+    const item = navItems.find((n) => n.id === activeSection);
+    if (item) return item.label;
+    return activeSection.charAt(0).toUpperCase() + activeSection.slice(1);
+  }, [activeSection, navItems]);
 
   useEffect(() => {
     if (!accountMenuOpen) return;
@@ -472,14 +479,22 @@ export function AppShell({
                 isWindows && "pr-[140px]",
               )}
             >
-              <div className="flex items-center gap-3 min-w-0">
+              <div className="flex items-center gap-2.5 min-w-0">
                 <span className="text-base font-semibold text-text-secondary truncate">
                   Branch<span className="text-brand">Wise</span>
                 </span>
-                <span className="text-lg text-border">/</span>
-                <span className="capitalize text-base text-text-muted">
+                <span className="text-base text-border font-light">/</span>
+                <span className="capitalize text-base text-text-muted shrink-0">
                   {activeWorkspace ?? "workspace"}
                 </span>
+                {currentSectionLabel && (
+                  <>
+                    <span className="text-base text-border font-light">/</span>
+                    <span className="text-base font-medium text-text-primary truncate">
+                      {currentSectionLabel}
+                    </span>
+                  </>
+                )}
               </div>
               <div className="flex items-center gap-3 app-no-drag">
                 <span className="text-xs text-text-muted/70 hidden sm:inline-block">
