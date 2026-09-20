@@ -168,7 +168,7 @@ function createWindow(): void {
     icon: platformIcon,
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
-      sandbox: true,
+      sandbox: false,
     },
   });
 

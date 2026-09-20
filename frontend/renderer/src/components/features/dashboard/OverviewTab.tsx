@@ -12,6 +12,11 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   DashboardIcon,
+  DollarIcon,
+  InventoryIcon,
+  ShieldCheckIcon,
+  TrendingUpIcon,
+  UsersIcon,
   WarningIcon,
 } from "@renderer/components/ui/icons";
 import { MeasureValue, RefreshingHint } from "./shared";
@@ -39,13 +44,25 @@ const DIMENSION_EVIDENCE: Record<string, EvidenceTarget> = {
   data_quality: "warnings",
 };
 
-const DIMENSION_ICONS: Record<string, string> = {
-  sales: "📈",
-  profit: "💰",
-  inventory: "📦",
-  customer: "👥",
-  data_quality: "🛡️",
-};
+function renderDimensionIcon(
+  key: string,
+  className = "w-4 h-4",
+): React.JSX.Element {
+  switch (key) {
+    case "sales":
+      return <TrendingUpIcon className={className} />;
+    case "profit":
+      return <DollarIcon className={className} />;
+    case "inventory":
+      return <InventoryIcon className={className} />;
+    case "customer":
+      return <UsersIcon className={className} />;
+    case "data_quality":
+      return <ShieldCheckIcon className={className} />;
+    default:
+      return <DashboardIcon className={className} />;
+  }
+}
 
 function statusForScore(score: number | null): HealthStatus | null {
   if (score === null) return null;
@@ -197,11 +214,11 @@ function BranchHealthCard({
   );
 
   const dimensionKeys = [
-    { key: "sales", label: "Sales", icon: "📈" },
-    { key: "profit", label: "Profit", icon: "💰" },
-    { key: "inventory", label: "Inventory", icon: "📦" },
-    { key: "customer", label: "Customer", icon: "👥" },
-    { key: "data_quality", label: "Data Quality", icon: "🛡️" },
+    { key: "sales", label: "Sales" },
+    { key: "profit", label: "Profit" },
+    { key: "inventory", label: "Inventory" },
+    { key: "customer", label: "Customer" },
+    { key: "data_quality", label: "Data Quality" },
   ];
 
   return (
@@ -263,7 +280,7 @@ function BranchHealthCard({
             Pillars Performance
           </span>
           <div className="space-y-2">
-            {dimensionKeys.map(({ key, label, icon }) => {
+            {dimensionKeys.map(({ key, label }) => {
               const dim = branch.dimensions.find((d) => d.key === key);
               const score = dim?.score ?? null;
               const status = statusForScore(score);
@@ -271,7 +288,9 @@ function BranchHealthCard({
                 <div key={key} className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
                     <span className="flex items-center gap-1.5 text-text-secondary font-medium">
-                      <span>{icon}</span>
+                      <span className="text-text-muted shrink-0">
+                        {renderDimensionIcon(key, "w-3.5 h-3.5")}
+                      </span>
                       <span>{label}</span>
                     </span>
                     <span
@@ -341,7 +360,6 @@ function DimensionMatrixCard({
 }): React.JSX.Element {
   const evidence = DIMENSION_EVIDENCE[dimension.key];
   const meta = dimension.status ? STATUS_META[dimension.status] : null;
-  const icon = DIMENSION_ICONS[dimension.key] ?? "📊";
   const weight = dimension.effective_weight ?? dimension.weight;
   const actionableAlerts = alerts.filter(
     (a) =>
@@ -353,8 +371,10 @@ function DimensionMatrixCard({
       {/* Top Title & Header */}
       <div>
         <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-border/70">
-          <div className="flex items-center gap-2">
-            <span className="text-base">{icon}</span>
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center justify-center w-7 h-7 rounded-md bg-bg-subtle border border-border/60 text-text-secondary shrink-0">
+              {renderDimensionIcon(dimension.key, "w-4 h-4")}
+            </div>
             <div>
               <span className="font-semibold text-sm text-text-primary">
                 {dimension.label} Health

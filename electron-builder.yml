@@ -45,5 +45,5 @@ npmRebuild: false
 publish:
   provider: github
   owner: seinwinhtutAU
-  repo: branchwise_app2
+  repo: branchwise-release
   releaseType: release
