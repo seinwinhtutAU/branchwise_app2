@@ -24,11 +24,16 @@ def _branch_dict(branch: Branch) -> dict:
 
 @router.get("")
 def list_branches(
-    kind: Literal["retail", "wholesale"] = "retail",
+    kind: Literal["retail", "wholesale", "all"] = "retail",
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    branches = list_wholesale_branches(db) if kind == "wholesale" else list_retail_branches(db)
+    if kind == "all":
+        branches = db.query(Branch).order_by(Branch.name)
+    elif kind == "wholesale":
+        branches = list_wholesale_branches(db)
+    else:
+        branches = list_retail_branches(db)
     return [_branch_dict(b) for b in branches.all()]
 
 

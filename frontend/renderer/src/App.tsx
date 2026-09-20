@@ -10,7 +10,6 @@ import {
   dashboardUrl,
   type OverviewData,
 } from "@renderer/components/features/dashboard/helpers";
-import { ChatLauncher } from "@renderer/components/features/chat/ChatLauncher";
 import {
   apiBaseUrl,
   installAuthRetry,
@@ -44,7 +43,11 @@ import type {
   Profile,
 } from "@renderer/components/features/types";
 import type { InventorySubTab } from "@renderer/components/features/retail/InventoryPage";
-import { useBranches, useRetailBranchOptions } from "@renderer/lib/useBranches";
+import {
+  useAllBranchOptions,
+  useBranches,
+  useRetailBranchOptions,
+} from "@renderer/lib/useBranches";
 import { formatBuyingPriceSource } from "@renderer/lib/buyingPriceSource";
 import { useAppSettings } from "@renderer/lib/appSettings";
 import { Spinner } from "@renderer/components/ui/Spinner";
@@ -558,6 +561,7 @@ function App(): React.JSX.Element {
       : (WORKSPACE_NAV_ITEMS[effectiveWorkspace][0].id as Section);
   const branchOptions = useBranches(isAdmin ? session : null);
   const retailBranchOptions = useRetailBranchOptions(isAdmin ? session : null);
+  const allBranchOptions = useAllBranchOptions(isAdmin ? session : null);
 
   async function refreshWarningCount(): Promise<void> {
     if (!session) return;
@@ -597,7 +601,7 @@ function App(): React.JSX.Element {
   const businessAlertUrls = useMemo(() => {
     if (isWholesale) return [];
     const branchIds = isAdmin
-      ? retailBranchOptions.map((branch) => branch.id)
+      ? allBranchOptions.map((branch) => branch.id)
       : profile?.branch_id
         ? [profile.branch_id]
         : [];
@@ -605,7 +609,7 @@ function App(): React.JSX.Element {
     return branchIds.map((id) =>
       dashboardUrl("overview", id, { period: "30d", dateFrom: "", dateTo: "" }),
     );
-  }, [isAdmin, isWholesale, profile?.branch_id, retailBranchOptions]);
+  }, [isAdmin, isWholesale, profile?.branch_id, allBranchOptions]);
 
   const { data: branchHealth } = useUrlQueries<OverviewData>(
     businessAlertUrls,
@@ -1003,7 +1007,7 @@ function App(): React.JSX.Element {
                 <DashboardPage
                   session={session}
                   profile={profile}
-                  branchOptions={retailBranchOptions}
+                  branchOptions={allBranchOptions}
                   onViewWarnings={() => handleSectionChange("warnings")}
                   onViewBusinessAlerts={() =>
                     handleSectionChange("businessAlerts")
@@ -1024,7 +1028,7 @@ function App(): React.JSX.Element {
                 <BusinessAlertsPage
                   session={session}
                   profile={profile}
-                  branchOptions={retailBranchOptions}
+                  branchOptions={allBranchOptions}
                   onOpenEvidence={(target, branchId) => {
                     if (target === "warnings") {
                       handleSectionChange("warnings");
@@ -1216,14 +1220,6 @@ function App(): React.JSX.Element {
           )}
         </Suspense>
       </ErrorBoundary>
-
-      {/* The chat is a floating button rather than a nav section: it answers questions
-          about whatever page you are already on, so making it a place you had to leave
-          that page for was the wrong shape. Retail only, as before — the wholesale
-          workflow has none of the imported data it reads. */}
-      {effectiveWorkspace === "retail" && (
-        <ChatLauncher session={session} profile={profile} />
-      )}
     </AppShell>
   );
 }

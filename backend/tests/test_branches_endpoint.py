@@ -151,3 +151,32 @@ def test_invalid_date_format_value_is_rejected(
         f"/api/branches/{branch.id}", json={"sale_date_format": "YMD"}
     )
     assert response.status_code == 422
+
+
+def test_list_all_branches_returns_both_retail_and_wholesale(
+    authed_client: TestClient, db_session: Session
+):
+    retail = Branch(name="Retail 1", phone_number="000", address="TBD")
+    depot = Branch(name="Wholesale Depot", phone_number="000", address="TBD")
+    db_session.add_all([retail, depot])
+    db_session.flush()
+    db_session.add(
+        User(
+            id="wholesale-user-id",
+            name="Wholesale User",
+            email="wholesale@example.com",
+            role=UserRole.WHOLESALE,
+            branch_id=depot.id,
+        )
+    )
+    db_session.commit()
+
+    # Default (retail) excludes depot
+    res_retail = authed_client.get("/api/branches")
+    assert res_retail.status_code == 200
+    assert {b["name"] for b in res_retail.json()} == {"Retail 1"}
+
+    # kind=all returns both
+    res_all = authed_client.get("/api/branches?kind=all")
+    assert res_all.status_code == 200
+    assert {b["name"] for b in res_all.json()} == {"Retail 1", "Wholesale Depot"}

@@ -9,7 +9,7 @@ from app.models.branch import Branch
 from app.models.user import User
 from app.retail.services import branch_health as branch_health_service
 from app.services import dashboard as dashboard_service
-from app.services.branches import list_retail_branches, resolve_branch_id
+from app.services.branches import resolve_branch_id
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -17,19 +17,20 @@ DATE_FROM_DESCRIPTION = "Custom range start (inclusive) — overrides `period` w
 DATE_TO_DESCRIPTION = "Custom range end (inclusive) — overrides `period` when both date_from and date_to are given"
 
 
-def _resolve_retail_branch(user: User, branch_id: str | None, db: Session) -> Branch:
+def _resolve_dashboard_branch(user: User, branch_id: str | None, db: Session) -> Branch:
     """Same rule as every other write/scoped endpoint (a branch-scoped account's own
-    branch wins; admin must say which one) — plus a check that the resolved branch is
-    actually a retail branch, since this dashboard is retail-only (the Wholesale branch
-    never has sale/inventory/purchase data to show here)."""
+    branch wins; admin must say which one). Resolves any valid branch."""
     resolved_id = resolve_branch_id(user, branch_id, db)
-    branch = list_retail_branches(db).filter(Branch.id == resolved_id).first()
+    branch = db.get(Branch, resolved_id)
     if branch is None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "This dashboard is retail-only — the resolved branch isn't a retail branch",
+            f"Unknown branch_id: {resolved_id}",
         )
     return branch
+
+
+_resolve_retail_branch = _resolve_dashboard_branch
 
 
 def _validate_period_or_dates(period: str, date_from: date | None, date_to: date | None) -> None:

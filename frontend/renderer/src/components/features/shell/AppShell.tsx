@@ -369,7 +369,7 @@ export function AppShell({
                         </span>
                       )}
                     </div>
-                    <span className="text-[10px] leading-tight font-medium text-center truncate max-w-full mt-1">
+                    <span className="text-[10px] leading-tight font-medium text-center max-w-full mt-1">
                       {item.shortLabel ?? item.label}
                     </span>
                   </>
@@ -487,7 +487,7 @@ export function AppShell({
         <aside
           className={cn(
             "shrink-0 border-r border-border bg-bg-subtle transition-[width] duration-200 select-none",
-            collapsed ? "w-[4.5rem]" : "w-64",
+            collapsed ? "w-[5.25rem]" : "w-64",
           )}
         >
           <div
@@ -496,7 +496,7 @@ export function AppShell({
               hasCustomTitleBar
                 ? "top-10 h-[calc(100vh-2.5rem)]"
                 : "top-0 h-screen",
-              collapsed ? "w-[4.5rem]" : "w-64",
+              collapsed ? "w-[5.25rem]" : "w-64",
             )}
           >
             {renderSidebar(collapsed)}

@@ -173,7 +173,7 @@ function MultiBranchComparisonView({
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-text-primary tracking-tight">
-              Retail Branches Health
+              Branch Health
             </h2>
             <p className="text-xs text-text-muted mt-0.5">
               Comprehensive health scores and operational pillar performance per branch.

@@ -437,7 +437,7 @@ def test_overview_of_a_branch_with_no_data_scores_nothing_rather_than_zero(
     assert all(d["insufficient_data_reason"] for d in body["dimensions"])
 
 
-def test_overview_is_retail_only(authed_client: TestClient, db_session: Session):
+def test_overview_accepts_wholesale_branch(authed_client: TestClient, db_session: Session):
     db_session.add(
         User(id="test-user-id", name="Admin", email="admin@example.com", role=UserRole.ADMIN)
     )
@@ -455,7 +455,7 @@ def test_overview_is_retail_only(authed_client: TestClient, db_session: Session)
 
     assert authed_client.get("/api/dashboard/overview").status_code == 400  # admin, no branch_id
     assert (
-        authed_client.get(f"/api/dashboard/overview?branch_id={wholesale.id}").status_code == 400
+        authed_client.get(f"/api/dashboard/overview?branch_id={wholesale.id}").status_code == 200
     )
 
 

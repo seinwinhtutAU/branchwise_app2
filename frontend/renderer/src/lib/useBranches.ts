@@ -60,7 +60,7 @@ function useRememberedBranches<T>(
 export function useBranches(session: Session | null): string[] {
   return useRememberedBranches<string[]>(
     "branch-names",
-    `${apiBaseUrl}/api/branches`,
+    `${apiBaseUrl}/api/branches?kind=all`,
     session,
     (branches) => branches.map((b) => b.name).sort(),
     [],
@@ -69,14 +69,27 @@ export function useBranches(session: Session | null): string[] {
 
 // id+name pairs (not just display names) for a branch picker whose selection is actually
 // submitted somewhere, e.g. an admin account choosing which retail branch's
-// Dashboard to view (the dashboard is always one branch at a time, never a cross-branch
-// rollup — see docs/retail_dashboard.md). Pass `null` to skip fetching.
+// Purchasing to view. Pass `null` to skip fetching.
 export function useRetailBranchOptions(
   session: Session | null,
 ): BranchOption[] {
   return useRememberedBranches<BranchOption[]>(
     "branches-retail",
     `${apiBaseUrl}/api/branches`,
+    session,
+    (branches) => branches,
+    [],
+  );
+}
+
+// Full list of branches (both retail and wholesale) with id and name, for pickers
+// like the Dashboard that support viewing any branch. Pass `null` to skip fetching.
+export function useAllBranchOptions(
+  session: Session | null,
+): BranchOption[] {
+  return useRememberedBranches<BranchOption[]>(
+    "branches-all",
+    `${apiBaseUrl}/api/branches?kind=all`,
     session,
     (branches) => branches,
     [],

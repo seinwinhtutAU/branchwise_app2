@@ -158,8 +158,8 @@ export function DashboardPage({
       {waitingOnBranch && (
         <EmptyState
           icon={<DashboardIcon />}
-          title="No retail branches yet"
-          description="Add a retail branch before the dashboard has anything to show."
+          title="No branches yet"
+          description="Add a branch before the dashboard has anything to show."
         />
       )}
 
