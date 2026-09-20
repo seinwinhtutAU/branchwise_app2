@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_chat_model: str = "gpt-4o-mini"
 
+    # Cloudflare R2 Object Storage settings
+    r2_account_id: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket: str = "branchwise"
+
     # Restrict CORS to known origins (local dev, Electron, and web deployments)
     cors_origins: list[str] = [
         "http://localhost:5173",

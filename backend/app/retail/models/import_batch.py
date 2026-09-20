@@ -55,6 +55,8 @@ class ImportBatch(Base):
     # don't preserve the original file layout or row-level validation notes, so this
     # is what backs the "view this past import" history detail page.
     preview_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # Object storage key in Cloudflare R2 where the raw uploaded spreadsheet file is preserved
+    storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     reverted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     reverted_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)

@@ -56,8 +56,16 @@ interface AppShellProps {
 
 const roleBadgeVariant: Record<string, "brand" | "info" | "default"> = {
   admin: "brand",
+  retail_management: "brand",
   wholesale: "brand",
   retail: "default",
+};
+
+const roleLabels: Record<string, string> = {
+  admin: "Admin",
+  retail_management: "Retail management",
+  wholesale: "Wholesale user",
+  retail: "Retail user",
 };
 
 const workspaceActiveClasses: Record<"brand" | "info", string> = {
@@ -404,7 +412,7 @@ export function AppShell({
               <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                 {profile?.role && (
                   <Badge variant={roleBadgeVariant[profile.role] ?? "default"}>
-                    {profile.role}
+                    {roleLabels[profile.role] ?? profile.role}
                   </Badge>
                 )}
                 {profile?.branch_name && (
@@ -492,7 +500,7 @@ export function AppShell({
         >
           <div
             className={cn(
-              "fixed transition-[width] duration-200 z-30",
+            "fixed transition-[width] duration-200 z-50",
               hasCustomTitleBar
                 ? "top-10 h-[calc(100vh-2.5rem)]"
                 : "top-0 h-screen",
@@ -505,7 +513,7 @@ export function AppShell({
 
         <div className="flex-1 min-w-0 flex flex-col">
           {/* Sticky so the header and connection banner stay put while page scrolls */}
-          <div className="sticky top-0 z-20 flex flex-col shrink-0">
+          <div className="sticky top-0 z-40 flex flex-col shrink-0">
             {/* Header Bar */}
             <div className="h-14 shrink-0 flex items-center justify-between px-6 border-b border-border/60 text-sm text-text-muted select-none bg-bg-subtle">
               <div className="flex items-center gap-2.5 min-w-0">
@@ -556,7 +564,7 @@ export function AppShell({
                         </p>
                         {profile?.role && (
                           <p className="mt-0.5 text-xs capitalize text-text-muted">
-                            {profile.role}
+                            {roleLabels[profile.role] ?? profile.role}
                           </p>
                         )}
                       </div>

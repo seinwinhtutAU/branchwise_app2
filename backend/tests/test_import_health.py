@@ -264,9 +264,10 @@ def test_dismiss_respects_branch_scoping(db_session: Session):
 def test_build_import_health_counts_all_types(db_session: Session):
     branch = _branch(db_session)
     admin = _user(db_session, None, UserRole.ADMIN)
-    _batch(db_session, branch=branch, import_type=ImportType.SALES, created_at=datetime.datetime(2026, 8, 20))
-    _batch(db_session, branch=branch, import_type=ImportType.PURCHASE, created_at=datetime.datetime(2026, 8, 21))
-    _batch(db_session, branch=branch, import_type=ImportType.INVENTORY, created_at=datetime.datetime(2026, 8, 22))
+    now = datetime.datetime.now()
+    _batch(db_session, branch=branch, import_type=ImportType.SALES, created_at=now - datetime.timedelta(days=3))
+    _batch(db_session, branch=branch, import_type=ImportType.PURCHASE, created_at=now - datetime.timedelta(days=2))
+    _batch(db_session, branch=branch, import_type=ImportType.INVENTORY, created_at=now - datetime.timedelta(days=1))
     db_session.commit()
 
     result = import_health.build_import_health(db_session, admin, days=30)

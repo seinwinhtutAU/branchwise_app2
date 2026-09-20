@@ -1,4 +1,5 @@
 import io
+import json
 from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
@@ -328,3 +329,85 @@ def test_data_version_is_scoped_to_the_branch_the_account_can_see(
     db_session.commit()
 
     assert authed_client.get("/api/imports/data-version").json()["version"] == before
+
+
+def test_download_file_admin_allowed(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+    batch_id = summary["batch_id"]
+
+    # Swap account to admin
+    db_session.query(User).filter(User.id == "test-user-id").update(
+        {"branch_id": None, "role": UserRole.ADMIN}
+    )
+    db_session.commit()
+
+    response = authed_client.get(f"/api/imports/history/{batch_id}/download")
+    assert response.status_code == 200
+    assert "attachment" in response.headers.get("Content-Disposition", "")
+
+
+def test_download_file_retail_forbidden(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, branch_name="Retail 1")  # Retail role
+    summary = _confirm_sale(authed_client)
+    batch_id = summary["batch_id"]
+
+    response = authed_client.get(f"/api/imports/history/{batch_id}/download")
+    assert response.status_code == 403
+    assert "Only administrators can download" in response.json()["detail"]
+
+
+def test_get_history_detail_prefers_r2_preview_data(
+    authed_client: TestClient, db_session: Session, monkeypatch
+):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+    batch_id = summary["batch_id"]
+
+    # Mock storage service to return custom R2 preview data
+    class MockStorage:
+        is_configured = True
+
+        def download_file_bytes(self, key: str):
+            if key == f"imports/{batch_id}/preview_data.json":
+                r2_content = json.dumps({
+                    "origin": {"rows": [{"Source": "Cloudflare R2"}]},
+                    "clean": {"columns": ["Source"], "rows": [{"Source": "Cloudflare R2"}]}
+                }).encode("utf-8")
+                return r2_content, "application/json"
+            return None
+
+    monkeypatch.setattr("app.retail.routers.imports.get_storage_service", lambda: MockStorage())
+
+    response = authed_client.get(f"/api/imports/history/{batch_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["origin"]["rows"] == [{"Source": "Cloudflare R2"}]
+    assert data["clean"]["rows"] == [{"Source": "Cloudflare R2"}]
+
+
+def test_get_history_detail_falls_back_to_db_when_r2_missing(
+    authed_client: TestClient, db_session: Session, monkeypatch
+):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+    batch_id = summary["batch_id"]
+
+    # Mock storage where preview_data.json is missing
+    class MockStorage:
+        is_configured = True
+
+        def download_file_bytes(self, key: str):
+            return None
+
+    monkeypatch.setattr("app.retail.routers.imports.get_storage_service", lambda: MockStorage())
+
+    response = authed_client.get(f"/api/imports/history/{batch_id}")
+    assert response.status_code == 200
+    data = response.json()
+    # Should fall back to DB origin data
+    assert len(data["origin"]["rows"]) > 0
+    assert data["origin"]["rows"][0][0].startswith("Printed :")
+
+
+

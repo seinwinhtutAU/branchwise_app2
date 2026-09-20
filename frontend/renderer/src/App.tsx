@@ -44,7 +44,6 @@ import type {
 } from "@renderer/components/features/types";
 import type { InventorySubTab } from "@renderer/components/features/retail/InventoryPage";
 import {
-  useAllBranchOptions,
   useBranches,
   useRetailBranchOptions,
 } from "@renderer/lib/useBranches";
@@ -55,6 +54,7 @@ import { ErrorBoundary } from "@renderer/components/ui/ErrorBoundary";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import {
   UploadIcon,
+  HistoryIcon,
   OverviewIcon,
   BellIcon,
   DashboardIcon,
@@ -70,6 +70,7 @@ import {
   DollarIcon,
   ReportsIcon,
   MasterDataIcon,
+  UsersIcon,
 } from "@renderer/components/ui/icons";
 
 // Lazy-loaded so a given account's bundle only pays for the sections it can actually
@@ -131,8 +132,14 @@ const BusinessAlertsPage = lazy(
 const PurchasingPage = lazy(
   () => import("@renderer/components/features/retail/PurchasingPage"),
 );
+const CheckingPage = lazy(
+  () => import("@renderer/components/features/retail/CheckingPage"),
+);
 const SettingsPage = lazy(
   () => import("@renderer/components/features/settings/SettingsPage"),
+);
+const UserManagementPage = lazy(
+  () => import("@renderer/components/features/settings/UserManagementPage"),
 );
 
 type Section =
@@ -140,6 +147,7 @@ type Section =
   | "businessAlerts"
   | "import"
   | "history"
+  | "checking"
   | "importOverview"
   | "overview"
   | "sales"
@@ -157,7 +165,8 @@ type Section =
   | "reports"
   | "masterData"
   | "wholesale"
-  | "settings";
+  | "settings"
+  | "userManagement";
 
 // Retail and Wholesale are two functionally separate products glued together for admin's
 // convenience (see the "Wholesale" doc section in CLAUDE.md) — an admin switches between
@@ -249,6 +258,18 @@ const WHOLESALE_NAV_ITEMS: NavItem[] = [
 // the left navigation until those screens are ready to be part of the daily workflow.
 const HIDDEN_WHOLESALE_NAV_IDS = new Set(["monitoring", "reports"]);
 
+// Retail accounts are scoped strictly to data import & import history.
+const RETAIL_ROLE_NAV_ITEMS: NavItem[] = [
+  { id: "import", label: "Import", icon: <UploadIcon /> },
+  { id: "history", label: "Import History", icon: <HistoryIcon /> },
+  // Checking is implemented but intentionally hidden until the daily check workflow
+  // and its verified-inventory-import handoff are ready to be released.
+];
+
+const RETAIL_ROLE_SECTION_IDS = new Set(
+  RETAIL_ROLE_NAV_ITEMS.map((item) => item.id),
+);
+
 const WORKSPACE_NAV_ITEMS: Record<Workspace, NavItem[]> = {
   retail: RETAIL_NAV_ITEMS,
   wholesale: WHOLESALE_NAV_ITEMS,
@@ -284,6 +305,7 @@ const SECTION_TITLES: Record<Section, string> = {
   businessAlerts: "Business alerts",
   import: "Import data",
   history: "Import history",
+  checking: "Checking",
   importOverview: "Import overview",
   overview: "Data overview",
   sales: "Sale",
@@ -302,6 +324,7 @@ const SECTION_TITLES: Record<Section, string> = {
   masterData: "Master data",
   wholesale: "Wholesale",
   settings: "Settings",
+  userManagement: "User management",
 };
 
 interface SaleRow {
@@ -364,6 +387,7 @@ const SALE_COLUMNS: DataTableColumn<SaleRow>[] = [
 
 interface PurchaseRow {
   Branch: string | null;
+  PurchaseNumber: string | null;
   Date: string;
   StockCode: string;
   Description: string;
@@ -374,6 +398,7 @@ interface PurchaseRow {
 }
 
 const PURCHASE_COLUMNS: DataTableColumn<PurchaseRow>[] = [
+  { key: "PurchaseNumber", label: "Purchase Number", copyable: true },
   { key: "Branch", label: "Branch" },
   { key: "Date", label: "Date" },
   { key: "StockCode", label: "Stock Code", copyable: true },
@@ -536,12 +561,16 @@ function App(): React.JSX.Element {
   // Branch-scoped accounts never see other branches' data at all, so we skip the fetch
   // for them; SimpleDataTable/ImportHistoryTable/DataOverviewTable fall back to deriving
   // options from loaded rows, which naturally hides a pointless single-branch filter.
-  const isAdmin = profile !== null && profile.branch_id === null;
+  const isAdmin = profile !== null && profile.role === "admin";
   // Wholesale runs on a completely separate workflow than retail (its own product codes,
   // customer orders, factory vouchers) — none of the import/sale/inventory/purchase/
   // history/overview screens apply to it, so a wholesale account only sees the wholesale
   // nav. Admin sees both, since admin already sees every branch's data elsewhere.
   const isWholesale = profile !== null && profile.role === "wholesale";
+  const isRetailUser = profile !== null && profile.role === "retail";
+  const isRetailManagement =
+    profile !== null && profile.role === "retail_management";
+  const canManageRetail = isAdmin || isRetailManagement;
   // A role scoped to a single workspace is always in that workspace — only admin (who sees
   // both) actually uses the switcher state below.
   const effectiveWorkspace: Workspace = isWholesale
@@ -555,13 +584,19 @@ function App(): React.JSX.Element {
   // there's no frame where the wrong workspace's UI briefly renders before a correction
   // catches up.
   const section: Section =
-    rawSection === "settings" ||
-    WORKSPACE_SECTION_IDS[effectiveWorkspace].has(rawSection)
+    (rawSection === "settings" || rawSection === "userManagement") && isAdmin
       ? rawSection
-      : (WORKSPACE_NAV_ITEMS[effectiveWorkspace][0].id as Section);
-  const branchOptions = useBranches(isAdmin ? session : null);
-  const retailBranchOptions = useRetailBranchOptions(isAdmin ? session : null);
-  const allBranchOptions = useAllBranchOptions(isAdmin ? session : null);
+      : isRetailUser
+        ? RETAIL_ROLE_SECTION_IDS.has(rawSection)
+          ? rawSection
+          : "import"
+        : WORKSPACE_SECTION_IDS[effectiveWorkspace].has(rawSection)
+          ? rawSection
+          : (WORKSPACE_NAV_ITEMS[effectiveWorkspace][0].id as Section);
+  const branchOptions = useBranches(canManageRetail ? session : null);
+  const retailBranchOptions = useRetailBranchOptions(
+    canManageRetail ? session : null,
+  );
 
   async function refreshWarningCount(): Promise<void> {
     if (!session) return;
@@ -584,14 +619,14 @@ function App(): React.JSX.Element {
     }
   }
 
-  // Wholesale accounts never see the Warning nav item, so there's nothing to count for
+  // Wholesale and retail accounts never see the Warning nav item, so there's nothing to count for
   // them. Re-runs whenever either check window changes (e.g. from Settings) so the badge
   // doesn't sit stale until the next sign-in.
   useEffect(() => {
-    if (!session || isWholesale) return;
+    if (!session || isWholesale || isRetailUser) return;
     refreshWarningCount();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, isWholesale, saleWindowDays, purchaseWindowDays]);
+  }, [session, isWholesale, isRetailUser, saleWindowDays, purchaseWindowDays]);
 
   // The Business Alerts badge, counted from the same per-branch overview payloads the
   // Dashboard and the Business Alerts page read — so this costs one set of requests that
@@ -599,9 +634,9 @@ function App(): React.JSX.Element {
   // whose work would be thrown away. Data-quality alerts are excluded here for the same
   // reason they are excluded from that page: the Warning badge already counts them.
   const businessAlertUrls = useMemo(() => {
-    if (isWholesale) return [];
-    const branchIds = isAdmin
-      ? allBranchOptions.map((branch) => branch.id)
+    if (isWholesale || isRetailUser) return [];
+    const branchIds = canManageRetail
+      ? retailBranchOptions.map((branch) => branch.id)
       : profile?.branch_id
         ? [profile.branch_id]
         : [];
@@ -609,7 +644,7 @@ function App(): React.JSX.Element {
     return branchIds.map((id) =>
       dashboardUrl("overview", id, { period: "30d", dateFrom: "", dateTo: "" }),
     );
-  }, [isAdmin, isWholesale, profile?.branch_id, allBranchOptions]);
+  }, [canManageRetail, isWholesale, isRetailUser, profile?.branch_id, retailBranchOptions]);
 
   const { data: branchHealth } = useUrlQueries<OverviewData>(
     businessAlertUrls,
@@ -634,8 +669,11 @@ function App(): React.JSX.Element {
   );
 
   const navItems = useMemo(
-    () =>
-      WORKSPACE_NAV_ITEMS[effectiveWorkspace]
+    () => {
+      if (isRetailUser) {
+        return RETAIL_ROLE_NAV_ITEMS;
+      }
+      const items = WORKSPACE_NAV_ITEMS[effectiveWorkspace]
         .filter(
           (item) =>
             effectiveWorkspace !== "wholesale" ||
@@ -647,8 +685,20 @@ function App(): React.JSX.Element {
           if (item.id === "businessAlerts")
             return { ...item, badgeCount: businessAlertCount };
           return item;
-        }),
-    [effectiveWorkspace, warningCount, businessAlertCount],
+        });
+      return isAdmin
+        ? [
+            ...items,
+            {
+              id: "userManagement",
+              label: "User Management",
+              shortLabel: "Users",
+              icon: <UsersIcon />,
+            },
+          ]
+        : items;
+    },
+    [isAdmin, isRetailUser, effectiveWorkspace, warningCount, businessAlertCount],
   );
 
   // Only admin actually switches workspaces — a retail-only or wholesale-only account is
@@ -861,6 +911,11 @@ function App(): React.JSX.Element {
     setViewingBatchId(null);
     setHighlightBatchId(null);
     if (id !== "receiving") setReceivingTarget(null);
+    if (id === "import") {
+      setImportInitialTab("import");
+      setSection("import");
+      return;
+    }
     if (id === "history") {
       setImportInitialTab("history");
       setSection("import");
@@ -944,10 +999,20 @@ function App(): React.JSX.Element {
     );
   }
 
+  // Import and History share one rendered ImportHubPage, so only those two need to
+  // derive their sidebar selection from its active tab. Checking and Settings are
+  // independent pages and must keep their own section identity.
+  const activeNavSection =
+    isRetailUser && (section === "import" || section === "history")
+      ? importInitialTab === "history"
+        ? "history"
+        : "import"
+      : section;
+
   return (
     <AppShell
       navItems={navItems}
-      activeSection={section}
+      activeSection={activeNavSection}
       onSectionChange={handleSectionChange}
       workspaces={workspaceTabs}
       activeWorkspace={effectiveWorkspace}
@@ -1000,6 +1065,7 @@ function App(): React.JSX.Element {
               session={session}
               batchId={viewingBatchId}
               onBack={() => setViewingBatchId(null)}
+              profile={profile}
             />
           ) : (
             <>
@@ -1007,7 +1073,7 @@ function App(): React.JSX.Element {
                 <DashboardPage
                   session={session}
                   profile={profile}
-                  branchOptions={allBranchOptions}
+                  branchOptions={retailBranchOptions}
                   onViewWarnings={() => handleSectionChange("warnings")}
                   onViewBusinessAlerts={() =>
                     handleSectionChange("businessAlerts")
@@ -1022,16 +1088,26 @@ function App(): React.JSX.Element {
                   onOverviewBranchChange={setOverviewBranchId}
                   initialTab={dashboardTarget?.tab}
                   initialBranchId={dashboardTarget?.branchId}
+                  onViewChecking={() => handleSectionChange("checking")}
+                  onViewImport={() => handleSectionChange("import")}
                 />
               )}
               {section === "businessAlerts" && (
                 <BusinessAlertsPage
                   session={session}
                   profile={profile}
-                  branchOptions={allBranchOptions}
+                  branchOptions={retailBranchOptions}
                   onOpenEvidence={(target, branchId) => {
                     if (target === "warnings") {
                       handleSectionChange("warnings");
+                      return;
+                    }
+                    if (target === "checking") {
+                      handleSectionChange("checking");
+                      return;
+                    }
+                    if (target === "import") {
+                      handleSectionChange("import");
                       return;
                     }
                     // DashboardPage reads these once, on mount — which is exactly what a
@@ -1055,6 +1131,13 @@ function App(): React.JSX.Element {
                   highlightBatchId={highlightBatchId}
                   onViewImportBatch={handleViewImportBatch}
                   initialTab={importInitialTab}
+                  onTabChange={setImportInitialTab}
+                />
+              )}
+              {section === "checking" && (
+                <CheckingPage
+                  session={session}
+                  onImportInventory={() => handleSectionChange("import")}
                 />
               )}
               {section === "overview" && (
@@ -1215,6 +1298,9 @@ function App(): React.JSX.Element {
                   settings={settings}
                   onUpdateSettings={updateSettings}
                 />
+              )}
+              {section === "userManagement" && isAdmin && (
+                <UserManagementPage session={session} />
               )}
             </>
           )}

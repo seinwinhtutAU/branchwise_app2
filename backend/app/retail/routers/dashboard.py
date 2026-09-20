@@ -9,28 +9,27 @@ from app.models.branch import Branch
 from app.models.user import User
 from app.retail.services import branch_health as branch_health_service
 from app.services import dashboard as dashboard_service
-from app.services.branches import resolve_branch_id
+from app.services.branches import list_retail_branches, resolve_branch_id
+from app.retail.routers.common import require_retail
 
-router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[Depends(require_retail)])
 
 DATE_FROM_DESCRIPTION = "Custom range start (inclusive) — overrides `period` when both date_from and date_to are given"
 DATE_TO_DESCRIPTION = "Custom range end (inclusive) — overrides `period` when both date_from and date_to are given"
 
 
-def _resolve_dashboard_branch(user: User, branch_id: str | None, db: Session) -> Branch:
+def _resolve_retail_branch(user: User, branch_id: str | None, db: Session) -> Branch:
     """Same rule as every other write/scoped endpoint (a branch-scoped account's own
-    branch wins; admin must say which one). Resolves any valid branch."""
+    branch wins; admin must say which one). Resolves any valid retail branch (wholesale
+    branches are excluded from the retail dashboard)."""
     resolved_id = resolve_branch_id(user, branch_id, db)
-    branch = db.get(Branch, resolved_id)
+    branch = list_retail_branches(db).filter(Branch.id == resolved_id).first()
     if branch is None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"Unknown branch_id: {resolved_id}",
+            f"Unknown or non-retail branch_id: {resolved_id}",
         )
     return branch
-
-
-_resolve_retail_branch = _resolve_dashboard_branch
 
 
 def _validate_period_or_dates(period: str, date_from: date | None, date_to: date | None) -> None:
@@ -157,4 +156,3 @@ def get_summary_dashboard(
     return dashboard_service.build_summary_dashboard(
         db, branch.id, branch.name, period, date_from=date_from, date_to=date_to
     )
-

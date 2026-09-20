@@ -78,7 +78,8 @@ def test_sales_preview_flags_bad_qty(authed_client: TestClient, db_session: Sess
     assert origin["row_issues"][bad_rows[0]] == clean_issues[1]
 
 
-def test_purchase_preview_flags_negative_price(authed_client: TestClient):
+def test_purchase_preview_flags_negative_price(authed_client: TestClient, db_session: Session):
+    _make_retail_user(db_session)
     response = authed_client.post(
         "/api/imports/purchase",
         files={"file": ("purchase.csv", io.BytesIO(PURCHASE_CSV.encode()), "text/csv")},
@@ -130,7 +131,8 @@ def test_sales_endpoint_rejects_purchase_file(authed_client: TestClient, db_sess
     assert "Sale file" in response.json()["detail"]
 
 
-def test_purchase_endpoint_rejects_inventory_file(authed_client: TestClient):
+def test_purchase_endpoint_rejects_inventory_file(authed_client: TestClient, db_session: Session):
+    _make_retail_user(db_session)
     response = authed_client.post(
         "/api/imports/purchase",
         files={"file": ("inventory.csv", io.BytesIO(INVENTORY_CSV.encode()), "text/csv")},

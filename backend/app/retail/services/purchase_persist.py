@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.retail.models.import_batch import ImportType
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.services.import_common import (
+    count_preview_issues,
     get_or_create_products,
     new_import_batch,
     pluralize,
@@ -24,6 +25,8 @@ def persist_purchases(
     uploaded_by: str | None = None,
     preview_data: dict | None = None,
     purchase_date: datetime.date | None = None,
+    purchase_number: str | None = None,
+    storage_key: str | None = None,
 ) -> dict:
     """Persist a purchase import as one new Purchase batch per call.
 
@@ -42,16 +45,20 @@ def persist_purchases(
         uploaded_by=uploaded_by,
         source_file=source_file,
         preview_data=preview_data,
+        storage_key=storage_key,
     )
     db.add(batch)
 
     summary = {
         "batch_id": batch.id,
         "purchase_id": None,
+        "purchase_number": purchase_number,
         "purchase_lines_created": 0,
         "products_created": 0,
         "products_updated": 0,
     }
+    if preview_data is not None:
+        summary["issue_count"] = count_preview_issues(preview_data)
 
     if df.empty:
         summary["messages"] = ["No purchase items were found in this file — nothing was imported."]
@@ -70,6 +77,7 @@ def persist_purchases(
         branch_id=branch_id,
         import_batch_id=batch.id,
         location_raw=location_raw,
+        purchase_number=purchase_number,
         purchase_date=purchase_date or datetime.date.today(),
         source_file=source_file,
     )

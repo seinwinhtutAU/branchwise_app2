@@ -1,8 +1,14 @@
 import datetime
+import io
+import json
+import logging
 from pathlib import Path
+import uuid
+
+logger = logging.getLogger(__name__)
 
 import pandas as pd
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session, defer, joinedload
 
@@ -15,23 +21,54 @@ from app.retail.models.sale import Sale, SaleLine
 from app.retail.models.stock_level import StockLevel
 from app.models.user import User, UserRole
 from app.services.branches import list_retail_branches
-from app.retail.services.import_common import SUPPORTED_EXTENSIONS, detect_report_type, validate_rows
+from app.retail.services.import_common import SUPPORTED_EXTENSIONS, detect_report_type, validate_rows, read_raw_grid
 from app.retail.services.inventory_import import OUTPUT_COLUMNS as INVENTORY_OUTPUT_COLUMNS
 from app.retail.services.inventory_import import VALIDATION_RULES as INVENTORY_VALIDATION_RULES
-from app.retail.services.inventory_import import parse_inventory_upload
+from app.retail.services.inventory_import import parse_inventory_upload, parse_inventory_export_from_grid
 from app.retail.services.inventory_persist import persist_inventory
 from app.retail.services.pos_import import OUTPUT_COLUMNS as SALES_OUTPUT_COLUMNS
 from app.retail.services.pos_import import VALIDATION_RULES as SALES_VALIDATION_RULES
-from app.retail.services.pos_import import parse_pos_sale_upload
+from app.retail.services.pos_import import parse_pos_sale_upload, parse_pos_sale_export_from_grid
 from app.retail.services.purchase_import import OUTPUT_COLUMNS as PURCHASE_OUTPUT_COLUMNS
 from app.retail.services.purchase_import import VALIDATION_RULES as PURCHASE_VALIDATION_RULES
-from app.retail.services.purchase_import import parse_purchase_upload
+from app.retail.services.purchase_import import parse_purchase_upload, parse_purchase_export_from_grid, extract_purchase_metadata
 from app.retail.services.purchase_persist import persist_purchases
 from app.retail.services.sales_persist import persist_sales
+from app.retail.routers.common import require_retail
+from app.services.storage import get_storage_service
 
-router = APIRouter(prefix="/api/imports", tags=["imports"])
+router = APIRouter(prefix="/api/imports", tags=["imports"], dependencies=[Depends(require_retail)])
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
+
+
+def _upload_to_storage(contents: bytes, filename: str | None, preview_data: dict | None = None) -> str | None:
+    if not filename:
+        return None
+    storage = get_storage_service()
+    if not storage.is_configured:
+        return None
+    batch_prefix = str(uuid.uuid4())
+    key = f"imports/{batch_prefix}/{filename}"
+    ext = Path(filename).suffix.lower()
+    content_type = (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        if ext == ".xlsx"
+        else "application/vnd.ms-excel"
+        if ext == ".xls"
+        else "text/csv"
+        if ext == ".csv"
+        else "application/octet-stream"
+    )
+    uploaded_key = storage.upload_file_bytes(contents, key, content_type)
+    if preview_data:
+        json_key = f"imports/{batch_prefix}/preview_data.json"
+        storage.upload_file_bytes(
+            json.dumps(preview_data).encode("utf-8"),
+            json_key,
+            "application/json",
+        )
+    return uploaded_key
 
 
 async def _read_upload(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> bytes:
@@ -206,6 +243,7 @@ async def confirm_sales_file(
     preview_data = _build_preview(
         file.filename, origin_rows, clean_df, SALES_OUTPUT_COLUMNS, SALES_VALIDATION_RULES
     )
+    storage_key = _upload_to_storage(contents, file.filename)
     return persist_sales(
         db,
         clean_df,
@@ -214,6 +252,7 @@ async def confirm_sales_file(
         source_file=file.filename,
         uploaded_by=user.id,
         preview_data=preview_data,
+        storage_key=storage_key,
     )
 
 
@@ -258,6 +297,7 @@ async def confirm_inventory_file(
     preview_data = _build_preview(
         file.filename, origin_rows, clean_df, INVENTORY_OUTPUT_COLUMNS, INVENTORY_VALIDATION_RULES
     )
+    storage_key = _upload_to_storage(contents, file.filename)
     return persist_inventory(
         db,
         clean_df,
@@ -266,6 +306,7 @@ async def confirm_inventory_file(
         source_file=file.filename,
         uploaded_by=user.id,
         preview_data=preview_data,
+        storage_key=storage_key,
     )
 
 
@@ -291,11 +332,15 @@ async def confirm_purchase_file(
     file: UploadFile = File(...),
     branch_id: str | None = Form(None),
     purchase_date: str | None = Form(None),
+    purchase_number: str | None = Form(None),
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
     _check_extension(file.filename)
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
+
+    extracted_number, extracted_date = extract_purchase_metadata(file.filename or "")
+    resolved_purchase_number = purchase_number or extracted_number
 
     resolved_purchase_date = None
     if purchase_date:
@@ -303,6 +348,8 @@ async def confirm_purchase_file(
             resolved_purchase_date = datetime.date.fromisoformat(purchase_date)
         except ValueError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "purchase_date must be YYYY-MM-DD") from exc
+    elif extracted_date:
+        resolved_purchase_date = extracted_date
 
     contents = await _read_upload(file)
     origin_rows, clean_df = _parse_or_400(
@@ -312,6 +359,7 @@ async def confirm_purchase_file(
     preview_data = _build_preview(
         file.filename, origin_rows, clean_df, PURCHASE_OUTPUT_COLUMNS, PURCHASE_VALIDATION_RULES
     )
+    storage_key = _upload_to_storage(contents, file.filename)
     return persist_purchases(
         db,
         clean_df,
@@ -321,7 +369,166 @@ async def confirm_purchase_file(
         uploaded_by=user.id,
         preview_data=preview_data,
         purchase_date=resolved_purchase_date,
+        purchase_number=resolved_purchase_number,
+        storage_key=storage_key,
     )
+
+
+@router.post("/inspect")
+async def inspect_import_file(
+    file: UploadFile = File(...),
+    expected_type: str = Form(...),
+    user: User = Depends(get_current_app_user),
+) -> dict:
+    """Fast inspection of an import file before confirmation.
+
+    Verifies the file format matches expected_type, extracts date(s) and
+    purchase number (if applicable), and flags wrong/unrecognized files.
+    """
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in SUPPORTED_EXTENSIONS:
+        return {
+            "filename": file.filename,
+            "status": "invalid",
+            "detected_type": "unknown",
+            "expected_type": expected_type,
+            "dates": [],
+            "purchase_number": None,
+            "row_count": 0,
+            "error_message": f"Unsupported file type ({ext or 'unknown'})",
+        }
+
+    try:
+        contents = await _read_upload(file)
+        rows = read_raw_grid(contents, file.filename or "")
+    except HTTPException as exc:
+        msg = str(exc.detail)
+        if exc.status_code == 413 or "too large" in msg.lower():
+            err_msg = "Too large: exceeds 25 MB limit"
+        else:
+            err_msg = msg
+        return {
+            "filename": file.filename,
+            "status": "invalid",
+            "detected_type": "unknown",
+            "expected_type": expected_type,
+            "dates": [],
+            "purchase_number": None,
+            "row_count": 0,
+            "error_message": err_msg,
+        }
+    except Exception as exc:
+        msg = str(exc)
+        if "too large" in msg.lower() or "413" in msg:
+            err_msg = "Too large: exceeds 25 MB limit"
+        else:
+            err_msg = f"Could not read file: {exc}"
+        return {
+            "filename": file.filename,
+            "status": "invalid",
+            "detected_type": "unknown",
+            "expected_type": expected_type,
+            "dates": [],
+            "purchase_number": None,
+            "row_count": 0,
+            "error_message": err_msg,
+        }
+
+    detected = detect_report_type(rows)
+    dates: list[str] = []
+    purchase_number: str | None = None
+    row_count = 0
+
+    if detected is not None and detected != expected_type:
+        return {
+            "filename": file.filename,
+            "status": "wrong_type",
+            "detected_type": detected,
+            "expected_type": expected_type,
+            "dates": [],
+            "purchase_number": None,
+            "row_count": 0,
+            "error_message": f"Not a {expected_type} file",
+        }
+
+    try:
+        if expected_type == "purchase":
+            purchase_number, p_date = extract_purchase_metadata(file.filename or "")
+            if p_date:
+                dates = [p_date.isoformat()]
+            clean_df = parse_purchase_export_from_grid(rows)
+            row_count = len(clean_df)
+            if row_count == 0 and detected is None:
+                return {
+                    "filename": file.filename,
+                    "status": "unrecognized",
+                    "detected_type": "unknown",
+                    "expected_type": expected_type,
+                    "dates": dates,
+                    "purchase_number": purchase_number,
+                    "row_count": 0,
+                    "error_message": "Not a purchase file",
+                }
+        elif expected_type == "sale":
+            clean_df = parse_pos_sale_export_from_grid(rows)
+            row_count = len(clean_df)
+            if row_count == 0 and detected is None:
+                return {
+                    "filename": file.filename,
+                    "status": "unrecognized",
+                    "detected_type": "unknown",
+                    "expected_type": expected_type,
+                    "dates": [],
+                    "purchase_number": None,
+                    "row_count": 0,
+                    "error_message": "Not a sale file",
+                }
+            if not clean_df.empty and "Date" in clean_df.columns:
+                unique_dates = sorted(clean_df["Date"].dropna().astype(str).unique().tolist())
+                dates = unique_dates
+        elif expected_type == "inventory":
+            clean_df = parse_inventory_export_from_grid(rows)
+            row_count = len(clean_df)
+            if row_count == 0 and detected is None:
+                return {
+                    "filename": file.filename,
+                    "status": "unrecognized",
+                    "detected_type": "unknown",
+                    "expected_type": expected_type,
+                    "dates": [],
+                    "purchase_number": None,
+                    "row_count": 0,
+                    "error_message": "Not an inventory file",
+                }
+            printed_at = clean_df.attrs.get("printed_at")
+            if printed_at:
+                dates = [printed_at.date().isoformat()]
+            else:
+                _, f_date = extract_purchase_metadata(file.filename or "")
+                if f_date:
+                    dates = [f_date.isoformat()]
+    except Exception as exc:
+        return {
+            "filename": file.filename,
+            "status": "invalid",
+            "detected_type": detected or "unknown",
+            "expected_type": expected_type,
+            "dates": dates,
+            "purchase_number": purchase_number,
+            "row_count": 0,
+            "error_message": f"Could not parse file: {exc}",
+        }
+
+    return {
+        "filename": file.filename,
+        "status": "valid",
+        "detected_type": detected or expected_type,
+        "expected_type": expected_type,
+        "dates": dates,
+        "purchase_number": purchase_number,
+        "row_count": row_count,
+        "error_message": None,
+    }
 
 
 @router.get("/freshness")
@@ -439,6 +646,8 @@ def list_import_history(
             "summary": b.summary,
             "created_at": b.created_at.isoformat(),
             "reverted_at": b.reverted_at.isoformat() if b.reverted_at else None,
+            "storage_key": b.storage_key,
+            "has_file": bool(b.storage_key),
         }
         for b in query.all()
     ]
@@ -454,6 +663,29 @@ def get_import_history_detail(
     if batch is None or not _can_access_batch(user, batch):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
 
+    preview_data = None
+    storage = get_storage_service()
+    if storage.is_configured:
+        try:
+            preview_key = f"imports/{batch.id}/preview_data.json"
+            res = storage.download_file_bytes(preview_key)
+            if res is not None:
+                data_bytes, _ = res
+                preview_data = json.loads(data_bytes.decode("utf-8"))
+        except Exception as exc:
+            logger.warning("Failed to fetch preview data from R2 for batch %s: %s", batch.id, exc)
+
+    if preview_data is None:
+        preview_data = batch.preview_data or {}
+
+    origin_data = preview_data.get("origin", {"rows": [], "row_issues": []})
+    clean_data = preview_data.get("clean", {"columns": [], "rows": [], "row_issues": []})
+
+    has_origin_rows = bool(
+        isinstance(origin_data, dict)
+        and origin_data.get("rows")
+    )
+
     return {
         "id": batch.id,
         "import_type": batch.import_type.value,
@@ -464,9 +696,61 @@ def get_import_history_detail(
         "summary": batch.summary,
         "created_at": batch.created_at.isoformat(),
         "reverted_at": batch.reverted_at.isoformat() if batch.reverted_at else None,
-        "origin": batch.preview_data.get("origin", {"rows": [], "row_issues": []}),
-        "clean": batch.preview_data.get("clean", {"columns": [], "rows": [], "row_issues": []}),
+        "storage_key": batch.storage_key,
+        "has_file": bool(batch.storage_key or has_origin_rows),
+        "origin": origin_data,
+        "clean": clean_data,
     }
+
+
+@router.get("/history/{batch_id}/download")
+def download_import_batch_file(
+    batch_id: str,
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+):
+    """Download the original spreadsheet file for an import batch. Restricted to admin users."""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only administrators can download original import files",
+        )
+
+    batch = db.get(ImportBatch, batch_id)
+    if batch is None or not _can_access_batch(user, batch):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
+
+    storage = get_storage_service()
+    if batch.storage_key and storage.is_configured:
+        res = storage.download_file_bytes(batch.storage_key)
+        if res is not None:
+            data, content_type = res
+            filename = batch.filename or f"import_{batch.id}.xlsx"
+            return Response(
+                content=data,
+                media_type=content_type,
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+    # Fallback: if no R2 file exists yet, check if preview_data has origin rows to reconstruct an Excel file
+    origin = (batch.preview_data or {}).get("origin", {})
+    origin_rows = origin.get("rows", [])
+    if origin_rows:
+        output = io.BytesIO()
+        df = pd.DataFrame(origin_rows)
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False)
+        output.seek(0)
+        filename = batch.filename or f"import_{batch.id}.xlsx"
+        if not filename.endswith((".xlsx", ".xls", ".csv")):
+            filename = f"{filename}.xlsx"
+        return Response(
+            content=output.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    raise HTTPException(status.HTTP_404_NOT_FOUND, "Original file is not available for this import batch")
 
 
 @router.post("/history/{batch_id}/revert")

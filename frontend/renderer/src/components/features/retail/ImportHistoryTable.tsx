@@ -29,13 +29,14 @@ import {
   Td,
 } from "@renderer/components/ui/Table";
 import { Pagination } from "@renderer/components/ui/Pagination";
-import { HistoryIcon } from "@renderer/components/ui/icons";
+import { DownloadIcon, HistoryIcon } from "@renderer/components/ui/icons";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 import { distinctValues, inDateRange } from "@renderer/lib/filters";
 import "@renderer/lib/reactTable";
 import type {
   PendingImport,
   Profile,
+  SelectedImportFile,
 } from "@renderer/components/features/types";
 
 const RETAIL_REVERT_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -61,6 +62,8 @@ interface ImportBatchRow {
   summary: Record<string, unknown>;
   created_at: string;
   reverted_at: string | null;
+  storage_key?: string | null;
+  has_file?: boolean;
 }
 
 interface Props {
@@ -74,6 +77,7 @@ interface Props {
   // Hands off a picked-and-parsed file to the app-level confirm flow — used by each
   // row's "Reimport" button.
   onFileReady?: (pending: PendingImport) => void;
+  onFileSelected?: (file: SelectedImportFile) => void;
 }
 
 function formatDate(iso: string): string {
@@ -99,6 +103,7 @@ function statusLabel(status: string): string {
 }
 
 const DEFAULT_STATUS_FILTER = "completed";
+const IMPORT_STATUS_OPTIONS = ["completed", "reverted", "reimported"];
 const EMPTY_ROWS: never[] = [];
 
 const STATUS_BADGE_VARIANT: Record<string, "success" | "info" | "default"> = {
@@ -121,6 +126,7 @@ function ImportHistoryTable({
   profile,
   highlightBatchId,
   onFileReady,
+  onFileSelected,
 }: Props): React.JSX.Element {
   const showToast = useToast();
   const {
@@ -141,7 +147,7 @@ function ImportHistoryTable({
     trigger: triggerFilePicker,
     input: filePickerInput,
     picking,
-  } = useImportFilePicker(session, onFileReady);
+  } = useImportFilePicker(session, onFileReady, onFileSelected);
 
   const handleReimport = useCallback((row: ImportBatchRow): void => {
     triggerFilePicker({
@@ -222,6 +228,39 @@ function ImportHistoryTable({
     }
   }, [session, showToast]);
 
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const handleDownload = useCallback(
+    async (row: ImportBatchRow): Promise<void> => {
+      setDownloadingId(row.id);
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/imports/history/${row.id}/download`, {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          showToast("error", body?.detail ?? `Download failed (${response.status})`);
+          return;
+        }
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = row.filename || `import_${row.id}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        showToast("success", "File downloaded successfully.");
+      } catch {
+        showToast("error", "Network error while downloading the file.");
+      } finally {
+        setDownloadingId(null);
+      }
+    },
+    [session.access_token, showToast],
+  );
+
   const filteredRows = useMemo(() => {
     if (!rows) return null;
     return rows.filter(
@@ -250,19 +289,45 @@ function ImportHistoryTable({
         id: "filename",
         accessorFn: (row) => row.filename,
         header: "Filename",
-        cell: (info) => String(info.getValue() ?? "—"),
+        cell: (info) => {
+          const row = info.row.original;
+          const issueCount =
+            typeof row.summary?.issue_count === "number"
+              ? row.summary.issue_count
+              : null;
+          const hasIssues = issueCount !== null ? issueCount > 0 : false;
+          return (
+            <div className="flex items-center gap-2 max-w-[16rem]">
+              <span className="truncate font-mono text-xs">{row.filename ?? "—"}</span>
+              {hasIssues && (
+                <span
+                  title={`${issueCount} validation issue${issueCount === 1 ? "" : "s"} found — click to inspect origin vs clean data`}
+                  className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/20 text-amber-500 border border-amber-500/30 shrink-0 select-none cursor-pointer"
+                >
+                  ! {issueCount}
+                </span>
+              )}
+            </div>
+          );
+        },
       },
       {
         id: "branch",
         accessorFn: (row) => row.branch_name,
         header: "Branch",
-        cell: (info) => String(info.getValue() ?? "—"),
-      },
-      {
-        id: "uploaded_by",
-        accessorFn: (row) => row.uploaded_by_name,
-        header: "Uploaded by",
-        cell: (info) => String(info.getValue() ?? "—"),
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <div>
+              <div>{row.branch_name ?? "All branches"}</div>
+              {row.uploaded_by_name && (
+                <div className="text-[11px] text-text-muted">
+                  by {row.uploaded_by_name}
+                </div>
+              )}
+            </div>
+          );
+        },
       },
       {
         id: "status",
@@ -278,9 +343,9 @@ function ImportHistoryTable({
         },
       },
       {
-        id: "created",
+        id: "date",
         accessorFn: (row) => row.created_at,
-        header: "Created",
+        header: "Date",
         cell: (info) => formatDate(String(info.getValue())),
       },
       {
@@ -289,19 +354,74 @@ function ImportHistoryTable({
         header: "",
         cell: (info) => {
           const row = info.row.original;
-          if (row.status !== "completed") return null;
-          if (isRetailRevertLocked(row, profile)) {
+          const isAdmin = profile?.role === "admin";
+
+          if (row.status !== "completed") {
+            if (!isAdmin) return null;
             return (
-              <span
-                className="text-xs text-text-muted"
-                title="Retail accounts can only reimport or remove an import within 1 day of importing it"
-              >
-                Locked
-              </span>
+              <div className="flex items-center gap-1.5 justify-end">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title="Download original file"
+                  loading={downloadingId === row.id}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void handleDownload(row);
+                  }}
+                >
+                  <DownloadIcon className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Download</span>
+                </Button>
+              </div>
             );
           }
+
+          if (isRetailRevertLocked(row, profile)) {
+            return (
+              <div className="flex items-center gap-1.5 justify-end">
+                <span
+                  className="text-xs text-text-muted"
+                  title="Retail accounts can only reimport or remove an import within 1 day of importing it"
+                >
+                  Locked
+                </span>
+                {isAdmin && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    title="Download original file"
+                    loading={downloadingId === row.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void handleDownload(row);
+                    }}
+                  >
+                    <DownloadIcon className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Download</span>
+                  </Button>
+                )}
+              </div>
+            );
+          }
+
           return (
             <div className="flex items-center gap-1.5 justify-end">
+              {isAdmin && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title="Download original file"
+                  loading={downloadingId === row.id}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void handleDownload(row);
+                  }}
+                >
+                  <DownloadIcon className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Download</span>
+                </Button>
+              )}
               <Button
                 variant="secondary"
                 size="sm"
@@ -331,6 +451,8 @@ function ImportHistoryTable({
       },
     ],
     [
+      downloadingId,
+      handleDownload,
       handleReimport,
       handleRevert,
       picking,
@@ -357,7 +479,18 @@ function ImportHistoryTable({
   const pageSize = pagination.pageSize;
 
   const typeOptions = useMemo(() => (rows ? distinctValues(rows, "import_type") : []), [rows]);
-  const statusOptions = useMemo(() => (rows ? distinctValues(rows, "status") : []), [rows]);
+  // Keep the status picker available even when all current rows are completed. A user
+  // must still be able to switch to the audit states (Removed/Reimported) without first
+  // creating a row of one of those types.
+  const statusOptions = useMemo(() => {
+    const presentStatuses = rows ? distinctValues(rows, "status") : [];
+    return [
+      ...IMPORT_STATUS_OPTIONS,
+      ...presentStatuses.filter(
+        (status) => !IMPORT_STATUS_OPTIONS.includes(status),
+      ),
+    ];
+  }, [rows]);
   const branchOptionsList = useMemo(() => {
     if (!rows) return [];
     return branchOptions.length > 0 ? branchOptions : distinctValues(rows, "branch_name");
@@ -410,22 +543,20 @@ function ImportHistoryTable({
                 </div>
               )}
 
-              {statusOptions.length > 1 && (
-                <div className="w-32 max-w-full">
-                  <Select
-                    size="sm"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                  >
-                    <option value="">All statuses</option>
-                    {statusOptions.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {statusLabel(opt)}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              )}
+              <div className="w-32 max-w-full">
+                <Select
+                  size="sm"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                >
+                  <option value="">All statuses</option>
+                  {statusOptions.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {statusLabel(opt)}
+                    </option>
+                  ))}
+                </Select>
+              </div>
 
               {branchOptionsList.length > 1 && (
                 <div className="w-36 max-w-full">
@@ -612,4 +743,3 @@ function ImportHistoryTable({
 }
 
 export default ImportHistoryTable;
-

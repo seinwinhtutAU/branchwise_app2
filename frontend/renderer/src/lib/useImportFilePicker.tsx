@@ -2,7 +2,10 @@ import { useRef, useState, type ChangeEvent } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
 import { useToast } from "@renderer/lib/useToast";
-import type { PendingImport } from "@renderer/components/features/types";
+import type {
+  PendingImport,
+  SelectedImportFile,
+} from "@renderer/components/features/types";
 
 interface PickContext {
   endpoint: string;
@@ -15,11 +18,12 @@ interface PickContext {
   replacingFilename?: string | null;
 }
 
-// Shared "pick a file → parse/preview it → hand off as a PendingImport" flow for
+// Shared "pick a file → hand off as a SelectedImportFile / PendingImport" flow for
 // anywhere an import is triggered without going through the FileImportCard grid.
 export function useImportFilePicker(
   session: Session,
   onFileReady?: (pending: PendingImport) => void,
+  onFileSelected?: (file: SelectedImportFile) => void,
 ): {
   trigger: (context: PickContext) => void;
   input: React.JSX.Element;
@@ -40,6 +44,18 @@ export function useImportFilePicker(
     e.target.value = "";
     const context = contextRef.current;
     if (!file || !context) return;
+
+    if (onFileSelected) {
+      onFileSelected({
+        id: crypto.randomUUID(),
+        importLabel: context.importLabel,
+        endpoint: context.endpoint,
+        file,
+        revertBatchId: context.revertBatchId,
+        replacingFilename: context.replacingFilename,
+      });
+      return;
+    }
 
     setPicking(true);
     try {

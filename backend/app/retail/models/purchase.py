@@ -26,6 +26,7 @@ class Purchase(Base):
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True)
     import_batch_id: Mapped[str | None] = mapped_column(ForeignKey("import_batches.id"), nullable=True)
     location_raw: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    purchase_number: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     purchase_date: Mapped[date] = mapped_column(Date, nullable=False)
     source_file: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

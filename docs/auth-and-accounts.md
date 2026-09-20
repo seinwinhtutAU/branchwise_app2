@@ -70,6 +70,8 @@ given real passwords before daily use.
 | -------------------------- | --------- | ----------- |
 | admin@branchwise.app       | admin     | _(none)_    |
 | wholesale@branchwise.app   | wholesale | Wholesale   |
+| bogyoke@branchwise.app      | retail    | Bogyoke     |
+| bhs1@branchwise.app        | retail    | BHS 1       |
 | aungthitsar@branchwise.app | retail    | AungThitSar |
 | ashley@branchwise.app      | retail    | Ashley      |
 | retail3@branchwise.app     | retail    | Retail 3    |

@@ -45,6 +45,8 @@ interface Props {
   // unmounting the tab on every tab switch — see App.tsx.
   overviewBranchId: string | null;
   onOverviewBranchChange: (branchId: string | null) => void;
+  onViewChecking?: () => void;
+  onViewImport?: () => void;
 }
 
 type Tab = "summary" | "overview" | "revenue" | "cost" | "inventory" | "customer";
@@ -87,6 +89,8 @@ export function DashboardPage({
   onOverviewBranchChange,
   initialTab,
   initialBranchId,
+  onViewChecking,
+  onViewImport,
 }: Props): React.JSX.Element {
   // Admin has no fixed branch_id — same convention used everywhere else in the app.
   const isAdmin = profile !== null && profile.branch_id === null;
@@ -197,8 +201,15 @@ export function DashboardPage({
             evidenceBranchId: string,
           ) => {
             setBranchId(evidenceBranchId);
-            if (target === "warnings") onViewWarnings();
-            else setActiveTab(target);
+            if (target === "warnings") {
+              onViewWarnings();
+            } else if (target === "checking") {
+              onViewChecking?.();
+            } else if (target === "import") {
+              onViewImport?.();
+            } else {
+              setActiveTab(target);
+            }
           }}
         />
       )}

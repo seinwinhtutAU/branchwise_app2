@@ -2,9 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import auth, branches, health, settings
+from app.routers import auth, branches, health, settings, users
 from app.retail.routers import (
     chat,
+    checking,
     dashboard,
     data_overview,
     import_health,
@@ -53,7 +54,9 @@ def create_app() -> FastAPI:
     app.include_router(purchasing.router)
     app.include_router(warnings.router)
     app.include_router(settings.router)
+    app.include_router(users.router)
     app.include_router(chat.router)
+    app.include_router(checking.router)
     app.include_router(dashboard.router)
     app.include_router(wholesale_shipments.router)
     app.include_router(wholesale_receivings.router)

@@ -223,6 +223,17 @@ def product_summary_messages(created: int, updated: int) -> list[str]:
     return messages
 
 
+def count_preview_issues(preview_data: dict | None) -> int:
+    """Calculate the total count of row issues and validation warnings in preview_data."""
+    if not preview_data:
+        return 0
+    clean_issues = preview_data.get("clean", {}).get("row_issues", [])
+    count = sum(len(issues) for issues in clean_issues if issues)
+    mismatches = preview_data.get("slip_subtotal_mismatches", [])
+    count += len(mismatches)
+    return count
+
+
 def new_import_batch(
     import_type: ImportType,
     *,
@@ -230,6 +241,7 @@ def new_import_batch(
     uploaded_by: str | None,
     source_file: str | None,
     preview_data: dict | None,
+    storage_key: str | None = None,
 ) -> ImportBatch:
     """A fresh (not yet committed) ImportBatch header, identical across the three
     persist services — client-generated id so the data rows it creates can reference
@@ -242,6 +254,7 @@ def new_import_batch(
         filename=source_file,
         summary={},
         preview_data=preview_data or {},
+        storage_key=storage_key,
     )
 
 

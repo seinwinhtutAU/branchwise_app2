@@ -24,6 +24,15 @@ export interface ImportPreviewResult {
   clean: CleanResult;
 }
 
+export interface SelectedImportFile {
+  id: string;
+  file: File;
+  endpoint: string;
+  importLabel: string;
+  revertBatchId?: string;
+  replacingFilename?: string | null;
+}
+
 export interface PendingImport {
   // Unique per pick, even for two files with the same name — App.tsx keys
   // ImportReviewPage on this so switching to a different pending file (advancing a
@@ -50,6 +59,8 @@ export interface ImportHistoryDetail {
   summary: Record<string, unknown>;
   created_at: string;
   reverted_at: string | null;
+  storage_key?: string | null;
+  has_file?: boolean;
   origin: { rows: string[][]; row_issues: RowIssue[][] };
   clean: CleanResult;
 }

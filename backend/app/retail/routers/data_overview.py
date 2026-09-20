@@ -11,8 +11,9 @@ from app.retail.models.product import Product
 from app.retail.models.sale import Sale, SaleLine
 from app.models.user import User
 from app.retail.services.pricing import compute_profit, sale_line_pricer
+from app.retail.routers.common import require_retail
 
-router = APIRouter(prefix="/api/data-overview", tags=["data-overview"])
+router = APIRouter(prefix="/api/data-overview", tags=["data-overview"], dependencies=[Depends(require_retail)])
 
 # Matches the frontend's usePagination default, so a page of results here is exactly
 # one page of the table on screen.

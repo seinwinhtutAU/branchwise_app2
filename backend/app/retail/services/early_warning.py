@@ -898,15 +898,364 @@ def data_quality_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[
 
 Rule = Callable[[BranchSnapshot, Thresholds], list[Alert]]
 
+
+def daily_import_missing_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]:
+    """Fires a CRITICAL alert after 8:00 PM if today's Sale and/or Inventory export
+    from POS has not been imported for this branch."""
+    if not snapshot.is_after_8pm:
+        return []
+
+    missing = []
+    if not snapshot.has_today_sales:
+        missing.append("Sale")
+    if not snapshot.has_today_inventory:
+        missing.append("Inventory")
+
+    if not missing:
+        return []
+
+    missing_str = " and ".join(missing)
+    title = f"Daily {missing_str} import missing for today"
+    summary = f"Today's {', '.join(missing)} not imported after 8:00 PM"
+    what_happened = (
+        f"The shop closed at 8:00 PM, but today's {missing_str} export from the POS terminal "
+        "has not been imported. Store performance, stock counts, and daily reconciliations "
+        "cannot reflect today's trade until confirmed."
+    )
+    recommended_action = "Upload and confirm today's POS export file immediately."
+
+    facts = _facts(
+        _fact("Shop Status", "Closed (after 8:00 PM)"),
+        _fact("Today's Sales", "Imported" if snapshot.has_today_sales else "Missing"),
+        _fact("Today's Inventory", "Imported" if snapshot.has_today_inventory else "Missing"),
+    )
+
+    return [
+        Alert(
+            id="daily_import_missing",
+            severity=CRITICAL,
+            dimension="sales" if not snapshot.has_today_sales else "inventory",
+            title=title,
+            summary=summary,
+            what_happened=what_happened,
+            recommended_action=recommended_action,
+            link="import",
+            measure="daily_import",
+            facts=facts,
+        )
+    ]
+
+
+def physical_stock_audit_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]:
+    """Alerts when inventory data quality issues exist, prompting a physical stock check.
+    Audit sheet generation is unlocked after 8:00 PM once daily imports complete."""
+    if snapshot.data_issue_count == 0:
+        return []
+
+    can_generate = snapshot.is_after_8pm and snapshot.has_today_sales and snapshot.has_today_inventory
+    status_note = (
+        "Audit sheet ready — daily imports completed after 8:00 PM."
+        if can_generate
+        else "Audit sheet locked until 8:00 PM and today's sales and inventory imports are confirmed."
+    )
+
+    title = "Physical stock audit required"
+    summary = f"{snapshot.data_issue_count} inventory discrepancies to verify physically"
+    what_happened = (
+        f"The system detected {snapshot.data_issue_count} data quality issues in inventory "
+        "(reconciliation mismatches, unlinked products, or negative stock). Staff must perform "
+        "a physical shelf count and update the external inventory system. "
+        + status_note
+    )
+    recommended_action = (
+        "Download checking stock file, conduct physical stock count in shop, update external POS, "
+        "and re-import inventory file."
+    )
+
+    facts = _facts(
+        _fact("Discrepancy Count", str(snapshot.data_issue_count)),
+        _fact("Critical Issues", str(snapshot.critical_data_issue_count)),
+        _fact("Audit Sheet Status", "Ready for download" if can_generate else "Locked (pending 8:00 PM & daily imports)"),
+    )
+
+    return [
+        Alert(
+            id="physical_stock_audit",
+            severity=WARNING,
+            dimension="inventory",
+            title=title,
+            summary=summary,
+            what_happened=what_happened,
+            recommended_action=recommended_action,
+            link="checking",
+            measure="physical_stock_audit",
+            facts=facts,
+        )
+    ]
+
+
+def stock_allocation_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]:
+    """Recommends allocating dead stock (no sales in last 90 days) from this branch to
+    other retail branches that have active sales in the same 90-day window."""
+    if not snapshot.stock_allocations:
+        return []
+
+    count = len(snapshot.stock_allocations)
+    target_branches = sorted(list({item["target_branch_name"] for item in snapshot.stock_allocations}))
+    title = f"Stock allocation: {_count_products(count)} dead locally have sales elsewhere"
+    summary = f"Rebalance {count} dead products to {', '.join(target_branches[:2])}"
+    what_happened = (
+        f"{_count_products(count)} have sat with zero sales in the last 90 days at this branch while "
+        f"stock remains on hand. Other retail branches ({', '.join(target_branches)}) are actively selling "
+        "these exact stock codes. Transferring these pairs rebalances inventory and frees up tied capital."
+    )
+    recommended_action = f"Initiate inter-branch transfer to {', '.join(target_branches)} instead of ordering new units."
+
+    rows = [
+        [
+            f"{item['stock_code']} · {item['description']}",
+            f"{item['on_hand_qty']:,.0f}",
+            item["target_branch_name"],
+            f"{item['target_sales_90d']:,.0f} sold",
+            f"Transfer {item['recommended_transfer_qty']:,.0f}",
+        ]
+        for item in snapshot.stock_allocations[:5]
+    ]
+    table = {
+        "columns": [
+            {"label": "Product", "align": "left"},
+            {"label": "On hand here", "align": "right"},
+            {"label": "Selling branch", "align": "left"},
+            {"label": "Sales (90d)", "align": "right"},
+            {"label": "Recommendation", "align": "right"},
+        ],
+        "rows": rows,
+        "note": f"Showing top {len(rows)} of {count} transfer opportunities." if count > len(rows) else None,
+    }
+
+    return [
+        Alert(
+            id="stock_allocation",
+            severity=WARNING,
+            dimension="inventory",
+            title=title,
+            summary=summary,
+            what_happened=what_happened,
+            recommended_action=recommended_action,
+            link="inventory",
+            measure="stock_allocation",
+            table=table,
+        )
+    ]
+
+
+def urgent_reorder_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]:
+    """Flags critical stockout risk (<= 3 days of stock remaining) with suggested reorders."""
+    if not snapshot.urgent_reorders:
+        return []
+
+    count = len(snapshot.urgent_reorders)
+    title = f"Urgent stock reorder required: {_count_products(count)} critical"
+    summary = f"{count} products have \u2264 3 days of stock left"
+    what_happened = (
+        f"{_count_products(count)} are at immediate risk of stocking out based on recent daily sales run-rates. "
+        "Immediate supplier replenishment is required to prevent lost sales."
+    )
+    recommended_action = "Create urgent purchase orders for the recommended replenishment quantities."
+
+    rows = [
+        [
+            f"{item['stock_code']} · {item['description']}",
+            f"{item['on_hand_qty']:,.0f}",
+            f"{item['days_left']} days",
+            f"Order {item['recommended_reorder_qty']:,.0f}",
+        ]
+        for item in snapshot.urgent_reorders[:5]
+    ]
+    table = {
+        "columns": [
+            {"label": "Product", "align": "left"},
+            {"label": "In shop", "align": "right"},
+            {"label": "Cover left", "align": "right"},
+            {"label": "Recommended Order", "align": "right"},
+        ],
+        "rows": rows,
+        "note": f"Showing top {len(rows)} of {count} urgent reorder items." if count > len(rows) else None,
+    }
+
+    return [
+        Alert(
+            id="urgent_reorder",
+            severity=CRITICAL,
+            dimension="inventory",
+            title=title,
+            summary=summary,
+            what_happened=what_happened,
+            recommended_action=recommended_action,
+            link="inventory",
+            measure="urgent_reorder",
+            table=table,
+        )
+    ]
+
+
+def footwear_aging_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]:
+    """Flags footwear stock aging > 180 days (> 6 months) as expired/obsolete with purchase batch labels."""
+    if not snapshot.aged_footwear:
+        return []
+
+    count = len(snapshot.aged_footwear)
+    oldest = snapshot.aged_footwear[0]
+    title = f"Footwear stock aging > 6 months: {_count_products(count)} at risk"
+    summary = f"{count} products held > 180 days without turning over"
+    what_happened = (
+        f"{_count_products(count)} have been held in inventory for over 180 days (6 months). "
+        "In footwear retail, older stock suffers from sole hydrolysis, glue drying, and fashion obsolescence. "
+        f"Oldest item ({oldest['stock_code']}) has been held for {oldest['age_days']} days."
+    )
+    recommended_action = "Inspect batch receipts, review aging items, and launch clearance discounts or promotional bundles."
+
+    rows = [
+        [
+            f"{item['stock_code']} · {item['description']}",
+            f"{item['on_hand_qty']:,.0f}",
+            f"{item['age_days']} days",
+            item["batch_label"],
+        ]
+        for item in snapshot.aged_footwear[:5]
+    ]
+    table = {
+        "columns": [
+            {"label": "Product", "align": "left"},
+            {"label": "In shop", "align": "right"},
+            {"label": "Age", "align": "right"},
+            {"label": "Purchase Origin", "align": "left"},
+        ],
+        "rows": rows,
+        "note": f"Showing top {len(rows)} of {count} aged items." if count > len(rows) else None,
+    }
+
+    return [
+        Alert(
+            id="footwear_aging",
+            severity=WARNING,
+            dimension="inventory",
+            title=title,
+            summary=summary,
+            what_happened=what_happened,
+            recommended_action=recommended_action,
+            link="inventory",
+            measure="aging_stock",
+            table=table,
+        )
+    ]
+
+
+def seasonal_demand_spike_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]:
+    """Alerts when prior-year sales in this calendar month show a historical demand surge."""
+    if not snapshot.seasonal_spikes:
+        return []
+
+    count = len(snapshot.seasonal_spikes)
+    month_name = snapshot.seasonal_spikes[0]["month_name"]
+    title = f"Seasonal demand surge: {_count_products(count)} peak in {month_name}"
+    summary = f"Prior-year high demand detected for {month_name}"
+    what_happened = (
+        f"Historical sales analysis indicates that {count} products experienced a surge in {month_name} "
+        "in prior years. Preparing inventory early prevents supply bottlenecks during the seasonal peak."
+    )
+    recommended_action = f"Check stock levels and place advance orders with suppliers for {month_name} seasonal styles."
+
+    rows = [
+        [
+            f"{item['stock_code']} · {item['description']}",
+            f"{item['prior_year_qty']:,.0f} pairs sold",
+            f"Surge in {item['month_name']}",
+        ]
+        for item in snapshot.seasonal_spikes[:5]
+    ]
+    table = {
+        "columns": [
+            {"label": "Product", "align": "left"},
+            {"label": "Prior-Year Sales", "align": "right"},
+            {"label": "Seasonality", "align": "left"},
+        ],
+        "rows": rows,
+        "note": f"Showing top {len(rows)} of {count} seasonal items." if count > len(rows) else None,
+    }
+
+    return [
+        Alert(
+            id="seasonal_demand_spike",
+            severity=NORMAL,
+            dimension="sales",
+            title=title,
+            summary=summary,
+            what_happened=what_happened,
+            recommended_action=recommended_action,
+            link="revenue",
+            measure="seasonal_demand",
+            table=table,
+        )
+    ]
+
+
+def weekly_pattern_demand_rule(snapshot: BranchSnapshot, thresholds: Thresholds) -> list[Alert]:
+    """Alerts when day-of-week sales show high weekend concentration."""
+    if not snapshot.weekly_pattern:
+        return []
+
+    wp = snapshot.weekly_pattern
+    peak_day = wp["peak_day"]
+    share = wp["weekend_share_pct"]
+    title = f"Weekend demand concentration ({share:.0f}% Saturday & Sunday)"
+    summary = f"Peak store volume occurs on {peak_day}"
+    what_happened = (
+        f"Store transaction patterns show that weekend trading accounts for {share:.0f}% of weekly footwear sales, "
+        f"peaking on {peak_day} ({wp['peak_day_qty']} pairs, vs {wp['weekday_avg_qty']} weekday average). "
+        "Floor shelves risk stockout during peak shopping hours."
+    )
+    recommended_action = f"Replenish sales floor and footwear display racks before {peak_day} store opening."
+
+    facts = _facts(
+        _fact("Peak Day", peak_day),
+        _fact("Weekend Share", f"{share:.1f}%"),
+        _fact("Peak Day Sales", f"{wp['peak_day_qty']:,.0f} pairs"),
+        _fact("Weekday Average", f"{wp['weekday_avg_qty']:,.1f} pairs"),
+    )
+
+    return [
+        Alert(
+            id="weekly_pattern_demand",
+            severity=NORMAL,
+            dimension="customer",
+            title=title,
+            summary=summary,
+            what_happened=what_happened,
+            recommended_action=recommended_action,
+            link="customer",
+            measure="weekly_pattern",
+            facts=facts,
+        )
+    ]
+
+
 # Registration order is the tiebreak within a severity, so it reads roughly worst-first
 # for a manager: money, then stock, then shoppers, then the data underneath it all.
 RULES: tuple[Rule, ...] = (
+    daily_import_missing_rule,
+    urgent_reorder_rule,
     revenue_rule,
     margin_rule,
     stockout_rule,
     dead_stock_rule,
+    stock_allocation_rule,
+    footwear_aging_rule,
     traffic_rule,
     data_quality_rule,
+    physical_stock_audit_rule,
+    seasonal_demand_spike_rule,
+    weekly_pattern_demand_rule,
 )
 
 

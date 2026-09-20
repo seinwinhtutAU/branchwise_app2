@@ -848,3 +848,65 @@ def build_warning_sections(
         },
     ]
     return [section for section in sections if wanted(section["id"])]
+
+
+# These checks all require a person to inspect or add a product in the external
+# inventory system. The Checking screen deliberately excludes price and transaction
+# validation warnings: those need a source-file correction, not a shelf count.
+CHECKING_SECTION_IDS = frozenset(
+    {"missing_product", "reconciliation_uom", "reconciliation_mismatch"}
+)
+
+
+def build_checking_items(
+    db: Session, user: User, sale_days: int, purchase_days: int
+) -> list[dict[str, object]]:
+    """Return the unique products a retail user needs to check in inventory.
+
+    This reuses the Warning calculations rather than reimplementing reconciliation.
+    The external inventory system remains the source of truth, so the screen exposes
+    the product identity and latest on-hand count needed to find and verify it there.
+    """
+    sections = build_warning_sections(
+        db,
+        user,
+        sale_days,
+        purchase_days,
+        section_ids=set(CHECKING_SECTION_IDS),
+    )
+    items_by_code: dict[str, dict[str, object]] = {}
+    for section in sections:
+        for row in section["rows"]:
+            fields = {field["label"]: field["value"] for field in row["fields"]}
+            stock_code = fields.get("Stock Code", "")
+            description = fields.get("Description", "")
+            if not stock_code or stock_code == "—":
+                continue
+            # A product can trigger more than one check; list it only once.
+            items_by_code.setdefault(
+                stock_code,
+                {"stock_code": stock_code, "description": description, "on_hand_qty": None},
+            )
+
+    if user.branch_id and items_by_code:
+        latest_subq = (
+            db.query(func.max(StockLevel.snapshot_at))
+            .filter(StockLevel.branch_id == user.branch_id)
+            .scalar()
+        )
+        if latest_subq:
+            stocks = (
+                db.query(Product.stock_code, StockLevel.on_hand_qty)
+                .join(StockLevel, StockLevel.product_id == Product.id)
+                .filter(
+                    StockLevel.branch_id == user.branch_id,
+                    StockLevel.snapshot_at == latest_subq,
+                    Product.stock_code.in_(list(items_by_code.keys())),
+                )
+                .all()
+            )
+            for code, qty in stocks:
+                if code in items_by_code:
+                    items_by_code[code]["on_hand_qty"] = float(qty) if qty is not None else None
+
+    return sorted(items_by_code.values(), key=lambda item: str(item["stock_code"]).casefold())

@@ -1,8 +1,59 @@
+import datetime as dt
 from pathlib import Path
+import re
 
 import pandas as pd
 
 from app.retail.services.import_common import NumericRule, clean_description, clean_text, parse_number, read_raw_grid
+
+
+def extract_purchase_metadata(filename: str) -> tuple[str | None, dt.date | None]:
+    """Extract normalized purchase_number and purchase_date from a filename.
+
+    Examples:
+    - STR-000067-purchase-bogyoke-19-9-26.xlsx -> ("STR-000067", dt.date(2026, 9, 19))
+    - STR000067purchase19-9-26.xls -> ("STR-000067", dt.date(2026, 9, 19))
+    - STR_000067_19-09-2026.xlsx -> ("STR-000067", dt.date(2026, 9, 19))
+    """
+    stem = Path(filename).stem
+
+    # 1. Purchase number extraction and normalization
+    purchase_number: str | None = None
+    str_match = re.search(r"(?i)(?:^|[^a-z0-9])STR[-_\s]?(\d+)", stem)
+    if str_match:
+        purchase_number = f"STR-{str_match.group(1)}"
+    else:
+        gen_match = re.search(r"(?i)(?:^|[^a-z0-9])([a-z]{2,5})[-_\s]?(\d{3,})", stem)
+        if gen_match:
+            purchase_number = f"{gen_match.group(1).upper()}-{gen_match.group(2)}"
+
+    # 2. Date extraction: Day-Month-Year (e.g. 19-9-26) or ISO Year-Month-Day
+    purchase_date: dt.date | None = None
+
+    # First check ISO YYYY-MM-DD
+    iso_match = re.search(r"(?:^|\D)(20\d\d)[-_./](\d{1,2})[-_./](\d{1,2})(?:$|\D)", stem)
+    if iso_match:
+        try:
+            y, m, d = int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3))
+            purchase_date = dt.date(y, m, d)
+        except (ValueError, OverflowError):
+            pass
+
+    if purchase_date is None:
+        # Check Day-Month-Year e.g. 19-9-26, 19-09-26, 19-9-2026
+        for match in re.finditer(r"(?:^|\D)(\d{1,2})[-_./](\d{1,2})[-_./](\d{2,4})(?:$|\D)", stem):
+            d_str, m_str, y_str = match.group(1), match.group(2), match.group(3)
+            d, m = int(d_str), int(m_str)
+            y = int(y_str)
+            if y < 100:
+                y += 2000
+            try:
+                purchase_date = dt.date(y, m, d)
+                break
+            except (ValueError, OverflowError):
+                continue
+
+    return purchase_number, purchase_date
 
 OUTPUT_COLUMNS = [
     "StockCode",

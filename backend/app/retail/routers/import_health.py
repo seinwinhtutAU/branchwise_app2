@@ -5,8 +5,9 @@ from app.core.security import get_current_app_user
 from app.db.session import get_db
 from app.models.user import User
 from app.retail.services.import_health import build_import_health, dismiss_batch, undismiss_batch
+from app.retail.routers.common import require_retail
 
-router = APIRouter(prefix="/api/imports", tags=["imports"])
+router = APIRouter(prefix="/api/imports", tags=["imports"], dependencies=[Depends(require_retail)])
 
 
 @router.get("/health")

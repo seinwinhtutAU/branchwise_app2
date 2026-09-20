@@ -10,8 +10,9 @@ from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.models.user import User
 from app.services.settings import get_purchase_list_window_days
+from app.retail.routers.common import require_retail
 
-router = APIRouter(prefix="/api/purchases", tags=["purchases"])
+router = APIRouter(prefix="/api/purchases", tags=["purchases"], dependencies=[Depends(require_retail)])
 
 # See sales.py's PAGE_SIZE comment.
 PAGE_SIZE = 20
@@ -51,7 +52,9 @@ def list_purchases(
     if search:
         like = f"%{search}%"
         query = query.filter(
-            (Product.stock_code.ilike(like)) | (Product.description.ilike(like))
+            (Product.stock_code.ilike(like))
+            | (Product.description.ilike(like))
+            | (Purchase.purchase_number.ilike(like))
         )
     if branch:
         query = query.filter(Branch.name == branch)
@@ -65,6 +68,7 @@ def list_purchases(
     rows = [
         {
             "Branch": branch_row.name if branch_row else None,
+            "PurchaseNumber": purchase.purchase_number,
             "Date": purchase.purchase_date.isoformat(),
             "StockCode": product.stock_code,
             "Description": product.description,

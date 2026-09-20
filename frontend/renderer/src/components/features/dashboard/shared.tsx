@@ -386,17 +386,12 @@ export function AlertExplanation({
         <span className="text-xs text-text-muted">{alert.context}</span>
       )}
 
-      {/* `?? []` rather than `.length` directly: the page cache is on disk now, so a
-          payload written by an older version of the app can outlive it, and a detail
-          panel is exactly where that first shows — it did, as a blank red page. */}
-      {(alert.facts ?? []).length > 0 ? (
+      <AlertSection label="What happened">
+        {withNumbersEmphasised(alert.what_happened)}
+      </AlertSection>
+
+      {(alert.facts ?? []).length > 0 && (
         <AlertFacts facts={alert.facts} />
-      ) : (
-        // Data-quality alerts carry no figures of their own — they hand the Warning
-        // page's own count straight through, and that sentence is all there is.
-        <AlertSection label="What happened">
-          {withNumbersEmphasised(alert.what_happened)}
-        </AlertSection>
       )}
 
       {alert.table && <AlertTableBlock table={alert.table} />}

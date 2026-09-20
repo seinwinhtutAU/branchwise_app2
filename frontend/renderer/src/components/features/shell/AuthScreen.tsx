@@ -22,6 +22,8 @@ const DEMO_ACCOUNTS = import.meta.env.DEV
   ? [
       { email: "admin@branchwise.app", label: "Admin" },
       { email: "wholesale@branchwise.app", label: "Wholesale" },
+      { email: "bogyoke@branchwise.app", label: "Bogyoke" },
+      { email: "bhs1@branchwise.app", label: "BHS 1" },
       { email: "aungthitsar@branchwise.app", label: "AungThitSar" },
       { email: "ashley@branchwise.app", label: "Ashley" },
       { email: "retail3@branchwise.app", label: "Retail 3" },

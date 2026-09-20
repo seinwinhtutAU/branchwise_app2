@@ -100,6 +100,13 @@ Default thresholds; all of them are tunable in Settings.
 | 5   | Dead stock                    | ≥ 5% of stocked products with no sale in 90 days (≥ 10% and ≥ 25% escalate)             | normal / warning / critical |
 | 6   | Traffic decline               | Transactions down ≥ 10% while the average sale rose **and** revenue itself stayed quiet | warning                     |
 | 7   | Data quality                  | Any Warning-page check found rows for this branch and period                            | that check's own severity   |
+| 8   | Daily import missing (after 8 PM) | After 8:00 PM shop close, today's Sale and/or Inventory export from POS is not imported  | critical                    |
+| 9   | Physical stock audit required | Inventory data quality discrepancies detected; physical audit file unlocked after 8 PM  | warning                     |
+| 10  | Inter-branch stock allocation | Dead stock (0 sales in 90d, stock > 0) has active sales in another branch               | warning                     |
+| 11  | Urgent stock reorder required | Critical stockout risk with ≤ 3 days cover remaining and active daily run-rate          | critical                    |
+| 12  | Footwear aging > 6 months     | Footwear inventory held > 180 days (hydrolysis/glue degradation risk) with batch labels | warning                     |
+| 13  | Seasonal demand spike         | Prior-year sales in this calendar month show a historical demand surge                  | normal                      |
+| 14  | Weekly pattern demand         | High weekend demand concentration (≥ 35% weekly sales or peak ≥ 1.8× weekday avg)       | normal                      |
 
 A branch can raise at most one alert from each numbered group: 3a and 3b are one margin
 rule reporting whichever is worse, and 4a/4b/4c is one stock rule reporting the worst
@@ -376,6 +383,74 @@ doesn't match previous snapshot + purchases − sales:
 
 These appear on the Dashboard Overview but **not** on the Business Alerts page, so one
 job doesn't get split across two screens.
+
+### Rule 8 — Daily import missing (critical)
+
+**Fires when** the clock is past 8:00 PM (retail shop closing window) and today's POS export for **Sale** and/or **Inventory** has not been imported.
+
+**Strict Date Checking:**
+The system checks actual record dates:
+- Sales: `sale_date == date.today()`
+- Inventory: `snapshot_at.date() == date.today()`
+
+Uploading past-dated or backfilled files does **not** clear this alert until files containing today's date are confirmed.
+
+> _Daily Sale and Inventory import missing for today — The shop closed at 8:00 PM, but today's Sale and Inventory export from the POS terminal has not been imported._
+> **Do:** Upload and confirm today's POS export file immediately. (Links directly to Import Hub).
+
+### Rule 9 — Physical stock audit required (warning)
+
+**Fires when** inventory reconciliation discrepancies, unlinked products, or negative counts are detected. Staff must perform a physical stock audit in the store, update their external inventory system, and re-import.
+
+**Gating Window & Pre-requisites:**
+To prevent incomplete audit sheets during trading hours or multiple mid-day file uploads:
+1. Audit sheet unlocks strictly **after 8:00 PM** (shop close).
+2. Requires **today's sales and inventory files** to be imported and confirmed first.
+
+**Audit Workflow:**
+1. Manager downloads the checking stock CSV (`stock_code`, `description`, `on_hand_qty`, `actual_count`).
+2. Staff counts the physical stock in the shop and records actual counts.
+3. Manager updates the external inventory / POS system.
+4. Manager exports the corrected inventory file from the external POS and imports it into BranchWise.
+5. BranchWise validates that all flagged stock codes exist in the new inventory snapshot upon clicking **Verify Re-import**.
+
+### Rule 10 — Inter-branch stock allocation (warning)
+
+**Fires when** a branch holds dead stock (zero sales in the trailing 90 days, on-hand > 0), while another retail branch has active customer demand (sales recorded in the same 90-day window).
+
+**Recommended action:** Transfer excess pairs from the stagnant branch to the active selling branch rather than placing new supplier purchase orders. The alert table presents:
+- Product SKU & Description
+- Units on hand here
+- Selling branch name
+- Sales velocity in selling branch (90d)
+- Recommended transfer quantity: $\min(\text{on-hand}, \text{target branch 90d sales})$
+
+### Rule 11 — Urgent stock reorder required (critical)
+
+**Fires when** any product has $\le 3$ days of stock cover remaining with an active daily sales run-rate.
+
+The alert detail table lists the top critical products, current units in shop, remaining cover in days, and calculated replenishment order quantity ($\text{daily velocity} \times 30 - \text{on-hand}$).
+
+### Rule 12 — Footwear stock aging > 6 months (warning)
+
+**Footwear Domain Context:**
+Shoes held longer than 180 days suffer from polyurethane sole hydrolysis (crumbly crumbling outsoles), glue drying/delamination, and seasonal fashion obsolescence.
+
+**Tracking Origin & Batch Labels:**
+Each aging product is mapped to its earliest supplier purchase or initial import snapshot:
+- Labeled with: `Purchased: Batch #PO-2026-001 · 10 Jan 2026` (or `First recorded: Batch #... · Date`)
+- Shows exact age in days (e.g. `240 days`)
+- Recommends markdown clearance discounts (e.g., 20% off), bundle promotions, or supplier returns.
+
+### Rule 13 — Seasonal demand spike (normal)
+
+**Fires when** prior-year sales in the matching calendar month indicate a surge in demand ($\ge 40\%$ higher than average monthly volume) for specific footwear styles (e.g., boots in autumn, sandals in summer).
+
+Staff are alerted in advance to review stock levels before the peak season begins.
+
+### Rule 14 — Weekly pattern demand (normal)
+
+**Fires when** sales exhibit high day-of-week concentration — e.g., weekend trade accounting for $\ge 35\%$ of weekly sales or peak day volume $\ge 1.8\times$ weekday average. Recommends scheduling weekend floor coverage and staging Friday stock replenishment.
 
 ---
 

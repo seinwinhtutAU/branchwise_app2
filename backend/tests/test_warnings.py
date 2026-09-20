@@ -524,6 +524,40 @@ def test_warnings_endpoint_returns_all_sections(authed_client: TestClient, db_se
     assert all(s["rows"] == [] for s in body["sections"])
 
 
+def test_checking_endpoint_returns_only_unique_product_identity(
+    authed_client: TestClient, db_session: Session
+):
+    branch = Branch(name="Retail 1", phone_number="000", address="TBD")
+    db_session.add(branch)
+    db_session.flush()
+    db_session.add(
+        User(
+            id="test-user-id",
+            name="Tester",
+            email="test@example.com",
+            role=UserRole.RETAIL,
+            branch_id=branch.id,
+        )
+    )
+    product = _make_product(db_session, "CHECK-1", "Stock to verify")
+    _make_sale_line(
+        db_session,
+        branch=branch,
+        product=product,
+        slip_id="checking-sale",
+        qty=1,
+        sale_date=datetime.date.today(),
+    )
+    db_session.commit()
+
+    response = authed_client.get("/api/checking")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {"stock_code": "CHECK-1", "description": "Stock to verify"}
+    ]
+
+
 def test_warnings_endpoint_defaults_to_business_wide_sale_window(
     authed_client: TestClient, db_session: Session
 ):

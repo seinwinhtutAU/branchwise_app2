@@ -25,16 +25,20 @@ the business to tune without a code change.
 """
 
 from dataclasses import asdict, dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Callable
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.models.branch import Branch
+from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.models.sale import Sale, SaleLine
+from app.retail.models.stock_level import StockLevel
 from app.retail.services import data_quality, explanation
+from app.services.branches import list_retail_branches
 from app.services.settings import get_branch_health_weights, get_early_warning_thresholds
 from app.services.dashboard import (
     DEAD_STOCK_WINDOW_DAYS,
@@ -461,6 +465,15 @@ class BranchSnapshot:
     date_to: str | None = None
     previous_date_from: str | None = None
     previous_date_to: str | None = None
+    # 7 Business Alerts Extensions
+    has_today_sales: bool = True
+    has_today_inventory: bool = True
+    is_after_8pm: bool = False
+    stock_allocations: tuple[dict, ...] = ()
+    urgent_reorders: tuple[dict, ...] = ()
+    aged_footwear: tuple[dict, ...] = ()
+    seasonal_spikes: tuple[dict, ...] = ()
+    weekly_pattern: dict | None = None
 
 
 def _growth_pct(current: float, previous: float) -> float | None:
@@ -593,6 +606,284 @@ def _summarise_stock_risk(
     return len(at_risk), demand_driven, leading, tuple(shortlist)
 
 
+def _check_daily_import_status(
+    db: Session, branch_id: str, now: datetime | None = None
+) -> tuple[bool, bool, bool]:
+    now = now or datetime.now()
+    today = now.date()
+    is_after_8pm = now.hour >= 20
+
+    has_today_sales = (
+        db.query(Sale.id)
+        .filter(Sale.branch_id == branch_id, Sale.sale_date == today)
+        .first() is not None
+    )
+    has_today_inventory = (
+        db.query(StockLevel.id)
+        .filter(StockLevel.branch_id == branch_id, func.date(StockLevel.snapshot_at) == today)
+        .first() is not None
+    )
+    return has_today_sales, has_today_inventory, is_after_8pm
+
+
+def _find_stock_allocations(
+    db: Session, branch_id: str, dead_stock_items: list[dict], lookback_days: int = 90
+) -> tuple[dict, ...]:
+    if not dead_stock_items:
+        return ()
+
+    since = date.today() - timedelta(days=lookback_days)
+    dead_codes = [item["stock_code"] for item in dead_stock_items if item.get("on_hand_qty", 0) > 0]
+    if not dead_codes:
+        return ()
+
+    retail_branches = list_retail_branches(db).all()
+    other_branch_ids = [b.id for b in retail_branches if b.id != branch_id]
+    if not other_branch_ids:
+        return ()
+
+    sales = (
+        db.query(
+            Product.stock_code,
+            Sale.branch_id,
+            Branch.name.label("branch_name"),
+            func.sum(SaleLine.qty).label("total_qty"),
+        )
+        .join(Sale, SaleLine.sale_id == Sale.id)
+        .join(Product, SaleLine.product_id == Product.id)
+        .join(Branch, Sale.branch_id == Branch.id)
+        .filter(
+            Sale.branch_id.in_(other_branch_ids),
+            Sale.sale_date >= since,
+            Product.stock_code.in_(dead_codes),
+        )
+        .group_by(Product.stock_code, Sale.branch_id, Branch.name)
+        .having(func.sum(SaleLine.qty) > 0)
+        .order_by(func.sum(SaleLine.qty).desc())
+        .all()
+    )
+
+    if not sales:
+        return ()
+
+    dead_lookup = {item["stock_code"]: item for item in dead_stock_items}
+    best_per_code: dict[str, dict] = {}
+    for stock_code, other_b_id, other_b_name, total_qty in sales:
+        if stock_code not in best_per_code:
+            dead_info = dead_lookup.get(stock_code, {})
+            on_hand = float(dead_info.get("on_hand_qty", 0))
+            sold = float(total_qty)
+            best_per_code[stock_code] = {
+                "stock_code": stock_code,
+                "description": dead_info.get("description", ""),
+                "on_hand_qty": on_hand,
+                "target_branch_id": other_b_id,
+                "target_branch_name": other_b_name,
+                "target_sales_90d": round(sold),
+                "recommended_transfer_qty": min(round(on_hand), round(sold)),
+            }
+
+    return tuple(list(best_per_code.values())[:10])
+
+
+def _find_urgent_reorders(low_stock_items: list[dict]) -> tuple[dict, ...]:
+    critical_items = [
+        item for item in low_stock_items
+        if item.get("status") == "Critical" and item.get("daily_velocity", 0) > 0
+    ]
+    critical_items.sort(key=lambda x: (x.get("days_left", 999), -x.get("daily_velocity", 0)))
+    result = []
+    for item in critical_items[:10]:
+        v = item.get("daily_velocity", 0)
+        on_hand = item.get("on_hand_qty", 0)
+        reorder_qty = max(1, round(v * 30 - on_hand))
+        result.append({
+            "stock_code": item["stock_code"],
+            "description": item["description"],
+            "days_left": round(item["days_left"]),
+            "on_hand_qty": round(on_hand),
+            "daily_velocity": v,
+            "recommended_reorder_qty": reorder_qty,
+        })
+    return tuple(result)
+
+
+def _find_aged_footwear(
+    db: Session, branch_id: str, aging_days: int = 180, today: date | None = None
+) -> tuple[dict, ...]:
+    today = today or date.today()
+    cutoff_date = today - timedelta(days=aging_days)
+
+    latest_snapshot_subq = (
+        db.query(func.max(StockLevel.snapshot_at))
+        .filter(StockLevel.branch_id == branch_id)
+        .scalar()
+    )
+    if not latest_snapshot_subq:
+        return ()
+
+    current_stocks = (
+        db.query(StockLevel.product_id, StockLevel.on_hand_qty, Product.stock_code, Product.description)
+        .join(Product, StockLevel.product_id == Product.id)
+        .filter(
+            StockLevel.branch_id == branch_id,
+            StockLevel.snapshot_at == latest_snapshot_subq,
+            StockLevel.on_hand_qty > 0,
+        )
+        .all()
+    )
+    if not current_stocks:
+        return ()
+
+    product_ids = [s[0] for s in current_stocks]
+
+    purchases = (
+        db.query(
+            PurchaseLine.product_id,
+            func.min(Purchase.purchase_date).label("earliest_purchase"),
+            func.min(Purchase.import_batch_id).label("batch_id"),
+        )
+        .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
+        .filter(
+            Purchase.branch_id == branch_id,
+            PurchaseLine.product_id.in_(product_ids),
+        )
+        .group_by(PurchaseLine.product_id)
+        .all()
+    )
+    purchase_map = {p[0]: (p[1], p[2]) for p in purchases}
+
+    earliest_snapshots = (
+        db.query(
+            StockLevel.product_id,
+            func.min(StockLevel.snapshot_at).label("earliest_snapshot"),
+            func.min(StockLevel.import_batch_id).label("batch_id"),
+        )
+        .filter(
+            StockLevel.branch_id == branch_id,
+            StockLevel.product_id.in_(product_ids),
+        )
+        .group_by(StockLevel.product_id)
+        .all()
+    )
+    snapshot_map = {s[0]: (s[1].date(), s[2]) for s in earliest_snapshots if s[1]}
+
+    aged_items = []
+    for pid, on_hand, code, desc in current_stocks:
+        p_date, batch_id = purchase_map.get(pid, (None, None))
+        is_purchase = True
+        if not p_date:
+            p_date, batch_id = snapshot_map.get(pid, (None, None))
+            is_purchase = False
+        if not p_date or p_date > cutoff_date:
+            continue
+
+        age = (today - p_date).days
+        batch_prefix = f"Batch #{batch_id[:8]} · " if batch_id else ""
+        type_prefix = "Purchased" if is_purchase else "First recorded"
+        batch_label = f"{type_prefix}: {batch_prefix}{p_date.strftime('%d %b %Y')}"
+        aged_items.append({
+            "stock_code": code,
+            "description": desc,
+            "on_hand_qty": round(float(on_hand)),
+            "age_days": age,
+            "purchase_date": p_date.isoformat(),
+            "batch_label": batch_label,
+        })
+
+    aged_items.sort(key=lambda x: -x["age_days"])
+    return tuple(aged_items[:15])
+
+
+def _find_seasonal_spikes(
+    db: Session, branch_id: str, today: date | None = None
+) -> tuple[dict, ...]:
+    today = today or date.today()
+    target_month = today.month
+    month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    month_name = month_names[target_month - 1]
+
+    prior_year = today.year - 1
+    prior_sales = (
+        db.query(
+            Product.stock_code,
+            Product.description,
+            func.sum(SaleLine.qty).label("sold_qty"),
+        )
+        .join(Sale, SaleLine.sale_id == Sale.id)
+        .join(Product, SaleLine.product_id == Product.id)
+        .filter(
+            Sale.branch_id == branch_id,
+            func.extract("year", Sale.sale_date) == prior_year,
+            func.extract("month", Sale.sale_date) == target_month,
+        )
+        .group_by(Product.stock_code, Product.description)
+        .having(func.sum(SaleLine.qty) >= 5)
+        .order_by(func.sum(SaleLine.qty).desc())
+        .limit(10)
+        .all()
+    )
+    if not prior_sales:
+        return ()
+
+    return tuple(
+        {
+            "stock_code": s[0],
+            "description": s[1],
+            "prior_year_qty": round(float(s[2])),
+            "month_name": month_name,
+        }
+        for s in prior_sales
+    )
+
+
+def _find_weekly_patterns(
+    db: Session, branch_id: str, start: date, end: date
+) -> dict | None:
+    dow_counts = (
+        db.query(
+            func.extract("dow", Sale.sale_date).label("dow"),
+            func.sum(SaleLine.qty).label("qty"),
+            func.count(func.distinct(Sale.id)).label("txns"),
+        )
+        .join(SaleLine, SaleLine.sale_id == Sale.id)
+        .filter(
+            Sale.branch_id == branch_id,
+            Sale.sale_date >= start,
+            Sale.sale_date <= end,
+        )
+        .group_by(func.extract("dow", Sale.sale_date))
+        .all()
+    )
+    if not dow_counts:
+        return None
+
+    total_qty = sum(float(r[1] or 0) for r in dow_counts)
+    if total_qty < 10:
+        return None
+
+    # DOW convention (both Postgres and SQLite): 0=Sunday, 1=Monday, ..., 6=Saturday
+    dow_names = {0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday", 4: "Thursday", 5: "Friday", 6: "Saturday"}
+    by_dow = {int(r[0]): float(r[1] or 0) for r in dow_counts}
+
+    weekend_qty = by_dow.get(0, 0) + by_dow.get(6, 0)
+    weekend_share_pct = (weekend_qty / total_qty) * 100 if total_qty > 0 else 0
+
+    peak_dow = max(by_dow.keys(), key=lambda d: by_dow[d])
+    peak_qty = by_dow[peak_dow]
+    weekday_qtys = [by_dow.get(d, 0) for d in range(1, 6)]
+    weekday_avg = sum(weekday_qtys) / 5 if weekday_qtys else 0
+
+    if weekend_share_pct >= 35.0 or (weekday_avg > 0 and peak_qty >= 1.8 * weekday_avg):
+        return {
+            "peak_day": dow_names.get(peak_dow, "Weekend"),
+            "weekend_share_pct": round(weekend_share_pct, 1),
+            "peak_day_qty": round(peak_qty),
+            "weekday_avg_qty": round(weekday_avg, 1),
+        }
+    return None
+
+
 def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> BranchSnapshot:
     """The single gathering pass. Everything below delegates to the helper the
     matching dashboard tab already uses — see the module docstring's first rule."""
@@ -661,6 +952,13 @@ def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> Br
         section["count"] for section in data_issue_sections if section["severity"] == "critical"
     )
 
+    has_today_sales, has_today_inventory, is_after_8pm = _check_daily_import_status(db, branch_id)
+    stock_allocations = _find_stock_allocations(db, branch_id, stock.get("dead_stock_items", []))
+    urgent_reorders = _find_urgent_reorders(stock.get("low_stock_items", []))
+    aged_footwear = _find_aged_footwear(db, branch_id)
+    seasonal_spikes = _find_seasonal_spikes(db, branch_id)
+    weekly_pattern = _find_weekly_patterns(db, branch_id, period_range.start, period_range.end)
+
     return BranchSnapshot(
         net_revenue=net_revenue,
         previous_net_revenue=prev_net_revenue,
@@ -708,6 +1006,14 @@ def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> Br
         date_to=period_range.end.isoformat(),
         previous_date_from=period_range.previous_start.isoformat(),
         previous_date_to=period_range.previous_end.isoformat(),
+        has_today_sales=has_today_sales,
+        has_today_inventory=has_today_inventory,
+        is_after_8pm=is_after_8pm,
+        stock_allocations=stock_allocations,
+        urgent_reorders=urgent_reorders,
+        aged_footwear=aged_footwear,
+        seasonal_spikes=seasonal_spikes,
+        weekly_pattern=weekly_pattern,
     )
 
 

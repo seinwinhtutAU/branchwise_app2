@@ -116,7 +116,7 @@ def test_dashboard_admin_requires_branch_id(authed_client: TestClient, db_sessio
     assert response.status_code == 400
 
 
-def test_dashboard_accepts_wholesale_branch(authed_client: TestClient, db_session: Session):
+def test_dashboard_rejects_wholesale_branch(authed_client: TestClient, db_session: Session):
     admin = _make_admin_user(db_session)
     wholesale_branch = _make_branch(db_session, "Wholesale")
     db_session.add(
@@ -132,10 +132,10 @@ def test_dashboard_accepts_wholesale_branch(authed_client: TestClient, db_sessio
 
     for endpoint in ["revenue", "overview", "cost", "customer", "summary"]:
         response = authed_client.get(f"/api/dashboard/{endpoint}?period=today&branch_id={wholesale_branch.id}")
-        assert response.status_code == 200, f"Expected 200 for {endpoint}, got {response.status_code}"
+        assert response.status_code == 400
 
     response_inv = authed_client.get(f"/api/dashboard/inventory?branch_id={wholesale_branch.id}")
-    assert response_inv.status_code == 200
+    assert response_inv.status_code == 400
 
 
 def test_dashboard_kpis_and_delta_vs_previous_period(

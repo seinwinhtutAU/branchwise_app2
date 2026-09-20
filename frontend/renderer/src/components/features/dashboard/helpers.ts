@@ -159,7 +159,13 @@ export const STATUS_META: Record<
 
 /** Which tab holds the evidence behind a score or an alert. */
 export type EvidenceTarget =
-  "revenue" | "cost" | "inventory" | "customer" | "warnings";
+  | "revenue"
+  | "cost"
+  | "inventory"
+  | "customer"
+  | "warnings"
+  | "checking"
+  | "import";
 
 export interface SubMetric {
   key: string;
@@ -264,6 +270,8 @@ export const EVIDENCE_LABEL: Record<EvidenceTarget, string> = {
   inventory: "View Inventory",
   customer: "View Customer",
   warnings: "View Warning page",
+  checking: "View Checking page",
+  import: "Go to Import",
 };
 
 export interface KpiValue {

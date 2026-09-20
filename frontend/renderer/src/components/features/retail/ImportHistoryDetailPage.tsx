@@ -3,14 +3,17 @@ import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
 import { useToast } from "@renderer/lib/useToast";
 import { Badge } from "@renderer/components/ui/Badge";
+import { Button } from "@renderer/components/ui/Button";
 import { Spinner } from "@renderer/components/ui/Spinner";
+import { DownloadIcon } from "@renderer/components/ui/icons";
 import { ImportDataView } from "./ImportDataView";
-import type { ImportHistoryDetail } from "../types";
+import type { ImportHistoryDetail, Profile } from "../types";
 
 interface Props {
   session: Session;
   batchId: string;
   onBack: () => void;
+  profile?: Profile | null;
 }
 
 function formatDate(iso: string): string {
@@ -49,10 +52,44 @@ function ImportHistoryDetailPage({
   session,
   batchId,
   onBack,
+  profile,
 }: Props): React.JSX.Element {
   const showToast = useToast();
   const [detail, setDetail] = useState<ImportHistoryDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
+
+  async function handleDownload(): Promise<void> {
+    if (!detail) return;
+    setDownloading(true);
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/api/imports/history/${batchId}/download`,
+        {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        },
+      );
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        showToast("error", body?.detail ?? `Download failed (${response.status})`);
+        return;
+      }
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = detail.filename || `import_${batchId}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      showToast("success", "File downloaded successfully.");
+    } catch {
+      showToast("error", "Network error while downloading file.");
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -87,37 +124,53 @@ function ImportHistoryDetailPage({
 
   return (
     <div className="flex flex-col gap-4 animate-fade-in motion-reduce:animate-none">
-      <div className="flex items-center gap-3">
-        <button
-          onClick={onBack}
-          aria-label="Back to Import History"
-          className="w-8 h-8 rounded-md flex items-center justify-center text-text-secondary hover:bg-bg-raised transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            className="w-4.5 h-4.5"
-            aria-hidden="true"
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={onBack}
+            aria-label="Back to Import History"
+            className="w-8 h-8 rounded-md flex items-center justify-center text-text-secondary hover:bg-bg-raised transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
-            <path
-              d="M15 18l-6-6 6-6"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
-        <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-text-primary tracking-tight capitalize">
-            {detail ? `${detail.import_type} import` : "Import details"}
-          </h2>
-          {detail && (
-            <p className="text-sm text-text-muted truncate">
-              {detail.filename}
-            </p>
-          )}
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              className="w-4.5 h-4.5"
+              aria-hidden="true"
+            >
+              <path
+                d="M15 18l-6-6 6-6"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-text-primary tracking-tight capitalize">
+              {detail ? `${detail.import_type} import` : "Import details"}
+            </h2>
+            {detail && (
+              <p className="text-sm text-text-muted truncate">
+                {detail.filename}
+              </p>
+            )}
+          </div>
         </div>
+
+        {profile?.role === "admin" && detail && (
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={downloading}
+            onClick={handleDownload}
+            className="shrink-0 flex items-center gap-1.5"
+            title="Download original uploaded file"
+          >
+            <DownloadIcon className="w-3.5 h-3.5" />
+            <span>Download Original File</span>
+          </Button>
+        )}
       </div>
 
       {loading && (

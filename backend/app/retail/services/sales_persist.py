@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.retail.models.import_batch import ImportType
 from app.retail.models.sale import Sale, SaleLine
 from app.retail.services.import_common import (
+    count_preview_issues,
     get_or_create_products,
     new_import_batch,
     pluralize,
@@ -23,6 +24,7 @@ def persist_sales(
     source_file: str | None,
     uploaded_by: str | None = None,
     preview_data: dict | None = None,
+    storage_key: str | None = None,
 ) -> dict:
     batch = new_import_batch(
         ImportType.SALES,
@@ -30,6 +32,7 @@ def persist_sales(
         uploaded_by=uploaded_by,
         source_file=source_file,
         preview_data=preview_data,
+        storage_key=storage_key,
     )
     db.add(batch)
 
@@ -41,6 +44,8 @@ def persist_sales(
         "products_created": 0,
         "products_updated": 0,
     }
+    if preview_data is not None:
+        summary["issue_count"] = count_preview_issues(preview_data)
 
     if df.empty:
         summary["messages"] = ["No sales were found in this file — nothing was imported."]
