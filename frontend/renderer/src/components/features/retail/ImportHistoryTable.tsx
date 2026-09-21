@@ -35,6 +35,7 @@ import {
   MoreVerticalIcon,
   TrashIcon,
   UploadIcon,
+  WarningIcon,
 } from "@renderer/components/ui/icons";
 import {
   FloatingLayer,
@@ -412,25 +413,33 @@ function ImportHistoryTable({
         id: "filename",
         accessorFn: (row) => row.filename,
         header: "Filename",
+        cell: (info) => (
+          <span className="truncate font-mono text-xs">{info.getValue<string>() ?? "—"}</span>
+        ),
+      },
+      {
+        id: "issues",
+        accessorFn: (row) => row.summary?.issue_count,
+        header: () => (
+          <span className="inline-flex" title="Validation issues">
+            <WarningIcon className="w-4 h-4" />
+            <span className="sr-only">Validation issues</span>
+          </span>
+        ),
         cell: (info) => {
-          const row = info.row.original;
-          const issueCount =
-            typeof row.summary?.issue_count === "number"
-              ? row.summary.issue_count
-              : null;
-          const hasIssues = issueCount !== null ? issueCount > 0 : false;
+          const issueCount = info.getValue();
+          const hasIssues = typeof issueCount === "number" && issueCount > 0;
+          if (!hasIssues) return null;
+
+          const issueLabel = `${issueCount} validation issue${issueCount === 1 ? "" : "s"} found — click to inspect origin vs clean data`;
           return (
-            <div className="flex items-center gap-2 max-w-[16rem]">
-              <span className="truncate font-mono text-xs">{row.filename ?? "—"}</span>
-              {hasIssues && (
-                <span
-                  title={`${issueCount} validation issue${issueCount === 1 ? "" : "s"} found — click to inspect origin vs clean data`}
-                  className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/20 text-amber-500 border border-amber-500/30 shrink-0 select-none cursor-pointer"
-                >
-                  ! {issueCount}
-                </span>
-              )}
-            </div>
+            <span
+              aria-label={issueLabel}
+              title={issueLabel}
+              className="inline-flex items-center justify-center text-amber-500 cursor-pointer"
+            >
+              <WarningIcon className="w-4 h-4" />
+            </span>
           );
         },
       },
@@ -755,6 +764,7 @@ function ImportHistoryTable({
                           cell.column.id === "type" && "capitalize font-medium",
                           cell.column.id === "filename" &&
                             "max-w-[14rem] truncate font-mono text-xs",
+                          cell.column.id === "issues" && "w-11 text-center",
                           cell.column.id === "created" &&
                             "text-text-muted whitespace-nowrap text-xs",
                           cell.column.columnDef.meta?.align === "right" &&
