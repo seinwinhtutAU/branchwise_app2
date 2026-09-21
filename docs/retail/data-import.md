@@ -69,9 +69,13 @@ Purchase confirm additionally accepts optional `purchase_date` (`YYYY-MM-DD`) an
 
 Every confirm endpoint also uploads the raw uploaded bytes to Cloudflare R2 object storage (`app/services/storage.py`'s `R2StorageService`, under key `imports/{a fresh uuid}/{filename}`) and records the resulting key on `import_batches.storage_key`. This is entirely optional: `R2StorageService.is_configured` requires `R2_ACCOUNT_ID`/`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY`/`R2_BUCKET` to all be set in `backend/.env` (see `backend/.env.example`) and the `boto3` package to be installed; without them every upload/download call is a harmless no-op and `storage_key` just stays `null`, same as before this existed.
 
-`GET /api/imports/history/{batch_id}/download` (admin-only) streams the original spreadsheet back: it tries R2 first via `storage_key`, and if that's unavailable it falls back to reconstructing an `.xlsx` on the fly from the batch's own `preview_data.origin.rows` (the same grid the history detail view already reads) — so a batch confirmed before R2 was configured, or an environment that never configured it at all, still has a downloadable copy as long as its `preview_data` was kept.
+`GET /api/imports/history/{batch_id}/download` streams the original spreadsheet back for administrators: it tries R2 first via `storage_key`, and if that's unavailable it falls back to reconstructing an `.xlsx` on the fly from the batch's own `preview_data.origin.rows` (the same grid the history detail view already reads) — so a batch confirmed before R2 was configured, or an environment that never configured it at all, still has a downloadable copy as long as its `preview_data` was kept. Daily operation cost files are the exception: any staff account assigned to that file's branch can download its unchanged copy.
 
 `get_import_history_detail` also *attempts* to read a `preview_data.json` companion object from R2 (`imports/{batch.id}/preview_data.json`) before falling back to the `preview_data` database column — but nothing currently uploads a file at that key (the confirm endpoints' internal `_upload_to_storage` helper accepts a `preview_data` argument for this but is never called with one), so today this R2 lookup always misses and every read falls back to the database column. Functionally harmless (the fallback always has the data), just worth knowing if `preview_data` ever needs to actually move off the row in the future.
+
+## Daily operation cost storage
+
+The **Daily Operation Cost** card accepts any file type and does not parse it or create sales, purchasing, or inventory records. Each file is associated with the selected branch and stored byte-for-byte on its `ImportBatch` record, with Cloudflare R2 used as an optional mirror when configured. Daily operation cost files appear in Import History and can be downloaded by staff in that branch.
 
 ## Branch resolution on confirm
 

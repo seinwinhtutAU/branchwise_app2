@@ -1,6 +1,7 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Query as ORMQuery
 from sqlalchemy.orm import Session
 
@@ -30,6 +31,15 @@ def _scoped_query(db: Session, user: User) -> ORMQuery:
     if user.branch_id is not None:
         query = query.filter(Sale.branch_id == user.branch_id)
     return query
+
+
+@router.get("/date-bounds")
+def data_overview_date_bounds(
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    earliest_date = _scoped_query(db, user).with_entities(func.min(Sale.sale_date)).scalar()
+    return {"earliest_date": earliest_date.isoformat() if earliest_date else None}
 
 
 @router.get("")

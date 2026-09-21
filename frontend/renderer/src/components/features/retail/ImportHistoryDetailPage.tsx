@@ -58,6 +58,7 @@ function ImportHistoryDetailPage({
   const [detail, setDetail] = useState<ImportHistoryDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const isGeneralFile = detail?.import_type === "general";
 
   async function handleDownload(): Promise<void> {
     if (!detail) return;
@@ -148,7 +149,11 @@ function ImportHistoryDetailPage({
           </button>
           <div className="min-w-0">
             <h2 className="text-lg font-semibold text-text-primary tracking-tight capitalize">
-              {detail ? `${detail.import_type} import` : "Import details"}
+              {detail
+                ? isGeneralFile
+                  ? "Daily operation cost"
+                  : `${detail.import_type} import`
+                : "Import details"}
             </h2>
             {detail && (
               <p className="text-sm text-text-muted truncate">
@@ -158,7 +163,7 @@ function ImportHistoryDetailPage({
           </div>
         </div>
 
-        {profile?.role === "admin" && detail && (
+        {detail && (profile?.role === "admin" || isGeneralFile) && (
           <Button
             variant="secondary"
             size="sm"
@@ -244,7 +249,14 @@ function ImportHistoryDetailPage({
                 </div>
               )}
 
-          <ImportDataView clean={detail.clean} origin={detail.origin} />
+          {isGeneralFile ? (
+            <div className="rounded-lg border border-border bg-bg-subtle px-4 py-3 text-sm text-text-secondary">
+              This daily operation cost file is stored exactly as uploaded. Download it
+              to view or use it; no retail records were created.
+            </div>
+          ) : (
+            <ImportDataView clean={detail.clean} origin={detail.origin} />
+          )}
         </>
       )}
     </div>

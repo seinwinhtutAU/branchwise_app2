@@ -132,14 +132,14 @@ export function useUrlQuery<T>(
   session: Session,
   label: string,
 ): UrlQueryResult<T> {
-  const { data, isFetching, isError } = useQuery({
+  const { data, isFetching, isError, refetch } = useQuery({
     queryKey: urlQueryKey(url),
     queryFn: () => fetchJson<T>(url as string, session),
     enabled: url !== null,
   });
   useLoadErrorToast(isError, label);
   async function reload(): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: urlQueryKey(url) });
+    await refetch();
   }
   return { data, isRefreshing: isFetching, failed: isError, reload };
 }

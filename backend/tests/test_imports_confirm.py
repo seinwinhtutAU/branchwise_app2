@@ -110,6 +110,31 @@ def test_confirm_inventory_with_branch(authed_client: TestClient, db_session: Se
     assert db_session.query(StockLevel).count() == 1
 
 
+def test_export_date_bounds_return_the_earliest_visible_record(
+    authed_client: TestClient, db_session: Session
+):
+    _make_branch_user(db_session, with_branch=True)
+    assert authed_client.post(
+        "/api/imports/sales/confirm",
+        files={"file": ("sale.csv", io.BytesIO(SALE_CSV.encode()), "text/csv")},
+    ).status_code == 200
+    assert authed_client.post(
+        "/api/imports/purchase/confirm",
+        files={"file": ("purchase.csv", io.BytesIO(PURCHASE_CSV.encode()), "text/csv")},
+        data={"purchase_date": "2026-01-15"},
+    ).status_code == 200
+
+    assert authed_client.get("/api/sales/date-bounds").json() == {
+        "earliest_date": "2026-08-21"
+    }
+    assert authed_client.get("/api/purchases/date-bounds").json() == {
+        "earliest_date": "2026-01-15"
+    }
+    assert authed_client.get("/api/data-overview/date-bounds").json() == {
+        "earliest_date": "2026-08-21"
+    }
+
+
 def test_confirm_without_branch_requires_branch_id(authed_client: TestClient, db_session: Session):
     _make_branch_user(db_session, with_branch=False)
 

@@ -40,6 +40,10 @@ import { TabBar, type TabItem } from "@renderer/components/ui/Tabs";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 import { useSettled } from "@renderer/lib/useSettled";
 import {
+  ExportDateRangeDialog,
+  type ExportDateRange,
+} from "@renderer/components/features/ExportDateRangeDialog";
+import {
   SimpleDataTable,
   type DataTableColumn,
   type DataTableFilter,
@@ -349,6 +353,7 @@ function MergedDataOverviewTable({
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState<"csv" | "excel" | null>(null);
+  const [exportFormat, setExportFormat] = useState<"csv" | "excel" | null>(null);
 
   const appliedSearch = useSettled(search, FILTER_SETTLE_MS);
   const appliedDateFrom = useSettled(dateFrom, FILTER_SETTLE_MS);
@@ -494,8 +499,11 @@ function MergedDataOverviewTable({
     );
   }
 
-  async function fetchAllForExport(): Promise<OverviewRow[] | null> {
-    const params = buildParams({ export: "true" });
+  async function fetchAllForExport(exportRange: ExportDateRange): Promise<OverviewRow[] | null> {
+    // The download range is intentionally separate from all table filter controls.
+    const params = new URLSearchParams({ export: "true" });
+    params.set("date_from", exportRange.from);
+    params.set("date_to", exportRange.to);
     try {
       const response = await fetch(
         `${apiBaseUrl}/api/data-overview?${params.toString()}`,
@@ -515,27 +523,25 @@ function MergedDataOverviewTable({
     }
   }
 
-  async function handleDownloadCsv(): Promise<void> {
-    if (total === 0) return;
+  async function handleDownloadCsv(exportRange: ExportDateRange): Promise<void> {
     setExporting("csv");
-    const allRows = await fetchAllForExport();
+    const allRows = await fetchAllForExport(exportRange);
     setExporting(null);
     if (!allRows) return;
     downloadCsv(
-      "data-overview.csv",
+      `data-overview_${exportRange.from}_to_${exportRange.to}.csv`,
       visibleColumns.map((col) => col.label),
       overviewCsvRows(allRows),
     );
   }
 
-  async function handleDownloadExcel(): Promise<void> {
-    if (total === 0) return;
+  async function handleDownloadExcel(exportRange: ExportDateRange): Promise<void> {
     setExporting("excel");
-    const allRows = await fetchAllForExport();
+    const allRows = await fetchAllForExport(exportRange);
     setExporting(null);
     if (!allRows) return;
     downloadExcel(
-      "data-overview.xlsx",
+      `data-overview_${exportRange.from}_to_${exportRange.to}.xlsx`,
       "Data overview",
       visibleColumns.map((col) => col.label),
       overviewCsvRows(allRows),
@@ -544,6 +550,21 @@ function MergedDataOverviewTable({
 
   return (
     <div className="flex flex-col" style={containerStyle}>
+      {exportFormat && (
+        <ExportDateRangeDialog
+          session={session}
+          boundsEndpoint="/api/data-overview/date-bounds"
+          format={exportFormat}
+          title="Data overview"
+          onClose={() => setExportFormat(null)}
+          onConfirm={(range) => {
+            const format = exportFormat;
+            setExportFormat(null);
+            if (format === "csv") void handleDownloadCsv(range);
+            else void handleDownloadExcel(range);
+          }}
+        />
+      )}
       <div className="bg-bg-base border border-border rounded-md overflow-hidden shadow-xs">
         <div
           ref={aboveRef}
@@ -565,8 +586,8 @@ function MergedDataOverviewTable({
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={handleDownloadCsv}
-                disabled={total === 0}
+                onClick={() => setExportFormat("csv")}
+                disabled={rows === null}
                 loading={exporting === "csv"}
               >
                 <DownloadIcon className="w-4 h-4" />
@@ -575,8 +596,8 @@ function MergedDataOverviewTable({
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={handleDownloadExcel}
-                disabled={total === 0}
+                onClick={() => setExportFormat("excel")}
+                disabled={rows === null}
                 loading={exporting === "excel"}
               >
                 <DownloadIcon className="w-4 h-4" />

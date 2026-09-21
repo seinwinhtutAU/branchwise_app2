@@ -39,7 +39,7 @@ from app.services.storage import get_storage_service
 
 router = APIRouter(prefix="/api/imports", tags=["imports"], dependencies=[Depends(require_retail)])
 
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 def _upload_to_storage(contents: bytes, filename: str | None, preview_data: dict | None = None) -> str | None:
@@ -79,6 +79,48 @@ async def _read_upload(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> b
             f"File too large — maximum upload size is {max_bytes // (1024 * 1024)} MB",
         )
     return contents
+
+
+@router.post("/general")
+async def import_general_file(
+    file: UploadFile = File(...),
+    branch_id: str | None = Form(None),
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Keep an arbitrary file unchanged without creating retail records."""
+    if not file.filename:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Choose a file to upload")
+
+    contents = await _read_upload(file)
+    resolved_branch_id = _resolve_branch_id(user, branch_id, db)
+    content_type = file.content_type or "application/octet-stream"
+    batch = ImportBatch(
+        import_type=ImportType.GENERAL,
+        branch_id=resolved_branch_id,
+        uploaded_by=user.id,
+        filename=file.filename,
+        summary={
+            "message": "Daily operation cost file stored unchanged; no retail data was created.",
+            "file_size": len(contents),
+        },
+        preview_data={},
+        # Database storage is the reliable source of the original upload. R2 is an
+        # optional mirror consistent with the existing retail import flow.
+        original_file=contents,
+        original_file_size=len(contents),
+        original_file_content_type=content_type,
+        storage_key=_upload_to_storage(contents, file.filename),
+    )
+    db.add(batch)
+    db.commit()
+    db.refresh(batch)
+    return {
+        "id": batch.id,
+        "filename": batch.filename,
+        "file_size": batch.original_file_size,
+        "status": batch.status.value,
+    }
 
 
 def _check_extension(filename: str | None) -> None:
@@ -404,7 +446,7 @@ async def inspect_import_file(
     except HTTPException as exc:
         msg = str(exc.detail)
         if exc.status_code == 413 or "too large" in msg.lower():
-            err_msg = "Too large: exceeds 25 MB limit"
+            err_msg = f"Too large: exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit"
         else:
             err_msg = msg
         return {
@@ -420,7 +462,7 @@ async def inspect_import_file(
     except Exception as exc:
         msg = str(exc)
         if "too large" in msg.lower() or "413" in msg:
-            err_msg = "Too large: exceeds 25 MB limit"
+            err_msg = f"Too large: exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit"
         else:
             err_msg = f"Could not read file: {exc}"
         return {
@@ -627,6 +669,7 @@ def list_import_history(
             joinedload(ImportBatch.branch),
             joinedload(ImportBatch.uploaded_by_user),
             defer(ImportBatch.preview_data),
+            defer(ImportBatch.original_file),
         )
         .order_by(ImportBatch.created_at.desc())
     )
@@ -647,7 +690,7 @@ def list_import_history(
             "created_at": b.created_at.isoformat(),
             "reverted_at": b.reverted_at.isoformat() if b.reverted_at else None,
             "storage_key": b.storage_key,
-            "has_file": bool(b.storage_key),
+            "has_file": bool(b.storage_key or b.original_file_size),
         }
         for b in query.all()
     ]
@@ -659,7 +702,7 @@ def get_import_history_detail(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    batch = db.get(ImportBatch, batch_id)
+    batch = db.get(ImportBatch, batch_id, options=[defer(ImportBatch.original_file)])
     if batch is None or not _can_access_batch(user, batch):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
 
@@ -697,7 +740,7 @@ def get_import_history_detail(
         "created_at": batch.created_at.isoformat(),
         "reverted_at": batch.reverted_at.isoformat() if batch.reverted_at else None,
         "storage_key": batch.storage_key,
-        "has_file": bool(batch.storage_key or has_origin_rows),
+        "has_file": bool(batch.storage_key or batch.original_file_size or has_origin_rows),
         "origin": origin_data,
         "clean": clean_data,
     }
@@ -709,16 +752,16 @@ def download_import_batch_file(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ):
-    """Download the original spreadsheet file for an import batch. Restricted to admin users."""
-    if user.role != UserRole.ADMIN:
+    """Download an original file, including database-backed general uploads."""
+    batch = db.get(ImportBatch, batch_id)
+    if batch is None or not _can_access_batch(user, batch):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
+
+    if user.role != UserRole.ADMIN and batch.import_type != ImportType.GENERAL:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             "Only administrators can download original import files",
         )
-
-    batch = db.get(ImportBatch, batch_id)
-    if batch is None or not _can_access_batch(user, batch):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
 
     storage = get_storage_service()
     if batch.storage_key and storage.is_configured:
@@ -731,6 +774,14 @@ def download_import_batch_file(
                 media_type=content_type,
                 headers={"Content-Disposition": f'attachment; filename="{filename}"'},
             )
+
+    if batch.original_file is not None:
+        filename = batch.filename or f"import_{batch.id}"
+        return Response(
+            content=batch.original_file,
+            media_type=batch.original_file_content_type or "application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     # Fallback: if no R2 file exists yet, check if preview_data has origin rows to reconstruct an Excel file
     origin = (batch.preview_data or {}).get("origin", {})
@@ -770,6 +821,11 @@ def revert_import_batch(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
     if batch.status != ImportBatchStatus.COMPLETED:
         raise HTTPException(status.HTTP_409_CONFLICT, "This import was already removed or reimported")
+    if batch.import_type == ImportType.GENERAL:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Daily operation cost files are stored only and cannot be reverted or reimported",
+        )
     if user.role == UserRole.RETAIL and datetime.datetime.now() - batch.created_at > datetime.timedelta(
         days=1
     ):

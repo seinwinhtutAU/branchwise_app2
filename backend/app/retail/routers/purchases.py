@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_app_user
@@ -16,6 +17,18 @@ router = APIRouter(prefix="/api/purchases", tags=["purchases"], dependencies=[De
 
 # See sales.py's PAGE_SIZE comment.
 PAGE_SIZE = 20
+
+
+@router.get("/date-bounds")
+def purchase_date_bounds(
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    query = db.query(func.min(Purchase.purchase_date))
+    if user.branch_id is not None:
+        query = query.filter(Purchase.branch_id == user.branch_id)
+    earliest_date = query.scalar()
+    return {"earliest_date": earliest_date.isoformat() if earliest_date else None}
 
 
 @router.get("")

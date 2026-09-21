@@ -8,6 +8,7 @@ import type {
 } from "@renderer/components/features/types";
 import { TabBar, type TabItem } from "@renderer/components/ui/Tabs";
 import FileImportCard from "@renderer/components/features/retail/FileImportCard";
+import GeneralFileImportCard from "@renderer/components/features/retail/GeneralFileImportCard";
 import ImportHistoryTable from "@renderer/components/features/retail/ImportHistoryTable";
 import ImportOverviewPage from "@renderer/components/features/retail/ImportOverviewPage";
 import ImportConfirmModal from "@renderer/components/features/retail/ImportConfirmModal";
@@ -127,8 +128,9 @@ export default function ImportHubPage({
   return (
     <div className="flex flex-col gap-5">
       {/* The branch selector is only needed when preparing a new import. */}
-      <div className="border-b border-border flex items-center justify-between gap-4 flex-wrap">
+      <div className="border-b border-border flex items-center justify-between gap-4">
         <TabBar<ImportSubTab>
+          className="border-b-0 w-auto"
           tabs={tabs}
           activeTab={activeTab}
           onSelect={handleTabChange}
@@ -187,6 +189,10 @@ export default function ImportHubPage({
                 icon={<InventoryIcon />}
                 onFilesSelected={handleFilesSelected}
                 onFilesReady={onFilesReady}
+              />
+              <GeneralFileImportCard
+                session={session}
+                branchId={profile?.branch_id ?? selectedBranchId}
               />
             </div>
           </div>

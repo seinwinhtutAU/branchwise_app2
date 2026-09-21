@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Index, String, func
+from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Index, Integer, LargeBinary, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -17,6 +17,8 @@ class ImportType(str, enum.Enum):
     SALES = "sales"
     INVENTORY = "inventory"
     PURCHASE = "purchase"
+    # A file kept exactly as uploaded, without parsing it into retail data.
+    GENERAL = "general"
 
 
 class ImportBatchStatus(str, enum.Enum):
@@ -57,6 +59,12 @@ class ImportBatch(Base):
     preview_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     # Object storage key in Cloudflare R2 where the raw uploaded spreadsheet file is preserved
     storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # General uploads are retained in the database as well as optionally mirrored to
+    # object storage. Keeping these bytes makes the feature useful in installations
+    # that have not configured Cloudflare R2 yet.
+    original_file: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    original_file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    original_file_content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     reverted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     reverted_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)

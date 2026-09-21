@@ -127,6 +127,7 @@ function statusBadgeVariant(status: string): "success" | "info" | "default" {
 }
 
 function importTypeLabel(importType: string): string {
+  if (importType === "general") return "Daily operation cost";
   return importType.charAt(0).toUpperCase() + importType.slice(1);
 }
 
@@ -154,8 +155,9 @@ function ImportHistoryActions({
   onRevert,
 }: ImportHistoryActionsProps): React.JSX.Element | null {
   const { open, setOpen, ref, toggle } = useDismissableMenu();
-  const canDownload = isAdmin;
-  const canManageImport = row.status === "completed" && !isLocked;
+  const isGeneralFile = row.import_type === "general";
+  const canDownload = isAdmin || isGeneralFile;
+  const canManageImport = !isGeneralFile && row.status === "completed" && !isLocked;
 
   if (!canDownload && !canManageImport) {
     if (row.status === "completed" && isLocked) {
@@ -404,7 +406,7 @@ function ImportHistoryTable({
         id: "type",
         accessorFn: (row) => row.import_type,
         header: "Type",
-        cell: (info) => String(info.getValue()),
+        cell: (info) => importTypeLabel(String(info.getValue())),
       },
       {
         id: "filename",
@@ -555,7 +557,7 @@ function ImportHistoryTable({
                 Import History
               </h2>
               <span className="text-xs text-text-muted hidden sm:inline">
-                Every confirmed upload — reimport a corrected file to replace a mistaken one, or remove it outright.
+                Includes daily operation cost files stored unchanged, alongside your confirmed retail imports.
               </span>
             </div>
 
@@ -579,8 +581,8 @@ function ImportHistoryTable({
                   >
                     <option value="">All types</option>
                     {typeOptions.map((opt) => (
-                      <option key={opt} value={opt} className="capitalize">
-                        {opt}
+                      <option key={opt} value={opt}>
+                        {importTypeLabel(opt)}
                       </option>
                     ))}
                   </Select>

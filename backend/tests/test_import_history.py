@@ -107,6 +107,35 @@ def test_history_detail_returns_origin_and_clean_data(
     assert len(body["origin"]["rows"]) > 0
 
 
+def test_general_file_is_stored_unchanged_and_retail_can_download_it(
+    authed_client: TestClient, db_session: Session
+):
+    _make_user(db_session, branch_name="Retail 1")
+    original_bytes = b"This is an original file, not retail data.\x00\xff"
+
+    response = authed_client.post(
+        "/api/imports/general",
+        files={"file": ("notes.bin", io.BytesIO(original_bytes), "application/octet-stream")},
+    )
+    assert response.status_code == 200
+    batch_id = response.json()["id"]
+
+    batch = db_session.get(ImportBatch, batch_id)
+    assert batch is not None
+    assert batch.import_type.value == "general"
+    assert batch.original_file == original_bytes
+    assert batch.original_file_size == len(original_bytes)
+
+    history = authed_client.get("/api/imports/history").json()
+    assert history[0]["has_file"] is True
+    assert history[0]["import_type"] == "general"
+
+    download = authed_client.get(f"/api/imports/history/{batch_id}/download")
+    assert download.status_code == 200
+    assert download.content == original_bytes
+    assert download.headers["content-type"].startswith("application/octet-stream")
+
+
 def test_history_detail_unknown_batch_404(authed_client: TestClient, db_session: Session):
     _make_user(db_session, branch_name="Retail 1")
     response = authed_client.get("/api/imports/history/does-not-exist")
@@ -408,6 +437,5 @@ def test_get_history_detail_falls_back_to_db_when_r2_missing(
     # Should fall back to DB origin data
     assert len(data["origin"]["rows"]) > 0
     assert data["origin"]["rows"][0][0].startswith("Printed :")
-
 
 

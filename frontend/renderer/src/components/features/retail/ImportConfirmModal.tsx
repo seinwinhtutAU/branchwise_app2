@@ -148,9 +148,25 @@ export default function ImportConfirmModal({
       return;
     }
 
+const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+
     files.forEach((item) => {
       if (inspectedFileIdsRef.current.has(item.id)) return;
       inspectedFileIdsRef.current.add(item.id);
+
+      if (item.file.size > MAX_BATCH_SIZE_BYTES) {
+        setInspections((prev) => ({
+          ...prev,
+          [item.id]: {
+            status: "invalid",
+            dates: [],
+            purchase_number: null,
+            row_count: 0,
+            error_message: "Too large: exceeds 50 MB limit",
+          },
+        }));
+        return;
+      }
 
       setInspections((prev) => ({
         ...prev,
@@ -182,7 +198,7 @@ export default function ImportConfirmModal({
                 dates: [],
                 purchase_number: null,
                 row_count: 0,
-                error_message: "Too large: exceeds 25 MB limit",
+                error_message: "Too large: exceeds 50 MB limit",
               };
             }
             return {
@@ -216,6 +232,9 @@ export default function ImportConfirmModal({
     });
   }, [isOpen, files, session.access_token]);
 
+  const totalSizeBytes = useMemo(() => files.reduce((acc, f) => acc + f.file.size, 0), [files]);
+  const isTotalSizeExceeded = totalSizeBytes > 50 * 1024 * 1024;
+
   // Track invalid files
   const invalidFiles = useMemo(() => {
     return files.filter(
@@ -248,7 +267,7 @@ export default function ImportConfirmModal({
     (f) => !inspections[f.id] || inspections[f.id].status === "checking",
   );
   const hasInvalidFiles = invalidFiles.length > 0;
-  const canConfirm = !hasCheckingFiles && !hasInvalidFiles && !isBranchMissing && !importing;
+  const canConfirm = !hasCheckingFiles && !hasInvalidFiles && !isTotalSizeExceeded && !isBranchMissing && !importing;
 
   const allInvalidSelected =
     invalidFiles.length > 0 && invalidFiles.every((f) => selectedIds.includes(f.id));
@@ -287,6 +306,10 @@ export default function ImportConfirmModal({
   async function handleImportAll(): Promise<void> {
     if (isBranchMissing) {
       showToast("error", "Please select a branch at the top right before confirming.");
+      return;
+    }
+    if (isTotalSizeExceeded) {
+      showToast("error", `Total upload size (${formatFileSize(totalSizeBytes)}) exceeds the 50 MB limit.`);
       return;
     }
     if (hasInvalidFiles) {
@@ -409,8 +432,15 @@ export default function ImportConfirmModal({
               <h3 id="import-modal-title" className="text-sm font-semibold text-text-primary">
                 Import {expectedTypeLabel} Files
               </h3>
-              <p className="text-[11px] text-text-muted">
-                {files.length} {files.length === 1 ? "file" : "files"} selected
+              <p className="text-[11px] text-text-muted flex items-center gap-1.5 flex-wrap">
+                <span>
+                  {files.length} {files.length === 1 ? "file" : "files"} selected ({formatFileSize(totalSizeBytes)})
+                </span>
+                {isTotalSizeExceeded && (
+                  <span className="text-amber-600 dark:text-amber-400 font-semibold">
+                    — Exceeds 50 MB limit
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -427,12 +457,16 @@ export default function ImportConfirmModal({
 
         {/* Modal Body */}
         <div className="p-4 overflow-y-auto space-y-3 flex-1">
-          {/* Short warning banner if invalid files detected */}
-          {hasInvalidFiles && (
-            <div className="p-2.5 rounded-lg bg-bg-subtle border border-border flex items-center gap-2 text-xs text-text-secondary animate-fade-in">
-              <WarningIcon className="w-4 h-4 shrink-0 text-text-muted" />
-              <span className="font-medium text-xs text-text-secondary">
-                Invalid files detected. Remove non-{expectedType} files to confirm.
+          {/* Warning banner for total size exceeded or invalid files */}
+          {(isTotalSizeExceeded || hasInvalidFiles) && (
+            <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/25 flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 animate-fade-in">
+              <WarningIcon className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <span className="font-medium text-xs">
+                {isTotalSizeExceeded && hasInvalidFiles
+                  ? `Total upload size (${formatFileSize(totalSizeBytes)}) exceeds 50 MB limit, and invalid files detected. Remove files to confirm.`
+                  : isTotalSizeExceeded
+                    ? `Total upload size (${formatFileSize(totalSizeBytes)}) exceeds the 50 MB limit. Remove files to confirm.`
+                    : `Invalid files detected. Remove non-${expectedType} files to confirm.`}
               </span>
             </div>
           )}
