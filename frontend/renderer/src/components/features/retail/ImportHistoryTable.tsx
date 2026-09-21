@@ -418,32 +418,6 @@ function ImportHistoryTable({
         ),
       },
       {
-        id: "issues",
-        accessorFn: (row) => row.summary?.issue_count,
-        header: () => (
-          <span className="inline-flex" title="Validation issues">
-            <WarningIcon className="w-4 h-4" />
-            <span className="sr-only">Validation issues</span>
-          </span>
-        ),
-        cell: (info) => {
-          const issueCount = info.getValue();
-          const hasIssues = typeof issueCount === "number" && issueCount > 0;
-          if (!hasIssues) return null;
-
-          const issueLabel = `${issueCount} validation issue${issueCount === 1 ? "" : "s"} found — click to inspect origin vs clean data`;
-          return (
-            <span
-              aria-label={issueLabel}
-              title={issueLabel}
-              className="inline-flex items-center justify-center text-amber-500 cursor-pointer"
-            >
-              <WarningIcon className="w-4 h-4" />
-            </span>
-          );
-        },
-      },
-      {
         id: "branch",
         accessorFn: (row) => row.branch_name,
         header: "Branch",
@@ -487,8 +461,22 @@ function ImportHistoryTable({
         cell: (info) => {
           const row = info.row.original;
           const isAdmin = profile?.role === "admin";
+          const issueCount = row.summary?.issue_count;
+          const hasIssues = typeof issueCount === "number" && issueCount > 0;
+          const issueLabel = hasIssues
+            ? `${issueCount} validation issue${issueCount === 1 ? "" : "s"} found — click to inspect origin vs clean data`
+            : null;
           return (
-            <div className="flex items-center justify-end">
+            <div className="flex items-center justify-end gap-1">
+              {issueLabel && (
+                <span
+                  aria-label={issueLabel}
+                  title={issueLabel}
+                  className="inline-flex items-center justify-center p-1.5 text-amber-500"
+                >
+                  <WarningIcon className="w-4 h-4" />
+                </span>
+              )}
               <ImportHistoryActions
                 row={row}
                 isAdmin={isAdmin}
@@ -764,7 +752,6 @@ function ImportHistoryTable({
                           cell.column.id === "type" && "capitalize font-medium",
                           cell.column.id === "filename" &&
                             "max-w-[14rem] truncate font-mono text-xs",
-                          cell.column.id === "issues" && "w-11 text-center",
                           cell.column.id === "created" &&
                             "text-text-muted whitespace-nowrap text-xs",
                           cell.column.columnDef.meta?.align === "right" &&
