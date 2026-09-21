@@ -13,7 +13,7 @@ from app.models.branch import Branch
 from app.models.user import User
 from app.retail.models.product import Product
 from app.retail.models.stock_level import StockLevel
-from app.retail.routers.common import require_retail
+from app.retail.routers.common import require_retail_operations
 from app.retail.services.branch_health import _check_daily_import_status
 from app.retail.services.data_quality import build_checking_items
 from app.schemas.checking import CheckingItem, CheckingStatusResponse, CheckingVerifyResponse
@@ -25,7 +25,7 @@ from app.services.settings import (
     get_sale_warning_window_days,
 )
 
-router = APIRouter(prefix="/api/checking", tags=["checking"], dependencies=[Depends(require_retail)])
+router = APIRouter(prefix="/api/checking", tags=["checking"], dependencies=[Depends(require_retail_operations)])
 
 CurrentAppUser = Annotated[User, Depends(get_current_app_user)]
 DatabaseSession = Annotated[Session, Depends(get_db)]

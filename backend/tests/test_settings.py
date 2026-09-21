@@ -87,10 +87,25 @@ def test_non_admin_cannot_change_settings(
     assert response.status_code == 403
 
 
-def test_admin_can_change_settings_and_it_persists(
+def test_admin_can_change_basic_and_advanced_settings(
     authed_client: TestClient, db_session: Session
 ):
     _make_user(db_session, role=UserRole.ADMIN)
+
+    basic = authed_client.put("/api/settings", json={"theme": "dark"})
+    assert basic.status_code == 200
+    assert basic.json()["theme"] == "dark"
+
+    advanced = authed_client.put(
+        "/api/settings", json={"purchase_lookback_window_days": 21}
+    )
+    assert advanced.status_code == 200
+
+
+def test_development_can_change_advanced_settings_and_it_persists(
+    authed_client: TestClient, db_session: Session
+):
+    _make_user(db_session, role=UserRole.DEVELOPMENT)
 
     put_response = authed_client.put(
         "/api/settings",
@@ -113,10 +128,10 @@ def test_admin_can_change_settings_and_it_persists(
     assert get_response.json() == expected
 
 
-def test_admin_can_change_one_setting_without_touching_others(
+def test_development_can_change_one_setting_without_touching_others(
     authed_client: TestClient, db_session: Session
 ):
-    _make_user(db_session, role=UserRole.ADMIN)
+    _make_user(db_session, role=UserRole.DEVELOPMENT)
 
     put_response = authed_client.put(
         "/api/settings", json={"purchase_lookback_window_days": 21}
@@ -128,7 +143,7 @@ def test_admin_can_change_one_setting_without_touching_others(
 def test_out_of_range_window_is_rejected(
     authed_client: TestClient, db_session: Session
 ):
-    _make_user(db_session, role=UserRole.ADMIN)
+    _make_user(db_session, role=UserRole.DEVELOPMENT)
 
     response = authed_client.put(
         "/api/settings", json={"stock_forward_fallback_window_days": -1}
@@ -136,10 +151,10 @@ def test_out_of_range_window_is_rejected(
     assert response.status_code == 422
 
 
-def test_admin_can_change_business_wide_ui_preferences(
+def test_development_can_change_business_wide_ui_preferences(
     authed_client: TestClient, db_session: Session
 ):
-    _make_user(db_session, role=UserRole.ADMIN)
+    _make_user(db_session, role=UserRole.DEVELOPMENT)
 
     put_response = authed_client.put(
         "/api/settings",
@@ -194,8 +209,8 @@ def test_get_settings_backfills_a_row_for_every_key(
     assert db_session.query(AppSetting).count() == len(DEFAULT_SETTINGS)
 
 
-def test_admin_can_set_today_exchange_rates(authed_client: TestClient, db_session: Session):
-    _make_user(db_session, role=UserRole.ADMIN)
+def test_development_can_set_today_exchange_rates(authed_client: TestClient, db_session: Session):
+    _make_user(db_session, role=UserRole.DEVELOPMENT)
 
     put_response = authed_client.put(
         "/api/settings",
@@ -211,7 +226,7 @@ def test_admin_can_set_today_exchange_rates(authed_client: TestClient, db_sessio
 def test_today_exchange_rates_rejects_mmk_and_unsupported_currencies(
     authed_client: TestClient, db_session: Session
 ):
-    _make_user(db_session, role=UserRole.ADMIN)
+    _make_user(db_session, role=UserRole.DEVELOPMENT)
 
     response = authed_client.put("/api/settings", json={"today_exchange_rates": {"MMK": "1"}})
     assert response.status_code == 422
@@ -226,7 +241,7 @@ def test_today_exchange_rates_rejects_mmk_and_unsupported_currencies(
 def test_today_exchange_rates_rejects_non_positive_rate(
     authed_client: TestClient, db_session: Session
 ):
-    _make_user(db_session, role=UserRole.ADMIN)
+    _make_user(db_session, role=UserRole.DEVELOPMENT)
 
     response = authed_client.put("/api/settings", json={"today_exchange_rates": {"THB": "0"}})
     assert response.status_code == 422
@@ -235,10 +250,10 @@ def test_today_exchange_rates_rejects_non_positive_rate(
     assert response.status_code == 422
 
 
-def test_admin_can_set_purchasing_buffer_months(
+def test_development_can_set_purchasing_buffer_months(
     authed_client: TestClient, db_session: Session
 ):
-    _make_user(db_session, role=UserRole.ADMIN)
+    _make_user(db_session, role=UserRole.DEVELOPMENT)
 
     put_response = authed_client.put(
         "/api/settings",
@@ -251,10 +266,10 @@ def test_admin_can_set_purchasing_buffer_months(
     assert get_response.json()["purchasing_buffer_months"] == {"a": 4.0, "b": 2.0, "c": 0.5}
 
 
-def test_admin_can_set_daily_check_cutoff_time(
+def test_development_can_set_daily_check_cutoff_time(
     authed_client: TestClient, db_session: Session
 ):
-    _make_user(db_session, role=UserRole.ADMIN)
+    _make_user(db_session, role=UserRole.DEVELOPMENT)
 
     put_response = authed_client.put(
         "/api/settings",
@@ -270,7 +285,7 @@ def test_admin_can_set_daily_check_cutoff_time(
 def test_invalid_cutoff_time_is_rejected(
     authed_client: TestClient, db_session: Session
 ):
-    _make_user(db_session, role=UserRole.ADMIN)
+    _make_user(db_session, role=UserRole.DEVELOPMENT)
 
     # Invalid hour
     response = authed_client.put("/api/settings", json={"daily_check_cutoff_time": "25:00"})
@@ -279,4 +294,3 @@ def test_invalid_cutoff_time_is_rejected(
     # Invalid format
     response = authed_client.put("/api/settings", json={"daily_check_cutoff_time": "8pm"})
     assert response.status_code == 422
-

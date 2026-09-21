@@ -26,7 +26,7 @@ Before all three are true, `GET /api/checking` returns `is_eligible: false`, an 
 - **`GET /api/checking/export`** — a CSV download of the same list (`Stock Code, Description, System Qty, Actual Count (Physical)`, the last column left blank for staff to fill in by hand) — 400s with the same eligibility explanation if called before the list has unlocked. This is the sheet staff actually use on the floor.
 - **`GET /api/checking/verify`** — run *after* a corrected inventory file has been re-imported, to confirm the fix actually worked: it re-computes the current checking list's stock codes and checks whether the branch's *latest* inventory snapshot now contains every one of them. Returns `success`, a plain-English `message`, and which codes (if any) are still `missing_stock_codes`. This is what closes the loop — without it, there'd be no way to tell "I re-imported" from "I re-imported and it actually fixed what was flagged."
 
-All three resolve the branch the same way (`_resolve_retail_branch_id`): a branch-scoped account uses its own `users.branch_id`; an account with none (admin, `retail_management`) falls back to the first retail branch found, since — unlike the Dashboard — Checking has no branch picker of its own yet.
+All three resolve the branch the same way (`_resolve_retail_branch_id`): a branch-scoped account uses its own `users.branch_id`; an unscoped account (`admin`, `development`, or `retail_management`) falls back to the first retail branch found, since — unlike the Dashboard — Checking has no branch picker of its own yet.
 
 ## Frontend
 

@@ -2,7 +2,7 @@
 
 POS exports (`retail_data/{sale,inventory,purchase}.csv`) are printed-report formats, not clean tables. Cleaning them is a two-stage process — **parse** (pure, no DB) then **persist** (writes to the database) — exposed as a preview/confirm pair of endpoints so nothing is written until the user has seen what it looks like cleaned.
 
-Every retail import route (`app/retail/routers/imports.py`, `import_health.py`) sits behind `require_retail` (`app/retail/routers/common.py`), which lets admin, `retail_management`, and `retail` accounts through and blocks `wholesale` — see [auth-and-accounts.md](../auth-and-accounts.md) for what `retail_management` is.
+Every retail import route (`app/retail/routers/imports.py`, `import_health.py`) permits `admin`, `development`, `retail_management`, and `retail`, while blocking `wholesale` — see [auth-and-accounts.md](../auth-and-accounts.md). Admin's only retail restriction is the four high-information Dashboard tabs.
 
 ## Source formats
 

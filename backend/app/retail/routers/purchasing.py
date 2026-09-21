@@ -9,9 +9,9 @@ from app.models.branch import Branch
 from app.models.user import User
 from app.retail.services.purchasing import get_purchasing_recommendations
 from app.services.branches import list_retail_branches, resolve_branch_id
-from app.retail.routers.common import require_retail
+from app.retail.routers.common import require_retail_operations
 
-router = APIRouter(prefix="/api/purchasing", tags=["purchasing"], dependencies=[Depends(require_retail)])
+router = APIRouter(prefix="/api/purchasing", tags=["purchasing"], dependencies=[Depends(require_retail_operations)])
 
 PAGE_SIZE = 20
 

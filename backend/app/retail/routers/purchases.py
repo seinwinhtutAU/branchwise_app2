@@ -11,9 +11,9 @@ from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.models.user import User
 from app.services.settings import get_purchase_list_window_days
-from app.retail.routers.common import require_retail
+from app.retail.routers.common import require_retail_operations
 
-router = APIRouter(prefix="/api/purchases", tags=["purchases"], dependencies=[Depends(require_retail)])
+router = APIRouter(prefix="/api/purchases", tags=["purchases"], dependencies=[Depends(require_retail_operations)])
 
 # See sales.py's PAGE_SIZE comment.
 PAGE_SIZE = 20

@@ -22,11 +22,11 @@ The app's own profile row, separate from whatever issues logins (Neon Auth today
 | id           | uuid              | PK, this app's own id — not the auth provider's                                              |
 | name         | string            |                                                                                                |
 | email        | string            | unique                                                                                        |
-| role         | enum              | `admin` \| `retail_management` \| `wholesale` \| `retail`                                     |
-| branch_id    | uuid, nullable    | FK → branches. Null for `admin` and `retail_management`; required for `wholesale`/`retail`   |
+| role         | enum              | `development` \| `admin` \| `retail_management` \| `wholesale` \| `retail`                    |
+| branch_id    | uuid, nullable    | FK → branches. Null for `development`, `admin`, and `retail_management`; required for `wholesale`/`retail` |
 | auth_user_id | string, nullable  | The corresponding Neon Auth user id. Unique, indexed, nullable so a profile can exist before its login does. |
 
-`retail_management` behaves like `admin` for the retail workspace only — no fixed branch (sees every retail branch), full access to every retail screen (`require_retail` in `app/retail/routers/common.py` allows `admin`, `retail_management`, and `retail`) — but it cannot see the Wholesale workspace and cannot manage other accounts (`POST`/`PATCH`/`DELETE /api/users` require `role == admin` specifically). Account management itself (`app/routers/users.py`, admin-only) creates/edits/deletes both this row and the matching Neon Auth account together — see [auth-and-accounts.md](./auth-and-accounts.md).
+`development` and `admin` both have all-workspace system access. The exceptions are that admin cannot assign the `development` role, and it cannot access the Revenue, Cost, Inventory, or Customer dashboard APIs. `retail_management` has no fixed branch (sees every retail branch) and full retail operational access, but no Wholesale workspace or account management. Account management itself (`app/routers/users.py`) creates/edits/deletes both this row and the matching Neon Auth account together — see [auth-and-accounts.md](./auth-and-accounts.md).
 
 ## `products`
 

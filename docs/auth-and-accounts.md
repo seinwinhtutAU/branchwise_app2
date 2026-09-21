@@ -43,9 +43,9 @@ Auth's JWKS. Two differences from the Supabase era worth knowing: the algorithm 
 
 ## Roles
 
-Four roles exist (`UserRole` in `app/models/user.py`): `admin`, `retail_management`, `wholesale`, `retail`. `admin` and `retail_management` have no `branch_id` (`app/routers/users.py`'s `_validate_assignment` rejects assigning one to a branch); `wholesale` and `retail` must have one.
+Five roles exist (`UserRole` in `app/models/user.py`): `development`, `admin`, `retail_management`, `wholesale`, `retail`. `development`, `admin`, and `retail_management` have no `branch_id` (`app/routers/users.py`'s `_validate_assignment` rejects assigning one to a branch); `wholesale` and `retail` must have one.
 
-`retail_management` was added as a middle ground: full admin-equivalent access to the retail workspace (every retail screen, every retail branch, no revert time-limit — see [data-import.md](./retail/data-import.md)) without also getting the Wholesale workspace or the ability to manage other accounts. `require_retail` (`app/retail/routers/common.py`) is the shared dependency behind this: every retail router (`imports`, `dashboard`, `warnings`, `checking`, `chat`, `sales`, `inventory`, `purchases`, `purchasing`, `data_overview`) now depends on it instead of each repeating its own role check, and it allows `admin`, `retail_management`, and `retail` while rejecting `wholesale`.
+`development` is the full-system role: both workspaces, advanced settings, and assignment of every role. `admin` has the same system access, except it cannot assign the `development` role, and its Dashboard hides the Revenue, Cost, Inventory, and Customer tabs. `retail_management` remains the middle ground: full retail operational access (every retail screen, every retail branch, no revert time-limit — see [data-import.md](./retail/data-import.md)) without Wholesale or account management. `require_advanced_dashboard` enforces the four dashboard-tab restriction server-side.
 
 ## Two "users"
 

@@ -13,7 +13,7 @@ from app.models.user import User, UserRole
 
 
 def require_wholesale(user: User) -> None:
-    if user.role not in (UserRole.WHOLESALE, UserRole.ADMIN):
+    if user.role not in (UserRole.WHOLESALE, UserRole.DEVELOPMENT, UserRole.ADMIN):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This account cannot use the wholesale workspace")
 
 

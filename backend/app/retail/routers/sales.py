@@ -12,9 +12,9 @@ from app.retail.models.sale import Sale, SaleLine
 from app.models.user import User
 from app.retail.services.pricing import compute_profit, sale_line_pricer
 from app.services.settings import get_sale_list_window_days
-from app.retail.routers.common import require_retail
+from app.retail.routers.common import require_retail_operations
 
-router = APIRouter(prefix="/api/sales", tags=["sales"], dependencies=[Depends(require_retail)])
+router = APIRouter(prefix="/api/sales", tags=["sales"], dependencies=[Depends(require_retail_operations)])
 
 # Mirrors Data Overview's PAGE_SIZE — a page of results here is exactly one page of the
 # table on screen, so SimpleDataTable never has to hold more than that in memory either.

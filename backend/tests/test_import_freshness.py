@@ -14,7 +14,7 @@ def _make_user(db_session: Session, *, branch: Branch | None) -> None:
             id="test-user-id",
             name="Test User",
             email="test@example.com",
-            role=UserRole.RETAIL if branch else UserRole.ADMIN,
+            role=UserRole.RETAIL if branch else UserRole.DEVELOPMENT,
             branch_id=branch.id if branch else None,
         )
     )
@@ -109,7 +109,7 @@ def test_wholesale_branch_excluded(authed_client: TestClient, db_session: Sessio
     assert {r["branch_name"] for r in rows} == {"Retail 1"}
 
 
-def test_admin_sees_every_branch_retail_sees_only_own(authed_client: TestClient, db_session: Session):
+def test_development_sees_every_branch_retail_sees_only_own(authed_client: TestClient, db_session: Session):
     branch_a = Branch(name="Retail 1", phone_number="000", address="TBD")
     branch_b = Branch(name="Retail 2", phone_number="000", address="TBD")
     db_session.add_all([branch_a, branch_b])

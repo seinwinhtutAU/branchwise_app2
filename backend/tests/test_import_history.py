@@ -437,5 +437,3 @@ def test_get_history_detail_falls_back_to_db_when_r2_missing(
     # Should fall back to DB origin data
     assert len(data["origin"]["rows"]) > 0
     assert data["origin"]["rows"][0][0].startswith("Printed :")
-
-

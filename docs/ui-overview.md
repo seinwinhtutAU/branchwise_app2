@@ -97,17 +97,17 @@ Two states depending on viewport:
 - **Desktop (`lg:` and up)**: fixed 256px-wide left sidebar + fluid main content area. Sidebar has three stacked zones:
   1. Header (64px): app icon (indigo rounded-square logo mark) + "Branchwise" wordmark.
   2. Nav list: one row per section, icon + label, 40px tall, active item gets an indigo-tinted background and indigo text; others are plain text that highlight on hover.
-  3. Footer: current user's name (or email if no profile name) + role badge (colored by role: admin=brand/indigo, wholesale=info/blue, retail=default/gray) + branch name (plain text) + full-width "Sign out" secondary button + a collapsible "Debug" `<details>` block (dev-only: a button that calls `/api/me` and dumps the JSON response in a `<pre>`).
+  3. Footer: current user's name (or email if no profile name) + role badge + branch name (plain text) + full-width "Sign out" secondary button + a collapsible "Debug" `<details>` block (dev-only: a button that calls `/api/me` and dumps the JSON response in a `<pre>`).
 - **Mobile**: sidebar collapses into a 56px sticky top bar (hamburger icon + wordmark). Tapping the hamburger opens the same sidebar content as a left-anchored drawer over a dark scrim, closable by tapping the scrim.
 
 Main content area: `padding: 32px 16–24px`, vertical stack (`gap-8`) of a page title + optional description, then the section's content.
 
 **Navigation items are role-dependent**, all implemented (no more "Coming soon" placeholders):
 
-- **Retail-workspace roles** (`retail`, `retail_management`, and `admin` while in the Retail workspace tab) see the retail nav — this list has grown since it was first written; see [retail/](./retail/) for the current screens rather than trusting a specific list here, since it drifts. A plain `retail` account sees a deliberately narrow subset (Import, Import History) rather than the full set `retail_management`/`admin` get.
+- **Admin and development** see both workspaces and all operational screens. **Retail management** sees the full retail nav; a plain **retail** account sees only Import and Import History.
 - **Wholesale** accounts see the wholesale nav — this was an empty placeholder as of 2026-09-11 while the workflow was being redesigned from scratch, but it has since been rebuilt into a real multi-screen workflow (Customer Orders, Supplier Vouchers, Shipment, Receiving, Inventory, Finance, Master Data, plus Dashboard/Reports currently hidden pending release) — see [wholesale/](./wholesale/) rather than trusting the "empty placeholder" description, which is stale.
-- **Admin** sees both workspaces, switchable via a tab (it already sees every branch's retail data elsewhere).
-- **Every role** additionally sees Settings, appended last.
+- **Admin** has all settings and operational access, but its Dashboard shows only Summary and Health; Revenue, Cost, Inventory, and Customer are hidden and rejected by the API.
+- **Development** can additionally assign and manage every role, including development.
 
 ## 3. Screens
 

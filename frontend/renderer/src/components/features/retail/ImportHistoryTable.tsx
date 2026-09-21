@@ -460,7 +460,8 @@ function ImportHistoryTable({
         header: "",
         cell: (info) => {
           const row = info.row.original;
-          const isAdmin = profile?.role === "admin";
+          const isAdmin =
+            profile?.role === "admin" || profile?.role === "development";
           const issueCount = row.summary?.issue_count;
           const hasIssues = typeof issueCount === "number" && issueCount > 0;
           const issueLabel = hasIssues

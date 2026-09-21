@@ -47,6 +47,8 @@ interface Props {
   onOverviewBranchChange: (branchId: string | null) => void;
   onViewChecking?: () => void;
   onViewImport?: () => void;
+  /** Admin accounts are restricted to the Summary and Health tabs. */
+  showAdvancedTabs: boolean;
 }
 
 type Tab = "summary" | "overview" | "revenue" | "cost" | "inventory" | "customer";
@@ -64,13 +66,15 @@ const TABS: { id: Tab; label: string }[] = [
 function DashboardTabBar({
   activeTab,
   onSelect,
+  showAdvancedTabs,
 }: {
   activeTab: Tab;
   onSelect: (tab: Tab) => void;
+  showAdvancedTabs: boolean;
 }): React.JSX.Element {
   return (
     <TabBar<Tab>
-      tabs={TABS}
+      tabs={showAdvancedTabs ? TABS : TABS.filter((tab) => tab.id === "summary" || tab.id === "overview")}
       activeTab={activeTab}
       onSelect={onSelect}
       className="border-b-0 w-auto"
@@ -91,6 +95,7 @@ export function DashboardPage({
   initialBranchId,
   onViewChecking,
   onViewImport,
+  showAdvancedTabs,
 }: Props): React.JSX.Element {
   // Admin has no fixed branch_id — same convention used everywhere else in the app.
   const isAdmin = profile !== null && profile.branch_id === null;
@@ -102,6 +107,12 @@ export function DashboardPage({
   const range = usePeriodRange("30d");
   const { period } = range;
   const appliedRange = range.applied;
+
+  useEffect(() => {
+    if (!showAdvancedTabs && !["summary", "overview"].includes(activeTab)) {
+      setActiveTab("overview");
+    }
+  }, [activeTab, showAdvancedTabs]);
 
   // Defaults admin to the first retail branch once the list loads — a branch-scoped
   // account never needs this (its own branch is resolved server-side regardless of
@@ -131,7 +142,11 @@ export function DashboardPage({
           <h1 className="text-lg font-bold tracking-tight text-text-primary shrink-0 hidden sm:block">
             Dashboard
           </h1>
-          <DashboardTabBar activeTab={activeTab} onSelect={setActiveTab} />
+          <DashboardTabBar
+            activeTab={activeTab}
+            onSelect={setActiveTab}
+            showAdvancedTabs={showAdvancedTabs}
+          />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -207,7 +222,7 @@ export function DashboardPage({
               onViewChecking?.();
             } else if (target === "import") {
               onViewImport?.();
-            } else {
+            } else if (showAdvancedTabs) {
               setActiveTab(target);
             }
           }}

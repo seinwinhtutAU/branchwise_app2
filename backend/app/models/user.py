@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 
 class UserRole(str, enum.Enum):
+    DEVELOPMENT = "development"
     ADMIN = "admin"
     RETAIL_MANAGEMENT = "retail_management"
     WHOLESALE = "wholesale"

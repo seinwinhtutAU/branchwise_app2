@@ -33,6 +33,17 @@ def _make_admin_user(db_session: Session, user_id: str = "test-user-id") -> User
     return user
 
 
+def _make_development_user(db_session: Session, user_id: str = "test-user-id") -> User:
+    user = User(
+        id=user_id,
+        name="Development",
+        email=f"{user_id}@example.com",
+        role=UserRole.DEVELOPMENT,
+    )
+    db_session.add(user)
+    return user
+
+
 def _make_product(db_session: Session, stock_code: str, description: str = "Widget") -> Product:
     product = Product(stock_code=stock_code, description=description)
     db_session.add(product)
@@ -108,16 +119,16 @@ def test_dashboard_endpoint_retail_account_uses_own_branch(
     assert body["transaction_count"]["value"] == 1
 
 
-def test_dashboard_admin_requires_branch_id(authed_client: TestClient, db_session: Session):
+def test_dashboard_admin_cannot_open_revenue(authed_client: TestClient, db_session: Session):
     _make_admin_user(db_session)
     db_session.commit()
 
     response = authed_client.get("/api/dashboard/revenue?period=today")
-    assert response.status_code == 400
+    assert response.status_code == 403
 
 
 def test_dashboard_rejects_wholesale_branch(authed_client: TestClient, db_session: Session):
-    admin = _make_admin_user(db_session)
+    _make_development_user(db_session)
     wholesale_branch = _make_branch(db_session, "Wholesale")
     db_session.add(
         User(
@@ -275,7 +286,7 @@ def test_dashboard_heatmap_excludes_sales_outside_business_hours(
 def test_dashboard_sale_warnings_scoped_to_selected_branch(
     authed_client: TestClient, db_session: Session
 ):
-    admin = _make_admin_user(db_session)
+    _make_development_user(db_session)
     branch = _make_branch(db_session)
     other_branch = _make_branch(db_session, "Other")
     product = _make_product(db_session, "SKU-1")
@@ -560,14 +571,28 @@ def test_inventory_dashboard_dead_stock_excludes_sales_within_the_window(
     assert body["low_stock_items"] == []
 
 
-def test_inventory_dashboard_requires_retail_branch_for_admin(
+def test_inventory_dashboard_is_not_available_to_admin(
     authed_client: TestClient, db_session: Session
 ):
     _make_admin_user(db_session)
     db_session.commit()
 
     response = authed_client.get("/api/dashboard/inventory")
-    assert response.status_code == 400
+    assert response.status_code == 403
+
+
+def test_admin_can_open_summary_and_health_dashboard(
+    authed_client: TestClient, db_session: Session
+):
+    _make_admin_user(db_session)
+    branch = _make_branch(db_session)
+    db_session.commit()
+
+    for endpoint in ("summary", "overview"):
+        response = authed_client.get(
+            f"/api/dashboard/{endpoint}?period=today&branch_id={branch.id}"
+        )
+        assert response.status_code == 200
 
 
 def test_customer_dashboard_basket_stats_and_histogram(
@@ -748,4 +773,3 @@ def test_summary_dashboard_endpoint(
     assert "customer_demand" in body
     assert len(body["top_products"]) >= 1
     assert len(body["recommendations"]) == 3
-

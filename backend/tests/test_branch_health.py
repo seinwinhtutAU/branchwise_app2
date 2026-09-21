@@ -440,7 +440,7 @@ def test_overview_of_a_branch_with_no_data_scores_nothing_rather_than_zero(
 def test_overview_rejects_wholesale_branch(authed_client: TestClient, db_session: Session):
     """Wholesale branches are completely excluded from retail dashboard."""
     db_session.add(
-        User(id="test-user-id", name="Admin", email="admin@example.com", role=UserRole.ADMIN)
+        User(id="test-user-id", name="Development", email="development@example.com", role=UserRole.DEVELOPMENT)
     )
     wholesale = _make_branch(db_session, "Wholesale")
     db_session.add(
@@ -507,7 +507,7 @@ def test_weights_that_do_not_sum_to_one_still_produce_a_sound_score():
 def test_saved_weights_reach_the_overview_endpoint(authed_client: TestClient, db_session: Session):
     branch = _make_branch(db_session)
     db_session.add(
-        User(id="test-user-id", name="Admin", email="admin@example.com", role=UserRole.ADMIN)
+        User(id="test-user-id", name="Development", email="development@example.com", role=UserRole.DEVELOPMENT)
     )
     db_session.commit()
 

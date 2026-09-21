@@ -149,8 +149,8 @@ def test_customer_order_waits_for_stock_until_some_is_set_aside(authed_client: T
 def test_admin_can_list_and_create_orders_without_naming_a_branch(
     authed_client: TestClient, db_session: Session
 ) -> None:
-    """An admin account has no fixed branch_id. With exactly one wholesale branch (the
-    normal case), admin must be able to list and create orders without being forced to
+    """An admin account has no fixed branch_id. With exactly one wholesale branch,
+    admin must be able to list and create orders without being forced to
     pass branch_id — that used to 400 because the list/create endpoints called
     resolve_branch_id, which demands an explicit answer from any account with no fixed
     branch, retail-style. See app.services.branches.resolve_wholesale_branch_id and
@@ -547,4 +547,3 @@ def test_editing_an_order_with_a_stale_version_raises_instead_of_silently_overwr
             other.commit()
     finally:
         other.close()
-

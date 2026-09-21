@@ -17,6 +17,18 @@ def _admin(db: Session) -> User:
     return account
 
 
+def _development(db: Session) -> User:
+    account = User(
+        id="test-user-id",
+        name="Development",
+        email="development@example.com",
+        role=UserRole.DEVELOPMENT,
+    )
+    db.add(account)
+    db.flush()
+    return account
+
+
 def _branch(db: Session) -> Branch:
     branch = Branch(name="Retail 1", phone_number="000", address="TBD")
     db.add(branch)
@@ -82,3 +94,53 @@ def test_admin_can_create_update_and_delete_user(
             "branch_name": None,
         }
     ]
+
+
+def test_admin_cannot_assign_the_development_role(
+    authed_client, db_session: Session, monkeypatch
+):
+    _admin(db_session)
+    development = User(
+        id="development-id",
+        name="Development",
+        email="development@example.com",
+        role=UserRole.DEVELOPMENT,
+    )
+    db_session.add(development)
+    db_session.commit()
+    monkeypatch.setattr(users_router, "_create_auth_account", lambda *_: "auth-new")
+
+    created = authed_client.post(
+        "/api/users",
+        json={
+            "name": "Another Developer",
+            "email": "another@example.com",
+            "password": "password123",
+            "role": "development",
+        },
+    )
+    assert created.status_code == 403
+    changed = authed_client.patch(
+        "/api/users/development-id", json={"role": "admin"}
+    )
+    assert changed.status_code == 200
+    assert changed.json()["role"] == "admin"
+    assert authed_client.delete("/api/users/development-id").status_code == 204
+
+
+def test_development_can_assign_every_role(authed_client, db_session: Session, monkeypatch):
+    _development(db_session)
+    db_session.commit()
+    monkeypatch.setattr(users_router, "_create_auth_account", lambda *_: "auth-new")
+
+    created = authed_client.post(
+        "/api/users",
+        json={
+            "name": "Developer",
+            "email": "developer@example.com",
+            "password": "password123",
+            "role": "development",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["role"] == "development"

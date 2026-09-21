@@ -6,9 +6,9 @@ from app.db.session import get_db
 from app.models.user import User, UserRole
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.retail.services.chat import ChatNotConfigured, run_chat
-from app.retail.routers.common import require_retail
+from app.retail.routers.common import require_retail_operations
 
-router = APIRouter(prefix="/api/chat", tags=["chat"], dependencies=[Depends(require_retail)])
+router = APIRouter(prefix="/api/chat", tags=["chat"], dependencies=[Depends(require_retail_operations)])
 
 
 @router.post("")

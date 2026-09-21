@@ -756,4 +756,3 @@ def test_write_off_shipment_guard_and_version_bump(authed_client: TestClient, db
         json={"quantity": 1, "reason": "lost_in_transit", "note": "Too late"},
     )
     assert blocked_wo.status_code == 409
-

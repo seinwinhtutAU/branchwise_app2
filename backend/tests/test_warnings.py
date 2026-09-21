@@ -564,10 +564,10 @@ def test_warnings_endpoint_defaults_to_business_wide_sale_window(
     branch = Branch(name="Retail 1", phone_number="000", address="TBD")
     db_session.add(branch)
     db_session.flush()
-    # Admin (no fixed branch_id) so the PUT /api/settings call below is permitted, and
+    # Development (no fixed branch_id) can change advanced settings and sees every branch's
     # this account still sees every branch's sale rows for the GET /api/warnings checks.
     db_session.add(
-        User(id="test-user-id", name="Tester", email="test@example.com", role=UserRole.ADMIN)
+        User(id="test-user-id", name="Tester", email="test@example.com", role=UserRole.DEVELOPMENT)
     )
     product = _make_product(db_session, "SKU-1")
     _make_sale_line(

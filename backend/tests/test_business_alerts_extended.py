@@ -307,7 +307,7 @@ def test_checking_api_status_and_export(db_session: Session, authed_client: Test
         id="test-user-id",
         name="Admin User",
         email="test@example.com",
-        role=UserRole.ADMIN,
+            role=UserRole.DEVELOPMENT,
         auth_user_id="test-user-id",
         branch_id="test_br_01",
     )
@@ -388,7 +388,7 @@ def test_custom_daily_check_cutoff_time_formats_in_alerts_and_checking(
         id="test-user-id",
         name="Admin User",
         email="test@example.com",
-        role=UserRole.ADMIN,
+            role=UserRole.DEVELOPMENT,
         auth_user_id="test-user-id",
         branch_id="test_br_02",
     )
@@ -580,5 +580,4 @@ def test_db_check_sale_and_purchase_data_quality(db_session: Session):
     assert pur_dq["invalid_numeric_count"] == 1  # pl_2 (unit cost = 0)
     assert pur_dq["missing_description_count"] == 1  # pl_2 (prod_nodesc)
     assert pur_dq["total_issues"] == 2
-
 

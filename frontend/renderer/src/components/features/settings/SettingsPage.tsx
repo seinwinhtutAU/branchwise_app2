@@ -28,10 +28,9 @@ import { FOREIGN_CURRENCIES } from "@renderer/components/features/wholesale/shar
 interface Props {
   session: Session;
   profile: Profile | null;
-  // Every AppSettings field below is business-wide (app_settings table) — only an admin
-  // account can change any of them (enforced server-side too), so their cards only
-  // render for admin. `settings` is null until the fetch resolves.
-  isAdmin: boolean;
+  // Admins can change the basic appearance setting. Development owns the advanced
+  // operational, branch, and wholesale settings (also enforced server-side).
+  canManageAdvancedSettings: boolean;
   settings: AppSettings | null;
   onUpdateSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>;
 }
@@ -298,7 +297,7 @@ function SettingsTabBar({
 export function SettingsPage({
   session,
   profile,
-  isAdmin,
+  canManageAdvancedSettings,
   settings,
   onUpdateSettings,
 }: Props): React.JSX.Element {
@@ -306,6 +305,8 @@ export function SettingsPage({
   // Wholesale accounts never see the Warning tab (no sale/inventory/purchase data), so the
   // check-window setting has nothing to apply to for them.
   const isWholesale = profile?.role === "wholesale";
+  const canManageBasicSettings =
+    profile?.role === "admin" || profile?.role === "development";
   const [tab, setTab] = useState<SettingsTab>("general");
 
   const [branches, setBranches] = useState<BranchDateFormats[] | null>(null);
@@ -358,7 +359,7 @@ export function SettingsPage({
   }
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!canManageAdvancedSettings) return;
     let cancelled = false;
     fetch(`${apiBaseUrl}/api/branches`, {
       headers: { Authorization: `Bearer ${session.access_token}` },
@@ -373,7 +374,7 @@ export function SettingsPage({
     return () => {
       cancelled = true;
     };
-  }, [isAdmin, session]);
+  }, [canManageAdvancedSettings, session]);
 
   async function handleSettingChange<K extends keyof AppSettings>(
     key: K,
@@ -440,9 +441,9 @@ export function SettingsPage({
         description="Business-wide system preferences and operational parameters."
       />
 
-      {isAdmin && (
+      {canManageBasicSettings && (
         <SettingsTabBar
-          tabs={SETTINGS_TABS.filter(
+          tabs={(canManageAdvancedSettings ? SETTINGS_TABS : SETTINGS_TABS.filter((option) => option.id === "general")).filter(
             (option) => !option.retailOnly || !isWholesale,
           )}
           activeTab={tab}
@@ -450,7 +451,7 @@ export function SettingsPage({
         />
       )}
 
-      {!isAdmin && (
+      {!canManageBasicSettings && (
         <div className="flex flex-col gap-6">
           <Card>
             <CardHeader
@@ -499,7 +500,7 @@ export function SettingsPage({
         </div>
       )}
 
-      {isAdmin && tab === "general" && (
+      {canManageBasicSettings && tab === "general" && (
         <>
           <Card>
             <CardHeader
@@ -560,7 +561,7 @@ export function SettingsPage({
         </>
       )}
 
-      {isAdmin && !isWholesale && tab === "reorder" && (
+      {canManageAdvancedSettings && !isWholesale && tab === "reorder" && (
         <Card>
           <CardHeader
             title="ABC Inventory Buffer Months"
@@ -648,7 +649,7 @@ export function SettingsPage({
         </Card>
       )}
 
-      {isAdmin && !isWholesale && tab === "checks" && (
+      {canManageAdvancedSettings && !isWholesale && tab === "checks" && (
         <>
           <Card>
             <CardHeader
@@ -744,7 +745,7 @@ export function SettingsPage({
         </>
       )}
 
-      {isAdmin && !isWholesale && tab === "general" && (
+      {canManageAdvancedSettings && !isWholesale && tab === "general" && (
         <Card>
           <CardHeader
             title="Sale & Purchase list default range"
@@ -797,7 +798,7 @@ export function SettingsPage({
         </Card>
       )}
 
-      {isAdmin && !isWholesale && tab === "general" && (
+      {canManageAdvancedSettings && !isWholesale && tab === "general" && (
         <Card>
           <CardHeader
             title="Buying Price Source column"
@@ -828,7 +829,7 @@ export function SettingsPage({
         </Card>
       )}
 
-      {isAdmin && tab === "pricing" && (
+      {canManageAdvancedSettings && tab === "pricing" && (
         <Card>
           <CardHeader
             title="Purchase price lookback days"
@@ -859,7 +860,7 @@ export function SettingsPage({
         </Card>
       )}
 
-      {isAdmin && tab === "pricing" && (
+      {canManageAdvancedSettings && tab === "pricing" && (
         <Card>
           <CardHeader
             title="Inventory price lookback days"
@@ -890,7 +891,7 @@ export function SettingsPage({
         </Card>
       )}
 
-      {isAdmin && tab === "pricing" && (
+      {canManageAdvancedSettings && tab === "pricing" && (
         <Card>
           <CardHeader
             title="Inventory price forward days"
@@ -921,7 +922,7 @@ export function SettingsPage({
         </Card>
       )}
 
-      {isAdmin && !isWholesale && tab === "health" && (
+      {canManageAdvancedSettings && !isWholesale && tab === "health" && (
         <Card>
           <CardHeader
             title="Branch health weights"
@@ -980,7 +981,7 @@ export function SettingsPage({
         </Card>
       )}
 
-      {isAdmin && tab === "branches" && (
+      {canManageAdvancedSettings && tab === "branches" && (
         <Card>
           <CardHeader
             title="Branch date formats"
@@ -1063,7 +1064,7 @@ export function SettingsPage({
         </Card>
       )}
 
-      {isAdmin && tab === "wholesale" && (
+      {canManageAdvancedSettings && tab === "wholesale" && (
         <Card>
           <CardHeader
             title="Exchange rates"

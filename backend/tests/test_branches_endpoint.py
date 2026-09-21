@@ -55,21 +55,26 @@ def test_new_branch_defaults_to_month_first_date_formats(
     assert row["inventory_date_format"] == "MDY"
 
 
-def _make_admin(db_session: Session) -> None:
+def _make_development(db_session: Session) -> None:
     db_session.add(
-        User(id="test-user-id", name="Admin", email="admin@example.com", role=UserRole.ADMIN)
+        User(
+            id="test-user-id",
+            name="Development",
+            email="development@example.com",
+            role=UserRole.DEVELOPMENT,
+        )
     )
     db_session.commit()
 
 
-def test_admin_can_set_a_branchs_date_formats_independently_of_other_branches(
+def test_development_can_set_a_branchs_date_formats_independently_of_other_branches(
     authed_client: TestClient, db_session: Session
 ):
     ashley = Branch(name="Ashley", phone_number="000", address="TBD")
     other = Branch(name="Aung Thit Sar", phone_number="000", address="TBD")
     db_session.add_all([ashley, other])
     db_session.flush()
-    _make_admin(db_session)
+    _make_development(db_session)
 
     response = authed_client.put(
         f"/api/branches/{ashley.id}",
@@ -89,13 +94,13 @@ def test_admin_can_set_a_branchs_date_formats_independently_of_other_branches(
     assert unaffected["inventory_date_format"] == "MDY"
 
 
-def test_admin_can_update_just_one_of_the_two_formats(
+def test_development_can_update_just_one_of_the_two_formats(
     authed_client: TestClient, db_session: Session
 ):
     branch = Branch(name="Ashley", phone_number="000", address="TBD")
     db_session.add(branch)
     db_session.flush()
-    _make_admin(db_session)
+    _make_development(db_session)
 
     response = authed_client.put(
         f"/api/branches/{branch.id}", json={"sale_date_format": "DMY"}
@@ -105,7 +110,7 @@ def test_admin_can_update_just_one_of_the_two_formats(
     assert response.json()["inventory_date_format"] == "MDY"
 
 
-def test_non_admin_cannot_change_a_branchs_date_format(
+def test_admin_can_change_a_branchs_date_format(
     authed_client: TestClient, db_session: Session
 ):
     branch = Branch(name="Ashley", phone_number="000", address="TBD")
@@ -114,10 +119,9 @@ def test_non_admin_cannot_change_a_branchs_date_format(
     db_session.add(
         User(
             id="test-user-id",
-            name="Retail",
-            email="retail@example.com",
-            role=UserRole.RETAIL,
-            branch_id=branch.id,
+            name="Admin",
+            email="admin@example.com",
+            role=UserRole.ADMIN,
         )
     )
     db_session.commit()
@@ -125,13 +129,13 @@ def test_non_admin_cannot_change_a_branchs_date_format(
     response = authed_client.put(
         f"/api/branches/{branch.id}", json={"sale_date_format": "DMY"}
     )
-    assert response.status_code == 403
+    assert response.status_code == 200
 
 
 def test_updating_an_unknown_branch_id_is_rejected(
     authed_client: TestClient, db_session: Session
 ):
-    _make_admin(db_session)
+    _make_development(db_session)
 
     response = authed_client.put(
         "/api/branches/does-not-exist", json={"sale_date_format": "DMY"}
@@ -145,7 +149,7 @@ def test_invalid_date_format_value_is_rejected(
     branch = Branch(name="Ashley", phone_number="000", address="TBD")
     db_session.add(branch)
     db_session.flush()
-    _make_admin(db_session)
+    _make_development(db_session)
 
     response = authed_client.put(
         f"/api/branches/{branch.id}", json={"sale_date_format": "YMD"}

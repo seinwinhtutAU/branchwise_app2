@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
+import type { Profile } from "@renderer/components/features/types";
 import { useToast } from "@renderer/lib/useToast";
 import { Button } from "@renderer/components/ui/Button";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
@@ -32,14 +33,19 @@ interface BranchOption {
   name: string;
 }
 
-type RoleValue = "admin" | "retail_management" | "retail" | "wholesale";
+type RoleValue = "development" | "admin" | "retail_management" | "retail" | "wholesale";
 
 const ROLE_OPTIONS: { value: RoleValue; label: string; description: string }[] =
   [
     {
+      value: "development",
+      label: "Development",
+      description: "Full access to every workspace, setting, and role assignment",
+    },
+    {
       value: "admin",
       label: "Admin",
-      description: "Full access to retail, wholesale and administration",
+      description: "Summary and health dashboard, basic settings, and user management",
     },
     {
       value: "retail_management",
@@ -60,6 +66,7 @@ const ROLE_OPTIONS: { value: RoleValue; label: string; description: string }[] =
 
 interface Props {
   session: Session;
+  profile: Profile | null;
 }
 
 function roleNeedsBranch(role: RoleValue): boolean {
@@ -73,8 +80,16 @@ function errorMessage(response: Response, fallback: string): Promise<Error> {
     .catch(() => new Error(fallback));
 }
 
-export function UserManagementPage({ session }: Props): React.JSX.Element {
+export function UserManagementPage({ session, profile }: Props): React.JSX.Element {
   const showToast = useToast();
+  const isDevelopment = profile?.role === "development";
+  const assignableRoles = useMemo(
+    () =>
+      isDevelopment
+        ? ROLE_OPTIONS
+        : ROLE_OPTIONS.filter((option) => option.value !== "development"),
+    [isDevelopment],
+  );
   const [users, setUsers] = useState<ManagedUser[] | null>(null);
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [loadingError, setLoadingError] = useState<string | null>(null);
@@ -378,7 +393,7 @@ export function UserManagementPage({ session }: Props): React.JSX.Element {
                   }))
                 }
               >
-                {ROLE_OPTIONS.map((option) => (
+                {assignableRoles.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -490,8 +505,12 @@ export function UserManagementPage({ session }: Props): React.JSX.Element {
                           });
                         }}
                       >
-                        {ROLE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
+                        {(account.role === "development" ? ROLE_OPTIONS : assignableRoles).map((option) => (
+                          <option
+                            key={option.value}
+                            value={option.value}
+                            disabled={!isDevelopment && option.value === "development"}
+                          >
                             {option.label}
                           </option>
                         ))}
@@ -503,7 +522,9 @@ export function UserManagementPage({ session }: Props): React.JSX.Element {
                       size="sm"
                       aria-label={`Branch for ${account.name}`}
                       value={account.branch_id ?? ""}
-                      disabled={!roleNeedsBranch(account.role)}
+                      disabled={
+                        !roleNeedsBranch(account.role)
+                      }
                       onChange={(event) =>
                         updateDraft(account.id, {
                           branch_id: event.target.value || null,

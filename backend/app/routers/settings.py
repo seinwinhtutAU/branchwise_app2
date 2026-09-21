@@ -121,17 +121,14 @@ def update_settings(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    # Business-wide, not per-device — every account (and every device) sees the same
-    # value for all of these, so only an admin account can change them (mirrors
-    # orders.py's second-commit-qty restriction).
-    if user.role != UserRole.ADMIN:
+    updates = payload.model_dump(exclude_none=True)
+    if user.role not in (UserRole.ADMIN, UserRole.DEVELOPMENT):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Only an admin account can change business-wide settings",
+            "Only an admin or development account can change business-wide settings",
         )
-
     # model_dump turns the two nested models into plain dicts, which is exactly what the
     # JSON value column stores — no special-casing needed for them here.
-    for key, value in payload.model_dump(exclude_none=True).items():
+    for key, value in updates.items():
         set_setting(db, key, value)
     return get_all_settings(db)

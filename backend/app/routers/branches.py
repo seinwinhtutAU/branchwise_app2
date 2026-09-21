@@ -54,12 +54,12 @@ def update_branch_date_formats(
 ) -> dict:
     # Each branch's own POS terminal can use a different date convention, but which
     # convention every branch uses is still a business-wide call, not a per-device
-    # preference — same admin-only rule as the business-wide settings in
+    # preference — same administrator/development rule as the business-wide settings in
     # app.routers.settings.
-    if user.role != UserRole.ADMIN:
+    if user.role not in (UserRole.ADMIN, UserRole.DEVELOPMENT):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Only an admin account can change a branch's date format",
+            "Only an admin or development account can change a branch's date format",
         )
 
     branch = db.get(Branch, branch_id)

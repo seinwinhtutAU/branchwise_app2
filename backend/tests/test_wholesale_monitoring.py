@@ -29,7 +29,7 @@ def test_monitoring_surfaces_only_needs_attention_rows_and_admin_sees_all_branch
     branch_two = Branch(name="Wholesale two", phone_number="0", address="There")
     db_session.add_all([branch_one, branch_two])
     db_session.flush()
-    db_session.add(User(id="test-user-id", name="Admin", email="admin@example.com", role=UserRole.ADMIN))
+    db_session.add(User(id="test-user-id", name="Development", email="development@example.com", role=UserRole.DEVELOPMENT))
 
     in_transit = Shipment(
         branch_id=branch_one.id, shipment_no="SHP-IN", voucher_no="VCH-IN", supplier_name="Factory A",

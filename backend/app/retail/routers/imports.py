@@ -34,10 +34,10 @@ from app.retail.services.purchase_import import VALIDATION_RULES as PURCHASE_VAL
 from app.retail.services.purchase_import import parse_purchase_upload, parse_purchase_export_from_grid, extract_purchase_metadata
 from app.retail.services.purchase_persist import persist_purchases
 from app.retail.services.sales_persist import persist_sales
-from app.retail.routers.common import require_retail
+from app.retail.routers.common import require_retail_operations
 from app.services.storage import get_storage_service
 
-router = APIRouter(prefix="/api/imports", tags=["imports"], dependencies=[Depends(require_retail)])
+router = APIRouter(prefix="/api/imports", tags=["imports"], dependencies=[Depends(require_retail_operations)])
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 
@@ -179,13 +179,13 @@ def _resolve_branch_id(user: User, branch_id: str | None, db: Session) -> str | 
 
 def _resolve_branch_for_preview(user: User, branch_id: str | None, db: Session) -> Branch | None:
     """Like _resolve_branch_id, but tolerates the branch being unknown rather than
-    erroring — an admin's very first preview call happens before they've picked a
+    erroring — a development account's first preview call happens before it has picked a
     branch on the review screen (the picker only appears there, and its value is only
     sent once chosen; see ImportReviewPage.tsx). A retail account's own branch is
     always known already. Returns None only when neither the account nor the request
     supplies one, meaning "use the universal MDY default for this one preview" — the
     frontend re-previews with a real branch_id as soon as one is picked, so this only
-    ever affects the very first render of an admin's review screen.
+    ever affects the very first render of a development account's review screen.
     """
     resolved_id = user.branch_id or branch_id
     if resolved_id is None:
@@ -241,7 +241,7 @@ def _build_preview(
 
 
 def _can_access_batch(user: User, batch: ImportBatch) -> bool:
-    """An account with no branch (e.g. admin) can see/revert any batch;
+    """An account with no branch can see/revert any batch;
     everyone else only their own branch's — same rule as import confirmation."""
     return user.branch_id is None or batch.branch_id == user.branch_id
 
@@ -757,7 +757,7 @@ def download_import_batch_file(
     if batch is None or not _can_access_batch(user, batch):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
 
-    if user.role != UserRole.ADMIN and batch.import_type != ImportType.GENERAL:
+    if user.role not in (UserRole.ADMIN, UserRole.DEVELOPMENT) and batch.import_type != ImportType.GENERAL:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             "Only administrators can download original import files",

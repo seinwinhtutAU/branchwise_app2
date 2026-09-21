@@ -8,9 +8,9 @@ from app.retail.models.stock_level import StockLevel
 from app.models.user import User
 from app.services.dashboard import compute_stock_health
 from app.retail.services.stock import latest_stock_query
-from app.retail.routers.common import require_retail
+from app.retail.routers.common import require_retail_operations
 
-router = APIRouter(prefix="/api/inventory", tags=["inventory"], dependencies=[Depends(require_retail)])
+router = APIRouter(prefix="/api/inventory", tags=["inventory"], dependencies=[Depends(require_retail_operations)])
 
 # Matches the other list endpoints' page size. Low/dead stock are bounded by product x
 # branch count rather than transaction volume, so this is for a consistent page size —

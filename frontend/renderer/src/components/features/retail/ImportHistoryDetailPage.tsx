@@ -163,7 +163,7 @@ function ImportHistoryDetailPage({
           </div>
         </div>
 
-        {detail && (profile?.role === "admin" || isGeneralFile) && (
+        {detail && (profile?.role === "admin" || profile?.role === "development" || isGeneralFile) && (
           <Button
             variant="secondary"
             size="sm"

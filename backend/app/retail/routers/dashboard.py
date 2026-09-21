@@ -10,7 +10,7 @@ from app.models.user import User
 from app.retail.services import branch_health as branch_health_service
 from app.services import dashboard as dashboard_service
 from app.services.branches import list_retail_branches, resolve_branch_id
-from app.retail.routers.common import require_retail
+from app.retail.routers.common import require_advanced_dashboard, require_retail
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[Depends(require_retail)])
 
@@ -82,6 +82,7 @@ def get_revenue_dashboard(
         None, description="Required for an admin account (no fixed branch); ignored otherwise"
     ),
     user: User = Depends(get_current_app_user),
+    _: None = Depends(require_advanced_dashboard),
     db: Session = Depends(get_db),
 ) -> dict:
     _validate_period_or_dates(period, date_from, date_to)
@@ -100,6 +101,7 @@ def get_cost_dashboard(
         None, description="Required for an admin account (no fixed branch); ignored otherwise"
     ),
     user: User = Depends(get_current_app_user),
+    _: None = Depends(require_advanced_dashboard),
     db: Session = Depends(get_db),
 ) -> dict:
     _validate_period_or_dates(period, date_from, date_to)
@@ -115,6 +117,7 @@ def get_inventory_dashboard(
         None, description="Required for an admin account (no fixed branch); ignored otherwise"
     ),
     user: User = Depends(get_current_app_user),
+    _: None = Depends(require_advanced_dashboard),
     db: Session = Depends(get_db),
 ) -> dict:
     # No period param — current stock is a point-in-time fact, not a date-range query.
@@ -131,6 +134,7 @@ def get_customer_dashboard(
         None, description="Required for an admin account (no fixed branch); ignored otherwise"
     ),
     user: User = Depends(get_current_app_user),
+    _: None = Depends(require_advanced_dashboard),
     db: Session = Depends(get_db),
 ) -> dict:
     _validate_period_or_dates(period, date_from, date_to)

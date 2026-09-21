@@ -153,10 +153,10 @@ def test_inventory_endpoint_rejects_sale_file(authed_client: TestClient, db_sess
     assert "Inventory file" in response.json()["detail"]
 
 
-def test_sales_preview_accepts_admin_with_branch_id_and_applies_its_date_format(
+def test_sales_preview_accepts_development_with_branch_id_and_applies_its_date_format(
     authed_client: TestClient, db_session: Session
 ):
-    # An admin account (no fixed branch) can pass branch_id even at preview time —
+    # A development account (no fixed branch) can pass branch_id even at preview time —
     # once the review screen's branch picker has a selection, the frontend re-previews
     # with it so the table reflects that branch's date format before confirm.
     branch = Branch(
@@ -165,7 +165,7 @@ def test_sales_preview_accepts_admin_with_branch_id_and_applies_its_date_format(
     db_session.add(branch)
     db_session.flush()
     db_session.add(
-        User(id="test-user-id", name="Admin", email="admin@example.com", role=UserRole.ADMIN)
+        User(id="test-user-id", name="Development", email="development@example.com", role=UserRole.DEVELOPMENT)
     )
     db_session.commit()
 
@@ -180,11 +180,11 @@ def test_sales_preview_accepts_admin_with_branch_id_and_applies_its_date_format(
     assert row["Date"] == "2026-06-05"  # day-first: 5 June, not May 6
 
 
-def test_sales_preview_defaults_to_mdy_when_admin_has_not_picked_a_branch_yet(
+def test_sales_preview_defaults_to_mdy_when_development_has_not_picked_a_branch_yet(
     authed_client: TestClient, db_session: Session
 ):
     db_session.add(
-        User(id="test-user-id", name="Admin", email="admin@example.com", role=UserRole.ADMIN)
+        User(id="test-user-id", name="Development", email="development@example.com", role=UserRole.DEVELOPMENT)
     )
     db_session.commit()
 

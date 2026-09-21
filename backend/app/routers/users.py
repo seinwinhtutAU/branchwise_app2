@@ -1,4 +1,4 @@
-"""Administrator-only account and role management."""
+"""Account and role management for admin and development accounts."""
 
 from typing import Literal
 
@@ -18,7 +18,7 @@ from app.retail.models.import_batch import ImportBatch
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
-RoleValue = Literal["admin", "retail_management", "retail", "wholesale"]
+RoleValue = Literal["development", "admin", "retail_management", "retail", "wholesale"]
 ORIGIN_HEADER = "http://localhost:8000"
 AUTH_TIMEOUT = httpx.Timeout(15.0)
 
@@ -62,17 +62,28 @@ class UserUpdate(BaseModel):
         return value
 
 
-def _require_admin(user: User) -> None:
-    if user.role != UserRole.ADMIN:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only an admin account can manage users")
+def _require_user_manager(user: User) -> None:
+    if user.role not in (UserRole.ADMIN, UserRole.DEVELOPMENT):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only an admin or development account can manage users",
+        )
+
+
+def _require_assignable_role(actor: User, role: UserRole) -> None:
+    if actor.role == UserRole.ADMIN and role == UserRole.DEVELOPMENT:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only a development account can assign the development role",
+        )
 
 
 def _validate_assignment(role: UserRole, branch_id: str | None, db: Session) -> None:
-    if role in (UserRole.ADMIN, UserRole.RETAIL_MANAGEMENT):
+    if role in (UserRole.DEVELOPMENT, UserRole.ADMIN, UserRole.RETAIL_MANAGEMENT):
         if branch_id is not None:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
-                "Admin and retail management accounts cannot be assigned to a branch",
+                "Development, admin, and retail management accounts cannot be assigned to a branch",
             )
         return
 
@@ -137,7 +148,7 @@ def list_users(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    _require_admin(user)
+    _require_user_manager(user)
     return [_user_out(account) for account in db.query(User).order_by(User.name, User.email).all()]
 
 
@@ -147,8 +158,9 @@ def create_user(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_admin(user)
+    _require_user_manager(user)
     role = UserRole(payload.role)
+    _require_assignable_role(user, role)
     _validate_assignment(role, payload.branch_id, db)
 
     existing = (
@@ -184,19 +196,21 @@ def update_user(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _require_admin(user)
+    _require_user_manager(user)
     account = db.get(User, user_id)
     if account is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
 
     next_role = UserRole(payload.role) if payload.role is not None else account.role
+    if payload.role is not None:
+        _require_assignable_role(user, next_role)
     branch_was_sent = "branch_id" in payload.model_fields_set
     next_branch_id = payload.branch_id if branch_was_sent else account.branch_id
-    if next_role in (UserRole.ADMIN, UserRole.RETAIL_MANAGEMENT):
+    if next_role in (UserRole.DEVELOPMENT, UserRole.ADMIN, UserRole.RETAIL_MANAGEMENT):
         if branch_was_sent and payload.branch_id is not None:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
-                "Admin and retail management accounts cannot be assigned to a branch",
+                "Development, admin, and retail management accounts cannot be assigned to a branch",
             )
         next_branch_id = None
     _validate_assignment(next_role, next_branch_id, db)
@@ -216,7 +230,7 @@ def delete_user(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> None:
-    _require_admin(user)
+    _require_user_manager(user)
     if user_id == user.id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "You cannot delete your own account")
 

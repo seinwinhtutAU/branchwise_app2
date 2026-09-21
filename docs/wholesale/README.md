@@ -106,9 +106,9 @@ not a silently-ignored no-op.
 ## Access control
 
 `app/wholesale/routers/common.py::require_wholesale` gates every wholesale router: it allows
-`UserRole.WHOLESALE` and `UserRole.ADMIN` only, rejecting `retail`/`retail_management` — the
-mirror image of `app/retail/routers/common.py::require_retail`, which allows
-`admin`/`retail_management`/`retail` and rejects `wholesale`. Admin is the only role with both.
+`UserRole.WHOLESALE`, `UserRole.ADMIN`, and `UserRole.DEVELOPMENT`, rejecting
+`retail`/`retail_management`. The retail Dashboard has a separate, narrower restriction:
+admin cannot request its Revenue, Cost, Inventory, or Customer tabs. Development can assign every role.
 See [auth-and-accounts.md](../auth-and-accounts.md).
 
 The same file's `paginate(rows, page, page_size, response)` is the shared pagination

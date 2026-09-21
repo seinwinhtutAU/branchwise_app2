@@ -163,8 +163,8 @@ type Section =
   | "settings"
   | "userManagement";
 
-// Retail and Wholesale are two functionally separate products glued together for admin's
-// convenience (see the "Wholesale" doc section in CLAUDE.md) — an admin switches between
+// Retail and Wholesale are two functionally separate products glued together for a
+// development account's convenience (see the "Wholesale" doc section in CLAUDE.md) — it switches between
 // them via the workspace tabs in AppShell rather than seeing one merged nav list, so each
 // workspace's item count can keep growing without bloating the other's.
 type Workspace = "retail" | "wholesale";
@@ -203,7 +203,7 @@ const RETAIL_NAV_ITEMS: NavItem[] = [
 
 // The wholesale workflow is being rebuilt from scratch (see diagram/wholesale/erd.mmd),
 // so its old screens are gone. The workspace and this one nav item stay so a wholesale
-// account still has somewhere to land and the tab doesn't disappear from admin's view.
+// account still has somewhere to land and the tab doesn't disappear from development's view.
 // Ordered the way the work actually runs: an order comes in, a voucher goes to the
 // factory, the goods ship, arrive at the gate, land on the shelf, and are paid for.
 // Reports sits with Finance at the end because it is a screen you read, not one you
@@ -273,7 +273,7 @@ const WORKSPACE_SECTION_IDS: Record<Workspace, Set<string>> = {
   wholesale: new Set(WHOLESALE_NAV_ITEMS.map((item) => item.id)),
 };
 
-// Remembers which workspace an admin was last in, so they don't land back on Retail every
+// Remembers which workspace development was last in, so it doesn't land back on Retail every
 // sign-in if they actually live in Wholesale.
 // The password every seeded account shares in development.
 // Eight characters because Neon Auth refuses anything shorter.
@@ -426,7 +426,7 @@ function App(): React.JSX.Element {
   // Only "← All branches" clears it.
   const [overviewBranchId, setOverviewBranchId] = useState<string | null>(null);
   // Seeded from the last time the server answered, so a launch on a dead connection still
-  // knows the role and branch — without which an admin account renders as a branch-scoped
+  // knows the role and branch — without which an unscoped account renders as a branch-scoped
   // retail one and every page below it loads the wrong thing (see lib/lastKnown.ts).
   const [profile, setProfile] = useState<Profile | null>(() =>
     readLastKnown<Profile>("profile"),
@@ -538,26 +538,28 @@ function App(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
-  // Admin accounts (no fixed branch_id) see every branch's data merged, so their filter
+  // Cross-branch roles see every branch's data, so their filter
   // dropdowns should offer every real branch — not just ones with rows currently loaded.
   // Branch-scoped accounts never see other branches' data at all, so we skip the fetch
   // for them; SimpleDataTable/ImportHistoryTable/DataOverviewTable fall back to deriving
   // options from loaded rows, which naturally hides a pointless single-branch filter.
+  const isDevelopment = profile !== null && profile.role === "development";
   const isAdmin = profile !== null && profile.role === "admin";
   // Wholesale runs on a completely separate workflow than retail (its own product codes,
   // customer orders, factory vouchers) — none of the import/sale/inventory/purchase/
   // history/overview screens apply to it, so a wholesale account only sees the wholesale
-  // nav. Admin sees both, since admin already sees every branch's data elsewhere.
+  // nav. Development sees both workspaces; admin is limited to its retail dashboard views.
   const isWholesale = profile !== null && profile.role === "wholesale";
   const isRetailUser = profile !== null && profile.role === "retail";
   const isRetailManagement =
     profile !== null && profile.role === "retail_management";
-  const canManageRetail = isAdmin || isRetailManagement;
-  // A role scoped to a single workspace is always in that workspace — only admin (who sees
+  const canManageRetail = isDevelopment || isAdmin || isRetailManagement;
+  const canAccessAllWorkspaces = isDevelopment || isAdmin;
+  // A role scoped to a single workspace is always in that workspace — only development or admin (who sees
   // both) actually uses the switcher state below.
   const effectiveWorkspace: Workspace = isWholesale
     ? "wholesale"
-    : !isAdmin
+    : !canAccessAllWorkspaces
       ? "retail"
       : workspace;
   // If the current section doesn't belong to the active workspace (first render before the
@@ -566,7 +568,8 @@ function App(): React.JSX.Element {
   // there's no frame where the wrong workspace's UI briefly renders before a correction
   // catches up.
   const section: Section =
-    (rawSection === "settings" || rawSection === "userManagement") && isAdmin
+    (rawSection === "settings" || rawSection === "userManagement") &&
+    (isAdmin || isDevelopment)
       ? rawSection
       : isRetailUser
         ? RETAIL_ROLE_SECTION_IDS.has(rawSection)
@@ -576,9 +579,7 @@ function App(): React.JSX.Element {
           ? rawSection
           : (WORKSPACE_NAV_ITEMS[effectiveWorkspace][0].id as Section);
   const branchOptions = useBranches(canManageRetail ? session : null);
-  const retailBranchOptions = useRetailBranchOptions(
-    canManageRetail ? session : null,
-  );
+  const retailBranchOptions = useRetailBranchOptions(canManageRetail ? session : null);
 
 
   // The Business Alerts badge, counted from the same per-branch overview payloads the
@@ -637,7 +638,7 @@ function App(): React.JSX.Element {
             return { ...item, badgeCount: businessAlertCount };
           return item;
         });
-      return isAdmin
+      return canAccessAllWorkspaces
         ? [
             ...items,
             {
@@ -649,15 +650,15 @@ function App(): React.JSX.Element {
           ]
         : items;
     },
-    [isAdmin, isRetailUser, effectiveWorkspace, businessAlertCount],
+    [canAccessAllWorkspaces, isRetailUser, effectiveWorkspace, businessAlertCount],
   );
 
-  // Only admin actually switches workspaces — a retail-only or wholesale-only account is
+  // Only development actually switches workspaces — a retail-only or wholesale-only account is
   // permanently in its one workspace, so showing a switcher with a single option would be
   // pointless (AppShell already hides it below two tabs).
   const workspaceTabs: WorkspaceTab[] = useMemo(
     () =>
-      isAdmin
+      canAccessAllWorkspaces
         ? (Object.keys(WORKSPACE_NAV_ITEMS) as Workspace[]).map((id) => ({
             id,
             label: WORKSPACE_LABELS[id],
@@ -665,7 +666,7 @@ function App(): React.JSX.Element {
             badgeCount: id === "retail" ? businessAlertCount : undefined,
           }))
         : [],
-    [isAdmin, businessAlertCount],
+    [canAccessAllWorkspaces, businessAlertCount],
   );
 
   function handleWorkspaceChange(id: string): void {
@@ -703,13 +704,13 @@ function App(): React.JSX.Element {
       }
 
       // Workspace toggle shortcut: Cmd+1 / Ctrl+1 (Retail), Cmd+2 / Ctrl+2 (Wholesale)
-      if (isAdmin && isModifier && e.key === "1") {
+      if (canAccessAllWorkspaces && isModifier && e.key === "1") {
         e.preventDefault();
         handleWorkspaceChange("retail");
         return;
       }
 
-      if (isAdmin && isModifier && e.key === "2") {
+      if (canAccessAllWorkspaces && isModifier && e.key === "2") {
         e.preventDefault();
         handleWorkspaceChange("wholesale");
         return;
@@ -718,7 +719,7 @@ function App(): React.JSX.Element {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isAdmin]);
+  }, [canAccessAllWorkspaces]);
 
   // Listen to native app menu commands
   useEffect(() => {
@@ -957,7 +958,7 @@ function App(): React.JSX.Element {
   }
 
   // Which nav/section a signed-in account sees depends on its role (retail vs. wholesale vs.
-  // admin), known only once /api/me resolves. Rendering the shell before that would default
+  // admin, or development), known only once /api/me resolves. Rendering the shell before that would default
   // to the retail nav/section for every role — including wholesale — producing a visible
   // flash of retail UI right after sign-in. Waiting here instead means the shell only ever
   // renders once with the correct role-specific nav.
@@ -1056,6 +1057,7 @@ function App(): React.JSX.Element {
                   }}
                   overviewBranchId={overviewBranchId}
                   onOverviewBranchChange={setOverviewBranchId}
+                  showAdvancedTabs={!isAdmin}
                   initialTab={dashboardTarget?.tab}
                   initialBranchId={dashboardTarget?.branchId}
                   onViewChecking={() => handleSectionChange("checking")}
@@ -1244,13 +1246,13 @@ function App(): React.JSX.Element {
                 <SettingsPage
                   session={session}
                   profile={profile}
-                  isAdmin={isAdmin}
+                  canManageAdvancedSettings={canAccessAllWorkspaces}
                   settings={settings}
                   onUpdateSettings={updateSettings}
                 />
               )}
-              {section === "userManagement" && isAdmin && (
-                <UserManagementPage session={session} />
+              {section === "userManagement" && (isAdmin || isDevelopment) && (
+                <UserManagementPage session={session} profile={profile} />
               )}
             </>
           )}
@@ -1262,7 +1264,7 @@ function App(): React.JSX.Element {
 
 // Stands in for the wholesale workflow while it is being redesigned from scratch. The nav
 // item and the workspace tab stay put so a wholesale account still lands somewhere and
-// admin can still see the tab; there is simply nothing behind them yet.
+// development can still see the tab; there is simply nothing behind them yet.
 function WholesalePlaceholder(): React.JSX.Element {
   return (
     <EmptyState

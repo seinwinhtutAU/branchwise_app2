@@ -17,7 +17,7 @@ def _make_admin_user(db_session: Session) -> None:
             id="admin-user-id",
             name="Admin User",
             email="admin@example.com",
-            role=UserRole.ADMIN,
+                role=UserRole.DEVELOPMENT,
             branch_id=None,
         )
     )

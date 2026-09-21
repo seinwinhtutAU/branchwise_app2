@@ -6,9 +6,9 @@ from app.db.session import get_db
 from app.models.user import User
 from app.retail.services.data_quality import build_warning_sections
 from app.services.settings import get_purchase_warning_window_days, get_sale_warning_window_days
-from app.retail.routers.common import require_retail
+from app.retail.routers.common import require_retail_operations
 
-router = APIRouter(prefix="/api/warnings", tags=["warnings"], dependencies=[Depends(require_retail)])
+router = APIRouter(prefix="/api/warnings", tags=["warnings"], dependencies=[Depends(require_retail_operations)])
 
 
 @router.get("")

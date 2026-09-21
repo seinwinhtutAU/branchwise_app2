@@ -75,8 +75,7 @@ def _branch_scoped_batches(db: Session, user: User, import_type: ImportType, sin
 
 
 def _can_access_batch(user: User, batch: ImportBatch) -> bool:
-    """Same rule as imports.py's history endpoints: admin (no fixed branch) can act on
-    any batch, everyone else only their own branch's."""
+    """An unscoped account can act on any batch; everyone else only their own branch's."""
     return user.branch_id is None or batch.branch_id == user.branch_id
 
 

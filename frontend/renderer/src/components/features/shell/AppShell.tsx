@@ -55,6 +55,7 @@ interface AppShellProps {
 }
 
 const roleBadgeVariant: Record<string, "brand" | "info" | "default"> = {
+  development: "brand",
   admin: "brand",
   retail_management: "brand",
   wholesale: "brand",
@@ -62,6 +63,7 @@ const roleBadgeVariant: Record<string, "brand" | "info" | "default"> = {
 };
 
 const roleLabels: Record<string, string> = {
+  development: "Development",
   admin: "Admin",
   retail_management: "Retail management",
   wholesale: "Wholesale user",
