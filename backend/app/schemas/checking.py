@@ -15,6 +15,8 @@ class CheckingStatusResponse(BaseModel):
     has_today_sales: bool
     has_today_inventory: bool
     is_after_8pm: bool
+    cutoff_time: str = "20:00"
+    formatted_cutoff_time: str = "8:00 PM"
     items: list[CheckingItem]
 
 

@@ -113,19 +113,39 @@ def get_today_exchange_rates(db: Session) -> dict[str, str]:
     return dict(saved) if isinstance(saved, dict) else {}
 
 
-def get_early_warning_thresholds(db: Session) -> dict[str, float]:
-    """The firing points for every Early Warning rule, as a plain dict — the caller
-    turns it into an early_warning.Thresholds. Returning the dataclass from here would
-    make this module import early_warning, which already reaches back into settings
-    through branch_health."""
-    return {
-        name: float(value) for name, value in _merged_over_default(db, "early_warning_thresholds").items()
-    }
-
-
 def get_purchasing_buffer_months(db: Session) -> dict[str, float]:
     """The target inventory buffer months for each ABC classification tier."""
     return {
         name: float(value) for name, value in _merged_over_default(db, "purchasing_buffer_months").items()
     }
+
+
+def get_daily_check_cutoff_time(db: Session) -> str:
+    """The shop closing cutoff time ('HH:MM') after which daily checks run and audit sheets unlock."""
+    val = get_setting(db, "daily_check_cutoff_time")
+    return str(val) if val else "20:00"
+
+
+def get_daily_check_cutoff_hour_minute(db: Session) -> tuple[int, int]:
+    raw = get_daily_check_cutoff_time(db)
+    try:
+        parts = raw.split(":")
+        return int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+    except Exception:
+        return 20, 0
+
+
+def format_cutoff_time(cutoff_time: str) -> str:
+    """Formats '20:00' to '8:00 PM', '19:30' to '7:30 PM', etc."""
+    try:
+        parts = cutoff_time.split(":")
+        h = int(parts[0])
+        m = int(parts[1]) if len(parts) > 1 else 0
+        suffix = "AM" if h < 12 else "PM"
+        display_h = 12 if h in (0, 12) else h % 12
+        if m == 0:
+            return f"{display_h}:00 {suffix}"
+        return f"{display_h}:{m:02d} {suffix}"
+    except Exception:
+        return cutoff_time
 

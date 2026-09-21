@@ -39,20 +39,24 @@ import {
 } from "@renderer/components/features/dashboard/helpers";
 import type { Profile } from "@renderer/components/features/types";
 
-const EXCLUDED_DIMENSION = "data_quality";
 const COLUMN_COUNT = 6;
 
-type Tab = "all" | "sales" | "profit" | "inventory" | "customer";
+type Tab = "all" | "sales" | "inventory" | "customer" | "data_quality";
 type SeverityFilter = "all" | AlertSeverity;
 
 const CATEGORY_LABEL: Record<string, string> = {
   sales: "Sales",
-  profit: "Profit",
   inventory: "Inventory",
   customer: "Customer",
+  data_quality: "Data quality",
 };
 
-const CATEGORY_ORDER = ["sales", "profit", "inventory", "customer"] as const;
+const CATEGORY_ORDER = [
+  "sales",
+  "inventory",
+  "customer",
+  "data_quality",
+] as const;
 
 // Worst first. `normal` alerts sit at the end of a branch's rows.
 const SEVERITY_RANK: Record<AlertSeverity, number> = {
@@ -96,7 +100,9 @@ function AlertRow({
           {CATEGORY_LABEL[alert.dimension] ?? alert.dimension}
         </Td>
         <Td className="font-medium text-text-primary text-xs">{alert.title}</Td>
-        <Td className={cn("text-xs font-medium", meta.text)}>{alert.summary}</Td>
+        <Td className={cn("text-xs font-medium", meta.text)}>
+          {alert.summary}
+        </Td>
         <Td className="w-20 text-right">
           <button
             type="button"
@@ -114,7 +120,10 @@ function AlertRow({
       </Tr>
       {expanded && (
         <Tr>
-          <Td colSpan={COLUMN_COUNT} className="bg-bg-subtle/40 px-6 py-4 border-y border-border/70">
+          <Td
+            colSpan={COLUMN_COUNT}
+            className="bg-bg-subtle/40 px-6 py-4 border-y border-border/70"
+          >
             <AlertExplanation
               alert={alert}
               onOpenEvidence={(target) =>
@@ -145,7 +154,7 @@ function AllClearRow(): React.JSX.Element {
         Everything normal this period
       </Td>
       <Td className="text-text-muted text-xs">
-        No sales, profit, inventory or customer problems found.
+        No sales, inventory, customer, or data-quality problems found.
       </Td>
       <Td className="w-20" />
     </Tr>
@@ -220,19 +229,21 @@ export function BusinessAlertsPage({
     () =>
       branches
         .flatMap((branch) =>
-          branch.alerts
-            .filter((alert) => alert.dimension !== EXCLUDED_DIMENSION)
-            .map((alert) => ({
-              ...alert,
-              branchId: branch.branch_id,
-              branchName: branch.branch_name,
-            })),
+          branch.alerts.map((alert) => ({
+            ...alert,
+            branchId: branch.branch_id,
+            branchName: branch.branch_name,
+          })),
         )
         .sort(
           (a, b) =>
             SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] ||
-            CATEGORY_ORDER.indexOf(a.dimension as (typeof CATEGORY_ORDER)[number]) -
-              CATEGORY_ORDER.indexOf(b.dimension as (typeof CATEGORY_ORDER)[number]) ||
+            CATEGORY_ORDER.indexOf(
+              a.dimension as (typeof CATEGORY_ORDER)[number],
+            ) -
+              CATEGORY_ORDER.indexOf(
+                b.dimension as (typeof CATEGORY_ORDER)[number],
+              ) ||
             a.branchName.localeCompare(b.branchName),
         ),
     [branches],
@@ -261,9 +272,10 @@ export function BusinessAlertsPage({
     () => ({
       all: inBranch.length,
       sales: inBranch.filter((a) => a.dimension === "sales").length,
-      profit: inBranch.filter((a) => a.dimension === "profit").length,
       inventory: inBranch.filter((a) => a.dimension === "inventory").length,
       customer: inBranch.filter((a) => a.dimension === "customer").length,
+      data_quality: inBranch.filter((a) => a.dimension === "data_quality")
+        .length,
     }),
     [inBranch],
   );
@@ -279,9 +291,7 @@ export function BusinessAlertsPage({
   );
 
   const isFiltered =
-    branchFilter !== "" ||
-    activeTab !== "all" ||
-    severityFilter !== "all";
+    branchFilter !== "" || activeTab !== "all" || severityFilter !== "all";
 
   const resetFilters = (): void => {
     setBranchFilter("");
@@ -328,7 +338,8 @@ export function BusinessAlertsPage({
                 Branch Anomaly Alerts
               </h2>
               <span className="text-xs text-text-muted hidden sm:inline">
-                {shown.length} alert{shown.length === 1 ? "" : "s"} across {groups.length} branch{groups.length === 1 ? "" : "es"}.
+                {shown.length} alert{shown.length === 1 ? "" : "s"} across{" "}
+                {groups.length} branch{groups.length === 1 ? "" : "es"}.
               </span>
               {isFiltered && (
                 <Button
@@ -370,7 +381,15 @@ export function BusinessAlertsPage({
           <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/60">
             {/* Category Tab Pills */}
             <div className="flex items-center gap-1 bg-bg-subtle/70 p-0.5 rounded-md border border-border text-xs">
-              {(["all", "sales", "profit", "inventory", "customer"] as Tab[]).map((tab) => {
+              {(
+                [
+                  "all",
+                  "sales",
+                  "inventory",
+                  "customer",
+                  "data_quality",
+                ] as Tab[]
+              ).map((tab) => {
                 const count = categoryCounts[tab];
                 const active = activeTab === tab;
                 const label = tab === "all" ? "All" : CATEGORY_LABEL[tab];
@@ -473,8 +492,8 @@ export function BusinessAlertsPage({
           <div>
             {failedCount > 0 && (
               <div className="p-3 bg-warning/10 text-xs text-warning border-b border-warning/20">
-                {failedCount} branch{failedCount === 1 ? "" : "es"} couldn&apos;t
-                be loaded, so this list may be incomplete.
+                {failedCount} branch{failedCount === 1 ? "" : "es"}{" "}
+                couldn&apos;t be loaded, so this list may be incomplete.
               </div>
             )}
 
@@ -486,7 +505,11 @@ export function BusinessAlertsPage({
                   description="No alerts found for the selected branch or category."
                   action={
                     isFiltered ? (
-                      <Button variant="secondary" size="sm" onClick={resetFilters}>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={resetFilters}
+                      >
                         Reset Filters
                       </Button>
                     ) : undefined
@@ -543,4 +566,3 @@ export function BusinessAlertsPage({
 }
 
 export default BusinessAlertsPage;
-

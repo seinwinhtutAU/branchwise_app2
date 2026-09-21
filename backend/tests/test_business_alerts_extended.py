@@ -64,6 +64,7 @@ def _base_snapshot(**overrides) -> BranchSnapshot:
         has_today_sales=True,
         has_today_inventory=True,
         is_after_8pm=False,
+        daily_check_cutoff_time="20:00",
         stock_allocations=(),
         urgent_reorders=(),
         aged_footwear=(),
@@ -374,3 +375,210 @@ def test_checking_api_status_and_export(db_session: Session, authed_client: Test
         v_data = res_verify.json()
         assert v_data["success"] is True
         assert v_data["missing_stock_codes"] == []
+
+
+def test_custom_daily_check_cutoff_time_formats_in_alerts_and_checking(
+    db_session: Session, authed_client: TestClient
+):
+    """Verify that changing daily_check_cutoff_time changes alert copy and checking locking messages."""
+    branch = Branch(id="test_br_02", name="Cutoff Test Branch", phone_number="123456", address="Main St")
+    db_session.add(branch)
+
+    user = User(
+        id="test-user-id",
+        name="Admin User",
+        email="test@example.com",
+        role=UserRole.ADMIN,
+        auth_user_id="test-user-id",
+        branch_id="test_br_02",
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    # 1. Test alert rule with custom cutoff time "19:00"
+    snap = _base_snapshot(
+        has_today_sales=False,
+        has_today_inventory=False,
+        is_after_8pm=True,
+        daily_check_cutoff_time="19:00",
+    )
+    alerts = early_warning.evaluate(snap)
+    import_alerts = [a for a in alerts if a.id == "daily_import_missing"]
+    assert len(import_alerts) == 1
+    assert "7:00 PM" in import_alerts[0].summary
+
+    # 2. Update app_settings with custom cutoff time 21:30
+    res_update = authed_client.put(
+        "/api/settings",
+        json={"daily_check_cutoff_time": "21:30"},
+    )
+    assert res_update.status_code == 200
+    assert res_update.json()["daily_check_cutoff_time"] == "21:30"
+
+    # 3. Checking status endpoint reflects new cutoff time and 9:30 PM in reason when locked
+    with patch("app.retail.routers.checking._check_daily_import_status", return_value=(False, False, False)):
+        res = authed_client.get("/api/checking")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["cutoff_time"] == "21:30"
+        assert data["formatted_cutoff_time"] == "9:30 PM"
+        assert "9:30 PM" in data["reason"]
+
+    # 4. Checking export reflects new cutoff time when locked
+    with patch("app.retail.routers.checking._check_daily_import_status", return_value=(False, False, False)):
+        res_exp = authed_client.get("/api/checking/export")
+        assert res_exp.status_code == 400
+        assert "9:30 PM" in res_exp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Rule 15 & 16: Sale & Purchase Data Quality Alerts (Critical)
+# ---------------------------------------------------------------------------
+
+def test_sale_data_quality_fires_critical_on_negative_or_zero_values():
+    """Flags critical alert when sale lines have zero/negative/invalid quantities or prices."""
+    snap = _base_snapshot(
+        sale_data_quality_issues={
+            "invalid_numeric_count": 3,
+            "missing_description_count": 0,
+            "total_issues": 3,
+        }
+    )
+    alerts = early_warning.evaluate(snap)
+    alert = next(a for a in alerts if a.id == "sale_data_quality")
+    assert alert.severity == early_warning.CRITICAL
+    assert alert.dimension == "data_quality"
+    assert "Critical sale data quality issues" in alert.title
+    assert "3 with zero/negative/invalid numbers" in alert.summary
+    assert alert.link == "warnings"
+
+
+def test_sale_data_quality_fires_critical_on_missing_description():
+    """Flags critical alert when sale products have missing or blank descriptions."""
+    snap = _base_snapshot(
+        sale_data_quality_issues={
+            "invalid_numeric_count": 0,
+            "missing_description_count": 2,
+            "total_issues": 2,
+        }
+    )
+    alerts = early_warning.evaluate(snap)
+    alert = next(a for a in alerts if a.id == "sale_data_quality")
+    assert alert.severity == early_warning.CRITICAL
+    assert "2 with missing description" in alert.summary
+
+
+def test_sale_data_quality_clears_when_clean():
+    """No alert fires when sale transactions are clean."""
+    snap = _base_snapshot(
+        sale_data_quality_issues={
+            "invalid_numeric_count": 0,
+            "missing_description_count": 0,
+            "total_issues": 0,
+        }
+    )
+    alerts = early_warning.evaluate(snap)
+    assert not any(a.id == "sale_data_quality" for a in alerts)
+
+
+def test_purchase_data_quality_fires_critical_on_zero_or_negative_qty_or_cost():
+    """Flags critical alert when purchase lines have zero/negative/invalid quantities or unit costs."""
+    snap = _base_snapshot(
+        purchase_data_quality_issues={
+            "invalid_numeric_count": 2,
+            "missing_description_count": 0,
+            "total_issues": 2,
+        }
+    )
+    alerts = early_warning.evaluate(snap)
+    alert = next(a for a in alerts if a.id == "purchase_data_quality")
+    assert alert.severity == early_warning.CRITICAL
+    assert alert.dimension == "data_quality"
+    assert "Critical purchase data quality issues" in alert.title
+    assert "2 with zero/negative/invalid quantity or unit cost" in alert.summary
+    assert alert.link == "warnings"
+
+
+def test_purchase_data_quality_fires_critical_on_missing_description():
+    """Flags critical alert when purchase items have missing descriptions."""
+    snap = _base_snapshot(
+        purchase_data_quality_issues={
+            "invalid_numeric_count": 0,
+            "missing_description_count": 4,
+            "total_issues": 4,
+        }
+    )
+    alerts = early_warning.evaluate(snap)
+    alert = next(a for a in alerts if a.id == "purchase_data_quality")
+    assert alert.severity == early_warning.CRITICAL
+    assert "4 with missing description" in alert.summary
+
+
+def test_purchase_data_quality_clears_when_clean():
+    """No alert fires when purchase lines are clean."""
+    snap = _base_snapshot(
+        purchase_data_quality_issues={
+            "invalid_numeric_count": 0,
+            "missing_description_count": 0,
+            "total_issues": 0,
+        }
+    )
+    alerts = early_warning.evaluate(snap)
+    assert not any(a.id == "purchase_data_quality" for a in alerts)
+
+
+def test_db_check_sale_and_purchase_data_quality(db_session: Session):
+    """Integration test verifying _check_sale_data_quality and _check_purchase_data_quality query logic."""
+    from app.retail.services.branch_health import (
+        _check_sale_data_quality,
+        _check_purchase_data_quality,
+    )
+
+    branch = Branch(id="test_br_dq", name="DQ Branch", phone_number="123", address="Main")
+    db_session.add(branch)
+
+    # 1. Product with valid description
+    p1 = Product(id="prod_valid", stock_code="SKU-VALID", description="Good Leather Shoes")
+    # 2. Product with empty/missing description
+    p2 = Product(id="prod_nodesc", stock_code="SKU-NODESC", description="   ")
+    db_session.add_all([p1, p2])
+    db_session.flush()
+
+    today = date(2026, 9, 21)
+
+    # Sale 1: valid line
+    s1 = Sale(id="sale_1", branch_id="test_br_dq", slip_id="SL-1", slip_number="001", sale_date=today)
+    l1 = SaleLine(id="sl_1", sale_id="sale_1", line_id="sl-1-1", line_no=1, product_id="prod_valid", qty=2.0, selling_price=50.0, net_amount=100.0, amount=100.0)
+
+    # Sale 2: invalid qty (-1) and invalid price (0)
+    s2 = Sale(id="sale_2", branch_id="test_br_dq", slip_id="SL-2", slip_number="002", sale_date=today)
+    l2 = SaleLine(id="sl_2", sale_id="sale_2", line_id="sl-2-1", line_no=1, product_id="prod_valid", qty=-1.0, selling_price=0.0, net_amount=0.0, amount=0.0)
+
+    # Sale 3: missing description on product
+    s3 = Sale(id="sale_3", branch_id="test_br_dq", slip_id="SL-3", slip_number="003", sale_date=today)
+    l3 = SaleLine(id="sl_3", sale_id="sale_3", line_id="sl-3-1", line_no=1, product_id="prod_nodesc", qty=1.0, selling_price=30.0, net_amount=30.0, amount=30.0)
+
+    # Purchase 1: valid
+    pur1 = Purchase(id="pur_1", branch_id="test_br_dq", purchase_number="STR-001", purchase_date=today)
+    pl1 = PurchaseLine(id="pl_1", purchase_id="pur_1", product_id="prod_valid", quantity=10.0, buying_price=25.0)
+
+    # Purchase 2: invalid unit cost (0) and missing description
+    pur2 = Purchase(id="pur_2", branch_id="test_br_dq", purchase_number="STR-002", purchase_date=today)
+    pl2 = PurchaseLine(id="pl_2", purchase_id="pur_2", product_id="prod_nodesc", quantity=5.0, buying_price=0.0)
+
+    db_session.add_all([s1, l1, s2, l2, s3, l3, pur1, pl1, pur2, pl2])
+    db_session.commit()
+
+    # Check sales data quality
+    sale_dq = _check_sale_data_quality(db_session, "test_br_dq", today, today)
+    assert sale_dq["invalid_numeric_count"] == 1  # sl_2
+    assert sale_dq["missing_description_count"] == 1  # sl_3
+    assert sale_dq["total_issues"] == 2
+
+    # Check purchase data quality
+    pur_dq = _check_purchase_data_quality(db_session, "test_br_dq", today, today)
+    assert pur_dq["invalid_numeric_count"] == 1  # pl_2 (unit cost = 0)
+    assert pur_dq["missing_description_count"] == 1  # pl_2 (prod_nodesc)
+    assert pur_dq["total_issues"] == 2
+
+

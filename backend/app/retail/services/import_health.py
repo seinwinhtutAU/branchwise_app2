@@ -1,6 +1,6 @@
 """Checks backing the "Import Health" nav page — whether the cleaning/confirm step
 itself behaved correctly for a given upload, as opposed to `data_quality.py`'s checks,
-which look at data that's already been saved. See docs/import_health.md for the full
+which look at data that's already been saved. See docs/retail/import_health.md for the full
 design rationale (this module implements it).
 
 Each import type fails differently at confirm time, so each has its own check:
@@ -27,7 +27,7 @@ from app.models.user import User
 from app.services.branches import list_retail_branches
 
 # A skip rate this high is well outside the 0-4% normal range seen on real re-uploads
-# (see docs/import_health.md) — the incident that motivated this check was 41%. A
+# (see docs/retail/import_health.md) — the incident that motivated this check was 41%. A
 # minimum skipped count keeps a tiny file (e.g. 1 of 6 slips = 17%) from flagging on
 # noise alone.
 SALES_SKIP_RATE_THRESHOLD = 0.15
@@ -48,7 +48,7 @@ INVENTORY_ANOMALY_RATIO = 0.5
 
 # A manual data-recovery replay (re-running a historical batch's stored preview_data
 # through persist_sales to catch slips a since-fixed bug wrongly skipped — see
-# docs/import_health.md's "Known simplifications", there is no in-page recovery
+# docs/retail/import_health.md's "Known simplifications", there is no in-page recovery
 # action yet) is *expected* to skip most of its rows: that's it correctly avoiding
 # re-creating what's already there, not a sign of anything wrong. Flagging it would
 # be a false positive, so any batch whose filename carries this convention's prefix

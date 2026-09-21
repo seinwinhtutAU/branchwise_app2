@@ -23,26 +23,13 @@ DEFAULT_SETTINGS_RESPONSE = {
     "sale_list_window_days": 90,
     "purchase_list_window_days": 90,
     "show_buying_price_source": True,
+    "daily_check_cutoff_time": "20:00",
     "branch_health_weights": {
         "sales": 0.25,
         "profit": 0.25,
         "inventory": 0.25,
         "customer": 0.15,
         "data_quality": 0.10,
-    },
-    "early_warning_thresholds": {
-        "revenue_decline_normal_pct": -5.0,
-        "revenue_decline_warning_pct": -10.0,
-        "revenue_decline_critical_pct": -20.0,
-        "low_margin_normal_pct": 15.0,
-        "low_margin_warning_pct": 10.0,
-        "low_margin_critical_pct": 5.0,
-        "margin_slip_normal_pp": -1.0,
-        "margin_slip_warning_pp": -3.0,
-        "dead_stock_normal_share_pct": 5.0,
-        "dead_stock_warning_share_pct": 10.0,
-        "dead_stock_critical_share_pct": 25.0,
-        "traffic_decline_warning_pct": -10.0,
     },
     "today_exchange_rates": {},
     "purchasing_buffer_months": {
@@ -262,4 +249,34 @@ def test_admin_can_set_purchasing_buffer_months(
 
     get_response = authed_client.get("/api/settings")
     assert get_response.json()["purchasing_buffer_months"] == {"a": 4.0, "b": 2.0, "c": 0.5}
+
+
+def test_admin_can_set_daily_check_cutoff_time(
+    authed_client: TestClient, db_session: Session
+):
+    _make_user(db_session, role=UserRole.ADMIN)
+
+    put_response = authed_client.put(
+        "/api/settings",
+        json={"daily_check_cutoff_time": "19:30"},
+    )
+    assert put_response.status_code == 200
+    assert put_response.json()["daily_check_cutoff_time"] == "19:30"
+
+    get_response = authed_client.get("/api/settings")
+    assert get_response.json()["daily_check_cutoff_time"] == "19:30"
+
+
+def test_invalid_cutoff_time_is_rejected(
+    authed_client: TestClient, db_session: Session
+):
+    _make_user(db_session, role=UserRole.ADMIN)
+
+    # Invalid hour
+    response = authed_client.put("/api/settings", json={"daily_check_cutoff_time": "25:00"})
+    assert response.status_code == 422
+
+    # Invalid format
+    response = authed_client.put("/api/settings", json={"daily_check_cutoff_time": "8pm"})
+    assert response.status_code == 422
 

@@ -65,7 +65,7 @@ shipment rules; the feature services own transactions. Its five screens persist 
 same Neon database. Only outgoing customer deliveries are rows; incoming stock is read
 from opened receiving packages, and all stock/order figures are derived on request.
 
-`import_common.py` holds logic shared across all three import types: reading csv/xls/xlsx into a raw grid, numeric parsing, Zawgyi-aware Myanmar text cleaning, and batched product upsert. See [data-import.md](./data-import.md) for the full pipeline.
+`import_common.py` holds logic shared across all three import types: reading csv/xls/xlsx into a raw grid, numeric parsing, Zawgyi-aware Myanmar text cleaning, and batched product upsert. See [data-import.md](./retail/data-import.md) for the full pipeline.
 
 ## Frontend structure
 
@@ -147,5 +147,5 @@ The one thing that cannot fall back to cache is an import, so `ImportReviewPage`
 file whose confirm never reached the server and sends it automatically once the
 connection is back, telling the reader it is waiting. That queue lives in memory only:
 closing the app means picking the file again. A confirm that _timed out_ is deliberately
-not retried — purchase imports are not idempotent (see `data-import.md`), so the message
+not retried — purchase imports are not idempotent (see `docs/retail/data-import.md`), so the message
 sends the reader to Import History to check before importing again.

@@ -33,16 +33,16 @@ import {
   type NavItem,
   type WorkspaceTab,
 } from "@renderer/components/features/shell/AppShell";
-import {
-  SimpleDataTable,
-  type DataTableColumn,
-  type DataTableFilter,
+import type {
+  DataTableColumn,
+  DataTableFilter,
 } from "@renderer/components/features/SimpleDataTable";
 import type {
   PendingImport,
   Profile,
 } from "@renderer/components/features/types";
 import type { InventorySubTab } from "@renderer/components/features/retail/InventoryPage";
+import type { DataOverviewSubTab } from "@renderer/components/features/retail/DataOverviewTable";
 import {
   useBranches,
   useRetailBranchOptions,
@@ -56,17 +56,15 @@ import {
   UploadIcon,
   HistoryIcon,
   OverviewIcon,
-  BellIcon,
+  HeartPulseIcon,
   DashboardIcon,
-  SalesIcon,
   InventoryIcon,
-  PurchaseIcon,
   ClipboardIcon,
   ReceivingIcon,
   TruckIcon,
   VoucherIcon,
   WarehouseIcon,
-  WarningIcon,
+  DataQualityIcon,
   DollarIcon,
   ReportsIcon,
   MasterDataIcon,
@@ -88,9 +86,6 @@ const ImportHistoryDetailPage = lazy(
 );
 const DataOverviewTable = lazy(
   () => import("@renderer/components/features/retail/DataOverviewTable"),
-);
-const InventoryPage = lazy(
-  () => import("@renderer/components/features/retail/InventoryPage"),
 );
 const CustomerOrdersPage = lazy(
   () => import("@renderer/components/features/wholesale/CustomerOrdersPage"),
@@ -183,7 +178,7 @@ const RETAIL_NAV_ITEMS: NavItem[] = [
     id: "businessAlerts",
     label: "Business Alerts",
     shortLabel: "Alerts",
-    icon: <BellIcon />,
+    icon: <HeartPulseIcon />,
   },
   { id: "import", label: "Import", icon: <UploadIcon /> },
   {
@@ -193,31 +188,17 @@ const RETAIL_NAV_ITEMS: NavItem[] = [
     icon: <OverviewIcon />,
   },
   {
-    id: "sales",
-    label: "Sale",
-    icon: <SalesIcon />,
-    dotColor: "bg-emerald-400",
-  },
-  {
-    id: "inventory",
-    label: "Inventory",
-    icon: <InventoryIcon />,
-    dotColor: "bg-sky-400",
-  },
-  {
     id: "purchasing",
     label: "Purchasing",
     shortLabel: "Reorder",
     icon: <ClipboardIcon />,
-    dotColor: "bg-amber-400",
   },
   {
-    id: "purchase",
-    label: "Purchase",
-    icon: <PurchaseIcon />,
-    dotColor: "bg-pink-400",
+    id: "warnings",
+    label: "Data Quality",
+    shortLabel: "Quality",
+    icon: <DataQualityIcon />,
   },
-  { id: "warnings", label: "Warning", icon: <WarningIcon /> },
 ];
 
 // The wholesale workflow is being rebuilt from scratch (see diagram/wholesale/erd.mmd),
@@ -312,7 +293,7 @@ const SECTION_TITLES: Record<Section, string> = {
   inventory: "Inventory",
   purchasing: "Purchasing",
   purchase: "Purchase",
-  warnings: "Warning",
+  warnings: "Data Quality",
   orders: "Customer orders",
   vouchers: "Supplier vouchers",
   delivery: "Shipment",
@@ -477,7 +458,8 @@ function App(): React.JSX.Element {
   const [importInitialTab, setImportInitialTab] = useState<
     "import" | "history" | "freshness"
   >("import");
-  const [warningCount, setWarningCount] = useState(0);
+  const [dataOverviewTab, setDataOverviewTab] =
+    useState<DataOverviewSubTab>("overview");
   // Business-wide (app_settings table) — same values for every account and device.
   // `settings` is null until the fetch resolves, so every read below falls back to the
   // backend's own DEFAULT_SETTINGS value for that key.
@@ -598,35 +580,6 @@ function App(): React.JSX.Element {
     canManageRetail ? session : null,
   );
 
-  async function refreshWarningCount(): Promise<void> {
-    if (!session) return;
-    try {
-      const response = await fetch(
-        `${apiBaseUrl}/api/warnings?sale_days=${saleWindowDays}&purchase_days=${purchaseWindowDays}`,
-        { headers: { Authorization: `Bearer ${session.access_token}` } },
-      );
-      if (!response.ok) return;
-      const body = await response.json();
-      const total = (body.sections as { rows: unknown[] }[]).reduce(
-        (sum, s) => sum + s.rows.length,
-        0,
-      );
-      setWarningCount(total);
-    } catch {
-      // Sidebar badge is a convenience, not a source of truth — the Warning page itself
-      // shows a proper error state if the backend is unreachable, so a failed refresh
-      // here just leaves the last-known count in place.
-    }
-  }
-
-  // Wholesale and retail accounts never see the Warning nav item, so there's nothing to count for
-  // them. Re-runs whenever either check window changes (e.g. from Settings) so the badge
-  // doesn't sit stale until the next sign-in.
-  useEffect(() => {
-    if (!session || isWholesale || isRetailUser) return;
-    refreshWarningCount();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, isWholesale, isRetailUser, saleWindowDays, purchaseWindowDays]);
 
   // The Business Alerts badge, counted from the same per-branch overview payloads the
   // Dashboard and the Business Alerts page read — so this costs one set of requests that
@@ -680,8 +633,6 @@ function App(): React.JSX.Element {
             !HIDDEN_WHOLESALE_NAV_IDS.has(item.id),
         )
         .map((item) => {
-          if (item.id === "warnings")
-            return { ...item, badgeCount: warningCount };
           if (item.id === "businessAlerts")
             return { ...item, badgeCount: businessAlertCount };
           return item;
@@ -698,7 +649,7 @@ function App(): React.JSX.Element {
           ]
         : items;
     },
-    [isAdmin, isRetailUser, effectiveWorkspace, warningCount, businessAlertCount],
+    [isAdmin, isRetailUser, effectiveWorkspace, businessAlertCount],
   );
 
   // Only admin actually switches workspaces — a retail-only or wholesale-only account is
@@ -711,10 +662,10 @@ function App(): React.JSX.Element {
             id,
             label: WORKSPACE_LABELS[id],
             color: WORKSPACE_COLORS[id],
-            badgeCount: id === "retail" ? warningCount : undefined,
+            badgeCount: id === "retail" ? businessAlertCount : undefined,
           }))
         : [],
-    [isAdmin, warningCount],
+    [isAdmin, businessAlertCount],
   );
 
   function handleWorkspaceChange(id: string): void {
@@ -926,6 +877,26 @@ function App(): React.JSX.Element {
       setSection("import");
       return;
     }
+    if (id === "sales") {
+      setDataOverviewTab("sale");
+      setSection("overview");
+      return;
+    }
+    if (id === "inventory") {
+      setDataOverviewTab("inventory");
+      setSection("overview");
+      return;
+    }
+    if (id === "purchase") {
+      setDataOverviewTab("purchase");
+      setSection("overview");
+      return;
+    }
+    if (id === "overview") {
+      setDataOverviewTab("overview");
+      setSection("overview");
+      return;
+    }
     setSection(id as Section);
   }
 
@@ -966,7 +937,6 @@ function App(): React.JSX.Element {
     // Advances to the next queued file rather than clearing outright — an empty queue
     // naturally falls back to the Import grid since `pendingImport` derives from it.
     setPendingImportQueue((queue) => queue.slice(1));
-    refreshWarningCount();
   }
 
   if (!session) {
@@ -1140,34 +1110,31 @@ function App(): React.JSX.Element {
                   onImportInventory={() => handleSectionChange("import")}
                 />
               )}
-              {section === "overview" && (
+              {(section === "overview" ||
+                section === "sales" ||
+                section === "inventory" ||
+                section === "purchase") && (
                 <DataOverviewTable
                   session={session}
                   branchOptions={branchOptions}
                   showBuyingPriceSource={showBuyingPriceSource}
-                />
-              )}
-              {section === "sales" && (
-                <SimpleDataTable<SaleRow>
-                  session={session}
-                  endpoint="/api/sales"
-                  title="Sales"
-                  description="Recent sales transactions and line-item profitability."
-                  icon={<SalesIcon />}
-                  columns={saleColumns}
-                  filters={saleFilters}
-                  rowKey={(row, i) => `${row.SlipNumber}-${i}`}
-                  emptyTitle="No sales yet"
-                  emptyDescription="Import a sales file to see it here."
-                  defaultWindowDays={saleListWindowDays}
-                  serverPaged
-                />
-              )}
-              {section === "inventory" && (
-                <InventoryPage
-                  session={session}
-                  branchOptions={branchOptions}
-                  initialTab={inventoryTarget ?? undefined}
+                  saleColumns={saleColumns}
+                  saleFilters={saleFilters}
+                  purchaseColumns={PURCHASE_COLUMNS}
+                  purchaseFilters={purchaseFilters}
+                  saleListWindowDays={saleListWindowDays}
+                  purchaseListWindowDays={purchaseListWindowDays}
+                  initialTab={
+                    section === "sales"
+                      ? "sale"
+                      : section === "inventory"
+                        ? "inventory"
+                        : section === "purchase"
+                          ? "purchase"
+                          : dataOverviewTab
+                  }
+                  onTabChange={setDataOverviewTab}
+                  inventoryTarget={inventoryTarget}
                 />
               )}
               {section === "purchasing" && (
@@ -1177,27 +1144,10 @@ function App(): React.JSX.Element {
                   branchOptions={retailBranchOptions}
                 />
               )}
-              {section === "purchase" && (
-                <SimpleDataTable<PurchaseRow>
-                  session={session}
-                  endpoint="/api/purchases"
-                  title="Purchases"
-                  description="Supplier purchase orders and receiving history."
-                  icon={<PurchaseIcon />}
-                  columns={PURCHASE_COLUMNS}
-                  filters={purchaseFilters}
-                  rowKey={(row, i) => `${row.StockCode}-${row.Date}-${i}`}
-                  emptyTitle="No purchases yet"
-                  emptyDescription="Import a purchase file to see it here."
-                  defaultWindowDays={purchaseListWindowDays}
-                  serverPaged
-                />
-              )}
               {section === "warnings" && (
                 <WarningsPage
                   session={session}
                   profile={profile}
-                  onCountChange={setWarningCount}
                   saleWindowDays={saleWindowDays}
                   purchaseWindowDays={purchaseWindowDays}
                   branchOptions={branchOptions}

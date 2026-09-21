@@ -1,8 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Session } from "@renderer/lib/auth";
-import { CardHeader } from "@renderer/components/ui/Card";
-import { TabBar } from "@renderer/components/ui/Tabs";
-import { InventoryIcon } from "@renderer/components/ui/icons";
+import { cn } from "@renderer/lib/utils";
 import {
   SimpleDataTable,
   type DataTableColumn,
@@ -25,22 +23,6 @@ const SUB_TABS: { id: InventorySubTab; label: string }[] = [
   { id: "lowStock", label: "Low Stock" },
   { id: "deadStock", label: "Dead Stock" },
 ];
-
-function InventoryTabBar({
-  activeTab,
-  onSelect,
-}: {
-  activeTab: InventorySubTab;
-  onSelect: (tab: InventorySubTab) => void;
-}): React.JSX.Element {
-  return (
-    <TabBar<InventorySubTab>
-      tabs={SUB_TABS}
-      activeTab={activeTab}
-      onSelect={onSelect}
-    />
-  );
-}
 
 interface InventoryRow {
   Branch: string | null;
@@ -178,28 +160,44 @@ export function InventoryPage({
     [branchOptions],
   );
 
-  return (
-    <div className="flex flex-col gap-2.5">
-      <CardHeader
-        title="Inventory"
-        description="Current stock levels and inventory health overview."
-        className="mb-0"
-      />
-      <InventoryTabBar activeTab={tab} onSelect={setTab} />
+  const subTabSwitcher = (
+    <div className="flex items-center gap-1.5 pt-0.5">
+      <span className="text-xs text-text-muted font-medium mr-1 select-none">
+        View:
+      </span>
+      {SUB_TABS.map((subTab) => (
+        <button
+          key={subTab.id}
+          type="button"
+          onClick={() => setTab(subTab.id)}
+          className={cn(
+            "px-2.5 py-0.5 text-xs font-medium rounded transition-colors cursor-pointer",
+            tab === subTab.id
+              ? "bg-brand/10 text-brand font-semibold shadow-2xs"
+              : "text-text-muted hover:text-text-primary hover:bg-bg-subtle",
+          )}
+        >
+          {subTab.label}
+        </button>
+      ))}
+    </div>
+  );
 
+  return (
+    <>
       {tab === "imported" && (
         <SimpleDataTable<InventoryRow>
           session={session}
           endpoint="/api/inventory"
           title="Inventory"
           description="Current stock on hand across branches."
-          icon={<InventoryIcon />}
+          icon={<div className="h-3 w-5 rounded-sm bg-sky-400 shrink-0" />}
           columns={INVENTORY_COLUMNS}
           filters={inventoryFilters}
           rowKey={(row, i) => `${row.StockCode}-${row.Branch}-${i}`}
           emptyTitle="No inventory yet"
           emptyDescription="Import an inventory file to see it here."
-          showTitle={false}
+          headerAddon={subTabSwitcher}
         />
       )}
 
@@ -207,16 +205,16 @@ export function InventoryPage({
         <SimpleDataTable<LowStockRow>
           session={session}
           endpoint="/api/inventory/low-stock"
-          title="Low Stock"
+          title="Inventory (Low Stock)"
           description="Products estimated to run out soon based on sales velocity."
-          icon={<InventoryIcon />}
+          icon={<div className="h-3 w-5 rounded-sm bg-sky-400 shrink-0" />}
           columns={LOW_STOCK_COLUMNS}
           filters={lowStockFilters}
           rowKey={(row, i) => `${row.StockCode}-${row.Branch}-${i}`}
           emptyTitle="Nothing running low"
           emptyDescription="No product is estimated to run out soon based on recent sales velocity."
           serverPaged
-          showTitle={false}
+          headerAddon={subTabSwitcher}
         />
       )}
 
@@ -224,19 +222,19 @@ export function InventoryPage({
         <SimpleDataTable<DeadStockRow>
           session={session}
           endpoint="/api/inventory/dead-stock"
-          title="Dead Stock"
+          title="Inventory (Dead Stock)"
           description="Products with no sales in the last 90 days."
-          icon={<InventoryIcon />}
+          icon={<div className="h-3 w-5 rounded-sm bg-sky-400 shrink-0" />}
           columns={DEAD_STOCK_COLUMNS}
           filters={deadStockFilters}
           rowKey={(row, i) => `${row.StockCode}-${row.Branch}-${i}`}
           emptyTitle="No dead stock"
           emptyDescription="Nothing on hand has gone 90 days without a sale."
           serverPaged
-          showTitle={false}
+          headerAddon={subTabSwitcher}
         />
       )}
-    </div>
+    </>
   );
 }
 

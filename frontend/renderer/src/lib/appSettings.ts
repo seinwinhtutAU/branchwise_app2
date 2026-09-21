@@ -4,31 +4,14 @@ import { apiBaseUrl } from "@renderer/lib/auth";
 import { applyTheme, cacheTheme, type ThemeMode } from "@renderer/lib/theme";
 import { invalidateEverything } from "@renderer/lib/queryClient";
 
-// The Branch Health Score's dimension weights and the Early Warning rules' firing
-// points (see docs/branch_health.md). Both are stored and updated as a whole set, not
-// field by field: a weight only means anything relative to the other four, and a
-// half-saved threshold set would fire alerts nobody chose.
+// The Branch Health Score's dimension weights are stored and updated as a whole set,
+// since a weight only has meaning relative to the other four.
 export interface BranchHealthWeights {
   sales: number;
   profit: number;
   inventory: number;
   customer: number;
   data_quality: number;
-}
-
-export interface EarlyWarningThresholds {
-  revenue_decline_normal_pct: number;
-  revenue_decline_warning_pct: number;
-  revenue_decline_critical_pct: number;
-  low_margin_normal_pct: number;
-  low_margin_warning_pct: number;
-  low_margin_critical_pct: number;
-  margin_slip_normal_pp: number;
-  margin_slip_warning_pp: number;
-  dead_stock_normal_share_pct: number;
-  dead_stock_warning_share_pct: number;
-  dead_stock_critical_share_pct: number;
-  traffic_decline_warning_pct: number;
 }
 
 export interface PurchasingBufferMonths {
@@ -47,8 +30,8 @@ export interface AppSettings {
   sale_list_window_days: number;
   purchase_list_window_days: number;
   show_buying_price_source: boolean;
+  daily_check_cutoff_time: string;
   branch_health_weights: BranchHealthWeights;
-  early_warning_thresholds: EarlyWarningThresholds;
   purchasing_buffer_months: PurchasingBufferMonths;
   // Today's MMK rate for each non-MMK currency the wholesale screens deal in — MMK per
   // 1 unit of that currency, e.g. { THB: "120.000000000000" }. Only prefills a new

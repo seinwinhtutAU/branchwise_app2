@@ -36,6 +36,8 @@ interface CheckingStatusResponse {
   has_today_sales: boolean;
   has_today_inventory: boolean;
   is_after_8pm: boolean;
+  cutoff_time?: string;
+  formatted_cutoff_time?: string;
   items: CheckingItem[];
 }
 
@@ -185,7 +187,9 @@ export default function CheckingPage({
             </p>
             <div className="flex flex-wrap gap-2 pt-1">
               <Badge variant={status.is_after_8pm ? "success" : "default"}>
-                {status.is_after_8pm ? "✓ After 8:00 PM" : "⏳ Before 8:00 PM"}
+                {status.is_after_8pm
+                  ? `✓ After ${status.formatted_cutoff_time || "8:00 PM"}`
+                  : `⏳ Before ${status.formatted_cutoff_time || "8:00 PM"}`}
               </Badge>
               <Badge variant={status.has_today_sales ? "success" : "default"}>
                 {status.has_today_sales

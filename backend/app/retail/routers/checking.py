@@ -19,6 +19,8 @@ from app.retail.services.data_quality import build_checking_items
 from app.schemas.checking import CheckingItem, CheckingStatusResponse, CheckingVerifyResponse
 from app.services.branches import list_retail_branches
 from app.services.settings import (
+    format_cutoff_time,
+    get_daily_check_cutoff_time,
     get_purchase_warning_window_days,
     get_sale_warning_window_days,
 )
@@ -42,11 +44,15 @@ def _resolve_retail_branch_id(user: User, db: Session) -> str:
 def get_checking_status(
     user: CurrentAppUser, db: DatabaseSession
 ) -> CheckingStatusResponse:
-    """Products to verify in the external inventory system. Only unlocked after 8:00 PM
+    """Products to verify in the external inventory system. Only unlocked after daily cutoff time
     once today's sale and inventory files are confirmed."""
     branch_id = _resolve_retail_branch_id(user, db)
-    has_today_sales, has_today_inventory, is_after_8pm = _check_daily_import_status(db, branch_id)
-    is_eligible = is_after_8pm and has_today_sales and has_today_inventory
+    cutoff_time = get_daily_check_cutoff_time(db)
+    formatted_cutoff = format_cutoff_time(cutoff_time)
+    has_today_sales, has_today_inventory, is_after_cutoff = _check_daily_import_status(
+        db, branch_id, cutoff_time=cutoff_time
+    )
+    is_eligible = is_after_cutoff and has_today_sales and has_today_inventory
 
     raw_items = build_checking_items(
         db,
@@ -59,8 +65,8 @@ def get_checking_status(
     reason = None
     if not is_eligible:
         parts = []
-        if not is_after_8pm:
-            parts.append("it is after 8:00 PM (shop close)")
+        if not is_after_cutoff:
+            parts.append(f"it is after {formatted_cutoff} (shop close)")
         if not has_today_sales:
             parts.append("today's POS sales file is imported")
         if not has_today_inventory:
@@ -72,7 +78,9 @@ def get_checking_status(
         reason=reason,
         has_today_sales=has_today_sales,
         has_today_inventory=has_today_inventory,
-        is_after_8pm=is_after_8pm,
+        is_after_8pm=is_after_cutoff,
+        cutoff_time=cutoff_time,
+        formatted_cutoff_time=formatted_cutoff,
         items=items if is_eligible else [],
     )
 
@@ -83,11 +91,15 @@ def export_checking_csv(
 ) -> Response:
     """Download the physical stock audit sheet as a CSV file."""
     branch_id = _resolve_retail_branch_id(user, db)
-    has_today_sales, has_today_inventory, is_after_8pm = _check_daily_import_status(db, branch_id)
-    if not (is_after_8pm and has_today_sales and has_today_inventory):
+    cutoff_time = get_daily_check_cutoff_time(db)
+    formatted_cutoff = format_cutoff_time(cutoff_time)
+    has_today_sales, has_today_inventory, is_after_cutoff = _check_daily_import_status(
+        db, branch_id, cutoff_time=cutoff_time
+    )
+    if not (is_after_cutoff and has_today_sales and has_today_inventory):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "Audit sheet cannot be generated until after 8:00 PM and today's sales and inventory imports are confirmed.",
+            f"Audit sheet cannot be generated until after {formatted_cutoff} and today's sales and inventory imports are confirmed.",
         )
 
     raw_items = build_checking_items(

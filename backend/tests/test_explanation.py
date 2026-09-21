@@ -1,7 +1,6 @@
 import pytest
 
-from app.retail.services import early_warning, explanation
-from tests.test_early_warning import _by_id, _snapshot
+from app.retail.services import explanation
 
 
 # --- the decomposition itself ---------------------------------------------------------
@@ -138,62 +137,6 @@ def test_a_low_margin_level_says_whether_it_is_new():
     assert explanation.describe_margin_level(7.0, None) == (None, None)
 
 
-# --- how the alerts use it ------------------------------------------------------------
-
-
-def test_revenue_alert_carries_the_decomposition():
-    alerts = early_warning.evaluate(
-        _snapshot(net_revenue=80_000.0, transaction_count=75, avg_basket=1066.67)
-    )
-    alert = _by_id(alerts, "revenue_decline")
-    assert alert.driver is not None and "Transactions are down" in alert.driver
-    assert alert.interpretation is not None
-
-
-def test_traffic_alert_explains_rather_than_repeats_itself():
-    """Its headline is the net effect on revenue; the two opposing movements live in
-    the driver line, so the card doesn't say the same thing twice."""
-    alert = _by_id(
-        early_warning.evaluate(_snapshot(transaction_count=85, avg_basket=1300.0, net_revenue=110_500.0)),
-        "traffic_decline",
-    )
-    assert "doesn't look alarming" in alert.what_happened
-    assert alert.driver is not None and "Transactions are down" in alert.driver
-    assert alert.driver not in alert.what_happened
-
-
-def test_no_two_alerts_tell_the_same_story():
-    """A branch losing footfall *and* visibly losing revenue gets one explanation of
-    that, not two cards carrying identical driver and interpretation text."""
-    alerts = early_warning.evaluate(
-        _snapshot(net_revenue=88_694.0, transaction_count=82, avg_basket=1081.6)
-    )
-    ids = [alert.id for alert in alerts]
-    assert "revenue_decline" in ids
-    assert "traffic_decline" not in ids
-    explanations = [(a.driver, a.interpretation) for a in alerts if a.driver]
-    assert len(explanations) == len(set(explanations))
-
-
-def test_low_margin_alert_explains_whether_the_level_is_new():
-    alert = _by_id(
-        early_warning.evaluate(_snapshot(gross_margin_pct=6.0, previous_gross_margin_pct=6.2)),
-        "low_margin",
-    )
-    assert alert.driver is not None and "as well" in alert.driver
-    assert alert.interpretation is not None and "standing level" in alert.interpretation
-
-
-def test_alerts_with_nothing_to_decompose_name_no_cause():
-    """Better an empty field than an invented cause — a dead-stock count has no two
-    components to split it into, so nothing here says *why* those products stopped
-    selling. The line it does carry says what the count means for the business, which is
-    a judgement about money, not a claim about a cause."""
-    alert = _by_id(early_warning.evaluate(_snapshot(dead_stock_count=40)), "dead_stock")
-    assert alert.interpretation is None
-    assert alert.driver is not None and "money sitting still" in alert.driver
-
-
 # --- stock risk -----------------------------------------------------------------------
 
 
@@ -260,25 +203,3 @@ def test_a_single_at_risk_product_is_not_described_as_a_tally():
 def test_nothing_at_risk_means_nothing_to_explain():
     assert explanation.classify_stock_risk(0, 0, None) is None
     assert explanation.classify_stock_risk(3, 1, None) is None
-
-
-def test_stock_alert_explains_itself_by_how_long_the_stock_lasts():
-    alert = _by_id(
-        early_warning.evaluate(
-            _snapshot(
-                critical_count=1,
-                at_risk_count=1,
-                at_risk_demand_driven_count=1,
-                at_risk_leading_item=_at_risk_item("BEV-014", "Coffee Mix", 1.8, 2.4),
-            )
-        ),
-        "stockout_risk",
-    )
-    # The "why" stays with what is solidly measured — how long the stock lasts — rather
-    # than naming a cause behind it; see early_warning._stock_why.
-    assert alert.driver is not None and "days of stock left" in alert.driver
-    assert alert.interpretation is None
-    # And the headline reads as a sentence, not a form letter.
-    assert "1 product has" in alert.what_happened
-    assert "product(s)" not in alert.what_happened
-    assert "its recent selling rate" in alert.what_happened

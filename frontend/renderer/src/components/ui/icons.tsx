@@ -169,40 +169,46 @@ export function DashboardIcon({
   return (
     <svg {...base} className={className}>
       <rect
-        x="3.5"
-        y="3.5"
-        width="7"
-        height="7"
-        rx="1.6"
+        x="3"
+        y="3"
+        width="18"
+        height="18"
+        rx="2"
         stroke="currentColor"
         strokeWidth="1.6"
       />
-      <rect
-        x="13.5"
-        y="3.5"
-        width="7"
-        height="7"
-        rx="1.6"
+      <path
+        d="M3 8.5h18"
         stroke="currentColor"
         strokeWidth="1.6"
+        strokeLinecap="round"
       />
       <rect
-        x="3.5"
-        y="13.5"
-        width="7"
-        height="7"
-        rx="1.6"
+        x="6"
+        y="11.5"
+        width="5"
+        height="6.5"
+        rx="1"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.5"
       />
       <rect
-        x="13.5"
-        y="13.5"
-        width="7"
-        height="7"
-        rx="1.6"
+        x="14"
+        y="11.5"
+        width="5"
+        height="2.5"
+        rx="1"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.5"
+      />
+      <rect
+        x="14"
+        y="15.5"
+        width="5"
+        height="2.5"
+        rx="1"
+        stroke="currentColor"
+        strokeWidth="1.5"
       />
     </svg>
   );
@@ -1343,7 +1349,7 @@ export function UsersIcon({
 }
 
 export function ShieldCheckIcon({
-  className = "w-4 h-4",
+  className = "w-5 h-5",
 }: {
   className?: string;
 }): React.JSX.Element {
@@ -1367,3 +1373,34 @@ export function ShieldCheckIcon({
   );
 }
 
+export function AuditIcon({
+  className = "w-5 h-5",
+}: {
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path
+        d="M9 12.5l2 2 4-4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9l-6-6z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14 3v6h6"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export { ShieldCheckIcon as DataQualityIcon, AuditIcon as CheckingDetailIcon };

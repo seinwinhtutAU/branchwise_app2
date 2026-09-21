@@ -1040,8 +1040,8 @@ function WarningsPage({
         className="sticky top-14 lg:top-0 z-30 bg-bg-base py-2 border-b border-border space-y-3"
       >
         <CardHeader
-          title="Warnings"
-          description="Data-quality issues, stock discrepancies, and daily recount flags."
+          title="Data Quality"
+          description="Sale, inventory, and purchase data discrepancies, missing master links, and recount flags."
           action={
             <div className="flex items-center gap-2">
               <Button

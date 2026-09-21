@@ -32,26 +32,6 @@ class BranchHealthWeights(BaseModel):
     data_quality: float = Field(ge=0, le=1)
 
 
-class EarlyWarningThresholds(BaseModel):
-    """The firing point for each Early Warning rule. Bounds are sanity caps rather than
-    business rules — the point of exposing these is that the business decides what
-    counts as a problem — but a decline threshold above zero would fire on every growing
-    branch, and a margin floor above 100% would fire on every branch there is."""
-
-    revenue_decline_normal_pct: float = Field(ge=-100, le=0)
-    revenue_decline_warning_pct: float = Field(ge=-100, le=0)
-    revenue_decline_critical_pct: float = Field(ge=-100, le=0)
-    low_margin_normal_pct: float = Field(ge=0, le=100)
-    low_margin_warning_pct: float = Field(ge=0, le=100)
-    low_margin_critical_pct: float = Field(ge=0, le=100)
-    margin_slip_normal_pp: float = Field(ge=-100, le=0)
-    margin_slip_warning_pp: float = Field(ge=-100, le=0)
-    dead_stock_normal_share_pct: float = Field(ge=0, le=100)
-    dead_stock_warning_share_pct: float = Field(ge=0, le=100)
-    dead_stock_critical_share_pct: float = Field(ge=0, le=100)
-    traffic_decline_warning_pct: float = Field(ge=-100, le=0)
-
-
 class PurchasingBufferMonths(BaseModel):
     """The target stock buffer in months for each ABC classification tier."""
 
@@ -76,9 +56,11 @@ class AppSettingsUpdate(BaseModel):
     sale_list_window_days: int | None = Field(default=None, ge=1, le=365)
     purchase_list_window_days: int | None = Field(default=None, ge=1, le=365)
     show_buying_price_source: bool | None = None
-    # See docs/branch_health.md. Whole-set updates (see each model's docstring).
+    daily_check_cutoff_time: str | None = Field(
+        default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$"
+    )
+    # See docs/retail/branch_health.md. Whole-set updates (see each model's docstring).
     branch_health_weights: BranchHealthWeights | None = None
-    early_warning_thresholds: EarlyWarningThresholds | None = None
     purchasing_buffer_months: PurchasingBufferMonths | None = None
     # Today's MMK rate for each non-MMK currency the wholesale screens deal in — MMK
     # per 1 unit of that currency, e.g. {"THB": "120.000000000000"}. A whole-set update,

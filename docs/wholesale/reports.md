@@ -1,5 +1,9 @@
 # Wholesale reports
 
+**Currently hidden from the nav**, the same as [Monitoring](./monitoring.md) — see that doc's
+"Currently hidden" section; the route (`section === "reports"`) still works, it's just not in
+the sidebar yet.
+
 The wholesale Reports page is organized around four server-aggregated pillars:
 Revenue, Cost & Supplier, Inventory, and Customer. The endpoints are:
 
@@ -27,3 +31,12 @@ delivered movement figures follow the selected period. Cost of goods delivered u
 estimated quantity-weighted buying price on the latest supplier-voucher date on or before
 each delivery. Freight is kept separate and is never split across products, so gross
 margin is before freight.
+
+## Frontend
+
+`frontend/renderer/src/components/features/wholesale/reports/`: `ReportsPage.tsx` is the
+four-tab shell, reusing `PeriodControls`/`usePeriodRange` from the shared `dashboard/` folder —
+the same one the retail Dashboard uses (see `CLAUDE.md`'s note on `dashboard/` not being
+retail-only). `RevenueTab.tsx`/`CostTab.tsx`/`InventoryTab.tsx`/`CustomerTab.tsx` each render
+one pillar's KPIs/trend/tables; `reportsApi.ts` holds the four fetch wrappers; `shared.tsx`
+holds pieces shared across the tabs.

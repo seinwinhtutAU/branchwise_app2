@@ -112,72 +112,18 @@ The score says _which part_ of a branch is unhealthy. `app/retail/services/early
 answers the next question — **what specifically is wrong, and what should I do about
 it** — as a severity-ranked list of named problems on the same payload.
 
-Each rule is a pure `(BranchSnapshot, Thresholds) -> list[Alert]` registered in one
-`RULES` tuple, so adding a check means appending a function and nothing else in the file
-changes. Every alert carries `title`, `what_happened`, `recommended_action`, a
-`severity`, the `dimension` it belongs to, and the `link` naming the tab holding its
-evidence.
+Each rule is a pure `BranchSnapshot -> list[Alert]` function registered in one
+`RULES` tuple. Every alert carries `title`, `what_happened`,
+`recommended_action`, a `severity`, the `dimension` it belongs to, and the `link`
+naming the operational screen holding its evidence.
 
-**There are three severities, and only two of them ask for anything.** The axis is
-whether the alert **requires a decision**, not how quickly someone should move:
-`critical` requires a decision now, `warning` requires one but the business chooses when
-to make it, and `normal` requires no decision at all — a movement drifting the wrong way
-that is only there so it can be seen starting — a margin down a point, a product with a fortnight of
-cover left. A third level is normally how an alert list turns into noise, and the reason
-it does not here is that **nothing counts it**: the nav badge, the Business Alerts branch
-tiles and the Overview branch cards all count criticals and warnings only, so the number
-a manager reacts to still means "decisions waiting", while the list itself can show the
-drift that used to produce no row at all. A `normal` alert's `recommended_action` says as
-much in its first words ("Nothing to act on yet…"), and there is a test asserting it.
+The engine is intentionally limited to operational alerts: daily Sale and Inventory
+imports, sale and purchase data validation, urgent reorder, physical stock checking,
+stock allocation, footwear aging, and known seasonal or weekly demand. General revenue,
+margin, low-stock/watch-stock, generic dead-stock, traffic-decline, and duplicate
+Warning-page alerts are not Business Alerts.
 
-| Rule                                                         | Fires when                                                                              | Severity                    |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------- | --------------------------- |
-| `no_sales_recorded`                                          | No sales at all this period, after a period that had them                               | critical                    |
-| `revenue_decline`                                            | Revenue growth ≤ -5% (≤ -10% and ≤ -20% escalate)                                       | normal / warning / critical |
-| `low_margin`                                                 | Gross margin < 15% (< 10% and < 5% escalate)                                            | normal / warning / critical |
-| `margin_slipping` (shown as "Margin lower than last period") | Margin fell ≥ 1% (≥ 3% escalates)                                                       | normal / warning            |
-| `stockout_risk`                                              | Any product with ≤ 3 days of stock left                                                 | critical                    |
-| `low_stock`                                                  | Any product with < 7 days of stock left                                                 | warning                     |
-| `watch_stock`                                                | Any product with 7–14 days of stock left                                                | normal                      |
-| `dead_stock`                                                 | ≥ 5% of SKUs on the shelf with no sale in 90 days (≥ 10% and ≥ 25% escalate)            | normal / warning / critical |
-| `traffic_decline`                                            | Transactions down ≥ 10% while the average sale rose **and** revenue itself stayed quiet | warning                     |
-| `data_quality_*`                                             | Any Warning-page check found rows this period                                           | that check's own severity   |
-
-Two rules deliberately have no `normal` tier. `no_sales_recorded` is never mild — an
-empty period is either a missing import or a shut shop. `traffic_decline` is already the
-narrow hidden case (see below), and a milder version of "the headline looks fine" is
-indistinguishable from an ordinary week. `watch_stock` is the opposite: the one rule that
-exists _only_ at `normal`, reusing the Inventory tab's own third band
-(`WATCH_DAYS_OF_STOCK` = 14), so the three stock levels on that page and the three
-severities here are the same three bands rather than two sets that can drift apart.
-
-Three design rules behind that table:
-
-- **One rule owns one subject.** A margin below the floor and a margin that is slipping
-  are the same conversation, so one rule reports whichever is worse rather than two
-  firing about one number and burying everything else. Same for stockout vs. low stock,
-  and for revenue decline vs. an empty period. `traffic_decline` extends this across
-  rules: it fires only when revenue itself stayed quiet — quiet enough that
-  `revenue_decline` said nothing at all, including at its `normal` tier — because a
-  visible revenue fall is already decomposed by `revenue_decline` into exactly this
-  explanation, and a second card repeating it word for word is the duplication everything
-  else here avoids. What
-  is left is the genuinely hidden case — the headline looks fine because bigger baskets
-  covered for the customers who stopped coming.
-- **An empty period is reported as a missing import, not a 100% collapse.** A period
-  with no sales at all, after one that had them, is nearly always a file nobody
-  imported; sending a manager to investigate the shop floor over it would be the most
-  annoying thing this engine could do.
-- **Data-integrity alerts delegate to `data_quality.py` entirely**, down to that
-  check's own title and severity (carried on the snapshot as `data_issue_sections`).
-  The engine holds no second opinion about what counts as a data problem or how bad one
-  is — it surfaces what the Warning page already found, scoped to this branch and
-  period, and links back to it.
-
-Thresholds live in a frozen `Thresholds` dataclass that every rule takes as an
-argument, built from `app_settings` on each request (see **Tuning** below).
-`dead_stock` fires on a _share_, not a raw count: twelve dead SKUs is nothing in a
-1,000-product shop and serious in a 40-product one.
+See [Business Alerts](./business-alerts.md) for the active rule catalogue and actions.
 
 Alerts are computed, never generated — every sentence is a template filled with figures
 from the snapshot. Nothing in this engine asks a model what it thinks.

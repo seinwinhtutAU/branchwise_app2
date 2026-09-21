@@ -22,34 +22,16 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "sale_list_window_days": 90,
     "purchase_list_window_days": 90,
     "show_buying_price_source": True,
-    # Branch Health scoring and Early Warning firing points (see docs/branch_health.md).
-    # Stored as one nested value each rather than fourteen flat keys, since they are
-    # each edited as a set — the weights only mean anything relative to one another, and
-    # a half-saved threshold set would fire alerts nobody chose. The value column is
-    # JSON, so nesting costs nothing; a partially-saved dict is merged over these
-    # defaults on read, so a key added here later works without a data migration.
+    # The shop closing time after which daily import checks fire and physical stock audit sheets unlock.
+    "daily_check_cutoff_time": "20:00",
+    # Branch Health weights are edited together, since each dimension's weight only
+    # has meaning relative to the others.
     "branch_health_weights": {
         "sales": 0.25,
         "profit": 0.25,
         "inventory": 0.25,
         "customer": 0.15,
         "data_quality": 0.10,
-    },
-    "early_warning_thresholds": {
-        # Three levels per rule wherever a rule has a milder tier: `normal` is the drift
-        # that asks for nothing today, `warning` is act soon, `critical` is act now.
-        "revenue_decline_normal_pct": -5.0,
-        "revenue_decline_warning_pct": -10.0,
-        "revenue_decline_critical_pct": -20.0,
-        "low_margin_normal_pct": 15.0,
-        "low_margin_warning_pct": 10.0,
-        "low_margin_critical_pct": 5.0,
-        "margin_slip_normal_pp": -1.0,
-        "margin_slip_warning_pp": -3.0,
-        "dead_stock_normal_share_pct": 5.0,
-        "dead_stock_warning_share_pct": 10.0,
-        "dead_stock_critical_share_pct": 25.0,
-        "traffic_decline_warning_pct": -10.0,
     },
     # Today's MMK rate for each non-MMK currency the wholesale screens deal in — MMK
     # per 1 unit of that currency, e.g. {"THB": "120.000000000000"}. Only prefills a

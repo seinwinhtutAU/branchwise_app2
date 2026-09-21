@@ -128,6 +128,11 @@ interface Props<T extends object> {
    * `showHeading` is false. Defaults true.
    */
   showTitle?: boolean;
+  /**
+   * Optional custom content (e.g. sub-tab pill buttons or status switches)
+   * rendered right below the title row.
+   */
+  headerAddon?: ReactNode;
 }
 
 const PAGE_SIZE = 20;
@@ -181,6 +186,7 @@ export function SimpleDataTable<T extends object>({
   serverPaged,
   showHeading = true,
   showTitle = true,
+  headerAddon,
 }: Props<T>): React.JSX.Element {
   const showToast = useToast();
   const { aboveRef, containerStyle } = useStickyAbove();
@@ -598,13 +604,16 @@ export function SimpleDataTable<T extends object>({
           ref={aboveRef}
           className={cn(
             "sticky top-14 lg:top-0 z-30 bg-bg-base px-4 py-2.5 border-b border-border",
-            hasTitle && "space-y-2.5",
+            (hasTitle || headerAddon) && "space-y-2.5",
           )}
         >
           {hasTitle ? (
             <>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  {icon && (
+                    <div className="shrink-0 flex items-center">{icon}</div>
+                  )}
                   <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
                     {title}
                   </h2>
@@ -620,6 +629,8 @@ export function SimpleDataTable<T extends object>({
                 </div>
               </div>
 
+              {headerAddon && <div>{headerAddon}</div>}
+
               {hasAnyFilter && (
                 <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/60">
                   {filterControls}
@@ -629,6 +640,7 @@ export function SimpleDataTable<T extends object>({
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">
+                {headerAddon}
                 {filterControls}
               </div>
 

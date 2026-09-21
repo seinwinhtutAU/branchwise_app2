@@ -2,7 +2,7 @@
 
 **There is now a fifth tab, "Overview", in front of these four** — the Branch Health
 Score, and later the Early Warning engine, documented separately in
-`docs/branch_health.md`. It shows every retail branch at once for an admin account (one card each, then a per-branch detail page), and it is the decision page these four are the evidence pages for:
+`docs/retail/branch_health.md`. It shows every retail branch at once for an admin account (one card each, then a per-branch detail page), and it is the decision page these four are the evidence pages for:
 each of its five dimension scores links into the tab (or, for Data Quality, the Warning
 page) that its numbers came from, and it reuses their helpers rather than computing
 anything of its own. Two knock-on changes here: `build_inventory_dashboard`'s stock
@@ -57,7 +57,7 @@ This is not a cross-branch rollup. A retail user sees only their own branch (`us
 
 ## Four pillars
 
-The dashboard is organized as four tabs: **Revenue**, **Cost**, **Inventory**, **Customer**. The Customer tab is _not_ customer-level tracking — the retail sales pipeline has no customer identifier anywhere. `Sale` (`app/retail/models/sale.py`) carries only `slip_id`/`slip_number`/`sale_date`/`sale_time`/`location_raw` — a POS slip is structurally anonymous. The wholesale workflow, which did have customer-named orders, is a deliberately separate business line (see CLAUDE.md), was removed on 2026-09-11 pending a redesign, and is out of scope here either way. If real customer-level tracking (repeat visits, loyalty) is ever wanted, that's a POS/data-capture decision upstream of this dashboard (a loyalty card, phone number, or membership ID captured at the point of sale) — not something this tab fakes from existing tables. Instead, the Customer tab reframes the same anonymous slip data Revenue already uses as **basket/visit behavior** — a proxy for "customers," not an identity.
+The dashboard is organized as four tabs: **Revenue**, **Cost**, **Inventory**, **Customer**. The Customer tab is _not_ customer-level tracking — the retail sales pipeline has no customer identifier anywhere. `Sale` (`app/retail/models/sale.py`) carries only `slip_id`/`slip_number`/`sale_date`/`sale_time`/`location_raw` — a POS slip is structurally anonymous. The wholesale workflow, which does have customer-named orders (see [wholesale/](../wholesale/)), is a deliberately separate business line (see CLAUDE.md) and out of scope here either way — its data never touches these tables. If real customer-level tracking (repeat visits, loyalty) is ever wanted, that's a POS/data-capture decision upstream of this dashboard (a loyalty card, phone number, or membership ID captured at the point of sale) — not something this tab fakes from existing tables. Instead, the Customer tab reframes the same anonymous slip data Revenue already uses as **basket/visit behavior** — a proxy for "customers," not an identity.
 
 Each pillar's original design notes (period control choice, which existing plumbing to reuse, caveats to surface) now live in its "— implemented" section near the top of this doc, alongside what was actually built and any place the implementation diverged from or narrowed the original note (e.g. Cost's duplicated-purchase-batch detection, still a follow-up).
 

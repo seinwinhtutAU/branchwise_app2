@@ -30,11 +30,62 @@ import {
   Td,
 } from "@renderer/components/ui/Table";
 import { Pagination } from "@renderer/components/ui/Pagination";
-import { DownloadIcon, OverviewIcon, SearchIcon } from "@renderer/components/ui/icons";
+import {
+  DownloadIcon,
+  OverviewIcon,
+  SearchIcon,
+} from "@renderer/components/ui/icons";
 import { CopyButton } from "@renderer/components/ui/CopyButton";
+import { TabBar, type TabItem } from "@renderer/components/ui/Tabs";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 import { useSettled } from "@renderer/lib/useSettled";
+import {
+  SimpleDataTable,
+  type DataTableColumn,
+  type DataTableFilter,
+} from "@renderer/components/features/SimpleDataTable";
+import {
+  InventoryPage,
+  type InventorySubTab,
+} from "@renderer/components/features/retail/InventoryPage";
 import "@renderer/lib/reactTable";
+
+export type DataOverviewSubTab = "overview" | "sale" | "inventory" | "purchase";
+
+export interface SaleRow {
+  Branch: string | null;
+  Date: string;
+  Time: string | null;
+  SlipID: string;
+  SlipNumber: string;
+  LineNo: number;
+  LineID: string;
+  StockCode: string;
+  Description: string;
+  Selling_Price: number | null;
+  Qty: number | null;
+  UOM: string | null;
+  Discount_Amount: number | null;
+  Amount: number | null;
+  Net_Amount: number | null;
+  Location: string | null;
+  Buying_Price: number | null;
+  Buying_Price_Source: string | null;
+  Profit: number | null;
+  Profit_Margin_Pct: number | null;
+}
+
+export interface PurchaseRow {
+  Branch: string | null;
+  PurchaseNumber: string | null;
+  Date: string;
+  StockCode: string;
+  Description: string;
+  Quantity: number | null;
+  UOM: string | null;
+  Buying_Price: number | null;
+  Location: string | null;
+}
 
 interface OverviewRow {
   Branch: string | null;
@@ -67,10 +118,19 @@ interface OverviewResponse {
   branches: string[];
 }
 
-interface Props {
+export interface DataOverviewTableProps {
   session: Session;
   branchOptions: string[];
   showBuyingPriceSource: boolean;
+  saleColumns?: DataTableColumn<SaleRow>[];
+  saleFilters?: DataTableFilter<SaleRow>[];
+  purchaseColumns?: DataTableColumn<PurchaseRow>[];
+  purchaseFilters?: DataTableFilter<PurchaseRow>[];
+  saleListWindowDays?: number;
+  purchaseListWindowDays?: number;
+  initialTab?: DataOverviewSubTab;
+  onTabChange?: (tab: DataOverviewSubTab) => void;
+  inventoryTarget?: InventorySubTab | null;
 }
 
 // green = from sale.csv, blue = from inventory, pink = from purchase.
@@ -138,33 +198,92 @@ const BAND_COLOR: Record<Band, string> = {
   inventory: "bg-sky-400",
   purchase: "bg-pink-400",
 };
-const BAND_LABEL: Record<Band, string> = {
-  sale: "Sale",
-  inventory: "Inventory",
-  purchase: "Purchase",
-};
 
-// How long a text/date filter must sit unchanged before it's sent to the backend — same
-// idea, and same delay, as DashboardPage's custom date range: a native date input fires
-// a change per keystroke, and this table's search box shouldn't refetch per letter typed.
+const DEFAULT_SALE_COLUMNS: DataTableColumn<SaleRow>[] = [
+  { key: "Branch", label: "Branch" },
+  { key: "Date", label: "Date" },
+  { key: "Time", label: "Time" },
+  { key: "SlipID", label: "Slip ID" },
+  { key: "SlipNumber", label: "Slip Number" },
+  { key: "LineNo", label: "Line No", align: "right" },
+  { key: "LineID", label: "Line ID" },
+  { key: "StockCode", label: "Stock Code", copyable: true },
+  { key: "Description", label: "Description" },
+  { key: "Selling_Price", label: "Selling Price", align: "right" },
+  { key: "Qty", label: "Qty", align: "right" },
+  { key: "UOM", label: "UOM" },
+  { key: "Discount_Amount", label: "Discount Amount", align: "right" },
+  { key: "Amount", label: "Amount", align: "right" },
+  { key: "Net_Amount", label: "Net Amount", align: "right" },
+  { key: "Location", label: "Location" },
+  { key: "Buying_Price", label: "Buying Price", align: "right" },
+  {
+    key: "Buying_Price_Source",
+    label: "Buying Price Source",
+    format: (value) => formatBuyingPriceSource(value as string | null),
+  },
+  { key: "Profit", label: "Profit", align: "right" },
+  {
+    key: "Profit_Margin_Pct",
+    label: "Profit Margin %",
+    align: "right",
+    format: (value) =>
+      value === null || value === undefined
+        ? "—"
+        : `${(value as number).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`,
+  },
+];
+
+const DEFAULT_PURCHASE_COLUMNS: DataTableColumn<PurchaseRow>[] = [
+  { key: "PurchaseNumber", label: "Purchase Number", copyable: true },
+  { key: "Branch", label: "Branch" },
+  { key: "Date", label: "Date" },
+  { key: "StockCode", label: "Stock Code", copyable: true },
+  { key: "Description", label: "Description" },
+  { key: "Quantity", label: "Quantity", align: "right" },
+  { key: "UOM", label: "UOM" },
+  { key: "Buying_Price", label: "Buying Price", align: "right" },
+  { key: "Location", label: "Location" },
+];
+
+const SUB_TABS: TabItem<DataOverviewSubTab>[] = [
+  {
+    id: "overview",
+    label: "Data Overview",
+    icon: <OverviewIcon className="w-4 h-4" />,
+  },
+  {
+    id: "sale",
+    label: (
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-3 w-5 rounded-sm bg-emerald-400 shrink-0" />
+        <span>Sale</span>
+      </span>
+    ),
+  },
+  {
+    id: "inventory",
+    label: (
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-3 w-5 rounded-sm bg-sky-400 shrink-0" />
+        <span>Inventory</span>
+      </span>
+    ),
+  },
+  {
+    id: "purchase",
+    label: (
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-3 w-5 rounded-sm bg-pink-400 shrink-0" />
+        <span>Purchase</span>
+      </span>
+    ),
+  },
+];
+
 const FILTER_SETTLE_MS = 400;
 const PAGE_SIZE = 20;
 const EMPTY_ROWS: never[] = [];
-
-function SourceLegend(): React.JSX.Element {
-  return (
-    <div className="flex flex-row flex-wrap items-center gap-4 mb-4">
-      {BAND_ORDER.map((band) => (
-        <div key={band} className="flex items-center gap-1.5">
-          <div className={cn("h-3 w-5 rounded-sm", BAND_COLOR[band])} />
-          <span className="text-sm text-text-secondary">
-            {BAND_LABEL[band]}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function SourceStrip({ bands }: { bands: Band[] }): React.JSX.Element {
   return (
@@ -209,11 +328,17 @@ function formatCell(col: OverviewColumn, value: unknown): string {
   return String(value);
 }
 
-function DataOverviewTable({
+interface MergedTableProps {
+  session: Session;
+  branchOptions: string[];
+  showBuyingPriceSource: boolean;
+}
+
+function MergedDataOverviewTable({
   session,
   branchOptions,
   showBuyingPriceSource,
-}: Props): React.JSX.Element {
+}: MergedTableProps): React.JSX.Element {
   const showToast = useToast();
   const { aboveRef, containerStyle } = useStickyAbove();
 
@@ -225,8 +350,6 @@ function DataOverviewTable({
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState<"csv" | "excel" | null>(null);
 
-  // What's actually fetched — settled text/date filters, applied instantly for the two
-  // dropdowns (a select fires once per choice, not per keystroke, so it needs no delay).
   const appliedSearch = useSettled(search, FILTER_SETTLE_MS);
   const appliedDateFrom = useSettled(dateFrom, FILTER_SETTLE_MS);
   const appliedDateTo = useSettled(dateTo, FILTER_SETTLE_MS);
@@ -292,8 +415,11 @@ function DataOverviewTable({
     page,
   ]);
 
-  const { data, isRefreshing, failed, reload } =
-    useUrlQuery<OverviewResponse>(url, session, "data overview");
+  const { data, isRefreshing, failed, reload } = useUrlQuery<OverviewResponse>(
+    url,
+    session,
+    "data overview",
+  );
 
   const rows = data?.rows ?? null;
   const total = data?.total ?? 0;
@@ -315,11 +441,16 @@ function DataOverviewTable({
           cell: isCopyable
             ? (info) => {
                 const val = info.getValue();
-                const str = val === null || val === undefined || val === "" ? "" : String(val);
+                const str =
+                  val === null || val === undefined || val === ""
+                    ? ""
+                    : String(val);
                 if (!str) return <span className="text-text-muted">—</span>;
                 return (
                   <div className="flex items-center gap-1 whitespace-nowrap">
-                    <span className="font-mono text-xs font-semibold text-brand">{str}</span>
+                    <span className="font-mono text-xs font-semibold text-brand">
+                      {str}
+                    </span>
                     <CopyButton value={str} what={col.label.toLowerCase()} />
                   </div>
                 );
@@ -348,9 +479,6 @@ function DataOverviewTable({
     pageCount: totalPages,
   });
 
-  // Strands nobody: if a background refresh (someone else's import) shrinks the result
-  // set out from under a page the user is sitting on, snap back to the last real page
-  // instead of showing an empty one.
   useEffect(() => {
     if (rows !== null && page > totalPages) setPage(totalPages);
   }, [rows, totalPages, page]);
@@ -366,9 +494,6 @@ function DataOverviewTable({
     );
   }
 
-  // Every page load only fetches one page of rows, so a full export needs its own
-  // request — deliberate and user-triggered, unlike the old full-history fetch this
-  // replaced (see backend/app/routers/data_overview.py for why that mattered).
   async function fetchAllForExport(): Promise<OverviewRow[] | null> {
     const params = buildParams({ export: "true" });
     try {
@@ -426,11 +551,13 @@ function DataOverviewTable({
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <OverviewIcon className="w-4 h-4 text-brand shrink-0" />
               <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
                 Data Overview
               </h2>
               <span className="text-xs text-text-muted hidden sm:inline">
-                Merged sales, inventory, and purchase records.
+                Merged sales, inventory, and purchase records. Click on any
+                source below to open its dedicated table.
               </span>
             </div>
 
@@ -455,14 +582,9 @@ function DataOverviewTable({
                 <DownloadIcon className="w-4 h-4" />
                 Excel
               </Button>
-              <RefreshButton
-                onClick={reload}
-                refreshing={isRefreshing}
-              />
+              <RefreshButton onClick={reload} refreshing={isRefreshing} />
             </div>
           </div>
-
-          <SourceLegend />
 
           {(total > 0 || hasActiveFilters) && (
             <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/60">
@@ -557,7 +679,9 @@ function DataOverviewTable({
           )}
         </div>
 
-        {rows === null && !failed && <TableSkeleton rows={6} cols={COLUMNS.length + 1} />}
+        {rows === null && !failed && (
+          <TableSkeleton rows={6} cols={COLUMNS.length + 1} />
+        )}
 
         {rows === null && failed && (
           <EmptyState
@@ -669,4 +793,159 @@ function DataOverviewTable({
   );
 }
 
-export default DataOverviewTable;
+export default function DataOverviewTable({
+  session,
+  branchOptions,
+  showBuyingPriceSource,
+  saleColumns,
+  saleFilters,
+  purchaseColumns,
+  purchaseFilters,
+  saleListWindowDays = 90,
+  purchaseListWindowDays = 90,
+  initialTab = "overview",
+  onTabChange,
+  inventoryTarget,
+}: DataOverviewTableProps): React.JSX.Element {
+  const [activeTab, setActiveTab] = useState<DataOverviewSubTab>(initialTab);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  const handleSelectTab = (tab: DataOverviewSubTab): void => {
+    setActiveTab(tab);
+    onTabChange?.(tab);
+  };
+
+  const resolvedSaleColumns = useMemo(
+    () =>
+      saleColumns ??
+      (showBuyingPriceSource
+        ? DEFAULT_SALE_COLUMNS
+        : DEFAULT_SALE_COLUMNS.filter(
+            (col) => col.key !== "Buying_Price_Source",
+          )),
+    [saleColumns, showBuyingPriceSource],
+  );
+
+  const resolvedSaleFilters: DataTableFilter<SaleRow>[] = useMemo(
+    () =>
+      saleFilters ?? [
+        {
+          type: "search",
+          keys: ["StockCode", "Description"],
+          placeholder: "Stock code or description",
+          serverParam: "search",
+        },
+        {
+          type: "select",
+          key: "Branch",
+          label: "Branch",
+          options: branchOptions,
+          serverParam: "branch",
+        },
+        {
+          type: "dateRange",
+          key: "Date",
+          label: "Date",
+          serverParam: { from: "date_from", to: "date_to" },
+        },
+      ],
+    [saleFilters, branchOptions],
+  );
+
+  const resolvedPurchaseColumns = purchaseColumns ?? DEFAULT_PURCHASE_COLUMNS;
+
+  const resolvedPurchaseFilters: DataTableFilter<PurchaseRow>[] = useMemo(
+    () =>
+      purchaseFilters ?? [
+        {
+          type: "search",
+          keys: ["StockCode", "Description"],
+          placeholder: "Stock code or description",
+          serverParam: "search",
+        },
+        {
+          type: "select",
+          key: "Branch",
+          label: "Branch",
+          options: branchOptions,
+          serverParam: "branch",
+        },
+        {
+          type: "dateRange",
+          key: "Date",
+          label: "Date",
+          serverParam: { from: "date_from", to: "date_to" },
+        },
+      ],
+    [purchaseFilters, branchOptions],
+  );
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="border-b border-border">
+        <TabBar
+          tabs={SUB_TABS}
+          activeTab={activeTab}
+          onSelect={handleSelectTab}
+        />
+      </div>
+
+      {activeTab === "overview" && (
+        <MergedDataOverviewTable
+          session={session}
+          branchOptions={branchOptions}
+          showBuyingPriceSource={showBuyingPriceSource}
+        />
+      )}
+
+      {activeTab === "sale" && (
+        <SimpleDataTable<SaleRow>
+          session={session}
+          endpoint="/api/sales"
+          title="Sale"
+          description="Recent sales transactions and line-item profitability."
+          icon={
+            <div className="h-3.5 w-5 rounded-sm bg-emerald-400 shrink-0" />
+          }
+          columns={resolvedSaleColumns}
+          filters={resolvedSaleFilters}
+          rowKey={(row, i) => `${row.SlipNumber}-${i}`}
+          emptyTitle="No sales yet"
+          emptyDescription="Import a sales file to see it here."
+          defaultWindowDays={saleListWindowDays}
+          serverPaged
+        />
+      )}
+
+      {activeTab === "inventory" && (
+        <InventoryPage
+          session={session}
+          branchOptions={branchOptions}
+          initialTab={inventoryTarget ?? undefined}
+        />
+      )}
+
+      {activeTab === "purchase" && (
+        <SimpleDataTable<PurchaseRow>
+          session={session}
+          endpoint="/api/purchases"
+          title="Purchase"
+          description="Supplier purchase orders and receiving history."
+          icon={<div className="h-3.5 w-5 rounded-sm bg-pink-400 shrink-0" />}
+          columns={resolvedPurchaseColumns}
+          filters={resolvedPurchaseFilters}
+          rowKey={(row, i) => `${row.StockCode}-${row.Date}-${i}`}
+          emptyTitle="No purchases yet"
+          emptyDescription="Import a purchase file to see it here."
+          defaultWindowDays={purchaseListWindowDays}
+          serverPaged
+        />
+      )}
+    </div>
+  );
+}

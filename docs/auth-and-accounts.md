@@ -41,6 +41,12 @@ Auth's JWKS. Two differences from the Supabase era worth knowing: the algorithm 
 (`https://<endpoint>.neonauth.<region>.aws.neon.tech`), _not_ the full base URL with its
 `/<db>/auth` path — verifying against the full base URL rejects every token.
 
+## Roles
+
+Four roles exist (`UserRole` in `app/models/user.py`): `admin`, `retail_management`, `wholesale`, `retail`. `admin` and `retail_management` have no `branch_id` (`app/routers/users.py`'s `_validate_assignment` rejects assigning one to a branch); `wholesale` and `retail` must have one.
+
+`retail_management` was added as a middle ground: full admin-equivalent access to the retail workspace (every retail screen, every retail branch, no revert time-limit — see [data-import.md](./retail/data-import.md)) without also getting the Wholesale workspace or the ability to manage other accounts. `require_retail` (`app/retail/routers/common.py`) is the shared dependency behind this: every retail router (`imports`, `dashboard`, `warnings`, `checking`, `chat`, `sales`, `inventory`, `purchases`, `purchasing`, `data_overview`) now depends on it instead of each repeating its own role check, and it allows `admin`, `retail_management`, and `retail` while rejecting `wholesale`.
+
 ## Two "users"
 
 The auth service holds credentials. This app's own `users` table (see
@@ -57,6 +63,27 @@ providers again would now be a script that rewrites one column.
 
 `backend/scripts/link_auth_accounts.py` is that script: it creates a Neon Auth account for
 every `users` row that lacks one, links it, and prints the temporary passwords.
+`backend/scripts/seed_retail_accounts.py` is the narrower, idempotent cousin used to add the
+Bogyoke/BHS 1 branches and their retail accounts specifically.
+
+## Provisioning accounts from the app
+
+Admin no longer has to run a script to add someone: **Settings → User Management**
+(`UserManagementPage.tsx`, backed by admin-only `app/routers/users.py`) creates, edits, and
+deletes accounts directly. Creating one (`POST /api/users`) does both halves in one call — it
+opens a Neon Auth account with the given password (`_create_auth_account`, same
+`sign-up/email` call the seed scripts use) *and* the app's own `users` row, atomically enough
+that a failure on either side leaves nothing half-created. Editing (`PATCH /api/users/{id}`)
+only ever touches the `users` row (name/role/branch) — it can't change email or password, since
+those live with Neon Auth, not this table. Deleting (`DELETE /api/users/{id}`) refuses to
+delete the caller's own account or the last remaining `admin`, nulls out that user's references
+on any `ImportBatch` (`uploaded_by`/`reverted_by`/`health_dismissed_by` — the import stays in
+history, it just no longer names a specific account) rather than blocking the delete, and — on
+Postgres only, since Neon Auth's tables don't exist in the SQLite test database — deletes the
+matching `neon_auth."user"` row too, so the deleted account can no longer sign in.
+
+This is the recommended way to add or change accounts today; the scripts above remain for
+one-off bulk/dev seeding.
 
 ## Seeded accounts (dev)
 
@@ -78,4 +105,4 @@ given real passwords before daily use.
 
 In dev builds (`import.meta.env.DEV`), the login screen shows one-click buttons for each of these — see `App.tsx`. They're hidden in production builds since the password is hardcoded in the client bundle.
 
-Admin has no branch — anywhere branch matters (e.g. confirming an import), admin must pick one explicitly. See [data-import.md](./data-import.md#branch-resolution-on-confirm).
+Admin has no branch — anywhere branch matters (e.g. confirming an import), admin must pick one explicitly. See [data-import.md](./retail/data-import.md#branch-resolution-on-confirm).

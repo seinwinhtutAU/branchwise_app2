@@ -7,8 +7,11 @@ reference, and as the material the assistant's answers should agree with.
 
 It explains how retail data is imported, how sales and profit are calculated, how warnings work, what each setting does, and how to use the chat assistant.
 
-> **Scope:** This Help Center only covers the Retail workflow.
-> It does not cover the Wholesale workflow, which was removed on 2026-09-11 while it is redesigned — a wholesale account currently sees an empty page.
+> **Scope:** This Help Center only covers the Retail workflow, as its original title says. The
+> Wholesale workflow was an empty placeholder when this text was written (2026-09-11, while it
+> was being redesigned from scratch) but has since been rebuilt into a real multi-screen
+> workflow — see [../wholesale/](../wholesale/) for that documentation instead of assuming this
+> page's "empty page" description still holds.
 
 ---
 

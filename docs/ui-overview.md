@@ -104,9 +104,9 @@ Main content area: `padding: 32px 16–24px`, vertical stack (`gap-8`) of a page
 
 **Navigation items are role-dependent**, all implemented (no more "Coming soon" placeholders):
 
-- **Retail/admin** accounts see: Import, Import History, Import Overview, Data Overview, Sale, Inventory, Purchase, Warning (badge showing the open warning count).
-- **Wholesale** accounts see only: Wholesale — one item rendering an empty placeholder. The old Customer Orders / Factory Vouchers / arrival screens were removed on 2026-09-11 while that workflow is redesigned (see `diagram/wholesale/erd.mmd`).
-- **Admin** sees both sets combined (it already sees every branch's retail data elsewhere).
+- **Retail-workspace roles** (`retail`, `retail_management`, and `admin` while in the Retail workspace tab) see the retail nav — this list has grown since it was first written; see [retail/](./retail/) for the current screens rather than trusting a specific list here, since it drifts. A plain `retail` account sees a deliberately narrow subset (Import, Import History) rather than the full set `retail_management`/`admin` get.
+- **Wholesale** accounts see the wholesale nav — this was an empty placeholder as of 2026-09-11 while the workflow was being redesigned from scratch, but it has since been rebuilt into a real multi-screen workflow (Customer Orders, Supplier Vouchers, Shipment, Receiving, Inventory, Finance, Master Data, plus Dashboard/Reports currently hidden pending release) — see [wholesale/](./wholesale/) rather than trusting the "empty placeholder" description, which is stale.
+- **Admin** sees both workspaces, switchable via a tab (it already sees every branch's retail data elsewhere).
 - **Every role** additionally sees Settings, appended last.
 
 ## 3. Screens
@@ -189,7 +189,7 @@ Same open questions as Data Overview apply here (no pagination/filter/search, on
 
 ### 3.9 Import Overview (`ImportOverviewPage`)
 
-One nav item, two tabs (`OverviewTabBar`, same pill visual as Dashboard's tab bar): **Import freshness** and **Import Health**. A single "Refresh" button above the tabs reloads both regardless of which is active. See `docs/import_health.md` for the full design rationale (that doc's title reflects the "Import Health" tab/feature specifically; "Import Overview" is the nav item both tabs share).
+One nav item, two tabs (`OverviewTabBar`, same pill visual as Dashboard's tab bar): **Import freshness** and **Import Health**. A single "Refresh" button above the tabs reloads both regardless of which is active. See `docs/retail/import_health.md` for the full design rationale (that doc's title reflects the "Import Health" tab/feature specifically; "Import Overview" is the nav item both tabs share).
 
 - **Import freshness tab** — at-a-glance per-branch import recency (`GET /api/imports/freshness`): Branch, Sales, Inventory, Purchase, each cell a badge plus the exact localized timestamp underneath. Sales and Inventory are expected daily and are graded by color (green "Today", amber "Yesterday", red "N days ago" or "Never imported"). Purchase isn't — the business only imports a purchase file when it actually restocks — so it shows the same recency wording in a neutral badge under a "Purchase (not daily)" header, never flagged as late.
 - **Import Health tab** — checks whether the cleaning/confirm step itself behaved correctly for a given upload, not the data already saved (that's Warning, below). A "Period" select (7/30/90 days, pinned to the right end of the tab row, this tab only) plus 3 stat tiles (batches checked, batches flagged, slip-total mismatches) backed by `GET /api/imports/health?days=`.
@@ -229,7 +229,7 @@ past the point where anyone could find anything in it:
 - **Buying price** — the three point-in-time pricing windows (purchase lookback,
   inventory lookback, inventory forward fallback).
 - **Branch health** — the Overview score's dimension weights, with a running total, and
-  every Early Warning rule's firing point. See `docs/branch_health.md`.
+  every Early Warning rule's firing point. See `docs/retail/branch_health.md`.
 - **Branches** — per-branch Sale/Inventory date formats. Per branch, not business-wide.
 
 The two retail-only tabs (Data checks, Branch health) are hidden from a wholesale

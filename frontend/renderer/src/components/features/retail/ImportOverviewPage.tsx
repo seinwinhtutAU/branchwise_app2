@@ -1,10 +1,10 @@
 import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
 import { useUrlQuery } from "@renderer/lib/queryClient";
+import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
-import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { TableSkeleton } from "@renderer/components/ui/Skeleton";
 import {
@@ -100,6 +100,7 @@ function FreshnessCell({
 }
 
 export function ImportOverviewPage({ session }: Props): React.JSX.Element {
+  const { aboveRef, containerStyle } = useStickyAbove();
   const {
     data: fetchedFreshness,
     isRefreshing: freshnessRefreshing,
@@ -113,46 +114,66 @@ export function ImportOverviewPage({ session }: Props): React.JSX.Element {
   const freshness = fetchedFreshness ?? null;
 
   return (
-    <div className="flex flex-col gap-4">
-      {freshness === null && !freshnessFailed && (
-        <TableSkeleton rows={3} cols={4} />
-      )}
-
-      {freshness === null && freshnessFailed && (
-        <EmptyState
-          icon={<HeartPulseIcon />}
-          title="Couldn't load upload freshness"
-          description="Something went wrong reaching the backend."
-          action={
-            <Button variant="secondary" size="sm" onClick={loadFreshness}>
-              Try again
-            </Button>
-          }
-        />
-      )}
-
-      {freshness !== null && freshness.length === 0 && (
-        <EmptyState
-          icon={<HeartPulseIcon />}
-          title="No branches yet"
-          description="Once a branch has an account and imports data, it'll show up here."
-        />
-      )}
-
-      {freshness !== null && freshness.length > 0 && (
-        <Card>
-          <CardHeader
-            title="Branch Upload Freshness"
-            description="Live tracking of the latest sales, inventory, and purchase uploads across branches."
-            action={
+    <div className="flex flex-col" style={containerStyle}>
+      <div className="bg-bg-base border border-border rounded-md overflow-hidden shadow-xs">
+        <div
+          ref={aboveRef}
+          className="sticky top-14 lg:top-0 z-30 bg-bg-base px-4 py-2.5 border-b border-border"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <h2 className="text-base font-semibold text-text-primary tracking-tight mr-1">
+                Import Freshness
+              </h2>
+              <span className="text-xs text-text-muted hidden sm:inline">
+                Live tracking of the latest sales, inventory, and purchase
+                uploads across branches.
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
               <RefreshButton
                 onClick={loadFreshness}
                 refreshing={freshnessRefreshing}
               />
+            </div>
+          </div>
+        </div>
+
+        {freshness === null && !freshnessFailed && (
+          <div className="p-4">
+            <TableSkeleton rows={3} cols={4} />
+          </div>
+        )}
+
+        {freshness === null && freshnessFailed && (
+          <EmptyState
+            icon={<HeartPulseIcon />}
+            title="Couldn't load upload freshness"
+            description="Something went wrong reaching the backend."
+            action={
+              <Button variant="secondary" size="sm" onClick={loadFreshness}>
+                Try again
+              </Button>
             }
           />
-          <TableContainer>
-            <Thead>
+        )}
+
+        {freshness !== null && freshness.length === 0 && (
+          <EmptyState
+            icon={<HeartPulseIcon />}
+            title="No branches yet"
+            description="Once a branch has an account and imports data, it'll show up here."
+          />
+        )}
+
+        {freshness !== null && freshness.length > 0 && (
+          <TableContainer
+            className="overflow-y-auto border-0 rounded-none"
+            style={{
+              maxHeight: "calc(100vh - var(--sticky-offset, 0px) - 8rem)",
+            }}
+          >
+            <Thead className="top-0">
               <Tr>
                 <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
                   #
@@ -195,8 +216,8 @@ export function ImportOverviewPage({ session }: Props): React.JSX.Element {
               ))}
             </Tbody>
           </TableContainer>
-        </Card>
-      )}
+        )}
+      </div>
     </div>
   );
 }

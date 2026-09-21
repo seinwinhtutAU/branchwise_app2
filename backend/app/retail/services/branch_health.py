@@ -1,4 +1,4 @@
-"""Branch Health Score — the scoring half of the Overview tab (see docs/branch_health.md).
+"""Branch Health Score — the scoring half of the Overview tab (see docs/retail/branch_health.md).
 
 Turns the numbers the four existing dashboard pillars already compute into one
 0-100 score per dimension and one overall score, so a manager reads "Inventory 54,
@@ -39,7 +39,7 @@ from app.retail.models.sale import Sale, SaleLine
 from app.retail.models.stock_level import StockLevel
 from app.retail.services import data_quality, explanation
 from app.services.branches import list_retail_branches
-from app.services.settings import get_branch_health_weights, get_early_warning_thresholds
+from app.services.settings import get_branch_health_weights
 from app.services.dashboard import (
     DEAD_STOCK_WINDOW_DAYS,
     LOW_DAYS_OF_STOCK,
@@ -469,11 +469,14 @@ class BranchSnapshot:
     has_today_sales: bool = True
     has_today_inventory: bool = True
     is_after_8pm: bool = False
+    daily_check_cutoff_time: str = "20:00"
     stock_allocations: tuple[dict, ...] = ()
     urgent_reorders: tuple[dict, ...] = ()
     aged_footwear: tuple[dict, ...] = ()
     seasonal_spikes: tuple[dict, ...] = ()
     weekly_pattern: dict | None = None
+    sale_data_quality_issues: dict = field(default_factory=dict)
+    purchase_data_quality_issues: dict = field(default_factory=dict)
 
 
 def _growth_pct(current: float, previous: float) -> float | None:
@@ -607,11 +610,25 @@ def _summarise_stock_risk(
 
 
 def _check_daily_import_status(
-    db: Session, branch_id: str, now: datetime | None = None
+    db: Session,
+    branch_id: str,
+    now: datetime | None = None,
+    cutoff_time: str | None = None,
 ) -> tuple[bool, bool, bool]:
     now = now or datetime.now()
     today = now.date()
-    is_after_8pm = now.hour >= 20
+
+    if cutoff_time is None:
+        from app.services.settings import get_daily_check_cutoff_time
+        cutoff_time = get_daily_check_cutoff_time(db)
+
+    try:
+        parts = cutoff_time.split(":")
+        cutoff_h, cutoff_m = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+    except Exception:
+        cutoff_h, cutoff_m = 20, 0
+
+    is_after_cutoff = (now.hour > cutoff_h) or (now.hour == cutoff_h and now.minute >= cutoff_m)
 
     has_today_sales = (
         db.query(Sale.id)
@@ -623,7 +640,7 @@ def _check_daily_import_status(
         .filter(StockLevel.branch_id == branch_id, func.date(StockLevel.snapshot_at) == today)
         .first() is not None
     )
-    return has_today_sales, has_today_inventory, is_after_8pm
+    return has_today_sales, has_today_inventory, is_after_cutoff
 
 
 def _find_stock_allocations(
@@ -884,6 +901,125 @@ def _find_weekly_patterns(
     return None
 
 
+def _check_sale_data_quality(
+    db: Session, branch_id: str, date_from: date, date_to: date
+) -> dict:
+    """Checks sale lines for zero/negative/invalid numbers and missing product descriptions.
+    Note: Missing buying price is ignored per requirements."""
+    rows = (
+        db.query(SaleLine, Sale, Product)
+        .join(Sale, SaleLine.sale_id == Sale.id)
+        .join(Product, SaleLine.product_id == Product.id)
+        .filter(
+            Sale.branch_id == branch_id,
+            Sale.sale_date >= date_from,
+            Sale.sale_date <= date_to,
+        )
+        .all()
+    )
+
+    invalid_numeric_lines = []
+    missing_desc_lines = []
+
+    for line, sale, product in rows:
+        # 1. Numeric validation:
+        # Qty <= 0, Selling Price <= 0, Amount <= 0, Net Amount <= 0, Discount Amount < 0, or None
+        is_num_invalid = False
+        if line.qty is None or float(line.qty) <= 0:
+            is_num_invalid = True
+        elif line.selling_price is None or float(line.selling_price) <= 0:
+            is_num_invalid = True
+        elif line.amount is None or float(line.amount) <= 0:
+            is_num_invalid = True
+        elif line.net_amount is None or float(line.net_amount) <= 0:
+            is_num_invalid = True
+        elif line.discount_amount is not None and float(line.discount_amount) < 0:
+            is_num_invalid = True
+
+        if is_num_invalid:
+            invalid_numeric_lines.append({
+                "slip_id": sale.slip_id,
+                "slip_number": sale.slip_number,
+                "stock_code": product.stock_code,
+                "qty": float(line.qty) if line.qty is not None else None,
+                "selling_price": float(line.selling_price) if line.selling_price is not None else None,
+                "net_amount": float(line.net_amount) if line.net_amount is not None else None,
+                "discount_amount": float(line.discount_amount) if line.discount_amount is not None else None,
+            })
+
+        # 2. Description validation:
+        desc = (product.description or "").strip()
+        if not desc or desc in ("—", "-", "?", "None", "NULL"):
+            missing_desc_lines.append({
+                "slip_id": sale.slip_id,
+                "slip_number": sale.slip_number,
+                "stock_code": product.stock_code,
+            })
+
+    total_flawed = len(invalid_numeric_lines) + len(missing_desc_lines)
+    return {
+        "invalid_numeric_count": len(invalid_numeric_lines),
+        "missing_description_count": len(missing_desc_lines),
+        "total_issues": total_flawed,
+        "sample_numeric": invalid_numeric_lines[:5],
+        "sample_missing_desc": missing_desc_lines[:5],
+    }
+
+
+def _check_purchase_data_quality(
+    db: Session, branch_id: str, date_from: date, date_to: date
+) -> dict:
+    """Checks purchase lines for zero/negative/invalid quantities or unit costs (buying prices),
+    and missing product descriptions."""
+    query = (
+        db.query(PurchaseLine, Purchase, Product)
+        .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
+        .join(Product, PurchaseLine.product_id == Product.id)
+        .filter(
+            Purchase.purchase_date >= date_from,
+            Purchase.purchase_date <= date_to,
+        )
+    )
+    query = query.filter((Purchase.branch_id == branch_id) | (Purchase.branch_id.is_(None)))
+    rows = query.all()
+
+    invalid_numeric_lines = []
+    missing_desc_lines = []
+
+    for line, purchase, product in rows:
+        # 1. Numeric validation: Quantity <= 0, Buying Price (unit cost) <= 0, or None
+        is_num_invalid = False
+        if line.quantity is None or float(line.quantity) <= 0:
+            is_num_invalid = True
+        elif line.buying_price is None or float(line.buying_price) <= 0:
+            is_num_invalid = True
+
+        if is_num_invalid:
+            invalid_numeric_lines.append({
+                "purchase_number": purchase.purchase_number,
+                "stock_code": product.stock_code,
+                "quantity": float(line.quantity) if line.quantity is not None else None,
+                "buying_price": float(line.buying_price) if line.buying_price is not None else None,
+            })
+
+        # 2. Description validation:
+        desc = (product.description or "").strip()
+        if not desc or desc in ("—", "-", "?", "None", "NULL"):
+            missing_desc_lines.append({
+                "purchase_number": purchase.purchase_number,
+                "stock_code": product.stock_code,
+            })
+
+    total_flawed = len(invalid_numeric_lines) + len(missing_desc_lines)
+    return {
+        "invalid_numeric_count": len(invalid_numeric_lines),
+        "missing_description_count": len(missing_desc_lines),
+        "total_issues": total_flawed,
+        "sample_numeric": invalid_numeric_lines[:5],
+        "sample_missing_desc": missing_desc_lines[:5],
+    }
+
+
 def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> BranchSnapshot:
     """The single gathering pass. Everything below delegates to the helper the
     matching dashboard tab already uses — see the module docstring's first rule."""
@@ -904,7 +1040,7 @@ def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> Br
     # Current stock is a point-in-time fact with no period control on its own tab, so
     # these figures describe today regardless of which period the Overview is showing.
     # A custom range set months back still scores its Inventory dimension on today's
-    # shelf — noted in docs/branch_health.md rather than silently implied.
+    # shelf — noted in docs/retail/branch_health.md rather than silently implied.
     stock = _stock_summary(db, branch_id)
 
     period_days = (period_range.end - period_range.start).days + 1
@@ -952,12 +1088,22 @@ def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> Br
         section["count"] for section in data_issue_sections if section["severity"] == "critical"
     )
 
-    has_today_sales, has_today_inventory, is_after_8pm = _check_daily_import_status(db, branch_id)
+    from app.services.settings import get_daily_check_cutoff_time
+    cutoff_time = get_daily_check_cutoff_time(db)
+    has_today_sales, has_today_inventory, is_after_8pm = _check_daily_import_status(
+        db, branch_id, cutoff_time=cutoff_time
+    )
     stock_allocations = _find_stock_allocations(db, branch_id, stock.get("dead_stock_items", []))
     urgent_reorders = _find_urgent_reorders(stock.get("low_stock_items", []))
     aged_footwear = _find_aged_footwear(db, branch_id)
     seasonal_spikes = _find_seasonal_spikes(db, branch_id)
     weekly_pattern = _find_weekly_patterns(db, branch_id, period_range.start, period_range.end)
+    sale_data_quality_issues = _check_sale_data_quality(
+        db, branch_id, period_range.start, period_range.end
+    )
+    purchase_data_quality_issues = _check_purchase_data_quality(
+        db, branch_id, period_range.start, period_range.end
+    )
 
     return BranchSnapshot(
         net_revenue=net_revenue,
@@ -1009,11 +1155,14 @@ def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> Br
         has_today_sales=has_today_sales,
         has_today_inventory=has_today_inventory,
         is_after_8pm=is_after_8pm,
+        daily_check_cutoff_time=cutoff_time,
         stock_allocations=stock_allocations,
         urgent_reorders=urgent_reorders,
         aged_footwear=aged_footwear,
         seasonal_spikes=seasonal_spikes,
         weekly_pattern=weekly_pattern,
+        sale_data_quality_issues=sale_data_quality_issues,
+        purchase_data_quality_issues=purchase_data_quality_issues,
     )
 
 
@@ -1227,7 +1376,6 @@ def build_overview_dashboard(
     period_range = resolve_period(period, date_from=date_from, date_to=date_to)
     snapshot = build_snapshot(db, branch_id, period_range)
     scored = score_branch(snapshot, get_branch_health_weights(db))
-    thresholds = early_warning.Thresholds(**get_early_warning_thresholds(db))
     return {
         "branch_id": branch_id,
         "branch_name": branch_name,
@@ -1237,6 +1385,6 @@ def build_overview_dashboard(
         "previous_date_from": period_range.previous_start.isoformat(),
         "previous_date_to": period_range.previous_end.isoformat(),
         **scored,
-        "alerts": early_warning.build_alerts(snapshot, thresholds),
+        "alerts": early_warning.build_alerts(snapshot),
         "metrics": asdict(snapshot),
     }

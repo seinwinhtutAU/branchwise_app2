@@ -29,7 +29,18 @@ import {
   Td,
 } from "@renderer/components/ui/Table";
 import { Pagination } from "@renderer/components/ui/Pagination";
-import { DownloadIcon, HistoryIcon } from "@renderer/components/ui/icons";
+import {
+  DownloadIcon,
+  HistoryIcon,
+  MoreVerticalIcon,
+  TrashIcon,
+  UploadIcon,
+} from "@renderer/components/ui/icons";
+import {
+  FloatingLayer,
+  MenuItem,
+} from "@renderer/components/features/wholesale/shared/ui";
+import { useDismissableMenu } from "@renderer/components/features/wholesale/shared/useDismissableMenu";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 import { distinctValues, inDateRange } from "@renderer/lib/filters";
 import "@renderer/lib/reactTable";
@@ -117,6 +128,116 @@ function statusBadgeVariant(status: string): "success" | "info" | "default" {
 
 function importTypeLabel(importType: string): string {
   return importType.charAt(0).toUpperCase() + importType.slice(1);
+}
+
+interface ImportHistoryActionsProps {
+  row: ImportBatchRow;
+  isAdmin: boolean;
+  isLocked: boolean;
+  picking: boolean;
+  downloading: boolean;
+  reverting: boolean;
+  onDownload: (row: ImportBatchRow) => void;
+  onReimport: (row: ImportBatchRow) => void;
+  onRevert: (batchId: string) => void;
+}
+
+function ImportHistoryActions({
+  row,
+  isAdmin,
+  isLocked,
+  picking,
+  downloading,
+  reverting,
+  onDownload,
+  onReimport,
+  onRevert,
+}: ImportHistoryActionsProps): React.JSX.Element | null {
+  const { open, setOpen, ref, toggle } = useDismissableMenu();
+  const canDownload = isAdmin;
+  const canManageImport = row.status === "completed" && !isLocked;
+
+  if (!canDownload && !canManageImport) {
+    if (row.status === "completed" && isLocked) {
+      return (
+        <span
+          className="text-xs text-text-muted"
+          title="Retail accounts can only reimport or remove an import within 1 day of importing it"
+        >
+          Locked
+        </span>
+      );
+    }
+    return null;
+  }
+
+  return (
+    <div className="relative inline-block" ref={ref}>
+      <button
+        type="button"
+        aria-label="Import actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-busy={downloading || picking || reverting}
+        disabled={downloading || picking || reverting}
+        onClick={(event) => {
+          event.stopPropagation();
+          toggle();
+        }}
+        className={cn(
+          "p-1.5 rounded-md text-text-muted",
+          "transition-colors duration-150",
+          "hover:bg-bg-raised hover:text-text-primary active:bg-bg-subtle",
+          "disabled:opacity-50 disabled:cursor-not-allowed",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+        )}
+      >
+        <MoreVerticalIcon className="w-4 h-4" />
+      </button>
+      {open && (
+        <FloatingLayer
+          anchorRef={ref}
+          align="right"
+          className="min-w-48 bg-bg-base border border-border rounded-lg shadow-lg py-1 animate-fade-in"
+        >
+          {canDownload && (
+            <MenuItem
+              icon={<DownloadIcon className="w-4 h-4" />}
+              label="Download original file"
+              onClick={() => {
+                setOpen(false);
+                onDownload(row);
+              }}
+            />
+          )}
+          {canManageImport && (
+            <>
+              <MenuItem
+                icon={<UploadIcon className="w-4 h-4" />}
+                label="Reimport corrected file"
+                onClick={() => {
+                  setOpen(false);
+                  onReimport(row);
+                }}
+              />
+              <MenuItem
+                icon={<TrashIcon className="w-4 h-4" />}
+                label="Remove import"
+                danger
+                onClick={() => {
+                  setOpen(false);
+                  onRevert(row.id);
+                }}
+              />
+            </>
+          )}
+          {(downloading || picking || reverting) && (
+            <span className="sr-only">Action in progress</span>
+          )}
+        </FloatingLayer>
+      )}
+    </div>
+  );
 }
 
 function ImportHistoryTable({
@@ -355,96 +476,19 @@ function ImportHistoryTable({
         cell: (info) => {
           const row = info.row.original;
           const isAdmin = profile?.role === "admin";
-
-          if (row.status !== "completed") {
-            if (!isAdmin) return null;
-            return (
-              <div className="flex items-center gap-1.5 justify-end">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  title="Download original file"
-                  loading={downloadingId === row.id}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void handleDownload(row);
-                  }}
-                >
-                  <DownloadIcon className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Download</span>
-                </Button>
-              </div>
-            );
-          }
-
-          if (isRetailRevertLocked(row, profile)) {
-            return (
-              <div className="flex items-center gap-1.5 justify-end">
-                <span
-                  className="text-xs text-text-muted"
-                  title="Retail accounts can only reimport or remove an import within 1 day of importing it"
-                >
-                  Locked
-                </span>
-                {isAdmin && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    title="Download original file"
-                    loading={downloadingId === row.id}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void handleDownload(row);
-                    }}
-                  >
-                    <DownloadIcon className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Download</span>
-                  </Button>
-                )}
-              </div>
-            );
-          }
-
           return (
-            <div className="flex items-center gap-1.5 justify-end">
-              {isAdmin && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  title="Download original file"
-                  loading={downloadingId === row.id}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void handleDownload(row);
-                  }}
-                >
-                  <DownloadIcon className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Download</span>
-                </Button>
-              )}
-              <Button
-                variant="secondary"
-                size="sm"
-                title="Pick a corrected file to replace this import"
-                disabled={picking}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleReimport(row);
-                }}
-              >
-                Reimport
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleRevert(row.id);
-                }}
-                loading={revertingId === row.id}
-              >
-                Remove
-              </Button>
+            <div className="flex items-center justify-end">
+              <ImportHistoryActions
+                row={row}
+                isAdmin={isAdmin}
+                isLocked={isRetailRevertLocked(row, profile)}
+                picking={picking}
+                downloading={downloadingId === row.id}
+                reverting={revertingId === row.id}
+                onDownload={(selectedRow) => void handleDownload(selectedRow)}
+                onReimport={handleReimport}
+                onRevert={(batchId) => void handleRevert(batchId)}
+              />
             </div>
           );
         },

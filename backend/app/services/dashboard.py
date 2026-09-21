@@ -1,4 +1,4 @@
-"""Aggregation for the per-branch retail dashboard (see docs/retail_dashboard.md).
+"""Aggregation for the per-branch retail dashboard (see docs/retail/dashboard.md).
 
 One branch at a time, never a cross-branch rollup, for every tab except Inventory's
 stock-health figures — the caller resolves which branch first (see
@@ -566,7 +566,7 @@ def _last_sale_dates(
 def _stock_status(days_left: float | None) -> str | None:
     """None means "healthy" (or "no recent sales to estimate from") — either way, not
     worth a row in the low-stock table. Thresholds are a reasonable default, not a
-    business-configured setting yet — see docs/retail_dashboard.md."""
+    business-configured setting yet — see docs/retail/dashboard.md."""
     if days_left is None:
         return None
     if days_left <= CRITICAL_DAYS_OF_STOCK:

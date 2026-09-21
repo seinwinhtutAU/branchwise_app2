@@ -126,30 +126,34 @@ export default function ImportHubPage({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Tabs with Branch Selector at the right */}
+      {/* The branch selector is only needed when preparing a new import. */}
       <div className="border-b border-border flex items-center justify-between gap-4 flex-wrap">
         <TabBar<ImportSubTab>
           tabs={tabs}
           activeTab={activeTab}
           onSelect={handleTabChange}
         />
-        {profile !== null && profile.branch_id === null && (
-          <div className="flex items-center gap-2 pb-1.5 shrink-0">
-            <span className="text-xs text-text-muted font-medium">Branch:</span>
-            <select
-              value={selectedBranchId}
-              onChange={(e) => setSelectedBranchId(e.target.value)}
-              className="text-xs bg-bg-surface border border-border rounded-md px-2.5 py-1 text-text-primary focus:outline-none focus:ring-1 focus:ring-brand font-medium cursor-pointer"
-            >
-              <option value="">Select a branch…</option>
-              {branches.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        {activeTab === "import" &&
+          profile !== null &&
+          profile.branch_id === null && (
+            <div className="flex items-center gap-2 pb-1.5 shrink-0">
+              <span className="text-xs text-text-muted font-medium">
+                Branch:
+              </span>
+              <select
+                value={selectedBranchId}
+                onChange={(e) => setSelectedBranchId(e.target.value)}
+                className="text-xs bg-bg-surface border border-border rounded-md px-2.5 py-1 text-text-primary focus:outline-none focus:ring-1 focus:ring-brand font-medium cursor-pointer"
+              >
+                <option value="">Select a branch…</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
       </div>
 
       <div>

@@ -269,7 +269,7 @@ export const EVIDENCE_LABEL: Record<EvidenceTarget, string> = {
   cost: "View Cost",
   inventory: "View Inventory",
   customer: "View Customer",
-  warnings: "View Warning page",
+  warnings: "View Data Quality",
   checking: "View Checking page",
   import: "Go to Import",
 };

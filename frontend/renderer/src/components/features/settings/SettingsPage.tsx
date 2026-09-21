@@ -6,7 +6,6 @@ import { useToast } from "@renderer/lib/useToast";
 import type {
   AppSettings,
   BranchHealthWeights,
-  EarlyWarningThresholds,
 } from "@renderer/lib/appSettings";
 import type { ThemeMode } from "@renderer/lib/theme";
 import { Button } from "@renderer/components/ui/Button";
@@ -195,9 +194,7 @@ function RateField({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium text-text-secondary">
-        {label}
-      </span>
+      <span className="text-sm font-medium text-text-secondary">{label}</span>
       <div className="flex items-center gap-2">
         <span className="text-sm font-semibold text-text-primary whitespace-nowrap">
           1 {label} =
@@ -234,74 +231,6 @@ const HEALTH_WEIGHT_FIELDS: {
   { key: "inventory", label: "Inventory" },
   { key: "customer", label: "Customer" },
   { key: "data_quality", label: "Data Quality" },
-];
-
-// `negative: true` means the field is shown as a positive number and stored as its
-// negative — "revenue falls by more than 10%" rather than asking anyone to type "-10".
-const WARNING_THRESHOLD_FIELDS: {
-  key: keyof EarlyWarningThresholds;
-  label: string;
-  hint: string;
-  negative?: boolean;
-}[] = [
-  {
-    key: "revenue_decline_normal_pct",
-    label: "Revenue normal — falls more than",
-    hint: "%",
-    negative: true,
-  },
-  {
-    key: "revenue_decline_warning_pct",
-    label: "Revenue warning — falls more than",
-    hint: "%",
-    negative: true,
-  },
-  {
-    key: "revenue_decline_critical_pct",
-    label: "Revenue critical — falls more than",
-    hint: "%",
-    negative: true,
-  },
-  { key: "low_margin_normal_pct", label: "Margin normal — below", hint: "%" },
-  { key: "low_margin_warning_pct", label: "Margin warning — below", hint: "%" },
-  {
-    key: "low_margin_critical_pct",
-    label: "Margin critical — below",
-    hint: "%",
-  },
-  {
-    key: "margin_slip_normal_pp",
-    label: "Margin slip normal — falls more than",
-    hint: "%",
-    negative: true,
-  },
-  {
-    key: "margin_slip_warning_pp",
-    label: "Margin slip warning — falls more than",
-    hint: "%",
-    negative: true,
-  },
-  {
-    key: "dead_stock_normal_share_pct",
-    label: "Dead stock normal — above",
-    hint: "% of products",
-  },
-  {
-    key: "dead_stock_warning_share_pct",
-    label: "Dead stock warning — above",
-    hint: "% of products",
-  },
-  {
-    key: "dead_stock_critical_share_pct",
-    label: "Dead stock critical — above",
-    hint: "% of products",
-  },
-  {
-    key: "traffic_decline_warning_pct",
-    label: "Footfall warning — visits fall more than",
-    hint: "%",
-    negative: true,
-  },
 ];
 
 type SettingsTab =
@@ -720,56 +649,99 @@ export function SettingsPage({
       )}
 
       {isAdmin && !isWholesale && tab === "checks" && (
-        <Card>
-          <CardHeader
-            title="Daily check windows"
-            description="Number of lookback days for automated sale and purchase anomaly checks."
-          />
-          <div className="flex flex-col gap-4">
+        <>
+          <Card>
+            <CardHeader
+              title="Daily check cutoff time (Shop Close)"
+              description="The shop closing time after which daily import checks run and physical stock audit sheets unlock."
+            />
             <div className="max-w-xs">
               {!settings ? (
                 <Skeleton className="h-10 w-full" />
               ) : (
-                <DayCountField
-                  label="Sale — check the last"
-                  value={settings.sale_warning_window_days}
-                  min={1}
-                  max={365}
-                  disabled={savingKeys.has("sale_warning_window_days")}
-                  onCommit={(days) =>
-                    handleSettingChange(
-                      "sale_warning_window_days",
-                      days,
-                      "Sale check window updated",
-                      "Couldn't update sale check window",
-                    )
-                  }
-                />
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    htmlFor="custom-cutoff-time"
+                    className="text-sm font-medium text-text-secondary"
+                  >
+                    Cutoff time
+                  </label>
+                  <input
+                    id="custom-cutoff-time"
+                    type="time"
+                    value={settings.daily_check_cutoff_time ?? "20:00"}
+                    disabled={savingKeys.has("daily_check_cutoff_time")}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        handleSettingChange(
+                          "daily_check_cutoff_time",
+                          e.target.value,
+                          "Daily check cutoff time updated",
+                          "Couldn't update daily check cutoff time",
+                        );
+                      }
+                    }}
+                    className="h-10 w-full rounded-md border border-border bg-bg-base px-3 text-sm text-text-primary transition-all duration-150 hover:border-border-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base disabled:cursor-not-allowed disabled:bg-bg-subtle disabled:opacity-50"
+                  />
+                  <p className="text-xs text-text-muted">
+                    Default is 20:00 (8:00 PM). You can select any time.
+                  </p>
+                </div>
               )}
             </div>
-            <div className="max-w-xs">
-              {!settings ? (
-                <Skeleton className="h-10 w-full" />
-              ) : (
-                <DayCountField
-                  label="Purchase — check the last"
-                  value={settings.purchase_warning_window_days}
-                  min={1}
-                  max={365}
-                  disabled={savingKeys.has("purchase_warning_window_days")}
-                  onCommit={(days) =>
-                    handleSettingChange(
-                      "purchase_warning_window_days",
-                      days,
-                      "Purchase check window updated",
-                      "Couldn't update purchase check window",
-                    )
-                  }
-                />
-              )}
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Daily check windows"
+              description="Number of lookback days for automated sale and purchase anomaly checks."
+            />
+            <div className="flex flex-col gap-4">
+              <div className="max-w-xs">
+                {!settings ? (
+                  <Skeleton className="h-10 w-full" />
+                ) : (
+                  <DayCountField
+                    label="Sale — check the last"
+                    value={settings.sale_warning_window_days}
+                    min={1}
+                    max={365}
+                    disabled={savingKeys.has("sale_warning_window_days")}
+                    onCommit={(days) =>
+                      handleSettingChange(
+                        "sale_warning_window_days",
+                        days,
+                        "Sale check window updated",
+                        "Couldn't update sale check window",
+                      )
+                    }
+                  />
+                )}
+              </div>
+              <div className="max-w-xs">
+                {!settings ? (
+                  <Skeleton className="h-10 w-full" />
+                ) : (
+                  <DayCountField
+                    label="Purchase — check the last"
+                    value={settings.purchase_warning_window_days}
+                    min={1}
+                    max={365}
+                    disabled={savingKeys.has("purchase_warning_window_days")}
+                    onCommit={(days) =>
+                      handleSettingChange(
+                        "purchase_warning_window_days",
+                        days,
+                        "Purchase check window updated",
+                        "Couldn't update purchase check window",
+                      )
+                    }
+                  />
+                )}
+              </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+        </>
       )}
 
       {isAdmin && !isWholesale && tab === "general" && (
@@ -1008,46 +980,6 @@ export function SettingsPage({
         </Card>
       )}
 
-      {isAdmin && !isWholesale && tab === "health" && (
-        <Card>
-          <CardHeader
-            title="Early warning thresholds"
-            description="Thresholds that trigger operational alerts and warnings."
-          />
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {WARNING_THRESHOLD_FIELDS.map((field) => (
-              <div key={field.key}>
-                {!settings ? (
-                  <Skeleton className="h-10 w-full" />
-                ) : (
-                  <NumberField
-                    label={field.label}
-                    hint={field.hint}
-                    value={Math.abs(
-                      settings.early_warning_thresholds[field.key],
-                    )}
-                    min={0}
-                    max={100}
-                    disabled={savingKeys.has("early_warning_thresholds")}
-                    onCommit={(entered) =>
-                      handleSettingChange(
-                        "early_warning_thresholds",
-                        {
-                          ...settings.early_warning_thresholds,
-                          [field.key]: field.negative ? -entered : entered,
-                        },
-                        "Early warning thresholds updated",
-                        "Couldn't update early warning thresholds",
-                      )
-                    }
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
       {isAdmin && tab === "branches" && (
         <Card>
           <CardHeader
@@ -1060,7 +992,9 @@ export function SettingsPage({
             <TableContainer>
               <Thead>
                 <Tr>
-                  <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
+                  <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
+                    #
+                  </Th>
                   <Th>Branch</Th>
                   <Th>Sale date format</Th>
                   <Th>Inventory date format</Th>
