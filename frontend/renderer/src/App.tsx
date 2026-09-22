@@ -1101,7 +1101,6 @@ function App(): React.JSX.Element {
                   onFileReady={handleFileReady}
                   onViewBatch={setViewingBatchId}
                   highlightBatchId={highlightBatchId}
-                  onViewImportBatch={handleViewImportBatch}
                   initialTab={importInitialTab}
                   onTabChange={setImportInitialTab}
                 />

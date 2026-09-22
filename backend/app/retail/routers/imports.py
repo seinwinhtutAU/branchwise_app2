@@ -97,14 +97,16 @@ MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 IdempotencyKey = Annotated[str | None, Header(alias="Idempotency-Key", max_length=64)]
 
 
-def _upload_to_storage(contents: bytes, filename: str | None) -> str | None:
+def _upload_to_storage(contents: bytes, filename: str | None, batch_id: str) -> str | None:
+    """Store the raw upload under the batch's own id, next to its preview pages
+    (imports/{batch_id}/original/{filename}), so the two are filed together in R2
+    instead of the original sitting under an unrelated, unguessable folder."""
     if not filename:
         return None
     storage = get_storage_service()
     if not storage.is_configured:
         return None
-    batch_prefix = str(uuid.uuid4())
-    key = f"imports/{batch_prefix}/{filename}"
+    key = f"imports/{batch_id}/original/{filename}"
     ext = Path(filename).suffix.lower()
     content_type = (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -117,6 +119,21 @@ def _upload_to_storage(contents: bytes, filename: str | None) -> str | None:
     )
     uploaded_key = storage.upload_file_bytes(contents, key, content_type)
     return uploaded_key
+
+
+def _finalize_original_file_storage(
+    db: Session, batch_id: str, contents: bytes, filename: str | None
+) -> None:
+    """Upload the original file once the batch id it's filed under actually exists,
+    then record the key — a confirm can't know that id up front, since it's generated
+    inside the persist step (see new_import_batch)."""
+    storage_key = _upload_to_storage(contents, filename, batch_id)
+    if storage_key is None:
+        return
+    db.query(ImportBatch).filter(ImportBatch.id == batch_id).update(
+        {"storage_key": storage_key}
+    )
+    db.commit()
 
 
 def _upload_preview_to_storage(batch_id: str, preview_data: dict) -> None:
@@ -154,6 +171,7 @@ async def import_general_file(
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
     content_type = file.content_type or "application/octet-stream"
     batch = ImportBatch(
+        id=str(uuid.uuid4()),
         import_type=ImportType.GENERAL,
         branch_id=resolved_branch_id,
         uploaded_by=user.id,
@@ -168,11 +186,14 @@ async def import_general_file(
         original_file=contents,
         original_file_size=len(contents),
         original_file_content_type=content_type,
-        storage_key=_upload_to_storage(contents, file.filename),
     )
     db.add(batch)
     db.commit()
     db.refresh(batch)
+    # Only upload to R2 once the batch is actually committed — uploading first (the old
+    # order here) left an orphaned R2 object with no matching row whenever the commit
+    # itself then failed; see _finalize_original_file_storage's docstring.
+    _finalize_original_file_storage(db, batch.id, contents, file.filename)
     return {
         "id": batch.id,
         "filename": batch.filename,
@@ -283,9 +304,6 @@ def _origin_row_issues(
     return mapped
 
 
-MAX_PREVIEW_ROWS = 500
-
-
 def _build_preview(
     filename: str | None,
     origin_rows: list[list[str]],
@@ -297,72 +315,59 @@ def _build_preview(
     total_clean_rows = len(clean_df)
     total_origin_rows = len(origin_rows)
 
-    if total_clean_rows <= MAX_PREVIEW_ROWS:
-        return {
-            "filename": filename,
-            "origin": {
-                "rows": origin_rows,
-                "row_issues": _origin_row_issues(origin_rows, clean_df, row_issues),
-                "is_sampled": False,
-                "total_rows": total_origin_rows,
-            },
-            "clean": {
-                "columns": columns,
-                "rows": clean_df.to_dict(orient="records"),
-                "row_issues": row_issues,
-                "is_sampled": False,
-                "total_rows": total_clean_rows,
-            },
-            "is_sampled": False,
-            "total_origin_rows": total_origin_rows,
-            "total_clean_rows": total_clean_rows,
-            "slip_subtotal_mismatches": clean_df.attrs.get("subtotal_mismatches", []),
-        }
-
-    # For large datasets (e.g. 100k rows), sample first MAX_PREVIEW_ROWS + ALL rows with validation issues
-    issue_indices = {i for i, issues in enumerate(row_issues) if issues}
-    sample_indices = sorted(
-        set(range(min(MAX_PREVIEW_ROWS, total_clean_rows))) | issue_indices
-    )
-
-    clean_records = clean_df.to_dict(orient="records")
-    sampled_clean_rows = [clean_records[i] for i in sample_indices]
-    sampled_clean_issues = [row_issues[i] for i in sample_indices]
-
-    origin_indices = clean_df.attrs.get("origin_indices", [])
-    mapped_origin_issues = _origin_row_issues(origin_rows, clean_df, row_issues)
-
-    sampled_origin_idx_set = set(range(min(MAX_PREVIEW_ROWS, total_origin_rows)))
-    if origin_indices:
-        for ci in sample_indices:
-            if ci < len(origin_indices):
-                sampled_origin_idx_set.add(origin_indices[ci])
-    sorted_origin_indices = sorted(sampled_origin_idx_set)
-    sampled_origin_rows = [origin_rows[i] for i in sorted_origin_indices]
-    sampled_origin_issues = [mapped_origin_issues[i] for i in sorted_origin_indices]
-
     return {
         "filename": filename,
         "origin": {
-            "rows": sampled_origin_rows,
-            "row_issues": sampled_origin_issues,
-            "is_sampled": True,
+            "rows": origin_rows,
+            "row_issues": _origin_row_issues(origin_rows, clean_df, row_issues),
+            "is_sampled": False,
             "total_rows": total_origin_rows,
-            "sample_count": len(sampled_origin_rows),
         },
         "clean": {
             "columns": columns,
-            "rows": sampled_clean_rows,
-            "row_issues": sampled_clean_issues,
-            "is_sampled": True,
+            "rows": clean_df.to_dict(orient="records"),
+            "row_issues": row_issues,
+            "is_sampled": False,
             "total_rows": total_clean_rows,
-            "sample_count": len(sampled_clean_rows),
         },
-        "is_sampled": True,
+        "is_sampled": False,
         "total_origin_rows": total_origin_rows,
         "total_clean_rows": total_clean_rows,
         "slip_subtotal_mismatches": clean_df.attrs.get("subtotal_mismatches", []),
     }
+
+
+DB_PREVIEW_ROW_CAP = 200
+
+
+def _capped_tab(tab: dict, cap: int) -> dict:
+    rows = tab.get("rows", [])
+    if len(rows) <= cap:
+        return tab
+    row_issues = tab.get("row_issues", [])
+    issue_indices = {i for i, issues in enumerate(row_issues) if issues}
+    keep = sorted(set(range(min(cap, len(rows)))) | issue_indices)
+    capped = dict(tab)
+    capped["rows"] = [rows[i] for i in keep]
+    capped["row_issues"] = [row_issues[i] for i in keep] if row_issues else []
+    capped["is_sampled"] = True
+    capped["sample_count"] = len(keep)
+    return capped
+
+
+def _preview_for_db(preview_data: dict, cap: int = DB_PREVIEW_ROW_CAP) -> dict:
+    """A capped copy of preview_data for the `import_batches.preview_data` column.
+
+    R2 always gets the full, unsampled preview (see _upload_preview_to_storage) — that's
+    what Import History actually pages through. The database copy only exists as a
+    fallback for when R2 isn't configured or a batch predates it, so it doesn't need
+    every row; capping it keeps this ~28 MB database from filling up with full import
+    snapshots that are already durably stored in R2. Rows with a validation issue are
+    always kept, so issue_count (computed from this same dict) stays accurate."""
+    capped = dict(preview_data)
+    capped["clean"] = _capped_tab(preview_data.get("clean", {}), cap)
+    capped["origin"] = _capped_tab(preview_data.get("origin", {}), cap)
+    return capped
 
 
 def _can_access_batch(user: User, batch: ImportBatch) -> bool:
@@ -463,7 +468,6 @@ async def confirm_sales_file(
         SALES_OUTPUT_COLUMNS,
         SALES_VALIDATION_RULES,
     )
-    storage_key = await run_in_threadpool(_upload_to_storage, contents, file.filename)
     try:
         summary = await run_in_threadpool(
             persist_sales,
@@ -473,14 +477,16 @@ async def confirm_sales_file(
             location_raw=_location_raw(clean_df),
             source_file=file.filename,
             uploaded_by=user.id,
-            preview_data=preview_data,
-            storage_key=storage_key,
+            preview_data=_preview_for_db(preview_data),
             request_key=idempotency_key,
         )
     except IntegrityError:
         summary = _replay_after_request_key_conflict(db, user, idempotency_key)
         if summary is None:
             raise
+    await run_in_threadpool(
+        _finalize_original_file_storage, db, summary["batch_id"], contents, file.filename
+    )
     await run_in_threadpool(_upload_preview_to_storage, summary["batch_id"], preview_data)
     return summary
 
@@ -546,7 +552,6 @@ async def confirm_inventory_file(
         INVENTORY_OUTPUT_COLUMNS,
         INVENTORY_VALIDATION_RULES,
     )
-    storage_key = await run_in_threadpool(_upload_to_storage, contents, file.filename)
     try:
         summary = await run_in_threadpool(
             persist_inventory,
@@ -556,14 +561,16 @@ async def confirm_inventory_file(
             location_raw=_location_raw(clean_df),
             source_file=file.filename,
             uploaded_by=user.id,
-            preview_data=preview_data,
-            storage_key=storage_key,
+            preview_data=_preview_for_db(preview_data),
             request_key=idempotency_key,
         )
     except IntegrityError:
         summary = _replay_after_request_key_conflict(db, user, idempotency_key)
         if summary is None:
             raise
+    await run_in_threadpool(
+        _finalize_original_file_storage, db, summary["batch_id"], contents, file.filename
+    )
     await run_in_threadpool(_upload_preview_to_storage, summary["batch_id"], preview_data)
     return summary
 
@@ -632,7 +639,6 @@ async def confirm_purchase_file(
         PURCHASE_OUTPUT_COLUMNS,
         PURCHASE_VALIDATION_RULES,
     )
-    storage_key = await run_in_threadpool(_upload_to_storage, contents, file.filename)
     try:
         summary = await run_in_threadpool(
             persist_purchases,
@@ -642,16 +648,18 @@ async def confirm_purchase_file(
             location_raw=_location_raw(clean_df),
             source_file=file.filename,
             uploaded_by=user.id,
-            preview_data=preview_data,
+            preview_data=_preview_for_db(preview_data),
             purchase_date=resolved_purchase_date,
             purchase_number=resolved_purchase_number,
-            storage_key=storage_key,
             request_key=idempotency_key,
         )
     except IntegrityError:
         summary = _replay_after_request_key_conflict(db, user, idempotency_key)
         if summary is None:
             raise
+    await run_in_threadpool(
+        _finalize_original_file_storage, db, summary["batch_id"], contents, file.filename
+    )
     await run_in_threadpool(_upload_preview_to_storage, summary["batch_id"], preview_data)
     return summary
 

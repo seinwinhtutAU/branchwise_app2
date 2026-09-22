@@ -64,20 +64,13 @@ def _format_time(cutoff: str) -> str:
 
 
 def daily_import_missing_rule(snapshot: BranchSnapshot) -> list[Alert]:
-    """After cutoff, require Sale and Inventory to be current for today."""
+    """After cutoff, require Sale and Inventory to each be current for today —
+    one alert per missing type, since they're two separate imports/files with
+    their own dimension, not one combined problem."""
     if not snapshot.is_after_8pm:
         return []
 
-    missing = []
-    if not snapshot.has_today_sales:
-        missing.append("Sale")
-    if not snapshot.has_today_inventory:
-        missing.append("Inventory")
-    if not missing:
-        return []
-
     cutoff = _format_time(snapshot.daily_check_cutoff_time)
-    missing_label = " and ".join(missing)
 
     def data_state(is_current: bool, data_date: str | None) -> str:
         if is_current:
@@ -86,37 +79,40 @@ def daily_import_missing_rule(snapshot: BranchSnapshot) -> list[Alert]:
             return f"{data_date} (not today)"
         return "No update today"
 
-    return [
-        Alert(
-            id="daily_import_missing",
+    def alert_for(kind: str, dimension: str, is_current: bool, data_date: str | None) -> Alert | None:
+        if is_current:
+            return None
+        return Alert(
+            id=f"daily_import_missing_{dimension}",
             severity=CRITICAL,
-            dimension="sales" if not snapshot.has_today_sales else "inventory",
-            title=f"Daily {missing_label} is not current",
-            summary=f"Today's {', '.join(missing)} is missing or from an earlier day after {cutoff}",
+            dimension=dimension,
+            title=f"Daily {kind} is not current",
+            summary=f"Today's {kind} is missing or from an earlier day after {cutoff}",
             what_happened=(
-                f"The shop closed at {cutoff}, but the latest {missing_label} is not for "
+                f"The shop closed at {cutoff}, but the latest {kind} is not for "
                 "today. This can mean the daily export was never imported or that an "
                 "older file was confirmed today. Store performance, stock counts, and daily "
                 "reconciliations cannot reflect today's trade until the correct export is confirmed."
             ),
             recommended_action="Upload and confirm today's POS export file immediately.",
-            link="import_freshness",
+            link="import",
             measure="daily_import",
             facts=_facts(
                 _fact("Shop Status", f"Closed (after {cutoff})"),
-                _fact(
-                    "Sale Day",
-                    data_state(snapshot.has_today_sales, snapshot.sales_data_date),
-                ),
-                _fact(
-                    "Inventory Day",
-                    data_state(
-                        snapshot.has_today_inventory, snapshot.inventory_data_date
-                    ),
-                ),
+                _fact(f"{kind} Day", data_state(is_current, data_date)),
             ),
         )
+
+    candidates = [
+        alert_for("Sale", "sales", snapshot.has_today_sales, snapshot.sales_data_date),
+        alert_for(
+            "Inventory",
+            "inventory",
+            snapshot.has_today_inventory,
+            snapshot.inventory_data_date,
+        ),
     ]
+    return [alert for alert in candidates if alert is not None]
 
 
 def purchase_number_sequence_rule(snapshot: BranchSnapshot) -> list[Alert]:
@@ -156,7 +152,7 @@ def purchase_number_sequence_rule(snapshot: BranchSnapshot) -> list[Alert]:
                 "Check the supplier/POS purchase documents for the missing numbers and "
                 "import each missing purchase file."
             ),
-            link="import_freshness",
+            link="import",
             measure="purchase_number_sequence",
             facts=_facts(
                 _fact(

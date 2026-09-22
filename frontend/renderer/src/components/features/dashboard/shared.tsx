@@ -13,15 +13,12 @@ import {
   Thead,
   Tr,
 } from "@renderer/components/ui/Table";
-import { ClipboardIcon } from "@renderer/components/ui/icons";
 import {
-  EVIDENCE_LABEL,
   PERIOD_OPTIONS,
   WEEKDAY_LABELS,
   formatShortDate,
   type AlertFact,
   type AlertTable,
-  type EvidenceTarget,
   type HealthAlert,
   type PeriodKey,
   type SaleWarningRow,
@@ -369,15 +366,14 @@ function AlertTableBlock({ table }: { table: AlertTable }): React.JSX.Element {
  * figures now sitting in the rows above, and the two together read as the panel saying
  * everything twice. It stays on the payload for the collapsed row and the branch cards.
  *
- * The action sits apart, tinted and holding the button, because it is the thing the whole
- * alert exists to produce.
+ * The action itself (what to do, and the button to go do it) lives beside the row this
+ * panel expands from, not in here — it needs to be visible without a click, since it is
+ * the thing the whole alert exists to produce. This panel is the supporting evidence for it.
  */
 export function AlertExplanation({
   alert,
-  onOpenEvidence,
 }: {
   alert: HealthAlert;
-  onOpenEvidence: (target: EvidenceTarget) => void;
 }): React.JSX.Element {
   const why = [alert.driver, alert.interpretation].filter(Boolean).join(" ");
   return (
@@ -399,23 +395,6 @@ export function AlertExplanation({
       {why && (
         <AlertSection label="Why">{withNumbersEmphasised(why)}</AlertSection>
       )}
-
-      <div className="rounded-lg border border-border-brand bg-brand-subtle p-3 flex flex-wrap items-center gap-x-6 gap-y-2">
-        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-brand">
-          <ClipboardIcon className="w-3.5 h-3.5" />
-          What to do
-        </span>
-        <p className="flex-1 min-w-[16rem] text-sm text-text-primary">
-          {alert.recommended_action}
-        </p>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => onOpenEvidence(alert.link)}
-        >
-          {EVIDENCE_LABEL[alert.link]} →
-        </Button>
-      </div>
     </div>
   );
 }

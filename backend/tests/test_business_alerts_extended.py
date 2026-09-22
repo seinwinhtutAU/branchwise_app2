@@ -88,21 +88,28 @@ def test_daily_import_no_alert_before_8pm():
         has_today_inventory=False,
     )
     alerts = early_warning.evaluate(snap)
-    assert not any(a.id == "daily_import_missing" for a in alerts)
+    assert not any(a.id.startswith("daily_import_missing") for a in alerts)
 
 
 def test_daily_import_fires_critical_after_8pm_when_both_missing():
-    """After 8:00 PM, if neither sales nor inventory was imported today, fire critical alert."""
+    """After 8:00 PM, if neither sales nor inventory was imported today, fire one
+    critical alert per missing type — they're two separate imports, not one problem."""
     snap = _base_snapshot(
         is_after_8pm=True,
         has_today_sales=False,
         has_today_inventory=False,
     )
     alerts = early_warning.evaluate(snap)
-    alert = next(a for a in alerts if a.id == "daily_import_missing")
-    assert alert.severity == early_warning.CRITICAL
-    assert "Sale and Inventory" in alert.title
-    assert alert.link == "import_freshness"
+    sales_alert = next(a for a in alerts if a.id == "daily_import_missing_sales")
+    inventory_alert = next(a for a in alerts if a.id == "daily_import_missing_inventory")
+    assert sales_alert.severity == early_warning.CRITICAL
+    assert sales_alert.dimension == "sales"
+    assert sales_alert.title == "Daily Sale is not current"
+    assert sales_alert.link == "import"
+    assert inventory_alert.severity == early_warning.CRITICAL
+    assert inventory_alert.dimension == "inventory"
+    assert inventory_alert.title == "Daily Inventory is not current"
+    assert inventory_alert.link == "import"
 
 
 def test_daily_import_fires_critical_after_8pm_when_only_sales_missing():
@@ -112,8 +119,10 @@ def test_daily_import_fires_critical_after_8pm_when_only_sales_missing():
         has_today_inventory=True,
     )
     alerts = early_warning.evaluate(snap)
-    alert = next(a for a in alerts if a.id == "daily_import_missing")
+    assert not any(a.id == "daily_import_missing_inventory" for a in alerts)
+    alert = next(a for a in alerts if a.id == "daily_import_missing_sales")
     assert alert.severity == early_warning.CRITICAL
+    assert alert.dimension == "sales"
     assert "Sale" in alert.title
     assert "Inventory" not in alert.title
 
@@ -125,8 +134,10 @@ def test_daily_import_fires_critical_after_8pm_when_only_inventory_missing():
         has_today_inventory=False,
     )
     alerts = early_warning.evaluate(snap)
-    alert = next(a for a in alerts if a.id == "daily_import_missing")
+    assert not any(a.id == "daily_import_missing_sales" for a in alerts)
+    alert = next(a for a in alerts if a.id == "daily_import_missing_inventory")
     assert alert.severity == early_warning.CRITICAL
+    assert alert.dimension == "inventory"
     assert "Inventory" in alert.title
     assert "Sale" not in alert.title
 
@@ -138,7 +149,7 @@ def test_daily_import_clears_when_both_today_imports_present():
         has_today_inventory=True,
     )
     alerts = early_warning.evaluate(snap)
-    assert not any(a.id == "daily_import_missing" for a in alerts)
+    assert not any(a.id.startswith("daily_import_missing") for a in alerts)
 
 
 def test_daily_import_alert_identifies_data_uploaded_for_an_older_day():
@@ -150,14 +161,13 @@ def test_daily_import_alert_identifies_data_uploaded_for_an_older_day():
         inventory_data_date="2026-09-19",
     )
 
-    alert = next(
-        alert
-        for alert in early_warning.evaluate(snap)
-        if alert.id == "daily_import_missing"
-    )
-    facts = {fact["label"]: fact["value"] for fact in alert.facts}
-    assert facts["Sale Day"] == "2026-09-20 (not today)"
-    assert facts["Inventory Day"] == "2026-09-19 (not today)"
+    alerts = early_warning.evaluate(snap)
+    sales_alert = next(a for a in alerts if a.id == "daily_import_missing_sales")
+    inventory_alert = next(a for a in alerts if a.id == "daily_import_missing_inventory")
+    sales_facts = {fact["label"]: fact["value"] for fact in sales_alert.facts}
+    inventory_facts = {fact["label"]: fact["value"] for fact in inventory_alert.facts}
+    assert sales_facts["Sale Day"] == "2026-09-20 (not today)"
+    assert inventory_facts["Inventory Day"] == "2026-09-19 (not today)"
 
 
 def test_purchase_number_sequence_gap_fires_critical_alert():
@@ -182,7 +192,7 @@ def test_purchase_number_sequence_gap_fires_critical_alert():
         if alert.id == "purchase_number_sequence_gap"
     )
     assert alert.severity == early_warning.CRITICAL
-    assert alert.link == "import_freshness"
+    assert alert.link == "import"
     assert "STR00050–STR00110" in alert.summary
 
 
@@ -483,9 +493,9 @@ def test_custom_daily_check_cutoff_time_formats_in_alerts_and_checking(
         daily_check_cutoff_time="19:00",
     )
     alerts = early_warning.evaluate(snap)
-    import_alerts = [a for a in alerts if a.id == "daily_import_missing"]
-    assert len(import_alerts) == 1
-    assert "7:00 PM" in import_alerts[0].summary
+    import_alerts = [a for a in alerts if a.id.startswith("daily_import_missing")]
+    assert len(import_alerts) == 2
+    assert all("7:00 PM" in alert.summary for alert in import_alerts)
 
     # 2. Update app_settings with custom cutoff time 21:30
     res_update = authed_client.put(

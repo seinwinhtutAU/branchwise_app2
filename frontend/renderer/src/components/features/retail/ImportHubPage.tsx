@@ -10,8 +10,7 @@ import { TabBar, type TabItem } from "@renderer/components/ui/Tabs";
 import FileImportCard from "@renderer/components/features/retail/FileImportCard";
 import GeneralFileImportCard from "@renderer/components/features/retail/GeneralFileImportCard";
 import ImportHistoryTable from "@renderer/components/features/retail/ImportHistoryTable";
-import ImportOverviewPage from "@renderer/components/features/retail/ImportOverviewPage";
-import ImportCompletenessPage from "@renderer/components/features/retail/ImportCompletenessPage";
+import ImportHealthPage from "@renderer/components/features/retail/ImportHealthPage";
 import ImportConfirmModal from "@renderer/components/features/retail/ImportConfirmModal";
 import {
   UploadIcon,
@@ -32,7 +31,6 @@ interface ImportHubPageProps {
   onFileReady?: (file: PendingImport) => void;
   onViewBatch: (batchId: string) => void;
   highlightBatchId: string | null;
-  onViewImportBatch: (importId: string) => void;
   initialTab?: ImportSubTab;
   /** Keeps the shell's role-specific Import / History navigation in step with these tabs. */
   onTabChange?: (tab: ImportSubTab) => void;
@@ -46,7 +44,6 @@ export default function ImportHubPage({
   onFileReady,
   onViewBatch,
   highlightBatchId,
-  onViewImportBatch,
   initialTab = "import",
   onTabChange,
 }: ImportHubPageProps): React.JSX.Element {
@@ -220,13 +217,7 @@ export default function ImportHubPage({
 
         {/* 3. Import Health — freshness and missing-day follow-up in one place. */}
         {activeTab === "health" && profile?.role !== "retail" && (
-          <div className="space-y-5">
-            <ImportOverviewPage
-              session={session}
-              onViewImportBatch={onViewImportBatch}
-            />
-            <ImportCompletenessPage session={session} profile={profile} />
-          </div>
+          <ImportHealthPage session={session} profile={profile} />
         )}
       </div>
 

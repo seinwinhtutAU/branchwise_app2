@@ -1,6 +1,6 @@
 # Import Health
 
-**Status: implemented.** `GET /api/imports/health` (`app/retail/routers/import_health.py`, `app/retail/services/import_health.py`) plus `GET /api/imports/freshness`, wired into `frontend/renderer/src/components/features/retail/ImportOverviewPage.tsx` and the retail nav as **"Import Overview"** — a single nav item with two internal tabs, **"Import freshness"** and **"Import Health"** (`ImportOverviewPage.tsx`'s `OverviewTabBar`, same pill-tab pattern as Dashboard's tab bar). "Import Health" is the tab/feature name this doc documents; "Import Overview" is just the nav item it now lives under, alongside its older sibling. A layout sketch (HTML mock, not real data) was published as a Claude Artifact during the original design conversation; ask in a new session if the link is needed, since artifact URLs aren't durable enough to paste into a doc that outlives one conversation.
+**Status: implemented.** The retail **Import Health** tab is rendered by `frontend/renderer/src/components/features/retail/ImportHealthPage.tsx`. It combines the existing `GET /api/imports/freshness` and `GET /api/imports/completeness` responses in the frontend; no backend response shape is changed. The tab remains available from the Import Hub for non-retail roles.
 
 ## Why this exists
 
@@ -14,9 +14,11 @@ It is a different concern from what already exists:
 
 This covers all three import types (Sales, Inventory, Purchase), not just Sales. The 2026-08-30 incident happened to be a Sales bug, but each import type has its own way of silently going wrong at confirm time (see "Batches to review" below). Slip-total mismatches are Sales-specific by nature (only Sales' source format has a slip subtotal row), not because the feature is scoped to Sales.
 
-## Sharing a nav item with Import freshness
+## Combining freshness and completeness
 
-Both "Import freshness" (the original per-branch, per-import-type "when was this last confirmed" table, `GET /api/imports/freshness`, unchanged) and "Import Health" answer "is the import pipeline actually working" — freshness answers "are files coming in at all," Health answers "are the files that do come in being handled correctly" — so they live under one nav item, **Import Overview**, as two tabs rather than two separate nav entries. This went through two iterations: first two separate nav items, then merged into one page with no tabs (Health's sections stacked directly under the freshness table), then split back into explicit tabs under a single "Import Overview" nav item once the un-tabbed merge made the page feel like it was all "Import Health" — the freshness table doesn't need `days`/skip-rate/dismiss machinery, so folding it into Health's frame undersold it as its own concern. A single shared "Refresh" button (top-right, next to the tab bar) refreshes both tabs' data regardless of which is active — simpler than two independent per-card Refresh buttons, and cheap since both endpoints are lightweight.
+The Import Hub exposes one **Import Health** view rather than separate stacked tables. The frontend requests `GET /api/imports/freshness` and `GET /api/imports/completeness` together, then merges rows by `branch_id`. This keeps the existing branch visibility rules and lets the UI present the operational picture in one place: freshness tells the user when data last arrived, while completeness tells them which daily dates still need attention.
+
+One shared Refresh button reloads both endpoints. Ignore/restore actions still use the existing completeness close/reopen endpoints; after an action, the affected branch card is refreshed without changing the backend contract.
 
 ## Sections
 
@@ -46,7 +48,9 @@ A batch's flag comes from `ImportBatch.summary`, a frozen snapshot from confirm 
 
 ## Frontend
 
-`frontend/renderer/src/components/features/retail/ImportOverviewPage.tsx` — a page-level `CardHeader` (title, description, and the single "Refresh" button as its `action`, same convention as Import History's header) reloads both tabs' data together regardless of which is active. Below it, `OverviewTabBar` (same pill-tab visual pattern as `DashboardPage.tsx`'s tab bar, a separate small local component rather than importing Dashboard's, since it's a different `Tab` union) with a "Period" selector (7/30/90 days — named to match Dashboard's period control, not "Window") pinned to the right end of that same row, shown only on the Import Health tab since freshness has no date-range concept. Selected tab is styled `bg-brand-subtle text-brand`, the same active-state color used by the sidebar nav, rather than Dashboard tab bar's neutral `bg-bg-base`. **Import freshness** is just the bare table — no `Card` wrapper or title/description, since the tab label already says what it is. **Import Health** keeps three `StatTile`s for batches checked/flagged and slip-total mismatches, then two `Card`s for batches-to-review and slip-total mismatches (these retain their own titles/descriptions, since two distinct checks share the tab). Each flagged batch has "View in History →" (reusing the same `onViewImportBatch` handler Warning's Source Import links already use) and "Dismiss" side by side; slip-total-mismatch rows only get "View in History →".
+`frontend/renderer/src/components/features/retail/ImportHealthPage.tsx` renders one card per branch. The card header shows the branch name, an overall `All caught up` / `N to check` pill, and an `Ignored (N)` link. Sales, Inventory, and Purchase are displayed as three responsive columns. Sales and Inventory reuse the existing Today / Yesterday / `N days ago` freshness grading; missing-day chips are shown only when their open count is non-zero. Purchase keeps neutral occasional-upload wording and shows number-gap details instead of missing days.
+
+Clicking a missing-day chip expands the relevant date selector below that card. Clicking `Ignored (N)` expands the branch's closed dates for restoration. The shared `DaySection` control and the existing close/reopen request flow live in `ImportCompletenessControls.tsx`, so date selection, optional notes, role checks, toasts, and refresh behavior remain consistent with the previous screen. The old `ImportOverviewPage.tsx` table and `ImportCompletenessPage.tsx` page-level display have been removed.
 
 ## Tests
 
