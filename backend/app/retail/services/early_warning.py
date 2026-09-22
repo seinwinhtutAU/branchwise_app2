@@ -82,19 +82,35 @@ def daily_import_missing_rule(snapshot: BranchSnapshot) -> list[Alert]:
     def alert_for(kind: str, dimension: str, is_current: bool, data_date: str | None) -> Alert | None:
         if is_current:
             return None
+        # Checked by data date, not by whether anything was imported today: if an
+        # older file gets confirmed today, this still fires, since today's own
+        # date still has no data. "hasn't been imported" would read as false to
+        # someone who just imported *something* today, so the copy below stays
+        # to what the check actually knows — today's data is missing or dated.
+        # Only name pages that actually exist in the retail nav (Dashboard, Data
+        # Overview) — earlier drafts said "Reports" and "today's business
+        # summary", neither of which is a screen the user can find or check.
+        kind_lower = "sales" if dimension == "sales" else "inventory"
+        what_happened = (
+            "Until today's sales file is imported, today's numbers won't show "
+            "up on the Dashboard or Data Overview."
+            if dimension == "sales"
+            else (
+                "Until today's inventory file is imported, today's stock "
+                "levels won't show up on the Dashboard or Data Overview."
+            )
+        )
         return Alert(
             id=f"daily_import_missing_{dimension}",
             severity=CRITICAL,
             dimension=dimension,
-            title=f"Daily {kind} is not current",
-            summary=f"Today's {kind} is missing or from an earlier day after {cutoff}",
-            what_happened=(
-                f"The shop closed at {cutoff}, but the latest {kind} is not for "
-                "today. This can mean the daily export was never imported or that an "
-                "older file was confirmed today. Store performance, stock counts, and daily "
-                "reconciliations cannot reflect today's trade until the correct export is confirmed."
+            title=f"Today's {kind_lower} data is missing or out of date",
+            summary=(
+                f"The latest {kind_lower} file on record isn't for today "
+                f"(checked after {cutoff})."
             ),
-            recommended_action="Upload and confirm today's POS export file immediately.",
+            what_happened=what_happened,
+            recommended_action=f"Upload and confirm today's POS {kind_lower} file.",
             link="import",
             measure="daily_import",
             facts=_facts(
@@ -138,20 +154,20 @@ def purchase_number_sequence_rule(snapshot: BranchSnapshot) -> list[Alert]:
             id="purchase_number_sequence_gap",
             severity=CRITICAL,
             dimension="data_quality",
-            title="Purchase number sequence has gaps",
+            # The gap in the numbering is a fact; that a file is actually missing is
+            # an inference from it, not something confirmed — so this stays a
+            # "possible" finding rather than a claim the records are confirmed gone.
+            title="Possible missing purchase records",
             summary=(
-                f"{missing_count} missing purchase number{'s' if missing_count != 1 else ''} "
-                f"across {gap_count} gap{'s' if gap_count != 1 else ''} (including {range_label})"
+                f"{missing_count} purchase number{'s' if missing_count != 1 else ''} "
+                f"{'appears' if missing_count == 1 else 'appear'} to be missing, "
+                f"including {range_label}."
             ),
             what_happened=(
-                "Purchase numbers should run without breaks within the same prefix. "
-                f"The imported records skip {range_label}, so one or more purchase files "
-                "may be absent from the system."
+                f"Purchase numbers skip {range_label}. A Purchase Orders file "
+                "covering that range may still need to be imported."
             ),
-            recommended_action=(
-                "Check the supplier/POS purchase documents for the missing numbers and "
-                "import each missing purchase file."
-            ),
+            recommended_action="Find the missing Purchase Orders file and import it.",
             link="import",
             measure="purchase_number_sequence",
             facts=_facts(
@@ -189,12 +205,16 @@ def physical_stock_audit_rule(snapshot: BranchSnapshot) -> list[Alert]:
         and snapshot.has_today_sales
         and snapshot.has_today_inventory
     )
-    status_note = (
-        f"Audit sheet ready — daily imports completed after {cutoff}."
+    # Locked until *both* conditions hold — the cutoff time has passed, and today's
+    # sales and inventory are confirmed — so the status text names both, not just
+    # the imports: being fully imported before the cutoff still reads as locked.
+    audit_status = (
+        "Ready: Stock checking sheet is ready. Today's sales and inventory have "
+        "been confirmed."
         if can_generate
         else (
-            f"Audit sheet locked until {cutoff} and today's sales and inventory "
-            "imports are confirmed."
+            f"Locked: Stock checking sheet will be available after {cutoff}, "
+            "once today's sales and inventory are confirmed."
         )
     )
     return [
@@ -202,19 +222,19 @@ def physical_stock_audit_rule(snapshot: BranchSnapshot) -> list[Alert]:
             id="physical_stock_audit",
             severity=WARNING,
             dimension="inventory",
-            title="Physical stock audit required",
+            title="Physical stock count is required",
             summary=(
-                f"{snapshot.data_issue_count} inventory discrepancies to verify physically"
+                f"{snapshot.data_issue_count} inventory issues need to be checked "
+                "in the shop."
             ),
             what_happened=(
-                f"The system detected {snapshot.data_issue_count} data quality issues in "
-                "inventory (reconciliation mismatches, unlinked products, or negative "
-                "stock). Staff must perform a physical shelf count and update the "
-                f"external inventory system. {status_note}"
+                "The system found inventory records that don't match expected "
+                "stock. Please verify the actual shelf quantity before updating "
+                "inventory."
             ),
             recommended_action=(
-                "Download checking stock file, conduct physical stock count in shop, "
-                "update external POS, and re-import inventory file."
+                "Download the stock checking sheet, count stock in the shop, and "
+                "re-import the updated inventory file."
             ),
             link="checking",
             measure="physical_stock_audit",
@@ -223,9 +243,7 @@ def physical_stock_audit_rule(snapshot: BranchSnapshot) -> list[Alert]:
                 _fact("Critical Issues", str(snapshot.critical_data_issue_count)),
                 _fact(
                     "Audit Sheet Status",
-                    "Ready for download"
-                    if can_generate
-                    else f"Locked (pending {cutoff} & daily imports)",
+                    audit_status,
                 ),
             ),
         )
@@ -256,19 +274,19 @@ def stock_allocation_rule(snapshot: BranchSnapshot) -> list[Alert]:
             id="stock_allocation",
             severity=WARNING,
             dimension="inventory",
-            title=(
-                f"Stock allocation: {_count_products(count)} dead locally have sales elsewhere"
+            title="Move slow-moving stock to another branch",
+            summary=(
+                f"{count} product{'s' if count != 1 else ''} "
+                f"{'are' if count != 1 else 'is'} selling in other branches but not here."
             ),
-            summary=f"Rebalance {count} dead products to {', '.join(target_branches[:2])}",
             what_happened=(
-                f"{_count_products(count)} have sat with zero sales in the last 90 days "
-                "at this branch while stock remains on hand. Other retail branches "
-                f"({', '.join(target_branches)}) are actively selling these exact stock "
-                "codes. Transferring these pairs rebalances inventory and frees up tied capital."
+                "These products haven't sold in this branch for the last 90 days, "
+                f"while other branches ({', '.join(target_branches)}) are actively "
+                "selling the same items."
             ),
             recommended_action=(
-                f"Initiate inter-branch transfer to {', '.join(target_branches)} instead "
-                "of ordering new units."
+                f"Transfer the recommended quantities below to "
+                f"{', '.join(target_branches)} instead of ordering new units."
             ),
             link="inventory",
             measure="stock_allocation",
@@ -311,16 +329,16 @@ def urgent_reorder_rule(snapshot: BranchSnapshot) -> list[Alert]:
             id="urgent_reorder",
             severity=CRITICAL,
             dimension="inventory",
-            title=f"Urgent stock reorder required: {_count_products(count)} critical",
-            summary=f"{count} products have ≤ 3 days of stock left",
+            title=f"Urgent reorder needed for {_count_products(count)}",
+            summary=(
+                f"{count} product{'s' if count != 1 else ''} may run out within "
+                "the next 3 days."
+            ),
             what_happened=(
-                f"{_count_products(count)} are at immediate risk of stocking out based "
-                "on recent daily sales run-rates. Immediate supplier replenishment is "
-                "required to prevent lost sales."
+                "These products are selling faster than current stock can "
+                "support and may sell out soon."
             ),
-            recommended_action=(
-                "Create urgent purchase orders for the recommended replenishment quantities."
-            ),
+            recommended_action="Create purchase orders for the recommended products today.",
             link="inventory",
             measure="urgent_reorder",
             table={
@@ -362,19 +380,18 @@ def footwear_aging_rule(snapshot: BranchSnapshot) -> list[Alert]:
             id="footwear_aging",
             severity=WARNING,
             dimension="inventory",
-            title=f"Footwear stock aging > 6 months: {_count_products(count)} at risk",
-            summary=f"{count} products held > 180 days without turning over",
+            title="Old stock has been sitting for over 6 months",
+            summary=(
+                f"{count} product{'s' if count != 1 else ''} "
+                f"{'have' if count != 1 else 'has'} stayed in stock for more than "
+                "180 days."
+            ),
             what_happened=(
-                f"{_count_products(count)} have been held in inventory for over 180 "
-                "days (6 months). In footwear retail, older stock suffers from sole "
-                "hydrolysis, glue drying, and fashion obsolescence. "
-                f"Oldest item ({oldest['stock_code']}) has been held for "
-                f"{oldest['age_days']} days."
+                "Older footwear becomes harder to sell over time and may lose "
+                "value if it stays in storage too long. The oldest item has been "
+                f"in stock for {oldest['age_days']} days."
             ),
-            recommended_action=(
-                "Inspect batch receipts, review aging items, and launch clearance "
-                "discounts or promotional bundles."
-            ),
+            recommended_action="Review these products for clearance, promotion, or bundle sales.",
             link="inventory",
             measure="aging_stock",
             table={
@@ -415,16 +432,15 @@ def seasonal_demand_spike_rule(snapshot: BranchSnapshot) -> list[Alert]:
             id="seasonal_demand_spike",
             severity=NORMAL,
             dimension="sales",
-            title=f"Seasonal demand surge: {_count_products(count)} peak in {month_name}",
-            summary=f"Prior-year high demand detected for {month_name}",
+            title=f"Prepare for higher demand in {month_name}",
+            summary=f"Last year's sales were strong in {month_name}.",
             what_happened=(
-                f"Historical sales analysis indicates that {count} products experienced "
-                f"a surge in {month_name} in prior years. Preparing inventory early "
-                "prevents supply bottlenecks during the seasonal peak."
+                f"These products each sold at least 5 units in {month_name} last "
+                "year. If the same pattern repeats, stock may run low if it "
+                "isn't ordered ahead of time."
             ),
             recommended_action=(
-                f"Check stock levels and place advance orders with suppliers for "
-                f"{month_name} seasonal styles."
+                f"Check stock now and place supplier orders before {month_name}."
             ),
             link="revenue",
             measure="seasonal_demand",
@@ -458,18 +474,20 @@ def weekly_pattern_demand_rule(snapshot: BranchSnapshot) -> list[Alert]:
             id="weekly_pattern_demand",
             severity=NORMAL,
             dimension="customer",
-            title=f"Weekend demand concentration ({share:.0f}% Saturday & Sunday)",
-            summary=f"Peak store volume occurs on {peak_day}",
+            # This fires on either of two separate conditions — weekend trade is at
+            # least 35% of the week, or one single day sells at least 1.8x a normal
+            # weekday — and `peak_day` is whichever day actually sold the most,
+            # which is not always a weekend day even when the alert fires from the
+            # weekend-share condition. So the copy names that day rather than
+            # assuming "weekend", which would misdescribe a weekday-peak case.
+            title=f"{peak_day} is your busiest sales day",
+            summary=f"Sales on {peak_day} run well above a typical weekday.",
             what_happened=(
-                f"Store transaction patterns show that weekend trading accounts for "
-                f"{share:.0f}% of weekly footwear sales, peaking on {peak_day} "
-                f"({pattern['peak_day_qty']} pairs, vs {pattern['weekday_avg_qty']} "
-                "weekday average). Floor shelves risk stockout during peak shopping hours."
+                f"{peak_day} brings in about {pattern['peak_day_qty']:,.0f} pairs, "
+                f"compared to a weekday average of {pattern['weekday_avg_qty']:,.1f}. "
+                "Shelves risk running low if they aren't restocked beforehand."
             ),
-            recommended_action=(
-                f"Replenish sales floor and footwear display racks before {peak_day} "
-                "store opening."
-            ),
+            recommended_action=f"Refill display shelves before the store opens on {peak_day}.",
             link="customer",
             measure="weekly_pattern",
             facts=_facts(
@@ -505,20 +523,18 @@ def sale_data_quality_rule(snapshot: BranchSnapshot) -> list[Alert]:
             id="sale_data_quality",
             severity=CRITICAL,
             dimension="data_quality",
-            title="Critical sale data quality issues detected",
+            title="Sales data needs attention",
             summary=(
-                f"{total} sale {'line has' if total == 1 else 'lines have'} invalid "
-                f"values ({detail})"
+                f"{total} sales {'line' if total == 1 else 'lines'} "
+                f"{'contains' if total == 1 else 'contain'} invalid values ({detail})."
             ),
             what_happened=(
-                f"The system detected {total} sale "
-                f"{'line' if total == 1 else 'lines'} with data quality issues: "
-                f"{detail}. Missing buying prices are excluded. Invalid transaction "
-                "numbers distort revenue and inventory calculations."
+                "Some sales lines have invalid values (quantity, price, or "
+                "amount) or are missing a product description, which can make "
+                "the numbers on the Dashboard and Data Overview wrong."
             ),
             recommended_action=(
-                "Open Data Quality to inspect the affected sales lines, revert the "
-                "incorrect POS export file, and re-import the corrected file."
+                "Review the affected sales records and re-import the corrected sales file."
             ),
             link="warnings",
             measure="critical_data_issue_count",
@@ -553,20 +569,19 @@ def purchase_data_quality_rule(snapshot: BranchSnapshot) -> list[Alert]:
             id="purchase_data_quality",
             severity=CRITICAL,
             dimension="data_quality",
-            title="Critical purchase data quality issues detected",
+            title="Purchase data needs attention",
             summary=(
-                f"{total} purchase {'line has' if total == 1 else 'lines have'} "
-                f"invalid values ({detail})"
+                f"{total} purchase {'line' if total == 1 else 'lines'} "
+                f"{'contains' if total == 1 else 'contain'} invalid quantities or "
+                f"costs ({detail})."
             ),
             what_happened=(
-                f"The system detected {total} purchase "
-                f"{'line' if total == 1 else 'lines'} with data quality issues: "
-                f"{detail}. Zero or negative quantities and costs corrupt inventory "
-                "valuation and margin pricing."
+                "Some purchase lines have invalid quantities or unit costs, or "
+                "are missing a product description, which can make product "
+                "costs and stock value on the Dashboard wrong."
             ),
             recommended_action=(
-                "Open Data Quality to check supplier invoice numbers, update item "
-                "costs/descriptions in the external system, and re-import."
+                "Review the affected purchase records and re-import the corrected purchase file."
             ),
             link="warnings",
             measure="critical_data_issue_count",

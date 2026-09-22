@@ -362,9 +362,12 @@ function AlertTableBlock({ table }: { table: AlertTable }): React.JSX.Element {
  * movement is already in the figures above and named in "Why", so the bars restated a
  * third time what the panel had said twice.
  *
- * `what_happened` is deliberately *not* shown any more: it was a sentence stating the same
- * figures now sitting in the rows above, and the two together read as the panel saying
- * everything twice. It stays on the payload for the collapsed row and the branch cards.
+ * `what_happened` is deliberately not shown here: it's a prose restatement of the same
+ * figures sitting in the rows above (or, for alerts with no facts/table, the same claim
+ * the alert's own summary already makes), and showing both reads as the panel saying
+ * everything twice. It stays on the payload — nothing in the frontend reads it today, but
+ * it's what a future compact context (a card, a digest) without room for a full figure
+ * table would use instead.
  *
  * The action itself (what to do, and the button to go do it) lives beside the row this
  * panel expands from, not in here — it needs to be visible without a click, since it is
@@ -381,10 +384,6 @@ export function AlertExplanation({
       {alert.context && (
         <span className="text-xs text-text-muted">{alert.context}</span>
       )}
-
-      <AlertSection label="What happened">
-        {withNumbersEmphasised(alert.what_happened)}
-      </AlertSection>
 
       {(alert.facts ?? []).length > 0 && (
         <AlertFacts facts={alert.facts} />

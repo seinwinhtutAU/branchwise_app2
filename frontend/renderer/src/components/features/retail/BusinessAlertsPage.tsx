@@ -174,12 +174,12 @@ function AlertInspector({
         <p className="text-sm text-text-secondary">{alert.summary}</p>
       </div>
 
-      {/* What to do lives at the top of the panel — it's the thing this whole page
-          exists to produce, so it must be visible without scrolling past the
-          evidence first. */}
+      {/* The recommended action lives at the top of the panel — it's the thing
+          this whole page exists to produce, so it must be visible without
+          scrolling past the evidence first. */}
       <div className="rounded-lg border border-brand-pill bg-brand-subtle p-3 flex flex-col gap-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-brand">
-          What to do
+          Recommended Action
         </span>
         <p className="text-sm text-text-primary">{alert.recommended_action}</p>
         <Button

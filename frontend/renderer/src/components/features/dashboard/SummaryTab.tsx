@@ -23,6 +23,41 @@ interface Props {
   dateFrom: string;
   dateTo: string;
   canLoad: boolean;
+  onOpenDashboard?: (tab: "revenue" | "cost" | "inventory" | "customer") => void;
+}
+
+function DrilldownCard({
+  children,
+  label,
+  onClick,
+  className,
+}: {
+  children: React.ReactNode;
+  label: string;
+  onClick?: () => void;
+  className: string;
+}): React.JSX.Element {
+  return (
+    <div
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-label={onClick ? label : undefined}
+      onClick={onClick}
+      onKeyDown={
+        onClick
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      className={className}
+    >
+      {children}
+    </div>
+  );
 }
 
 /**
@@ -238,6 +273,7 @@ export function SummaryTab({
   dateFrom,
   dateTo,
   canLoad,
+  onOpenDashboard,
 }: Props): React.JSX.Element {
   const url = canLoad
     ? dashboardUrl("summary", branchId, { period, dateFrom, dateTo })
@@ -342,7 +378,11 @@ export function SummaryTab({
         {/* 6 Top KPI Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
           {/* 1. Net Revenue */}
-          <div className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between">
+          <DrilldownCard
+            label="Revenue dashboard"
+            onClick={onOpenDashboard ? () => onOpenDashboard("revenue") : undefined}
+            className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between"
+          >
             <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
               Net Revenue
             </span>
@@ -354,10 +394,14 @@ export function SummaryTab({
             <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
               MMK · {periodSubtitle}
             </span>
-          </div>
+          </DrilldownCard>
 
           {/* 2. Gross Profit */}
-          <div className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between">
+          <DrilldownCard
+            label="Cost dashboard"
+            onClick={onOpenDashboard ? () => onOpenDashboard("cost") : undefined}
+            className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between"
+          >
             <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
               Gross Profit
             </span>
@@ -369,10 +413,14 @@ export function SummaryTab({
             <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
               MMK · before op. costs
             </span>
-          </div>
+          </DrilldownCard>
 
           {/* 3. Profit Margin */}
-          <div className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between">
+          <DrilldownCard
+            label="Cost dashboard"
+            onClick={onOpenDashboard ? () => onOpenDashboard("cost") : undefined}
+            className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between"
+          >
             <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
               Profit Margin
             </span>
@@ -384,10 +432,14 @@ export function SummaryTab({
             <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
               Profit ÷ net revenue
             </span>
-          </div>
+          </DrilldownCard>
 
           {/* 4. Transactions */}
-          <div className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between">
+          <DrilldownCard
+            label="Customer dashboard"
+            onClick={onOpenDashboard ? () => onOpenDashboard("customer") : undefined}
+            className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between"
+          >
             <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
               Transactions
             </span>
@@ -399,10 +451,14 @@ export function SummaryTab({
             <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
               Avg sale: {formatCompactMmk(kpis.avg_sale)} MMK
             </span>
-          </div>
+          </DrilldownCard>
 
           {/* 5. Quantity Sold */}
-          <div className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between">
+          <DrilldownCard
+            label="Revenue dashboard"
+            onClick={onOpenDashboard ? () => onOpenDashboard("revenue") : undefined}
+            className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between"
+          >
             <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
               Quantity Sold
             </span>
@@ -414,10 +470,14 @@ export function SummaryTab({
             <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
               Across {kpis.selling_sku_count.toLocaleString()} SKUs
             </span>
-          </div>
+          </DrilldownCard>
 
           {/* 6. Dead Stock */}
-          <div className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between">
+          <DrilldownCard
+            label="Inventory dashboard"
+            onClick={onOpenDashboard ? () => onOpenDashboard("inventory") : undefined}
+            className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between"
+          >
             <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
               Dead Stock
             </span>
@@ -429,13 +489,17 @@ export function SummaryTab({
             <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
               {kpis.dead_stock_pct.toFixed(1)}% of {kpis.total_products_count.toLocaleString()} items
             </span>
-          </div>
+          </DrilldownCard>
         </div>
 
         {/* Middle Row - 3 Cards */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
           {/* Card 1: Revenue by product category */}
-          <div className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border flex flex-col justify-between">
+          <DrilldownCard
+            label="Revenue dashboard"
+            onClick={onOpenDashboard ? () => onOpenDashboard("revenue") : undefined}
+            className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border flex flex-col justify-between"
+          >
             <div>
               <h2 className="text-sm font-semibold text-text-primary">
                 Revenue by product category
@@ -460,7 +524,7 @@ export function SummaryTab({
                         <div className="flex-1 h-2 rounded-full bg-bg-raised overflow-hidden">
                           <div
                             className="h-full rounded-full bg-brand transition-all duration-500"
-                            style={{ width: `${Math.max(fillPct, 1.5)}%` }}
+                            style={{ width: `${Math.max(fillPct, 8)}%` }}
                           />
                         </div>
                         <span className="w-14 shrink-0 text-right text-xs font-semibold tabular-nums text-text-primary">
@@ -472,10 +536,14 @@ export function SummaryTab({
                 </div>
               )}
             </div>
-          </div>
+          </DrilldownCard>
 
           {/* Card 2: Inventory condition */}
-          <div className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border flex flex-col justify-between gap-2.5">
+          <DrilldownCard
+            label="Inventory dashboard"
+            onClick={onOpenDashboard ? () => onOpenDashboard("inventory") : undefined}
+            className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border flex flex-col justify-between gap-2.5"
+          >
             <div>
               <h2 className="text-sm font-semibold text-text-primary">
                 Inventory condition
@@ -496,10 +564,14 @@ export function SummaryTab({
             <div className="bg-brand-subtle text-brand border border-brand/20 rounded-md p-2 text-xs leading-relaxed">
               {inventory_condition.risk_alert}
             </div>
-          </div>
+          </DrilldownCard>
 
           {/* Card 3: Customer demand by hour */}
-          <div className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border flex flex-col justify-between gap-2.5">
+          <DrilldownCard
+            label="Customer dashboard"
+            onClick={onOpenDashboard ? () => onOpenDashboard("customer") : undefined}
+            className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border flex flex-col justify-between gap-2.5"
+          >
             <div>
               <h2 className="text-sm font-semibold text-text-primary">
                 Customer demand by hour
@@ -520,13 +592,17 @@ export function SummaryTab({
                 {customer_demand.peak_hour_desc}
               </div>
             </div>
-          </div>
+          </DrilldownCard>
         </div>
 
         {/* Bottom Row - 2 Cards */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {/* Card 1: Top products by revenue */}
-          <div className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border">
+          <DrilldownCard
+            label="Revenue dashboard"
+            onClick={onOpenDashboard ? () => onOpenDashboard("revenue") : undefined}
+            className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border"
+          >
             <h2 className="text-sm font-semibold text-text-primary mb-2.5">
               Top products by revenue
             </h2>
@@ -557,7 +633,7 @@ export function SummaryTab({
                 ))}
               </div>
             )}
-          </div>
+          </DrilldownCard>
 
           {/* Card 2: Recommended decisions */}
           <div className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border">

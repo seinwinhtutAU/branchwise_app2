@@ -104,11 +104,11 @@ def test_daily_import_fires_critical_after_8pm_when_both_missing():
     inventory_alert = next(a for a in alerts if a.id == "daily_import_missing_inventory")
     assert sales_alert.severity == early_warning.CRITICAL
     assert sales_alert.dimension == "sales"
-    assert sales_alert.title == "Daily Sale is not current"
+    assert sales_alert.title == "Today's sales data is missing or out of date"
     assert sales_alert.link == "import"
     assert inventory_alert.severity == early_warning.CRITICAL
     assert inventory_alert.dimension == "inventory"
-    assert inventory_alert.title == "Daily Inventory is not current"
+    assert inventory_alert.title == "Today's inventory data is missing or out of date"
     assert inventory_alert.link == "import"
 
 
@@ -123,8 +123,8 @@ def test_daily_import_fires_critical_after_8pm_when_only_sales_missing():
     alert = next(a for a in alerts if a.id == "daily_import_missing_sales")
     assert alert.severity == early_warning.CRITICAL
     assert alert.dimension == "sales"
-    assert "Sale" in alert.title
-    assert "Inventory" not in alert.title
+    assert "sales" in alert.title.lower()
+    assert "inventory" not in alert.title.lower()
 
 
 def test_daily_import_fires_critical_after_8pm_when_only_inventory_missing():
@@ -138,8 +138,8 @@ def test_daily_import_fires_critical_after_8pm_when_only_inventory_missing():
     alert = next(a for a in alerts if a.id == "daily_import_missing_inventory")
     assert alert.severity == early_warning.CRITICAL
     assert alert.dimension == "inventory"
-    assert "Inventory" in alert.title
-    assert "Sale" not in alert.title
+    assert "inventory" in alert.title.lower()
+    assert "sales" not in alert.title.lower()
 
 
 def test_daily_import_clears_when_both_today_imports_present():
@@ -193,7 +193,7 @@ def test_purchase_number_sequence_gap_fires_critical_alert():
     )
     assert alert.severity == early_warning.CRITICAL
     assert alert.link == "import"
-    assert "STR00050–STR00110" in alert.summary
+    assert "STR00050–STR00110" in alert.what_happened
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +220,8 @@ def test_physical_stock_audit_fires_when_data_issues_exist():
     alert = next(a for a in alerts if a.id == "physical_stock_audit")
     assert alert.severity == early_warning.WARNING
     assert alert.link == "checking"
-    assert "locked" in alert.what_happened.lower()
+    status_facts = {fact["label"]: fact["value"] for fact in alert.facts}
+    assert "locked" in status_facts["Audit Sheet Status"].lower()
 
     # Ready status when after 8pm and imports complete
     snap_ready = _base_snapshot(
@@ -232,7 +233,8 @@ def test_physical_stock_audit_fires_when_data_issues_exist():
     )
     alerts_ready = early_warning.evaluate(snap_ready)
     alert_ready = next(a for a in alerts_ready if a.id == "physical_stock_audit")
-    assert "ready" in alert_ready.what_happened.lower()
+    ready_facts = {fact["label"]: fact["value"] for fact in alert_ready.facts}
+    assert "ready" in ready_facts["Audit Sheet Status"].lower()
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +354,8 @@ def test_weekly_pattern_alert():
     alert = next(a for a in alerts if a.id == "weekly_pattern_demand")
     assert alert.severity == early_warning.NORMAL
     assert alert.link == "customer"
-    assert "Saturday" in alert.title
+    assert "Saturday" in alert.what_happened
+    assert alert.title == "Saturday is your busiest sales day"
 
 
 # ---------------------------------------------------------------------------
@@ -545,7 +548,7 @@ def test_sale_data_quality_fires_critical_on_negative_or_zero_values():
     alert = next(a for a in alerts if a.id == "sale_data_quality")
     assert alert.severity == early_warning.CRITICAL
     assert alert.dimension == "data_quality"
-    assert "Critical sale data quality issues" in alert.title
+    assert alert.title == "Sales data needs attention"
     assert "3 with zero/negative/invalid numbers" in alert.summary
     assert alert.link == "warnings"
 
@@ -591,7 +594,7 @@ def test_purchase_data_quality_fires_critical_on_zero_or_negative_qty_or_cost():
     alert = next(a for a in alerts if a.id == "purchase_data_quality")
     assert alert.severity == early_warning.CRITICAL
     assert alert.dimension == "data_quality"
-    assert "Critical purchase data quality issues" in alert.title
+    assert alert.title == "Purchase data needs attention"
     assert "2 with zero/negative/invalid quantity or unit cost" in alert.summary
     assert alert.link == "warnings"
 

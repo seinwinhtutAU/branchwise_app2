@@ -190,6 +190,7 @@ export function DashboardPage({
           dateFrom={appliedRange.from}
           dateTo={appliedRange.to}
           canLoad={canLoad}
+          onOpenDashboard={showAdvancedTabs ? setActiveTab : undefined}
         />
       )}
 
