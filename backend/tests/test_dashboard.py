@@ -119,12 +119,18 @@ def test_dashboard_endpoint_retail_account_uses_own_branch(
     assert body["transaction_count"]["value"] == 1
 
 
-def test_dashboard_admin_cannot_open_revenue(authed_client: TestClient, db_session: Session):
+def test_dashboard_admin_can_open_revenue(authed_client: TestClient, db_session: Session):
     _make_admin_user(db_session)
+    branch = _make_branch(db_session)
     db_session.commit()
 
+    # Admin has no fixed branch_id, same as development/retail_management, so it must
+    # be supplied explicitly.
     response = authed_client.get("/api/dashboard/revenue?period=today")
-    assert response.status_code == 403
+    assert response.status_code == 400
+
+    response = authed_client.get(f"/api/dashboard/revenue?period=today&branch_id={branch.id}")
+    assert response.status_code == 200
 
 
 def test_dashboard_rejects_wholesale_branch(authed_client: TestClient, db_session: Session):
@@ -571,24 +577,28 @@ def test_inventory_dashboard_dead_stock_excludes_sales_within_the_window(
     assert body["low_stock_items"] == []
 
 
-def test_inventory_dashboard_is_not_available_to_admin(
-    authed_client: TestClient, db_session: Session
-):
-    _make_admin_user(db_session)
-    db_session.commit()
-
-    response = authed_client.get("/api/dashboard/inventory")
-    assert response.status_code == 403
-
-
-def test_admin_can_open_summary_and_health_dashboard(
+def test_inventory_dashboard_is_available_to_admin(
     authed_client: TestClient, db_session: Session
 ):
     _make_admin_user(db_session)
     branch = _make_branch(db_session)
     db_session.commit()
 
-    for endpoint in ("summary", "overview"):
+    response = authed_client.get("/api/dashboard/inventory")
+    assert response.status_code == 400
+
+    response = authed_client.get(f"/api/dashboard/inventory?branch_id={branch.id}")
+    assert response.status_code == 200
+
+
+def test_admin_can_open_every_dashboard_tab(
+    authed_client: TestClient, db_session: Session
+):
+    _make_admin_user(db_session)
+    branch = _make_branch(db_session)
+    db_session.commit()
+
+    for endpoint in ("summary", "overview", "revenue", "cost", "inventory", "customer"):
         response = authed_client.get(
             f"/api/dashboard/{endpoint}?period=today&branch_id={branch.id}"
         )

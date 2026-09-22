@@ -1,6 +1,13 @@
-import { useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
+import {
+  Controller,
+  useFieldArray,
+  useForm,
+  useWatch,
+  type Control,
+  type FieldErrors,
+} from "react-hook-form";
 import { z } from "zod";
 import { cn } from "@renderer/lib/utils";
 import { PlusIcon, TrashIcon } from "@renderer/components/ui/icons";
@@ -91,6 +98,129 @@ interface PaymentsFormValues {
   payments: Payment[];
 }
 
+/** One payment row. Watches only its own `payments.${index}` field instead of the whole
+ *  array, and is memoized on top of that — editing one payment used to re-render every
+ *  other row's date/amount/note inputs too, since the table watched the whole array and
+ *  rebuilt every row's JSX on each keystroke. Scoping the watch to this row's own index
+ *  is what react-hook-form's useWatch is designed for; the memo on top means an edit to
+ *  a sibling row (which still changes this component's `errors`/`balance` props by
+ *  content but not by value) is skipped rather than re-rendered for nothing. */
+const PaymentRow = memo(function PaymentRow({
+  control,
+  index,
+  errors,
+  balance,
+  readOnly,
+  onUpdate,
+  commitPayment,
+  removePayment,
+}: {
+  control: Control<PaymentsFormValues>;
+  index: number;
+  errors: FieldErrors<PaymentsFormValues>;
+  balance: number;
+  readOnly: boolean;
+  onUpdate?: (payment: Payment) => void;
+  commitPayment: (index: number, payment: Payment) => void;
+  removePayment: (index: number, paymentId: string) => void;
+}): React.JSX.Element | null {
+  const payment = useWatch({ control, name: `payments.${index}` }) as Payment | undefined;
+  if (!payment) return null;
+
+  return (
+    <Tr>
+      <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+        {index + 1}
+      </Td>
+      {onUpdate && !readOnly ? (
+        <Td>
+          <Controller
+            control={control}
+            name={`payments.${index}.paid_on`}
+            render={({ field: dateField }) => (
+              <CellInput
+                label={`Payment date for ${formatKyat(payment.amount)}`}
+                placeholder=""
+                type="date"
+                value={dateField.value}
+                onChange={(date) => {
+                  dateField.onChange(date);
+                  commitPayment(index, { ...payment, paid_on: date });
+                }}
+                error={errors.payments?.[index]?.paid_on?.message}
+              />
+            )}
+          />
+        </Td>
+      ) : (
+        <Td className="whitespace-nowrap">{formatDate(payment.paid_on)}</Td>
+      )}
+      {onUpdate && !readOnly ? (
+        <Td>
+          <Controller
+            control={control}
+            name={`payments.${index}.amount`}
+            render={({ field: amountField }) => (
+              <PaymentAmountCell
+                paid_on={payment.paid_on}
+                value={amountField.value}
+                balance={balance}
+                onChange={(amount) => {
+                  amountField.onChange(amount);
+                  commitPayment(index, { ...payment, amount });
+                }}
+                error={errors.payments?.[index]?.amount?.message}
+              />
+            )}
+          />
+        </Td>
+      ) : (
+        <Td className="text-right tabular-nums font-medium">
+          {formatKyat(payment.amount)}
+        </Td>
+      )}
+      {onUpdate && !readOnly ? (
+        <Td>
+          <Controller
+            control={control}
+            name={`payments.${index}.note`}
+            render={({ field: noteField }) => (
+              <CellInput
+                label={`Note for payment on ${formatDate(payment.paid_on)}`}
+                placeholder="Deposit, transfer, cash…"
+                value={noteField.value}
+                onChange={(note) => {
+                  noteField.onChange(note);
+                  commitPayment(index, { ...payment, note });
+                }}
+              />
+            )}
+          />
+        </Td>
+      ) : (
+        <Td className="text-text-muted">{payment.note || "—"}</Td>
+      )}
+      {!readOnly && (
+        <Td className="text-center">
+          <button
+            type="button"
+            onClick={() => removePayment(index, payment.payment_id)}
+            title="Remove this payment"
+            aria-label={`Remove the payment of ${formatKyat(payment.amount)}`}
+            className={cn(
+              "p-1.5 rounded-md transition-colors duration-150",
+              SOFT_RED,
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
+            )}
+          >
+            <TrashIcon className="w-4 h-4" />
+          </button>
+        </Td>
+      )}
+    </Tr>
+  );
+});
+
 /** The money taken against one order or one voucher, and the box for writing down the
  *  next payment.
  *
@@ -176,19 +306,25 @@ export function PaymentsTable({
     setAddingId(null);
   }
 
-  function removePayment(index: number, paymentId: string): void {
-    remove(index);
-    onRemove(paymentId);
-    if (paymentId === addingId) setAddingId(null);
-  }
+  const removePayment = useCallback(
+    (index: number, paymentId: string): void => {
+      remove(index);
+      onRemove(paymentId);
+      if (paymentId === addingId) setAddingId(null);
+    },
+    [remove, onRemove, addingId],
+  );
 
-  function commitPayment(index: number, payment: Payment): void {
-    setValue(`payments.${index}`, payment, {
-      shouldDirty: true,
-      shouldValidate: true,
-    });
-    void handleSubmit(() => onUpdate?.(payment))();
-  }
+  const commitPayment = useCallback(
+    (index: number, payment: Payment): void => {
+      setValue(`payments.${index}`, payment, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+      void handleSubmit(() => onUpdate?.(payment))();
+    },
+    [setValue, handleSubmit, onUpdate],
+  );
 
   return (
     <div className="flex flex-col gap-3">
@@ -213,104 +349,19 @@ export function PaymentsTable({
               </Td>
             </Tr>
           )}
-          {fields.map((field, index) => {
-            const payment = formPayments[index];
-            if (!payment) return null;
-            return (
-              <Tr key={field.id}>
-                <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
-                  {index + 1}
-                </Td>
-                {onUpdate && !readOnly ? (
-                  <Td>
-                    <Controller
-                      control={control}
-                      name={`payments.${index}.paid_on`}
-                      render={({ field: dateField }) => (
-                        <CellInput
-                          label={`Payment date for ${formatKyat(payment.amount)}`}
-                          placeholder=""
-                          type="date"
-                          value={dateField.value}
-                          onChange={(date) => {
-                            dateField.onChange(date);
-                            commitPayment(index, { ...payment, paid_on: date });
-                          }}
-                          error={errors.payments?.[index]?.paid_on?.message}
-                        />
-                      )}
-                    />
-                  </Td>
-                ) : (
-                  <Td className="whitespace-nowrap">
-                    {formatDate(payment.paid_on)}
-                  </Td>
-                )}
-                {onUpdate && !readOnly ? (
-                  <Td>
-                    <Controller
-                      control={control}
-                      name={`payments.${index}.amount`}
-                      render={({ field: amountField }) => (
-                        <PaymentAmountCell
-                          paid_on={payment.paid_on}
-                          value={amountField.value}
-                          balance={balance}
-                          onChange={(amount) => {
-                            amountField.onChange(amount);
-                            commitPayment(index, { ...payment, amount });
-                          }}
-                          error={errors.payments?.[index]?.amount?.message}
-                        />
-                      )}
-                    />
-                  </Td>
-                ) : (
-                  <Td className="text-right tabular-nums font-medium">
-                    {formatKyat(payment.amount)}
-                  </Td>
-                )}
-                {onUpdate && !readOnly ? (
-                  <Td>
-                    <Controller
-                      control={control}
-                      name={`payments.${index}.note`}
-                      render={({ field: noteField }) => (
-                        <CellInput
-                          label={`Note for payment on ${formatDate(payment.paid_on)}`}
-                          placeholder="Deposit, transfer, cash…"
-                          value={noteField.value}
-                          onChange={(note) => {
-                            noteField.onChange(note);
-                            commitPayment(index, { ...payment, note });
-                          }}
-                        />
-                      )}
-                    />
-                  </Td>
-                ) : (
-                  <Td className="text-text-muted">{payment.note || "—"}</Td>
-                )}
-                {!readOnly && (
-                  <Td className="text-center">
-                    <button
-                      type="button"
-                      onClick={() => removePayment(index, payment.payment_id)}
-                      title="Remove this payment"
-                      aria-label={`Remove the payment of ${formatKyat(payment.amount)}`}
-                      className={cn(
-                        "p-1.5 rounded-md transition-colors duration-150",
-                        SOFT_RED,
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error",
-                      )}
-                    >
-                      <TrashIcon className="w-4 h-4" />
-                    </button>
-                  </Td>
-                )}
-              </Tr>
-            );
-          })}
+          {fields.map((field, index) => (
+            <PaymentRow
+              key={field.id}
+              control={control}
+              index={index}
+              errors={errors}
+              balance={balance}
+              readOnly={readOnly}
+              onUpdate={onUpdate}
+              commitPayment={commitPayment}
+              removePayment={removePayment}
+            />
+          ))}
           <Tr className="bg-bg-subtle hover:bg-bg-subtle">
             <Td colSpan={2} className="font-semibold">Paid so far</Td>
             <Td className="text-right tabular-nums font-semibold text-success">

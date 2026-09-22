@@ -569,112 +569,155 @@ def inventory_reconciliation_warnings(
     checked — wholesale never has sale/inventory/purchase data. A branch with
     no snapshot, or no *prior* snapshot to compare against, is skipped rather
     than treated as a mismatch.
+
+    Every step below is batched across all branches in one query rather than one
+    query per branch — each branch used to pay for its own round trip to Neon for the
+    same handful of lookups (latest/prior snapshot timestamp, the two snapshots
+    themselves, purchases, sales, and the two UOM checks), which only matters more as
+    branches are added. The one thing that can't be a plain GROUP BY is the "prior"
+    (second-most-recent) snapshot timestamp, so distinct timestamps are fetched once
+    for every branch and the top two per branch are picked out in Python. Each
+    branch keeps its own (window_start, window_end] — the purchases/sales/UOM
+    queries below fetch a superset bounded by the widest window across all branches,
+    then filter each row against its own branch's actual window before summing, so a
+    branch with a narrower window never picks up another branch's purchases or sales.
     """
     branches_query = list_retail_branches(db)
     if user.branch_id is not None:
         branches_query = branches_query.filter(Branch.id == user.branch_id)
     branches = branches_query.all()
+    if not branches:
+        return [], []
+
+    branch_ids = [branch.id for branch in branches]
+
+    timestamps_by_branch: dict[str, list] = defaultdict(list)
+    for branch_id, snapshot_at in (
+        db.query(StockLevel.branch_id, StockLevel.snapshot_at)
+        .filter(StockLevel.branch_id.in_(branch_ids))
+        .distinct()
+        .order_by(StockLevel.branch_id, StockLevel.snapshot_at.desc())
+    ):
+        timestamps_by_branch[branch_id].append(snapshot_at)
+
+    # branch_id -> (latest_ts, prior_ts). A branch with no snapshot, or no prior
+    # snapshot to compare against, is dropped here — same skip as the original
+    # per-branch early-continue.
+    windows: dict[str, tuple] = {
+        branch.id: (timestamps_by_branch[branch.id][0], timestamps_by_branch[branch.id][1])
+        for branch in branches
+        if len(timestamps_by_branch.get(branch.id, [])) >= 2
+    }
+    if not windows:
+        return [], []
+
+    active_branch_ids = list(windows.keys())
+    window_start_by_branch = {bid: prior_ts.date() for bid, (_, prior_ts) in windows.items()}
+    window_end_by_branch = {bid: latest_ts.date() for bid, (latest_ts, _) in windows.items()}
+    overall_start = min(window_start_by_branch.values())
+    overall_end = max(window_end_by_branch.values())
+
+    def in_branch_window(branch_id: str, day: date) -> bool:
+        return window_start_by_branch[branch_id] < day <= window_end_by_branch[branch_id]
+
+    latest_snapshot_by_branch: dict[str, dict[str, StockLevel]] = defaultdict(dict)
+    prior_snapshot_by_branch: dict[str, dict[str, object]] = defaultdict(dict)
+    all_relevant_ts = {ts for pair in windows.values() for ts in pair}
+    for sl in (
+        db.query(StockLevel)
+        .filter(
+            StockLevel.branch_id.in_(active_branch_ids),
+            StockLevel.snapshot_at.in_(all_relevant_ts),
+        )
+    ):
+        latest_ts, prior_ts = windows[sl.branch_id]
+        if sl.snapshot_at == latest_ts:
+            latest_snapshot_by_branch[sl.branch_id][sl.product_id] = sl
+        elif sl.snapshot_at == prior_ts:
+            prior_snapshot_by_branch[sl.branch_id][sl.product_id] = sl.on_hand_qty
+
+    purchased_by_branch: dict[str, dict[str, Decimal]] = defaultdict(lambda: defaultdict(lambda: Decimal("0")))
+    for branch_id, product_id, purchase_date, qty in (
+        db.query(Purchase.branch_id, PurchaseLine.product_id, Purchase.purchase_date, PurchaseLine.quantity)
+        .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
+        .filter(
+            Purchase.branch_id.in_(active_branch_ids),
+            Purchase.purchase_date > overall_start,
+            Purchase.purchase_date <= overall_end,
+        )
+    ):
+        if in_branch_window(branch_id, purchase_date):
+            purchased_by_branch[branch_id][product_id] += Decimal(str(qty or 0))
+
+    sold_by_branch: dict[str, dict[str, Decimal]] = defaultdict(lambda: defaultdict(lambda: Decimal("0")))
+    for branch_id, product_id, sale_date, qty in (
+        db.query(Sale.branch_id, SaleLine.product_id, Sale.sale_date, SaleLine.qty)
+        .join(Sale, SaleLine.sale_id == Sale.id)
+        .filter(
+            Sale.branch_id.in_(active_branch_ids),
+            Sale.sale_date > overall_start,
+            Sale.sale_date <= overall_end,
+        )
+    ):
+        if in_branch_window(branch_id, sale_date):
+            sold_by_branch[branch_id][product_id] += Decimal(str(qty or 0))
+
+    uoms_seen_by_branch: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    for branch_id, product_id, sale_date, uom in (
+        db.query(Sale.branch_id, SaleLine.product_id, Sale.sale_date, SaleLine.uom)
+        .join(Sale, SaleLine.sale_id == Sale.id)
+        .filter(
+            Sale.branch_id.in_(active_branch_ids),
+            Sale.sale_date > overall_start,
+            Sale.sale_date <= overall_end,
+        )
+    ):
+        if uom and in_branch_window(branch_id, sale_date):
+            uoms_seen_by_branch[branch_id][product_id].add(uom)
+    for branch_id, product_id, purchase_date, uom in (
+        db.query(Purchase.branch_id, PurchaseLine.product_id, Purchase.purchase_date, PurchaseLine.uom)
+        .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
+        .filter(
+            Purchase.branch_id.in_(active_branch_ids),
+            Purchase.purchase_date > overall_start,
+            Purchase.purchase_date <= overall_end,
+        )
+    ):
+        if uom and in_branch_window(branch_id, purchase_date):
+            uoms_seen_by_branch[branch_id][product_id].add(uom)
+
+    all_stock_level_ids = {
+        sl.import_batch_id
+        for snapshot in latest_snapshot_by_branch.values()
+        for sl in snapshot.values()
+    }
+    batches_by_id = _fetch_import_batches(db, all_stock_level_ids)
+    all_product_ids = {
+        product_id
+        for snapshot in latest_snapshot_by_branch.values()
+        for product_id in snapshot.keys()
+    }
+    products_by_id = _fetch_products(db, all_product_ids)
 
     mismatch_rows: list[dict] = []
     uom_rows: list[dict] = []
 
     for branch in branches:
-        latest_ts = (
-            db.query(func.max(StockLevel.snapshot_at))
-            .filter(StockLevel.branch_id == branch.id)
-            .scalar()
-        )
-        if latest_ts is None:
+        if branch.id not in windows:
             continue
-        prior_ts = (
-            db.query(func.max(StockLevel.snapshot_at))
-            .filter(
-                StockLevel.branch_id == branch.id, StockLevel.snapshot_at < latest_ts
-            )
-            .scalar()
-        )
-        if prior_ts is None:
-            continue
+        latest_snapshot = latest_snapshot_by_branch.get(branch.id, {})
+        prior_snapshot = prior_snapshot_by_branch.get(branch.id, {})
+        purchased = purchased_by_branch.get(branch.id, {})
+        sold = sold_by_branch.get(branch.id, {})
+        uoms_seen = uoms_seen_by_branch.get(branch.id, {})
+        window_start = window_start_by_branch[branch.id]
+        window_end = window_end_by_branch[branch.id]
 
-        latest_snapshot = {
-            sl.product_id: sl
-            for sl in db.query(StockLevel).filter(
-                StockLevel.branch_id == branch.id, StockLevel.snapshot_at == latest_ts
-            )
-        }
-        prior_snapshot = {
-            sl.product_id: sl.on_hand_qty
-            for sl in db.query(StockLevel).filter(
-                StockLevel.branch_id == branch.id, StockLevel.snapshot_at == prior_ts
-            )
-        }
-
-        window_start = prior_ts.date()
-        window_end = latest_ts.date()
-
-        # A mismatch or unit-mix warning is about the *latest* snapshot being wrong —
-        # that's the one import worth pointing at, even though the check itself also
-        # reads the prior snapshot and the purchases/sales in between.
-        batches_by_id = _fetch_import_batches(
-            db, {sl.import_batch_id for sl in latest_snapshot.values()}
-        )
-
-        purchased: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
-        for product_id, qty in (
-            db.query(PurchaseLine.product_id, func.sum(PurchaseLine.quantity))
-            .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
-            .filter(
-                Purchase.branch_id == branch.id,
-                Purchase.purchase_date > window_start,
-                Purchase.purchase_date <= window_end,
-            )
-            .group_by(PurchaseLine.product_id)
-        ):
-            purchased[product_id] = Decimal(str(qty or 0))
-
-        sold: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
-        for product_id, qty in (
-            db.query(SaleLine.product_id, func.sum(SaleLine.qty))
-            .join(Sale, SaleLine.sale_id == Sale.id)
-            .filter(
-                Sale.branch_id == branch.id,
-                Sale.sale_date > window_start,
-                Sale.sale_date <= window_end,
-            )
-            .group_by(SaleLine.product_id)
-        ):
-            sold[product_id] = Decimal(str(qty or 0))
-
-        uoms_seen: dict[str, set[str]] = defaultdict(set)
-        for product_id, uom in (
-            db.query(SaleLine.product_id, SaleLine.uom)
-            .join(Sale, SaleLine.sale_id == Sale.id)
-            .filter(
-                Sale.branch_id == branch.id,
-                Sale.sale_date > window_start,
-                Sale.sale_date <= window_end,
-            )
-        ):
-            if uom:
-                uoms_seen[product_id].add(uom)
-        for product_id, uom in (
-            db.query(PurchaseLine.product_id, PurchaseLine.uom)
-            .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
-            .filter(
-                Purchase.branch_id == branch.id,
-                Purchase.purchase_date > window_start,
-                Purchase.purchase_date <= window_end,
-            )
-        ):
-            if uom:
-                uoms_seen[product_id].add(uom)
-
-        products_by_id = _fetch_products(db, set(latest_snapshot.keys()))
         for product_id, stock_level in latest_snapshot.items():
             product = products_by_id[product_id]
             prior_qty = Decimal(str(prior_snapshot.get(product_id) or 0))
-            purchased_qty = purchased[product_id]
-            sold_qty = sold[product_id]
+            purchased_qty = purchased.get(product_id, Decimal("0"))
+            sold_qty = sold.get(product_id, Decimal("0"))
             expected = round(prior_qty + purchased_qty - sold_qty, 2)
             actual = round(Decimal(str(stock_level.on_hand_qty or 0)), 2)
 

@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/wholesale", tags=["wholesale"])
 def list_wholesale_write_offs(
     search: Annotated[str, Query(max_length=100)] = "",
     page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100)] = 100,
+    page_size: Annotated[int, Query(ge=1, le=2000)] = 100,
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
     response: Response = None,

@@ -72,7 +72,7 @@ Neon Auth (managed Better Auth) issues JWTs signed with EdDSA/Ed25519 — `app/c
 
 `GET /api/me` returns the full app-level profile (via `get_current_app_user`), not just raw JWT claims.
 
-Five roles exist: `development`, `admin`, `retail_management`, `wholesale`, `retail`. `development` has the full cross-workspace system access and can assign every role. `admin` has the same system access, except it cannot assign or manage a `development` account and its Dashboard hides Revenue, Cost, Inventory, and Customer. `retail_management` has full retail operational access, every retail branch, and no fixed `branch_id`, but no Wholesale workspace or account management. `require_advanced_dashboard` is the only retail data guard that excludes admin.
+Five roles exist: `development`, `admin`, `retail_management`, `wholesale`, `retail`. `development` has the full cross-workspace system access and can assign every role. `admin` has the same system access, except it cannot assign or manage a `development` account. `retail_management` has full retail operational access, every retail branch, and no fixed `branch_id`, but no Wholesale workspace or account management. `require_advanced_dashboard` gates the Revenue/Cost/Inventory/Customer dashboard tabs to every retail role (`development`/`admin`/`retail_management`/`retail`) except `wholesale`.
 
 ### The CSV/XLS/XLSX import pipeline
 

@@ -39,6 +39,12 @@ import { StockList } from "./StockList";
 import { StockDetail } from "./StockDetail";
 import { lineRemaining } from "@renderer/components/features/wholesale/orders/customerOrders";
 
+// This page loads the whole inventory/stock/orders dataset up front so StockList can do
+// its own client-side search, location filter and pagination — the backend's default
+// page size (100) silently truncated a branch with more SKUs or open orders than that,
+// so ask for enough rows to cover realistic totals instead.
+const LOAD_ALL_PAGE_SIZE = "?page_size=2000";
+
 // ── Legacy fallback stock record builder ──────────────────────────────────────
 
 function legacyStockRecords(
@@ -184,7 +190,7 @@ export default function InventoryPage({
     isError,
   } = useQuery({
     queryKey: INVENTORY_QUERY_KEY,
-    queryFn: () => fetchJson<InventoryMovementWire[]>(WHOLESALE_INVENTORY_URL, session),
+    queryFn: () => fetchJson<InventoryMovementWire[]>(`${WHOLESALE_INVENTORY_URL}${LOAD_ALL_PAGE_SIZE}`, session),
   });
   useLoadErrorToast(isError, "wholesale inventory");
   const {
@@ -193,12 +199,12 @@ export default function InventoryPage({
     isError: stockFailed,
   } = useQuery({
     queryKey: STOCK_QUERY_KEY,
-    queryFn: () => fetchJson<StockRecordWire[]>(WHOLESALE_STOCK_URL, session),
+    queryFn: () => fetchJson<StockRecordWire[]>(`${WHOLESALE_STOCK_URL}${LOAD_ALL_PAGE_SIZE}`, session),
   });
   useLoadErrorToast(stockFailed, "wholesale stock records");
   const { data: orderWire, isError: ordersFailed } = useQuery({
     queryKey: ORDERS_QUERY_KEY,
-    queryFn: () => fetchJson<CustomerOrder[]>(CUSTOMER_ORDERS_URL, session),
+    queryFn: () => fetchJson<CustomerOrder[]>(`${CUSTOMER_ORDERS_URL}${LOAD_ALL_PAGE_SIZE}`, session),
   });
   useLoadErrorToast(ordersFailed, "customer orders for stock records");
   useEffect(() => {

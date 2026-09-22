@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { cn } from "@renderer/lib/utils";
 import { useToast } from "@renderer/lib/useToast";
 import { Button } from "@renderer/components/ui/Button";
@@ -41,7 +41,9 @@ import {
   subtractColorPairs,
 } from "./orderColorUtils";
 
-export function AllocationLineRow({
+// Memoized: this is rendered once per order line, and a table of many lines should not
+// re-render every other line when one line's allocation changes.
+export const AllocationLineRow = memo(function AllocationLineRow({
   index,
   line,
   order,
@@ -58,7 +60,7 @@ export function AllocationLineRow({
   inventoryLines: StockLine[];
   inventoryLoading: boolean;
   draftPairs: ColorPairs;
-  onDraftChange: (next: ColorPairs) => void;
+  onDraftChange: (lineId: string, next: ColorPairs) => void;
 }): React.JSX.Element {
   const setSize = line.unit_conversions?.set ?? PAIRS_PER.set;
   const stockColors = availableStockColors(line.stock_code, inventoryLines);
@@ -247,7 +249,7 @@ export function AllocationLineRow({
             available={availableForPicker}
             setSize={setSize}
             value={draftPairs}
-            onChange={onDraftChange}
+            onChange={(next) => onDraftChange(line.order_line_id, next)}
             disabled={inventoryLoading}
           />
         ) : (
@@ -274,7 +276,7 @@ export function AllocationLineRow({
       </Td>
     </Tr>
   );
-}
+});
 
 export function AllocationTable({
   order,
@@ -342,6 +344,10 @@ export function AllocationTable({
     !saving &&
     !inventoryLoading;
 
+  const handleDraftChange = useCallback((lineId: string, next: ColorPairs): void => {
+    setDrafts((prev) => ({ ...prev, [lineId]: next }));
+  }, []);
+
   async function handleSaveAllocations(): Promise<void> {
     if (!canSave || saving) return;
     setSaving(true);
@@ -395,12 +401,7 @@ export function AllocationTable({
               inventoryLines={inventoryLines}
               inventoryLoading={inventoryLoading}
               draftPairs={drafts[line.order_line_id] ?? {}}
-              onDraftChange={(next) =>
-                setDrafts((prev) => ({
-                  ...prev,
-                  [line.order_line_id]: next,
-                }))
-              }
+              onDraftChange={handleDraftChange}
             />
           ))}
         </Tbody>

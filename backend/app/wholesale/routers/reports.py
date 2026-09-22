@@ -10,7 +10,9 @@ from app.db.session import get_db
 from app.models.user import User
 from app.wholesale.schemas.reports import CostReport, CustomerReport, InventoryReport, RevenueReport
 from app.services import dashboard as dashboard_service
+from app.services import response_cache
 from app.wholesale.services import reports
+from app.wholesale.services.response_cache import wholesale_data_version
 from app.wholesale.routers.common import require_wholesale
 
 router = APIRouter(prefix="/api/wholesale/reports", tags=["wholesale"])
@@ -42,6 +44,14 @@ DateFromQuery = Annotated[date | None, Query()]
 DateToQuery = Annotated[date | None, Query()]
 
 
+def _cache_key(name: str, branch_id: str | None, db: Session, window) -> tuple:
+    # window.start/window.end are already resolved concrete dates (see _resolve_window
+    # above), so unlike the retail dashboard's cache key there is no separate need for
+    # date.today() to invalidate a "today"/"30d" preset after midnight — a calendar
+    # rollover already changes window.start/window.end before this key is built.
+    return (name, branch_id, window.period, window.start, window.end, wholesale_data_version(db, branch_id))
+
+
 @router.get("/revenue", response_model=RevenueReport)
 def get_revenue_report(
     period: PeriodQuery = "30d",
@@ -51,7 +61,11 @@ def get_revenue_report(
     db: Session = Depends(get_db),
 ) -> dict:
     require_wholesale(user)
-    return reports.revenue_report(db, user.branch_id, _resolve_window(period, date_from, date_to))
+    window = _resolve_window(period, date_from, date_to)
+    return response_cache.cached(
+        _cache_key("wholesale_revenue_report", user.branch_id, db, window),
+        lambda: reports.revenue_report(db, user.branch_id, window),
+    )
 
 
 @router.get("/cost", response_model=CostReport)
@@ -63,7 +77,11 @@ def get_cost_report(
     db: Session = Depends(get_db),
 ) -> dict:
     require_wholesale(user)
-    return reports.cost_report(db, user.branch_id, _resolve_window(period, date_from, date_to))
+    window = _resolve_window(period, date_from, date_to)
+    return response_cache.cached(
+        _cache_key("wholesale_cost_report", user.branch_id, db, window),
+        lambda: reports.cost_report(db, user.branch_id, window),
+    )
 
 
 @router.get("/inventory", response_model=InventoryReport)
@@ -75,7 +93,11 @@ def get_inventory_report(
     db: Session = Depends(get_db),
 ) -> dict:
     require_wholesale(user)
-    return reports.inventory_report(db, user.branch_id, _resolve_window(period, date_from, date_to))
+    window = _resolve_window(period, date_from, date_to)
+    return response_cache.cached(
+        _cache_key("wholesale_inventory_report", user.branch_id, db, window),
+        lambda: reports.inventory_report(db, user.branch_id, window),
+    )
 
 
 @router.get("/customer", response_model=CustomerReport)
@@ -87,4 +109,8 @@ def get_customer_report(
     db: Session = Depends(get_db),
 ) -> dict:
     require_wholesale(user)
-    return reports.customer_report(db, user.branch_id, _resolve_window(period, date_from, date_to))
+    window = _resolve_window(period, date_from, date_to)
+    return response_cache.cached(
+        _cache_key("wholesale_customer_report", user.branch_id, db, window),
+        lambda: reports.customer_report(db, user.branch_id, window),
+    )

@@ -13,6 +13,7 @@ Every check below returns only the batches/rows worth a look — same convention
 `data_quality.py`'s warning checks — not an "everything is fine" row per batch.
 """
 
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from statistics import median
 
@@ -196,31 +197,54 @@ def purchase_duplicate_reviews(db: Session, user: User, since: date) -> list[dic
 
 
 def inventory_anomaly_reviews(db: Session, user: User, since: date) -> list[dict]:
-    branch_names = _branch_names(db)
-    rows = []
-    for batch in _branch_scoped_batches(db, user, ImportType.INVENTORY, since):
-        baseline_batches = (
-            db.query(ImportBatch.id)
-            .filter(
-                ImportBatch.import_type == ImportType.INVENTORY,
-                ImportBatch.status == ImportBatchStatus.COMPLETED,
-                ImportBatch.branch_id == batch.branch_id,
-                ImportBatch.created_at < batch.created_at,
-            )
-            .order_by(ImportBatch.created_at.desc())
-            .limit(INVENTORY_BASELINE_LOOKBACK_BATCHES)
-            .all()
-        )
-        if len(baseline_batches) < INVENTORY_BASELINE_MIN_BATCHES:
-            continue
+    """Flag an Inventory batch whose product count falls well below its branch's usual
+    count, per-branch median over its last INVENTORY_BASELINE_LOOKBACK_BATCHES batches.
 
-        baseline_ids = [b.id for b in baseline_batches] + [batch.id]
-        counts = dict(
+    Batches sharing a branch share the same baseline lookup and counts, so both queries
+    below are grouped by branch up front instead of re-run once per candidate batch —
+    a branch with several batches inside the `since` window used to pay for its own
+    baseline lookup and count query as many times as it had candidates.
+    """
+    branch_names = _branch_names(db)
+    candidates = _branch_scoped_batches(db, user, ImportType.INVENTORY, since)
+    if not candidates:
+        return []
+
+    branch_ids = {batch.branch_id for batch in candidates}
+    history_by_branch: dict[str, list[ImportBatch]] = defaultdict(list)
+    history_query = (
+        db.query(ImportBatch)
+        .filter(
+            ImportBatch.import_type == ImportType.INVENTORY,
+            ImportBatch.status == ImportBatchStatus.COMPLETED,
+            ImportBatch.branch_id.in_(branch_ids),
+        )
+        .order_by(ImportBatch.branch_id, ImportBatch.created_at.desc())
+    )
+    for batch in history_query.all():
+        history_by_branch[batch.branch_id].append(batch)
+
+    all_batch_ids = [batch.id for batches in history_by_branch.values() for batch in batches]
+    counts = (
+        dict(
             db.query(StockLevel.import_batch_id, func.count(func.distinct(StockLevel.product_id)))
-            .filter(StockLevel.import_batch_id.in_(baseline_ids))
+            .filter(StockLevel.import_batch_id.in_(all_batch_ids))
             .group_by(StockLevel.import_batch_id)
             .all()
         )
+        if all_batch_ids
+        else {}
+    )
+
+    rows = []
+    for batch in candidates:
+        history = history_by_branch.get(batch.branch_id, [])
+        baseline_batches = [b for b in history if b.created_at < batch.created_at][
+            :INVENTORY_BASELINE_LOOKBACK_BATCHES
+        ]
+        if len(baseline_batches) < INVENTORY_BASELINE_MIN_BATCHES:
+            continue
+
         this_count = counts.get(batch.id, 0)
         baseline_counts = [counts.get(b.id, 0) for b in baseline_batches]
         baseline_median = median(baseline_counts)

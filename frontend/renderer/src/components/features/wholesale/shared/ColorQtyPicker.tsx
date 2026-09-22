@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback } from "react";
 import { cn } from "@renderer/lib/utils";
 import { formatSets, PAIRS_PER } from "./units";
 import { onlyDigits } from "./shared";
@@ -13,7 +13,9 @@ export interface ColorQtyPickerProps {
   disabled?: boolean;
 }
 
-export function ColorQtyPicker({
+// Memoized because this is rendered once per order/allocation line in a table — an
+// unrelated row's keystroke should not re-render every other row's picker.
+export const ColorQtyPicker = React.memo(function ColorQtyPicker({
   available,
   setSize,
   value,
@@ -27,54 +29,63 @@ export function ColorQtyPicker({
     0,
   );
 
-  function handleSetsChange(color: string, rawInput: string): void {
-    const digits = onlyDigits(rawInput);
-    const numSets = digits === "" ? 0 : parseInt(digits, 10);
-    const avail = available[color] ?? 0;
-    const currentTotal = value[color] ?? 0;
-    const currentRest = currentTotal % safeSetSize;
+  const handleSetsChange = useCallback(
+    (color: string, rawInput: string): void => {
+      const digits = onlyDigits(rawInput);
+      const numSets = digits === "" ? 0 : parseInt(digits, 10);
+      const avail = available[color] ?? 0;
+      const currentTotal = value[color] ?? 0;
+      const currentRest = currentTotal % safeSetSize;
 
-    const newTotal = numSets * safeSetSize + currentRest;
-    const capped = Math.min(avail, Math.max(0, newTotal));
+      const newTotal = numSets * safeSetSize + currentRest;
+      const capped = Math.min(avail, Math.max(0, newTotal));
 
-    const next: ColorPairs = { ...value };
-    if (capped > 0) {
-      next[color] = capped;
-    } else {
-      delete next[color];
-    }
-    onChange(next);
-  }
+      const next: ColorPairs = { ...value };
+      if (capped > 0) {
+        next[color] = capped;
+      } else {
+        delete next[color];
+      }
+      onChange(next);
+    },
+    [available, value, safeSetSize, onChange],
+  );
 
-  function handlePairsChange(color: string, rawInput: string): void {
-    const digits = onlyDigits(rawInput);
-    const numPairs = digits === "" ? 0 : parseInt(digits, 10);
-    const avail = available[color] ?? 0;
-    const currentTotal = value[color] ?? 0;
-    const currentSets = Math.floor(currentTotal / safeSetSize);
+  const handlePairsChange = useCallback(
+    (color: string, rawInput: string): void => {
+      const digits = onlyDigits(rawInput);
+      const numPairs = digits === "" ? 0 : parseInt(digits, 10);
+      const avail = available[color] ?? 0;
+      const currentTotal = value[color] ?? 0;
+      const currentSets = Math.floor(currentTotal / safeSetSize);
 
-    // Typing setSize or more rolls into the Sets box
-    const newTotal = currentSets * safeSetSize + numPairs;
-    const capped = Math.min(avail, Math.max(0, newTotal));
+      // Typing setSize or more rolls into the Sets box
+      const newTotal = currentSets * safeSetSize + numPairs;
+      const capped = Math.min(avail, Math.max(0, newTotal));
 
-    const next: ColorPairs = { ...value };
-    if (capped > 0) {
-      next[color] = capped;
-    } else {
-      delete next[color];
-    }
-    onChange(next);
-  }
+      const next: ColorPairs = { ...value };
+      if (capped > 0) {
+        next[color] = capped;
+      } else {
+        delete next[color];
+      }
+      onChange(next);
+    },
+    [available, value, safeSetSize, onChange],
+  );
 
-  function handleTakeAll(color: string, avail: number): void {
-    if (avail <= 0) return;
-    const next: ColorPairs = { ...value, [color]: avail };
-    onChange(next);
-  }
+  const handleTakeAll = useCallback(
+    (color: string, avail: number): void => {
+      if (avail <= 0) return;
+      const next: ColorPairs = { ...value, [color]: avail };
+      onChange(next);
+    },
+    [value, onChange],
+  );
 
-  function handleClear(): void {
+  const handleClear = useCallback((): void => {
     onChange({});
-  }
+  }, [onChange]);
 
   if (colorEntries.length === 0) {
     return (
@@ -169,15 +180,16 @@ export function ColorQtyPicker({
       </div>
     </div>
   );
-}
+});
 
 /** The picker's resting state: what has been chosen, as words, with a way in.
  *
  *  A table of open pickers is a wall of input boxes, most of them for rows nobody is
  *  touching today. This shows the figure instead and opens the picker when asked. A row
  *  with nothing to pick has nothing to open, so it gets the reason rather than a button
- *  that leads to an empty box. */
-export function ColorQtySummary({
+ *  that leads to an empty box. Memoized for the same reason as ColorQtyPicker above —
+ *  rendered once per row in a table. */
+export const ColorQtySummary = React.memo(function ColorQtySummary({
   value,
   available,
   setSize,
@@ -231,4 +243,4 @@ export function ColorQtySummary({
       </button>
     </div>
   );
-}
+});

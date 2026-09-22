@@ -29,6 +29,7 @@ from app.wholesale.services.money import order_totals
 from app.wholesale.services.inventory import (
     color_pairs_breakdown,
     delivered_color_pairs_by_order,
+    delivered_color_pairs_by_orders,
     delivered_pairs_by_order,
     effective_allocated_color_pairs,
 )
@@ -161,7 +162,7 @@ def list_customer_orders(
     order_status: Annotated[str | None, Query()] = None,
     payment_status: Annotated[str | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100)] = 100,
+    page_size: Annotated[int, Query(ge=1, le=2000)] = 100,
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
     response: Response = None,
@@ -169,12 +170,14 @@ def list_customer_orders(
     require_wholesale(user)
     resolved_branch_id = _visible_branch_id(user, branch_id)
     orders = list_orders(db, resolved_branch_id)
-    delivered = delivered_pairs_by_order(db, [order.id for order in orders], resolved_branch_id)
+    order_ids = [order.id for order in orders]
+    delivered = delivered_pairs_by_order(db, order_ids, resolved_branch_id)
+    delivered_colors_by_order = delivered_color_pairs_by_orders(db, order_ids, resolved_branch_id)
     rows = [
         _out(
             order,
             delivered.get(order.id),
-            _delivered_colors(db, order, resolved_branch_id),
+            delivered_colors_by_order.get(order.id, {}),
         )
         for order in orders
     ]
@@ -201,7 +204,7 @@ def list_customer_order_allocations(
     branch_id: Annotated[str | None, Query()] = None,
     search: Annotated[str, Query(max_length=100)] = "",
     page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100)] = 100,
+    page_size: Annotated[int, Query(ge=1, le=2000)] = 100,
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
     response: Response = None,

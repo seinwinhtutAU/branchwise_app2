@@ -12,7 +12,7 @@ from app.wholesale.models.entities import (
 )
 from app.wholesale.models.master_data import WholesaleProduct
 from app.wholesale.services.inventory import (
-    delivered_color_pairs_by_order,
+    delivered_color_pairs_by_orders,
     delivered_pairs_by_order,
     effective_allocated_color_pairs,
     incoming_movements,
@@ -51,7 +51,9 @@ def shipments_in_transit(db: Session, branch_id: str | None) -> dict:
 
 def _order_statuses(db: Session, branch_id: str | None) -> list[tuple[CustomerOrder, str]]:
     orders = list_orders(db, branch_id)
-    delivered = delivered_pairs_by_order(db, [order.id for order in orders], branch_id)
+    order_ids = [order.id for order in orders]
+    delivered = delivered_pairs_by_order(db, order_ids, branch_id)
+    delivered_colors_by_order = delivered_color_pairs_by_orders(db, order_ids, branch_id)
     statuses: list[tuple[CustomerOrder, str]] = []
     for order in orders:
         remaining_deliveries = dict(delivered.get(order.id, {}))
@@ -59,9 +61,7 @@ def _order_statuses(db: Session, branch_id: str | None) -> list[tuple[CustomerOr
         allocated = 0
         lost = 0
         for line in order.lines:
-            delivered_colors = delivered_color_pairs_by_order(
-                db, order.id, line.stock_code, branch_id,
-            )
+            delivered_colors = delivered_colors_by_order.get(order.id, {}).get(line.stock_code, {})
             effective_colors = effective_allocated_color_pairs(line, delivered_colors)
             allocated += sum(effective_colors.values())
             line_received = min(remaining_deliveries.get(line.stock_code, 0), line.quantity_pairs)

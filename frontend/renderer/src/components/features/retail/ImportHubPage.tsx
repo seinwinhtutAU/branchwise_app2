@@ -17,13 +17,12 @@ import {
   UploadIcon,
   HistoryIcon,
   HeartPulseIcon,
-  CalendarIcon,
   SalesIcon,
   PurchaseIcon,
   InventoryIcon,
 } from "@renderer/components/ui/icons";
 
-export type ImportSubTab = "import" | "history" | "freshness" | "completeness";
+export type ImportSubTab = "import" | "history" | "health";
 
 interface ImportHubPageProps {
   session: Session;
@@ -99,14 +98,9 @@ export default function ImportHubPage({
     ];
     if (profile?.role !== "retail") {
       base.push({
-        id: "freshness",
-        label: "Import Freshness",
+        id: "health",
+        label: "Import Health",
         icon: <HeartPulseIcon className="w-4 h-4" />,
-      });
-      base.push({
-        id: "completeness",
-        label: "Missing Days",
-        icon: <CalendarIcon className="w-4 h-4" />,
       });
     }
     return base;
@@ -224,19 +218,13 @@ export default function ImportHubPage({
           </div>
         )}
 
-        {/* 3. Import Freshness */}
-        {activeTab === "freshness" && profile?.role !== "retail" && (
-          <div className="space-y-3">
+        {/* 3. Import Health — freshness and missing-day follow-up in one place. */}
+        {activeTab === "health" && profile?.role !== "retail" && (
+          <div className="space-y-5">
             <ImportOverviewPage
               session={session}
               onViewImportBatch={onViewImportBatch}
             />
-          </div>
-        )}
-
-        {/* 4. Missing Days */}
-        {activeTab === "completeness" && profile?.role !== "retail" && (
-          <div className="space-y-3">
             <ImportCompletenessPage session={session} profile={profile} />
           </div>
         )}

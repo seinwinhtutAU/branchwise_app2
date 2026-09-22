@@ -104,8 +104,20 @@ def get_revenue_dashboard(
 ) -> dict:
     _validate_period_or_dates(period, date_from, date_to)
     branch = _resolve_retail_branch(user, branch_id, db)
-    return dashboard_service.build_revenue_dashboard(
-        db, branch.id, branch.name, period, date_from=date_from, date_to=date_to
+    cache_key = (
+        "dashboard_revenue",
+        branch.id,
+        period,
+        date_from,
+        date_to,
+        date.today(),
+        response_cache.import_data_version(db, branch.id),
+    )
+    return response_cache.cached(
+        cache_key,
+        lambda: dashboard_service.build_revenue_dashboard(
+            db, branch.id, branch.name, period, date_from=date_from, date_to=date_to
+        ),
     )
 
 
@@ -123,8 +135,20 @@ def get_cost_dashboard(
 ) -> dict:
     _validate_period_or_dates(period, date_from, date_to)
     branch = _resolve_retail_branch(user, branch_id, db)
-    return dashboard_service.build_cost_dashboard(
-        db, branch.id, branch.name, period, date_from=date_from, date_to=date_to
+    cache_key = (
+        "dashboard_cost",
+        branch.id,
+        period,
+        date_from,
+        date_to,
+        date.today(),
+        response_cache.import_data_version(db, branch.id),
+    )
+    return response_cache.cached(
+        cache_key,
+        lambda: dashboard_service.build_cost_dashboard(
+            db, branch.id, branch.name, period, date_from=date_from, date_to=date_to
+        ),
     )
 
 
@@ -139,7 +163,16 @@ def get_inventory_dashboard(
 ) -> dict:
     # No period param — current stock is a point-in-time fact, not a date-range query.
     branch = _resolve_retail_branch(user, branch_id, db)
-    return dashboard_service.build_inventory_dashboard(db, branch.id, branch.name)
+    cache_key = (
+        "dashboard_inventory",
+        branch.id,
+        date.today(),
+        response_cache.import_data_version(db, branch.id),
+    )
+    return response_cache.cached(
+        cache_key,
+        lambda: dashboard_service.build_inventory_dashboard(db, branch.id, branch.name),
+    )
 
 
 @router.get("/customer")
@@ -156,8 +189,20 @@ def get_customer_dashboard(
 ) -> dict:
     _validate_period_or_dates(period, date_from, date_to)
     branch = _resolve_retail_branch(user, branch_id, db)
-    return dashboard_service.build_customer_dashboard(
-        db, branch.id, branch.name, period, date_from=date_from, date_to=date_to
+    cache_key = (
+        "dashboard_customer",
+        branch.id,
+        period,
+        date_from,
+        date_to,
+        date.today(),
+        response_cache.import_data_version(db, branch.id),
+    )
+    return response_cache.cached(
+        cache_key,
+        lambda: dashboard_service.build_customer_dashboard(
+            db, branch.id, branch.name, period, date_from=date_from, date_to=date_to
+        ),
     )
 
 
@@ -174,6 +219,18 @@ def get_summary_dashboard(
 ) -> dict:
     _validate_period_or_dates(period, date_from, date_to)
     branch = _resolve_retail_branch(user, branch_id, db)
-    return dashboard_service.build_summary_dashboard(
-        db, branch.id, branch.name, period, date_from=date_from, date_to=date_to
+    cache_key = (
+        "dashboard_summary",
+        branch.id,
+        period,
+        date_from,
+        date_to,
+        date.today(),
+        response_cache.import_data_version(db, branch.id),
+    )
+    return response_cache.cached(
+        cache_key,
+        lambda: dashboard_service.build_summary_dashboard(
+            db, branch.id, branch.name, period, date_from=date_from, date_to=date_to
+        ),
     )

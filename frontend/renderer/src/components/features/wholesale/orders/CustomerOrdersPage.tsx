@@ -47,6 +47,12 @@ import { OrderList } from "./OrderList";
 import { OrderDetail } from "./OrderDetail";
 import { NewOrderForm } from "./NewOrderForm";
 
+// This page loads the whole orders/write-offs/inventory dataset up front and does its
+// own client-side search and filtering — the backend's default page size (100) silently
+// truncated a branch with more open orders than that, so ask for enough rows to cover
+// realistic totals instead.
+const LOAD_ALL_PAGE_SIZE = "?page_size=2000";
+
 export default function CustomerOrdersPage({
   session,
   settings,
@@ -67,12 +73,12 @@ export default function CustomerOrdersPage({
     isError,
   } = useQuery({
     queryKey: ORDERS_QUERY_KEY,
-    queryFn: () => fetchJson<CustomerOrder[]>(CUSTOMER_ORDERS_URL, session),
+    queryFn: () => fetchJson<CustomerOrder[]>(`${CUSTOMER_ORDERS_URL}${LOAD_ALL_PAGE_SIZE}`, session),
   });
   useLoadErrorToast(isError, "customer orders");
   const { data: writeOffs = [], isError: writeOffsFailed } = useQuery({
     queryKey: ["wholesale", "write-offs"],
-    queryFn: () => fetchJson<WriteOffWire[]>(WHOLESALE_WRITE_OFFS_URL, session),
+    queryFn: () => fetchJson<WriteOffWire[]>(`${WHOLESALE_WRITE_OFFS_URL}${LOAD_ALL_PAGE_SIZE}`, session),
   });
   useLoadErrorToast(writeOffsFailed, "mismatch explanations");
   const {
@@ -82,7 +88,7 @@ export default function CustomerOrdersPage({
   } = useQuery({
     queryKey: ["wholesale", "inventory"],
     queryFn: () =>
-      fetchJson<InventoryMovementWire[]>(WHOLESALE_INVENTORY_URL, session),
+      fetchJson<InventoryMovementWire[]>(`${WHOLESALE_INVENTORY_URL}${LOAD_ALL_PAGE_SIZE}`, session),
   });
   useLoadErrorToast(inventoryFailed, "wholesale inventory for allocations");
   const inventoryLines = useMemo<StockLine[]>(

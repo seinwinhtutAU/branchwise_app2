@@ -41,7 +41,14 @@ connect_args = (
 engine_kwargs = (
     {}
     if is_sqlite
-    else {"pool_pre_ping": True, "pool_recycle": 300}
+    # pool_size/max_overflow/pool_timeout were previously left at SQLAlchemy's defaults
+    # (5/10/30s) implicitly. Made explicit here for the same reason as everything else on
+    # this engine — this is a small team behind Neon's pooled (PgBouncer, transaction-mode)
+    # endpoint, which already does the heavy connection multiplexing; the app's own pool
+    # only needs to cover this single uvicorn process's own concurrent requests, so the
+    # values below are the same numbers SQLAlchemy would have picked anyway, just written
+    # down on purpose instead of left to a default nobody chose.
+    else {"pool_pre_ping": True, "pool_recycle": 300, "pool_size": 5, "max_overflow": 10, "pool_timeout": 30}
 )
 
 engine = create_engine(settings.database_url, connect_args=connect_args, **engine_kwargs)

@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, memo, useMemo } from "react";
 import {
   JourneyArrow,
   JourneyCard,
@@ -26,7 +26,7 @@ import { formatIn, type Unit } from "@renderer/components/features/wholesale/sha
 // ("Voucher taken"), an order adds one at each end ("Order created", "Delivered to
 // customer"), and Delivery shows it plain.
 
-export function DeliveryJourney({
+export const DeliveryJourney = memo(function DeliveryJourney({
   shipment,
   receivings = [],
   before = [],
@@ -75,7 +75,7 @@ export function DeliveryJourney({
     packagesToReceive > 0 && openedPackages === packagesToReceive;
   const quantityMatches = countedQty === quantityToReceive;
 
-  const cards: React.ReactNode[] = [
+  const cards: React.ReactNode[] = useMemo(() => [
     ...before,
     <JourneyCard
       key="supplier"
@@ -189,7 +189,19 @@ export function DeliveryJourney({
         ]
       : []),
     ...after,
-  ];
+  ], [
+    before,
+    after,
+    shipment,
+    openedPackages,
+    countedQty,
+    packagesToReceive,
+    quantityToReceive,
+    quantityUnit,
+    packagesComplete,
+    quantityMatches,
+    includeGateCount,
+  ]);
 
   return (
     <div className="flex items-stretch min-w-0 overflow-x-auto pb-2">
@@ -201,4 +213,4 @@ export function DeliveryJourney({
       ))}
     </div>
   );
-}
+});

@@ -456,7 +456,7 @@ function App(): React.JSX.Element {
   const [viewingBatchId, setViewingBatchId] = useState<string | null>(null);
   const [highlightBatchId, setHighlightBatchId] = useState<string | null>(null);
   const [importInitialTab, setImportInitialTab] = useState<
-    "import" | "history" | "freshness" | "completeness"
+    "import" | "history" | "health"
   >("import");
   const [dataOverviewTab, setDataOverviewTab] =
     useState<DataOverviewSubTab>("overview");
@@ -874,7 +874,7 @@ function App(): React.JSX.Element {
       return;
     }
     if (id === "importOverview") {
-      setImportInitialTab("freshness");
+      setImportInitialTab("health");
       setSection("import");
       return;
     }
@@ -1057,7 +1057,7 @@ function App(): React.JSX.Element {
                   }}
                   overviewBranchId={overviewBranchId}
                   onOverviewBranchChange={setOverviewBranchId}
-                  showAdvancedTabs={!isAdmin}
+                  showAdvancedTabs
                   initialTab={dashboardTarget?.tab}
                   initialBranchId={dashboardTarget?.branchId}
                   onViewChecking={() => handleSectionChange("checking")}

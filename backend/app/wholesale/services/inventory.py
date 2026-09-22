@@ -163,6 +163,34 @@ def delivered_pairs_by_order(db: Session, order_ids: list[str], branch_id: str |
     return {order_id: dict(by_stock) for order_id, by_stock in result.items()}
 
 
+def delivered_color_pairs_by_orders(
+    db: Session, order_ids: list[str], branch_id: str | None
+) -> dict[str, dict[str, dict[str, int]]]:
+    """Batched form of delivered_color_pairs_by_order for a whole list of orders.
+
+    One query for every order in `order_ids` instead of one query per (order, stock
+    code) pair. list_customer_orders and the monitoring snapshot both need this once
+    per order line, so at list-endpoint scale the per-call version was O(order lines)
+    queries; this is the same shape as delivered_pairs_by_order, just keyed one level
+    deeper by colour.
+    """
+    if not order_ids:
+        return {}
+    query = db.query(WholesaleStockMovement).filter(WholesaleStockMovement.order_id.in_(order_ids))
+    if branch_id is not None:
+        query = query.filter(WholesaleStockMovement.branch_id == branch_id)
+    result: dict[str, dict[str, dict[str, int]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    for movement in query.all():
+        for color, pairs in color_qty_pairs_by_color(
+            movement.color_breakdown, WholesaleUnit.SET, movement.unit_conversions
+        ).items():
+            result[movement.order_id][movement.stock_code][color] += pairs
+    return {
+        order_id: {stock_code: dict(colors) for stock_code, colors in by_stock.items()}
+        for order_id, by_stock in result.items()
+    }
+
+
 def delivered_color_pairs_by_order(
     db: Session,
     order_id: str,

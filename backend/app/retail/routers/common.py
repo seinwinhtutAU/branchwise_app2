@@ -29,8 +29,13 @@ def require_retail_operations(user: User = Depends(get_current_app_user)) -> Non
 
 
 def require_advanced_dashboard(user: User = Depends(get_current_app_user)) -> None:
-    """Keep the four high-information dashboard tabs out of the admin role."""
-    if user.role not in (UserRole.DEVELOPMENT, UserRole.RETAIL_MANAGEMENT, UserRole.RETAIL):
+    """Allow the four high-information dashboard tabs for every retail role except wholesale."""
+    if user.role not in (
+        UserRole.DEVELOPMENT,
+        UserRole.ADMIN,
+        UserRole.RETAIL_MANAGEMENT,
+        UserRole.RETAIL,
+    ):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This account cannot use this dashboard view")
 
 

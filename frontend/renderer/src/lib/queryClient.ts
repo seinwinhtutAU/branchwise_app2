@@ -305,15 +305,28 @@ export function useImportedDataWatch(session: Session | null): void {
     }
 
     void check();
-    const timer = setInterval(() => void check(), DATA_VERSION_POLL_MS);
+    // Skip the tick while the window is minimized/backgrounded — nobody is looking at
+    // stale data they can't see, so there's nothing to invalidate for yet. Checking
+    // again the moment it's visible (same as the focus listener below) means a colleague
+    // coming back to the app never reads yesterday's numbers for longer than it takes to
+    // switch back.
+    const timer = setInterval(() => {
+      if (document.hidden) return;
+      void check();
+    }, DATA_VERSION_POLL_MS);
     const onFocus = (): void => void check();
     window.addEventListener("focus", onFocus);
+    const onVisibilityChange = (): void => {
+      if (!document.hidden) void check();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
     const unsubscribe = subscribeToLocalInvalidate(() => void check(true));
 
     return () => {
       cancelled = true;
       clearInterval(timer);
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       unsubscribe();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

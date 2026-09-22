@@ -24,6 +24,7 @@ from fastapi import (
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, defer, joinedload
+from starlette.concurrency import run_in_threadpool
 
 from app.core.security import get_current_app_user, get_current_user
 from app.core.timestamps import utc_now, utc_timestamp
@@ -445,7 +446,8 @@ async def confirm_sales_file(
     branch = db.get(Branch, resolved_branch_id)
 
     contents = await _read_upload(file)
-    origin_rows, clean_df = _parse_or_400(
+    origin_rows, clean_df = await run_in_threadpool(
+        _parse_or_400,
         parse_pos_sale_upload,
         contents,
         file.filename,
@@ -453,16 +455,18 @@ async def confirm_sales_file(
         branch.sale_date_format if branch else "MDY",
     )
 
-    preview_data = _build_preview(
+    preview_data = await run_in_threadpool(
+        _build_preview,
         file.filename,
         origin_rows,
         clean_df,
         SALES_OUTPUT_COLUMNS,
         SALES_VALIDATION_RULES,
     )
-    storage_key = _upload_to_storage(contents, file.filename)
+    storage_key = await run_in_threadpool(_upload_to_storage, contents, file.filename)
     try:
-        summary = persist_sales(
+        summary = await run_in_threadpool(
+            persist_sales,
             db,
             clean_df,
             branch_id=resolved_branch_id,
@@ -477,7 +481,7 @@ async def confirm_sales_file(
         summary = _replay_after_request_key_conflict(db, user, idempotency_key)
         if summary is None:
             raise
-    _upload_preview_to_storage(summary["batch_id"], preview_data)
+    await run_in_threadpool(_upload_preview_to_storage, summary["batch_id"], preview_data)
     return summary
 
 
@@ -525,7 +529,8 @@ async def confirm_inventory_file(
     branch = db.get(Branch, resolved_branch_id)
 
     contents = await _read_upload(file)
-    origin_rows, clean_df = _parse_or_400(
+    origin_rows, clean_df = await run_in_threadpool(
+        _parse_or_400,
         parse_inventory_upload,
         contents,
         file.filename,
@@ -533,16 +538,18 @@ async def confirm_inventory_file(
         branch.inventory_date_format if branch else "MDY",
     )
 
-    preview_data = _build_preview(
+    preview_data = await run_in_threadpool(
+        _build_preview,
         file.filename,
         origin_rows,
         clean_df,
         INVENTORY_OUTPUT_COLUMNS,
         INVENTORY_VALIDATION_RULES,
     )
-    storage_key = _upload_to_storage(contents, file.filename)
+    storage_key = await run_in_threadpool(_upload_to_storage, contents, file.filename)
     try:
-        summary = persist_inventory(
+        summary = await run_in_threadpool(
+            persist_inventory,
             db,
             clean_df,
             branch_id=resolved_branch_id,
@@ -557,7 +564,7 @@ async def confirm_inventory_file(
         summary = _replay_after_request_key_conflict(db, user, idempotency_key)
         if summary is None:
             raise
-    _upload_preview_to_storage(summary["batch_id"], preview_data)
+    await run_in_threadpool(_upload_preview_to_storage, summary["batch_id"], preview_data)
     return summary
 
 
@@ -613,20 +620,22 @@ async def confirm_purchase_file(
         resolved_purchase_date = extracted_date
 
     contents = await _read_upload(file)
-    origin_rows, clean_df = _parse_or_400(
-        parse_purchase_upload, contents, file.filename, "purchase"
+    origin_rows, clean_df = await run_in_threadpool(
+        _parse_or_400, parse_purchase_upload, contents, file.filename, "purchase"
     )
 
-    preview_data = _build_preview(
+    preview_data = await run_in_threadpool(
+        _build_preview,
         file.filename,
         origin_rows,
         clean_df,
         PURCHASE_OUTPUT_COLUMNS,
         PURCHASE_VALIDATION_RULES,
     )
-    storage_key = _upload_to_storage(contents, file.filename)
+    storage_key = await run_in_threadpool(_upload_to_storage, contents, file.filename)
     try:
-        summary = persist_purchases(
+        summary = await run_in_threadpool(
+            persist_purchases,
             db,
             clean_df,
             branch_id=resolved_branch_id,
@@ -643,7 +652,7 @@ async def confirm_purchase_file(
         summary = _replay_after_request_key_conflict(db, user, idempotency_key)
         if summary is None:
             raise
-    _upload_preview_to_storage(summary["batch_id"], preview_data)
+    await run_in_threadpool(_upload_preview_to_storage, summary["batch_id"], preview_data)
     return summary
 
 
