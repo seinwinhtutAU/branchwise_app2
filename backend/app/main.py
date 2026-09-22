@@ -9,6 +9,7 @@ from app.retail.routers import (
     checking,
     dashboard,
     data_overview,
+    import_completeness,
     import_health,
     imports,
     inventory,
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
     app.include_router(inventory.router)
     app.include_router(imports.router)
     app.include_router(import_health.router)
+    app.include_router(import_completeness.router)
     app.include_router(branches.router)
     app.include_router(data_overview.router)
     app.include_router(sales.router)

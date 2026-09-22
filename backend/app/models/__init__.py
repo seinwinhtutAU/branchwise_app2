@@ -1,5 +1,6 @@
 from app.models.app_settings import AppSetting
 from app.models.branch import Branch
+from app.retail.models.branch_closure import BranchClosure
 from app.retail.models.import_batch import ImportBatch, ImportBatchStatus, ImportType
 from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
@@ -37,6 +38,7 @@ __all__ = [
     "AllocationEvent",
     "AppSetting",
     "Branch",
+    "BranchClosure",
     "CustomerOrder",
     "CustomerOrderLine",
     "ImportBatch",

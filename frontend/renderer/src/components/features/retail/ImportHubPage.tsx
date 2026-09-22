@@ -11,17 +11,19 @@ import FileImportCard from "@renderer/components/features/retail/FileImportCard"
 import GeneralFileImportCard from "@renderer/components/features/retail/GeneralFileImportCard";
 import ImportHistoryTable from "@renderer/components/features/retail/ImportHistoryTable";
 import ImportOverviewPage from "@renderer/components/features/retail/ImportOverviewPage";
+import ImportCompletenessPage from "@renderer/components/features/retail/ImportCompletenessPage";
 import ImportConfirmModal from "@renderer/components/features/retail/ImportConfirmModal";
 import {
   UploadIcon,
   HistoryIcon,
   HeartPulseIcon,
+  CalendarIcon,
   SalesIcon,
   PurchaseIcon,
   InventoryIcon,
 } from "@renderer/components/ui/icons";
 
-export type ImportSubTab = "import" | "history" | "freshness";
+export type ImportSubTab = "import" | "history" | "freshness" | "completeness";
 
 interface ImportHubPageProps {
   session: Session;
@@ -100,6 +102,11 @@ export default function ImportHubPage({
         id: "freshness",
         label: "Import Freshness",
         icon: <HeartPulseIcon className="w-4 h-4" />,
+      });
+      base.push({
+        id: "completeness",
+        label: "Missing Days",
+        icon: <CalendarIcon className="w-4 h-4" />,
       });
     }
     return base;
@@ -224,6 +231,13 @@ export default function ImportHubPage({
               session={session}
               onViewImportBatch={onViewImportBatch}
             />
+          </div>
+        )}
+
+        {/* 4. Missing Days */}
+        {activeTab === "completeness" && profile?.role !== "retail" && (
+          <div className="space-y-3">
+            <ImportCompletenessPage session={session} profile={profile} />
           </div>
         )}
       </div>

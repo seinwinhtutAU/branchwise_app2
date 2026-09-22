@@ -8,9 +8,21 @@ from app.core.security import CurrentUser, get_current_user
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
+from app.services import response_cache
 
 # Force-import all models so their tables register on Base.metadata before create_all.
 from app.models import *  # noqa: F401,F403
+
+
+@pytest.fixture(autouse=True)
+def _clear_response_cache():
+    """response_cache is a module-level dict, so it outlives any one test's db_session —
+    without this, a cache key that happened to collide across tests (or a test that
+    checks a request is served from cache) could see another test's entry instead of a
+    clean one."""
+    response_cache.clear()
+    yield
+    response_cache.clear()
 
 
 @pytest.fixture

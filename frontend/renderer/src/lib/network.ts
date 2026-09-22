@@ -2,15 +2,17 @@ import { apiBaseUrl } from "@renderer/lib/auth";
 import {
   getConnectionStatus,
   reportRequestFailure,
+  reportRequestRetry,
   reportRequestSuccess,
   watchBrowserOfflineEvent,
 } from "@renderer/lib/connection";
 import { readOfflineRead, saveOfflineRead } from "@renderer/lib/offlineReadCache";
+import { isTransportFailure } from "@renderer/lib/networkFailure";
 
 /**
  * Makes every call to this app's API survive a weak connection: a request that hangs is
  * cut off rather than left spinning forever, a read that failed on the way out is tried
- * again, and either way the connection banner learns what happened.
+ * again, and either way the network indicator learns what happened.
  *
  * Why patch `fetch` instead of fixing call sites: there are around fifty of them across
  * the pages, and they all want the same three things. This is the same trick
@@ -220,8 +222,12 @@ export function installNetworkResilience(): () => void {
         // The caller gave up (navigated away, typed a new filter). Not a failure, and
         // certainly not something to retry.
         if (callerSignal?.aborted) throw error;
+        // An auth or API wrapper can throw after it has already received a response.
+        // That is an application error, not evidence that the branch is offline.
+        if (!isTransportFailure(error, timeout.timedOut())) throw error;
         lastError = timeout.timedOut() ? new RequestTimeoutError(url) : error;
         const isLastAttempt = attempt === attempts - 1;
+        if (!isLastAttempt) reportRequestRetry();
         // eslint-disable-next-line no-console -- diagnostic trail for intermittent "no
         // connection" reports: exactly which request failed, how, and after how long.
         console.warn(

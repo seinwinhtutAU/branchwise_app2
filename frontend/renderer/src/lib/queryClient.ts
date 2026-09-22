@@ -97,11 +97,10 @@ export function useLoadErrorToast(isError: boolean, label: string): void {
   const showToast = useToast();
   useEffect(() => {
     if (!isError) return;
-    if (getConnectionStatus() === "offline") {
-      showToast("error", `No connection — the ${label} couldn't be loaded`);
-    } else {
-      showToast("error", `Failed to load the ${label} — is the backend running?`);
-    }
+    // Connection health is continuously visible in AppShell. A toast for every query
+    // that fails during the same outage would hide the actual work the reader was doing.
+    if (getConnectionStatus() === "offline") return;
+    showToast("error", `Failed to load the ${label} — is the backend running?`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isError, label]);
 }

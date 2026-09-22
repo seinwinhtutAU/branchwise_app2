@@ -115,6 +115,26 @@ def test_history_detail_returns_only_the_selected_tab_page(
     assert len(original_response.json()["origin"]["rows"]) > 0
 
 
+def test_download_clean_sales_returns_csv(
+    authed_client: TestClient, db_session: Session
+):
+    _make_user(db_session, branch_name="Retail 1")
+    summary = _confirm_sale(authed_client)
+
+    response = authed_client.get(
+        f"/api/imports/history/{summary['batch_id']}/download-clean"
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment; filename=\"sale_clean.csv\"" == response.headers[
+        "content-disposition"
+    ]
+    csv_data = response.content.decode("utf-8-sig")
+    assert "Date,Time,Slip_ID,StockCode" in csv_data
+    assert "U16085" in csv_data
+
+
 def test_general_file_is_stored_unchanged_and_retail_can_download_it(
     authed_client: TestClient, db_session: Session
 ):

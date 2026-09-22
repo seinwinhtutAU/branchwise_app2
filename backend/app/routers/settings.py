@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.security import get_current_app_user
 from app.db.session import get_db
 from app.models.user import User, UserRole
+from app.services import response_cache
 from app.services.settings import get_all_settings, get_setting, set_setting
 from app.wholesale.services.currency import DEFAULT_CURRENCY, SUPPORTED_CURRENCIES
 
@@ -131,4 +132,8 @@ def update_settings(
     # JSON value column stores — no special-casing needed for them here.
     for key, value in updates.items():
         set_setting(db, key, value)
+    # response_cache's key doesn't track settings changes (there's no cheap version
+    # number for them the way there is for imports) — a setting like the Branch Health
+    # weights changing is rare and admin-only, so a full clear is simpler than adding one.
+    response_cache.clear()
     return get_all_settings(db)

@@ -9,6 +9,7 @@ from app.models.branch import Branch
 from app.models.user import User
 from app.retail.services import branch_health as branch_health_service
 from app.services import dashboard as dashboard_service
+from app.services import response_cache
 from app.services.branches import list_retail_branches, resolve_branch_id
 from app.retail.routers.common import require_advanced_dashboard, require_retail
 
@@ -68,8 +69,24 @@ def get_overview_dashboard(
 ) -> dict:
     _validate_period_or_dates(period, date_from, date_to)
     branch = _resolve_retail_branch(user, branch_id, db)
-    return branch_health_service.build_overview_dashboard(
-        db, branch.id, branch.name, period, date_from=date_from, date_to=date_to
+    # Branch Health's Overview is one of the two most expensive dashboard reads (see
+    # response_cache's own docstring) and, on the admin Multi-Branch view, gets
+    # requested once per branch on every page load — cached per branch/period/day so
+    # that repeat requests before anything actually changes don't recompute it.
+    cache_key = (
+        "dashboard_overview",
+        branch.id,
+        period,
+        date_from,
+        date_to,
+        date.today(),
+        response_cache.import_data_version(db, branch.id),
+    )
+    return response_cache.cached(
+        cache_key,
+        lambda: branch_health_service.build_overview_dashboard(
+            db, branch.id, branch.name, period, date_from=date_from, date_to=date_to
+        ),
     )
 
 

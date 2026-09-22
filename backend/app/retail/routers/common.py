@@ -32,3 +32,11 @@ def require_advanced_dashboard(user: User = Depends(get_current_app_user)) -> No
     """Keep the four high-information dashboard tabs out of the admin role."""
     if user.role not in (UserRole.DEVELOPMENT, UserRole.RETAIL_MANAGEMENT, UserRole.RETAIL):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This account cannot use this dashboard view")
+
+
+def require_retail_management(user: User = Depends(get_current_app_user)) -> None:
+    """Restricts an action to the roles trusted to decide a missing import day was a
+    genuine branch closure rather than a forgotten upload — plain retail/wholesale
+    accounts can see the gap but not sign off on it."""
+    if user.role not in (UserRole.DEVELOPMENT, UserRole.ADMIN, UserRole.RETAIL_MANAGEMENT):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This account cannot mark a day as closed")

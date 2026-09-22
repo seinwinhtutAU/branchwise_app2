@@ -456,7 +456,7 @@ function App(): React.JSX.Element {
   const [viewingBatchId, setViewingBatchId] = useState<string | null>(null);
   const [highlightBatchId, setHighlightBatchId] = useState<string | null>(null);
   const [importInitialTab, setImportInitialTab] = useState<
-    "import" | "history" | "freshness"
+    "import" | "history" | "freshness" | "completeness"
   >("import");
   const [dataOverviewTab, setDataOverviewTab] =
     useState<DataOverviewSubTab>("overview");

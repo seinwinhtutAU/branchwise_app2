@@ -12,7 +12,10 @@ import {
 } from "@renderer/components/ui/icons";
 import { LogoChip, LogoWordmark } from "@renderer/components/ui/Logo";
 import type { Profile } from "@renderer/components/features/types";
-import { ConnectionBanner } from "@renderer/components/features/shell/ConnectionBanner";
+import {
+  NetworkStatusDetails,
+  NetworkStatusDot,
+} from "@renderer/components/features/shell/NetworkIndicator";
 
 export interface NavItem {
   id: string;
@@ -514,7 +517,7 @@ export function AppShell({
         </aside>
 
         <div className="flex-1 min-w-0 flex flex-col">
-          {/* Sticky so the header and connection banner stay put while page scrolls */}
+          {/* Sticky so the section title and network indicator stay visible while scrolling. */}
           <div className="sticky top-0 z-40 flex flex-col shrink-0">
             {/* Header Bar */}
             <div className="h-14 shrink-0 flex items-center justify-between px-6 border-b border-border/60 text-sm text-text-muted select-none bg-bg-subtle">
@@ -550,9 +553,10 @@ export function AppShell({
                     aria-haspopup="menu"
                     aria-expanded={accountMenuOpen}
                     onClick={() => setAccountMenuOpen((open) => !open)}
-                    className="flex h-9 w-9 items-center justify-center rounded-full bg-brand text-xs font-bold text-white shadow-xs transition-colors hover:bg-brand/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base"
+                    className="relative flex h-9 w-9 items-center justify-center rounded-full bg-brand text-xs font-bold text-white shadow-xs transition-colors hover:bg-brand/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base"
                   >
                     {accountInitials(profile, email)}
+                    <NetworkStatusDot />
                   </button>
                   {accountMenuOpen && (
                     <div
@@ -570,6 +574,7 @@ export function AppShell({
                           </p>
                         )}
                       </div>
+                      <NetworkStatusDetails />
                       <button
                         type="button"
                         role="menuitem"
@@ -599,10 +604,6 @@ export function AppShell({
                 </div>
               </div>
             </div>
-
-            {/* Above the content rather than inside it, so it is the same one line whichever
-            page is open — and so no page has to know about the network to explain itself. */}
-            <ConnectionBanner />
           </div>
           <main className="w-full px-3.5 sm:px-4.5 py-3 sm:py-3.5 flex flex-col gap-3 sm:gap-3.5 flex-1">
             {children}

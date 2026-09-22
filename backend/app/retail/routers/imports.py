@@ -1,3 +1,4 @@
+import csv
 import datetime
 import io
 import logging
@@ -29,6 +30,7 @@ from app.core.timestamps import utc_now, utc_timestamp
 from app.db.session import get_db
 from app.models.branch import Branch
 from app.retail.models.import_batch import ImportBatch, ImportBatchStatus, ImportType
+from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.models.sale import Sale, SaleLine
 from app.retail.models.stock_level import StockLevel
