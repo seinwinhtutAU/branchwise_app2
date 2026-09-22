@@ -64,7 +64,7 @@ def _format_time(cutoff: str) -> str:
 
 
 def daily_import_missing_rule(snapshot: BranchSnapshot) -> list[Alert]:
-    """After the daily cutoff, require today's Sale and Inventory imports only."""
+    """After cutoff, require Sale and Inventory to be current for today."""
     if not snapshot.is_after_8pm:
         return []
 
@@ -78,32 +78,106 @@ def daily_import_missing_rule(snapshot: BranchSnapshot) -> list[Alert]:
 
     cutoff = _format_time(snapshot.daily_check_cutoff_time)
     missing_label = " and ".join(missing)
+
+    def data_state(is_current: bool, data_date: str | None) -> str:
+        if is_current:
+            return "Today"
+        if data_date:
+            return f"{data_date} (not today)"
+        return "No update today"
+
     return [
         Alert(
             id="daily_import_missing",
             severity=CRITICAL,
             dimension="sales" if not snapshot.has_today_sales else "inventory",
-            title=f"Daily {missing_label} import missing for today",
-            summary=f"Today's {', '.join(missing)} not imported after {cutoff}",
+            title=f"Daily {missing_label} is not current",
+            summary=f"Today's {', '.join(missing)} is missing or from an earlier day after {cutoff}",
             what_happened=(
-                f"The shop closed at {cutoff}, but today's {missing_label} export from "
-                "the POS terminal has not been imported. Store performance, stock counts, "
-                "and daily reconciliations cannot reflect today's trade until confirmed."
+                f"The shop closed at {cutoff}, but the latest {missing_label} is not for "
+                "today. This can mean the daily export was never imported or that an "
+                "older file was confirmed today. Store performance, stock counts, and daily "
+                "reconciliations cannot reflect today's trade until the correct export is confirmed."
             ),
             recommended_action="Upload and confirm today's POS export file immediately.",
-            link="import",
+            link="import_freshness",
             measure="daily_import",
             facts=_facts(
                 _fact("Shop Status", f"Closed (after {cutoff})"),
                 _fact(
-                    "Today's Sales",
-                    "Imported" if snapshot.has_today_sales else "Missing",
+                    "Sale Day",
+                    data_state(snapshot.has_today_sales, snapshot.sales_data_date),
                 ),
                 _fact(
-                    "Today's Inventory",
-                    "Imported" if snapshot.has_today_inventory else "Missing",
+                    "Inventory Day",
+                    data_state(
+                        snapshot.has_today_inventory, snapshot.inventory_data_date
+                    ),
                 ),
             ),
+        )
+    ]
+
+
+def purchase_number_sequence_rule(snapshot: BranchSnapshot) -> list[Alert]:
+    """Escalate any missing numbers inside an otherwise known purchase sequence."""
+    integrity = snapshot.purchase_number_integrity or {}
+    gaps = integrity.get("gaps", [])
+    if not gaps:
+        return []
+
+    missing_count = integrity.get("missing_number_count", 0)
+    gap_count = integrity.get("gap_count", len(gaps))
+    sample = gaps[0]
+    range_label = f"{sample['start_number']}–{sample['end_number']}"
+    rows = [
+        [
+            f"{gap['start_number']}–{gap['end_number']}",
+            str(gap["missing_count"]),
+        ]
+        for gap in gaps[:5]
+    ]
+    return [
+        Alert(
+            id="purchase_number_sequence_gap",
+            severity=CRITICAL,
+            dimension="data_quality",
+            title="Purchase number sequence has gaps",
+            summary=(
+                f"{missing_count} missing purchase number{'s' if missing_count != 1 else ''} "
+                f"across {gap_count} gap{'s' if gap_count != 1 else ''} (including {range_label})"
+            ),
+            what_happened=(
+                "Purchase numbers should run without breaks within the same prefix. "
+                f"The imported records skip {range_label}, so one or more purchase files "
+                "may be absent from the system."
+            ),
+            recommended_action=(
+                "Check the supplier/POS purchase documents for the missing numbers and "
+                "import each missing purchase file."
+            ),
+            link="import_freshness",
+            measure="purchase_number_sequence",
+            facts=_facts(
+                _fact(
+                    "Numbered Purchases Checked",
+                    str(integrity.get("numbered_purchase_count", 0)),
+                ),
+                _fact("Missing Numbers", str(missing_count)),
+                _fact("First Missing Range", range_label),
+            ),
+            table={
+                "columns": [
+                    {"label": "Missing purchase-number range", "align": "left"},
+                    {"label": "Records", "align": "right"},
+                ],
+                "rows": rows,
+                "note": (
+                    f"Showing {len(rows)} of {gap_count} sequence gaps."
+                    if gap_count > len(rows)
+                    else None
+                ),
+            },
         )
     ]
 
@@ -513,6 +587,7 @@ Rule = Callable[[BranchSnapshot], list[Alert]]
 
 RULES: tuple[Rule, ...] = (
     daily_import_missing_rule,
+    purchase_number_sequence_rule,
     sale_data_quality_rule,
     purchase_data_quality_rule,
     urgent_reorder_rule,

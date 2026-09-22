@@ -1,4 +1,5 @@
 import datetime
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -118,7 +119,7 @@ def test_sale_numeric_warning_points_at_its_source_import(db_session: Session):
 
     rows = data_quality.sale_numeric_warnings(db_session, user)
     assert len(rows) == 1
-    assert rows[0]["source_import"] == {"id": batch.id, "filename": "sale.csv", "date": batch.created_at.isoformat()}
+    assert rows[0]["source_import"] == {"id": batch.id, "filename": "sale.csv", "date": f"{batch.created_at.isoformat()}Z"}
 
 
 def test_sale_numeric_warning_respects_since_window(db_session: Session):
@@ -550,11 +551,21 @@ def test_checking_endpoint_returns_only_unique_product_identity(
     )
     db_session.commit()
 
-    response = authed_client.get("/api/checking")
+    # GET /api/checking gates its items behind a daily-cutoff eligibility check
+    # (see app/retail/routers/checking.py) — irrelevant to what this test is actually
+    # checking (that build_checking_items' rows come back deduplicated by product), so
+    # it's forced open the same way test_business_alerts_extended.py's checking tests do.
+    with patch(
+        "app.retail.routers.checking._check_daily_import_status",
+        return_value=(True, True, True),
+    ):
+        response = authed_client.get("/api/checking")
 
     assert response.status_code == 200
-    assert response.json() == [
-        {"stock_code": "CHECK-1", "description": "Stock to verify"}
+    body = response.json()
+    assert body["is_eligible"] is True
+    assert body["items"] == [
+        {"stock_code": "CHECK-1", "description": "Stock to verify", "on_hand_qty": None}
     ]
 
 

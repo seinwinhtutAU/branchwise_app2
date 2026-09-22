@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
+import { formatRetailDateTime } from "@renderer/lib/retailDateTime";
 import { useToast } from "@renderer/lib/useToast";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
 import { Spinner } from "@renderer/components/ui/Spinner";
 import { DownloadIcon } from "@renderer/components/ui/icons";
+import { cn } from "@renderer/lib/utils";
 import { ImportDataView } from "./ImportDataView";
 import type { ImportHistoryDetail, Profile } from "../types";
 
@@ -14,13 +16,6 @@ interface Props {
   batchId: string;
   onBack: () => void;
   profile?: Profile | null;
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
 }
 
 function formatSummaryLabel(key: string): string {
@@ -57,8 +52,60 @@ function ImportHistoryDetailPage({
   const showToast = useToast();
   const [detail, setDetail] = useState<ImportHistoryDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingPage, setLoadingPage] = useState(false);
+  const [warningIndices, setWarningIndices] = useState<{
+    clean?: number[];
+    original?: number[];
+  }>({});
   const [downloading, setDownloading] = useState(false);
+  const [downloadingClean, setDownloadingClean] = useState(false);
   const isGeneralFile = detail?.import_type === "general";
+
+  async function handlePageChange(
+    newPage: number,
+    tab: "clean" | "original",
+  ): Promise<void> {
+    if (!detail) return;
+    setLoadingPage(true);
+    try {
+      const res = await fetch(
+        `${apiBaseUrl}/api/imports/history/${batchId}?page=${newPage}&page_size=50&tab=${tab}`,
+        {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        },
+      );
+      if (!res.ok) throw new Error(String(res.status));
+      const data: ImportHistoryDetail = await res.json();
+      setDetail((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          clean: data.clean,
+          origin: data.origin,
+        };
+      });
+    } catch {
+      showToast("error", "Failed to load page.");
+    } finally {
+      setLoadingPage(false);
+    }
+  }
+
+  async function loadWarningIndices(tab: "clean" | "original"): Promise<void> {
+    if (warningIndices[tab] !== undefined) return;
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/api/imports/history/${batchId}/warnings?tab=${tab}`,
+        { headers: { Authorization: `Bearer ${session.access_token}` } },
+      );
+      if (!response.ok) throw new Error(String(response.status));
+      const body = (await response.json()) as { indices: number[] };
+      setWarningIndices((current) => ({ ...current, [tab]: body.indices }));
+    } catch {
+      setWarningIndices((current) => ({ ...current, [tab]: [] }));
+      showToast("error", "Failed to load warning locations.");
+    }
+  }
 
   async function handleDownload(): Promise<void> {
     if (!detail) return;
@@ -72,7 +119,10 @@ function ImportHistoryDetailPage({
       );
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        showToast("error", body?.detail ?? `Download failed (${response.status})`);
+        showToast(
+          "error",
+          body?.detail ?? `Download failed (${response.status})`,
+        );
         return;
       }
       const blob = await response.blob();
@@ -92,8 +142,47 @@ function ImportHistoryDetailPage({
     }
   }
 
+  async function handleDownloadClean(): Promise<void> {
+    if (!detail) return;
+    setDownloadingClean(true);
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/api/imports/history/${batchId}/download-clean`,
+        {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        },
+      );
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        showToast(
+          "error",
+          body?.detail ?? `Download failed (${response.status})`,
+        );
+        return;
+      }
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const baseStem = detail.filename
+        ? detail.filename.replace(/\.[^/.]+$/, "")
+        : `import_${batchId}`;
+      a.download = `${baseStem}_clean.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      showToast("success", "Clean CSV downloaded successfully.");
+    } catch {
+      showToast("error", "Network error while downloading clean CSV.");
+    } finally {
+      setDownloadingClean(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
+    setWarningIndices({});
     setLoading(true);
     fetch(`${apiBaseUrl}/api/imports/history/${batchId}`, {
       headers: { Authorization: `Bearer ${session.access_token}` },
@@ -163,19 +252,38 @@ function ImportHistoryDetailPage({
           </div>
         </div>
 
-        {detail && (profile?.role === "admin" || profile?.role === "development" || isGeneralFile) && (
-          <Button
-            variant="secondary"
-            size="sm"
-            loading={downloading}
-            onClick={handleDownload}
-            className="shrink-0 flex items-center gap-1.5"
-            title="Download original uploaded file"
-          >
-            <DownloadIcon className="w-3.5 h-3.5" />
-            <span>Download Original File</span>
-          </Button>
-        )}
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          {detail && !isGeneralFile && (
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={downloadingClean}
+              onClick={handleDownloadClean}
+              className="flex items-center gap-1.5"
+              title="Download cleaned CSV data"
+            >
+              <DownloadIcon className="w-3.5 h-3.5" />
+              <span>Download Clean CSV</span>
+            </Button>
+          )}
+
+          {detail &&
+            (profile?.role === "admin" ||
+              profile?.role === "development" ||
+              isGeneralFile) && (
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={downloading}
+                onClick={handleDownload}
+                className="flex items-center gap-1.5"
+                title="Download original uploaded file"
+              >
+                <DownloadIcon className="w-3.5 h-3.5" />
+                <span>Download Original File</span>
+              </Button>
+            )}
+        </div>
       </div>
 
       {loading && (
@@ -202,7 +310,7 @@ function ImportHistoryDetailPage({
             <span>
               Date:{" "}
               <span className="text-text-primary">
-                {formatDate(detail.created_at)}
+                {formatRetailDateTime(detail.created_at)}
               </span>
             </span>
             <Badge variant={statusBadgeVariant(detail.status)}>
@@ -213,18 +321,48 @@ function ImportHistoryDetailPage({
           {Array.isArray(detail.summary.messages)
             ? (detail.summary.messages as unknown[]).length > 0 && (
                 <ul className="flex flex-col gap-1.5">
-                  {(detail.summary.messages as unknown[]).map((message, i) => (
-                    <li
-                      key={i}
-                      className="flex items-start gap-2 text-sm text-text-primary"
-                    >
-                      <span
-                        className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand"
-                        aria-hidden="true"
-                      />
-                      {String(message)}
-                    </li>
-                  ))}
+                  {(detail.summary.messages as unknown[]).map((msg, i) => {
+                    const message = String(msg);
+                    const isAlert =
+                      message.includes("⚠️") ||
+                      message.toLowerCase().startsWith("alert");
+                    const isRecorded =
+                      !isAlert &&
+                      (message.toLowerCase().includes("recorded") ||
+                        message.toLowerCase().includes("imported"));
+                    const isMuted =
+                      message.toLowerCase().includes("0 stock") ||
+                      message.toLowerCase().includes("skipped") ||
+                      message.toLowerCase().includes("omitted");
+
+                    return (
+                      <li
+                        key={i}
+                        className={cn(
+                          "flex items-start gap-2 text-sm",
+                          isRecorded && "text-brand font-semibold",
+                          isAlert && "text-warning font-medium",
+                          isMuted && "text-text-muted",
+                          !isRecorded && !isAlert && !isMuted && "text-text-primary",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "mt-1.5 shrink-0 rounded-full",
+                            isRecorded
+                              ? "bg-brand w-2 h-2 mt-1.5 ring-2 ring-brand/30"
+                              : isAlert
+                              ? "bg-warning w-1.5 h-1.5"
+                              : isMuted
+                              ? "bg-text-muted/50 w-1.5 h-1.5"
+                              : "bg-text-muted w-1.5 h-1.5",
+                          )}
+                          aria-hidden="true"
+                        />
+                        <span>{message}</span>
+                      </li>
+                    );
+                  })}
                 </ul>
               )
             : Object.entries(detail.summary).filter(
@@ -251,11 +389,19 @@ function ImportHistoryDetailPage({
 
           {isGeneralFile ? (
             <div className="rounded-lg border border-border bg-bg-subtle px-4 py-3 text-sm text-text-secondary">
-              This daily operation cost file is stored exactly as uploaded. Download it
-              to view or use it; no retail records were created.
+              This daily operation cost file is stored exactly as uploaded.
+              Download it to view or use it; no retail records were created.
             </div>
           ) : (
-            <ImportDataView clean={detail.clean} origin={detail.origin} />
+            <ImportDataView
+              clean={detail.clean}
+              origin={detail.origin}
+              isServerPaginated={true}
+              onPageChange={handlePageChange}
+              loadingPage={loadingPage}
+              warningIndices={warningIndices}
+              onWarningIndicesNeeded={loadWarningIndices}
+            />
           )}
         </>
       )}

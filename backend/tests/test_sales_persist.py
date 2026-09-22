@@ -58,7 +58,7 @@ def test_creates_sale_header_and_lines(db_session: Session):
         "sale_lines_created": 2,
         "products_created": 2,
         "products_updated": 0,
-        "messages": ["1 sale imported", "2 new products added"],
+        "messages": ["2 total sale lines in file", "1 sales recorded (2 items)"],
     }
 
     sale = db_session.query(Sale).filter(Sale.slip_id == "20260821-002").one()

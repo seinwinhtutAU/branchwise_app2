@@ -26,7 +26,6 @@ from app.models.branch import Branch
 from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.models.sale import Sale, SaleLine
-from app.retail.models.stock_level import StockLevel
 from app.retail.services.stock import latest_stock_query
 from app.services.settings import get_purchasing_buffer_months
 
@@ -46,11 +45,7 @@ def get_purchasing_recommendations(
         buffer_months = get_purchasing_buffer_months(db)
 
     # 1. Fetch latest stock snapshots for the branch
-    stock_query = latest_stock_query(db)
-    if branch_id is not None:
-        stock_query = stock_query.filter(StockLevel.branch_id == branch_id)
-
-    stock_rows = stock_query.all()
+    stock_rows = latest_stock_query(db, branch_id).all()
     if not stock_rows:
         return {
             "summary": {

@@ -130,9 +130,7 @@ def build_tools(db: Session, user: User) -> list:
         filters by a stock code/description substring; `low_stock_max_qty` caps results
         to items at or below that quantity (use it for "what's low on stock"-type
         questions). Returns at most 30 rows, sorted lowest quantity first."""
-        query = latest_stock_query(db)
-        if user.branch_id is not None:
-            query = query.filter(StockLevel.branch_id == user.branch_id)
+        query = latest_stock_query(db, user.branch_id)
         if search:
             like = f"%{search}%"
             query = query.filter(

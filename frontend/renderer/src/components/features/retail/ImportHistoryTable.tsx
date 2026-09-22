@@ -12,6 +12,7 @@ import { apiBaseUrl } from "@renderer/lib/auth";
 import { invalidateEverything, useUrlQuery } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
 import { cn } from "@renderer/lib/utils";
+import { formatRetailDateTime } from "@renderer/lib/retailDateTime";
 import { useImportFilePicker } from "@renderer/lib/useImportFilePicker";
 import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
@@ -92,13 +93,6 @@ interface Props {
   onFileSelected?: (file: SelectedImportFile) => void;
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
 // Display only — the backend/DB status values are still 'completed'/'reverted'/
 // 'reimported' (see ImportBatchStatus), this just gives the reader three unambiguous
 // words: Completed (still active), Removed (deleted, no replacement), Reimported
@@ -158,7 +152,8 @@ function ImportHistoryActions({
   const { open, setOpen, ref, toggle } = useDismissableMenu();
   const isGeneralFile = row.import_type === "general";
   const canDownload = isAdmin || isGeneralFile;
-  const canManageImport = !isGeneralFile && row.status === "completed" && !isLocked;
+  const canManageImport =
+    !isGeneralFile && row.status === "completed" && !isLocked;
 
   if (!canDownload && !canManageImport) {
     if (row.status === "completed" && isLocked) {
@@ -273,14 +268,17 @@ function ImportHistoryTable({
     picking,
   } = useImportFilePicker(session, onFileReady, onFileSelected);
 
-  const handleReimport = useCallback((row: ImportBatchRow): void => {
-    triggerFilePicker({
-      endpoint: `/api/imports/${row.import_type}`,
-      importLabel: importTypeLabel(row.import_type),
-      revertBatchId: row.id,
-      replacingFilename: row.filename,
-    });
-  }, [triggerFilePicker]);
+  const handleReimport = useCallback(
+    (row: ImportBatchRow): void => {
+      triggerFilePicker({
+        endpoint: `/api/imports/${row.import_type}`,
+        importLabel: importTypeLabel(row.import_type),
+        revertBatchId: row.id,
+        replacingFilename: row.filename,
+      });
+    },
+    [triggerFilePicker],
+  );
 
   const [typeFilter, setTypeFilter] = useState("");
   // Defaults to hiding Removed/Reimported rows — they're kept as an audit trail, not
@@ -321,36 +319,42 @@ function ImportHistoryTable({
     setDateTo("");
   }
 
-  const handleRevert = useCallback(async (batchId: string): Promise<void> => {
-    if (
-      !window.confirm("Remove this import? This deletes the data it created.")
-    )
-      return;
-
-    setRevertingId(batchId);
-    try {
-      const response = await fetch(
-        `${apiBaseUrl}/api/imports/history/${batchId}/revert`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        },
-      );
-      const body = await response.json().catch(() => null);
-      if (!response.ok) {
-        showToast("error", body?.detail ?? `Revert failed: ${response.status}`);
+  const handleRevert = useCallback(
+    async (batchId: string): Promise<void> => {
+      if (
+        !window.confirm("Remove this import? This deletes the data it created.")
+      )
         return;
+
+      setRevertingId(batchId);
+      try {
+        const response = await fetch(
+          `${apiBaseUrl}/api/imports/history/${batchId}/revert`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          },
+        );
+        const body = await response.json().catch(() => null);
+        if (!response.ok) {
+          showToast(
+            "error",
+            body?.detail ?? `Revert failed: ${response.status}`,
+          );
+          return;
+        }
+        // The batch's sale/inventory/purchase rows are gone, so every cached page is now
+        // wrong — including this one, which refetches itself as a result. See
+        // invalidateEverything.
+        invalidateEverything();
+      } catch {
+        showToast("error", "Revert failed — is the backend running?");
+      } finally {
+        setRevertingId(null);
       }
-      // The batch's sale/inventory/purchase rows are gone, so every cached page is now
-      // wrong — including this one, which refetches itself as a result. See
-      // invalidateEverything.
-      invalidateEverything();
-    } catch {
-      showToast("error", "Revert failed — is the backend running?");
-    } finally {
-      setRevertingId(null);
-    }
-  }, [session, showToast]);
+    },
+    [session, showToast],
+  );
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
@@ -358,12 +362,18 @@ function ImportHistoryTable({
     async (row: ImportBatchRow): Promise<void> => {
       setDownloadingId(row.id);
       try {
-        const response = await fetch(`${apiBaseUrl}/api/imports/history/${row.id}/download`, {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
+        const response = await fetch(
+          `${apiBaseUrl}/api/imports/history/${row.id}/download`,
+          {
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          },
+        );
         if (!response.ok) {
           const body = await response.json().catch(() => null);
-          showToast("error", body?.detail ?? `Download failed (${response.status})`);
+          showToast(
+            "error",
+            body?.detail ?? `Download failed (${response.status})`,
+          );
           return;
         }
         const blob = await response.blob();
@@ -414,7 +424,9 @@ function ImportHistoryTable({
         accessorFn: (row) => row.filename,
         header: "Filename",
         cell: (info) => (
-          <span className="truncate font-mono text-xs">{info.getValue<string>() ?? "—"}</span>
+          <span className="truncate font-mono text-xs">
+            {info.getValue<string>() ?? "—"}
+          </span>
         ),
       },
       {
@@ -452,7 +464,7 @@ function ImportHistoryTable({
         id: "date",
         accessorFn: (row) => row.created_at,
         header: "Date",
-        cell: (info) => formatDate(String(info.getValue())),
+        cell: (info) => formatRetailDateTime(String(info.getValue())),
       },
       {
         id: "actions",
@@ -522,7 +534,10 @@ function ImportHistoryTable({
   const currentPage = pagination.pageIndex + 1;
   const pageSize = pagination.pageSize;
 
-  const typeOptions = useMemo(() => (rows ? distinctValues(rows, "import_type") : []), [rows]);
+  const typeOptions = useMemo(
+    () => (rows ? distinctValues(rows, "import_type") : []),
+    [rows],
+  );
   // Keep the status picker available even when all current rows are completed. A user
   // must still be able to switch to the audit states (Removed/Reimported) without first
   // creating a row of one of those types.
@@ -537,7 +552,9 @@ function ImportHistoryTable({
   }, [rows]);
   const branchOptionsList = useMemo(() => {
     if (!rows) return [];
-    return branchOptions.length > 0 ? branchOptions : distinctValues(rows, "branch_name");
+    return branchOptions.length > 0
+      ? branchOptions
+      : distinctValues(rows, "branch_name");
   }, [rows, branchOptions]);
 
   return (
@@ -555,15 +572,13 @@ function ImportHistoryTable({
                 Import History
               </h2>
               <span className="text-xs text-text-muted hidden sm:inline">
-                Includes daily operation cost files stored unchanged, alongside your confirmed retail imports.
+                Includes daily operation cost files stored unchanged, alongside
+                your confirmed retail imports.
               </span>
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              <RefreshButton
-                onClick={reload}
-                refreshing={isRefreshing}
-              />
+              <RefreshButton onClick={reload} refreshing={isRefreshing} />
             </div>
           </div>
 

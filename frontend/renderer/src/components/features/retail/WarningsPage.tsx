@@ -3,6 +3,10 @@ import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
 import { useUrlQuery } from "@renderer/lib/queryClient";
 import { cn } from "@renderer/lib/utils";
+import {
+  formatRetailDate,
+  formatRetailDateTime,
+} from "@renderer/lib/retailDateTime";
 import { useImportFilePicker } from "@renderer/lib/useImportFilePicker";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 import { Button } from "@renderer/components/ui/Button";
@@ -103,19 +107,10 @@ const IMPORT_TYPE_LABEL: Record<ImportType, string> = {
 type Category = "Inventory" | "Sale" | "Purchase";
 
 // Order used by the "All" tab — inventory surfaces first ahead of transaction checks.
-const ALL_TAB_ORDER: Category[] = [
-  "Inventory",
-  "Sale",
-  "Purchase",
-];
+const ALL_TAB_ORDER: Category[] = ["Inventory", "Sale", "Purchase"];
 
 type Tab = "All" | Category;
-const TAB_ORDER: Tab[] = [
-  "All",
-  "Inventory",
-  "Sale",
-  "Purchase",
-];
+const TAB_ORDER: Tab[] = ["All", "Inventory", "Sale", "Purchase"];
 
 // Which broad area each backend check belongs under — purely a display grouping. The
 // backend still returns one row per check (each has its own detail fields), but every
@@ -228,13 +223,6 @@ function dateFieldLabel(fields: WarningField[]): string | undefined {
   return DATE_LABELS.find((label) => fields.some((f) => f.label === label));
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
 interface FlatRow {
   key: string;
   severity: "warning" | "critical";
@@ -263,11 +251,7 @@ function bySeverity(a: FlatRow, b: FlatRow): number {
 
 function formatDateLabel(iso: string): string {
   if (iso === "—") return iso;
-  return new Date(iso).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return formatRetailDate(iso);
 }
 
 // A reconciliation mismatch row always has these fields (see
@@ -456,8 +440,14 @@ function parseWarningIssue(
       summary: (
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-text-muted text-xs">
-            Exp: <span className="font-mono text-text-primary font-medium">{expected}</span> → Act:{" "}
-            <span className="font-mono text-text-primary font-medium">{actual}</span>
+            Exp:{" "}
+            <span className="font-mono text-text-primary font-medium">
+              {expected}
+            </span>{" "}
+            → Act:{" "}
+            <span className="font-mono text-text-primary font-medium">
+              {actual}
+            </span>
           </span>
           <span
             className={cn(
@@ -497,7 +487,9 @@ function parseWarningIssue(
       typeBadgeVariant: "warning",
       summary: (
         <div className="flex items-center gap-1.5 text-xs">
-          <span className="text-text-secondary font-medium">{activityText}</span>
+          <span className="text-text-secondary font-medium">
+            {activityText}
+          </span>
           <span className="text-text-muted font-normal">(no stock record)</span>
         </div>
       ),
@@ -604,13 +596,15 @@ function WarningRowItem({
         </Td>
         <Td>{fieldValue(row.fields, "Description")}</Td>
         <Td className="whitespace-nowrap text-xs font-semibold">
-          <span className={ISSUE_TEXT_COLOR[issue.typeBadgeVariant] ?? "text-text-primary"}>
+          <span
+            className={
+              ISSUE_TEXT_COLOR[issue.typeBadgeVariant] ?? "text-text-primary"
+            }
+          >
             {issue.type}
           </span>
         </Td>
-        <Td title={row.note}>
-          {issue.summary}
-        </Td>
+        <Td title={row.note}>{issue.summary}</Td>
         <Td>
           <button
             type="button"
@@ -725,7 +719,7 @@ function BatchGroupHeaderRow({
             <Badge>{group.items.length}</Badge>
             {meta && (
               <span className="text-xs font-normal text-text-muted">
-                imported {formatDate(meta.date)}
+                imported {formatRetailDateTime(meta.date)}
               </span>
             )}
           </div>
@@ -878,13 +872,7 @@ function WarningTabBar({
     [counts],
   );
 
-  return (
-    <TabBar<Tab>
-      tabs={tabs}
-      activeTab={activeTab}
-      onSelect={onSelect}
-    />
-  );
+  return <TabBar<Tab> tabs={tabs} activeTab={activeTab} onSelect={onSelect} />;
 }
 
 function WarningsPage({
@@ -984,7 +972,8 @@ function WarningsPage({
 
   const recountRows = useMemo(() => {
     if (!displaySections) return [];
-    const result: { branch: string; stockCode: string; description: string }[] = [];
+    const result: { branch: string; stockCode: string; description: string }[] =
+      [];
     const seen = new Set<string>();
 
     for (const section of displaySections) {
@@ -1072,10 +1061,7 @@ function WarningsPage({
                 <DownloadIcon className="w-4 h-4" />
                 Excel
               </Button>
-              <RefreshButton
-                onClick={reload}
-                refreshing={isRefreshing}
-              />
+              <RefreshButton onClick={reload} refreshing={isRefreshing} />
             </div>
           }
         />
@@ -1154,18 +1140,20 @@ function WarningsPage({
           />
         )}
 
-        {sections !== null && totalRawIssues > 0 && totalFilteredIssues === 0 && (
-          <EmptyState
-            icon={<WarningIcon />}
-            title="No matching warnings"
-            description="Try adjusting or clearing your filters to see warnings."
-            action={
-              <Button variant="secondary" size="sm" onClick={clearFilters}>
-                Clear filters
-              </Button>
-            }
-          />
-        )}
+        {sections !== null &&
+          totalRawIssues > 0 &&
+          totalFilteredIssues === 0 && (
+            <EmptyState
+              icon={<WarningIcon />}
+              title="No matching warnings"
+              description="Try adjusting or clearing your filters to see warnings."
+              action={
+                <Button variant="secondary" size="sm" onClick={clearFilters}>
+                  Clear filters
+                </Button>
+              }
+            />
+          )}
 
         {sections !== null && totalFilteredIssues > 0 && (
           <div className="flex flex-col gap-4">

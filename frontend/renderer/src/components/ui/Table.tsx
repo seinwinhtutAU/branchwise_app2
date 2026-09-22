@@ -60,10 +60,12 @@ export function Thead({
 
 export function Tbody({
   children,
+  className,
 }: {
   children: ReactNode;
+  className?: string;
 }): React.JSX.Element {
-  return <tbody>{children}</tbody>;
+  return <tbody className={className}>{children}</tbody>;
 }
 
 export const Tr = forwardRef<

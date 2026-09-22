@@ -35,8 +35,13 @@ def is_zawgyi(text: str) -> bool:
     copy=False)` raises ValueError). Call the underlying pybind model
     directly to bypass that broken wrapper.
     """
-    label = pds.f.f.predict(text, 1, 0.0, "strict")[0][1]
-    return label == "__label__zg"
+    try:
+        predictions = pds.f.f.predict(text, 1, 0.0, "strict")
+        if predictions and predictions[0]:
+            return predictions[0][1] == "__label__zg"
+        return False
+    except Exception:
+        return False
 
 
 @functools.lru_cache(maxsize=50_000)
@@ -96,7 +101,11 @@ def clean_description(value: str) -> str:
 
 
 def read_raw_grid(file_bytes: bytes, filename: str) -> list[list[str]]:
-    """Read a raw POS export (csv/xls/xlsx) into a grid of string cells, unmodified."""
+    """Read a raw POS export (csv/xls/xlsx) into a grid of string cells, unmodified.
+
+    For Excel workbooks with multiple sheets (common when reports exceed row limits),
+    all sheets are read and concatenated in sheet order.
+    """
     ext = Path(filename).suffix.lower()
 
     if ext == ".csv":
@@ -104,8 +113,12 @@ def read_raw_grid(file_bytes: bytes, filename: str) -> list[list[str]]:
         return [row for row in csv.reader(io.StringIO(text, newline=""))]
 
     if ext in (".xls", ".xlsx"):
-        df = pd.read_excel(io.BytesIO(file_bytes), header=None, dtype=str)
-        return df.fillna("").astype(str).values.tolist()
+        sheets_dict = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None, header=None, dtype=str)
+        all_rows: list[list[str]] = []
+        for df in sheets_dict.values():
+            if not df.empty:
+                all_rows.extend(df.fillna("").astype(str).values.tolist())
+        return all_rows
 
     raise ValueError(f"Unsupported file type: {ext or 'unknown'}")
 
@@ -120,22 +133,26 @@ _REPORT_TYPE_SIGNATURES: dict[str, str] = {
     "Other Code": "sale",
     "Stk. Code": "inventory",
     "Stock Code": "purchase",
+    "Stock Listing Report": "inventory",
 }
 
 
 def detect_report_type(rows: list[list[str]]) -> str | None:
     """Best-effort guess of which POS export type a raw grid is, from its
-    column-header row's first cell. Returns None when nothing in the first
-    few rows matches a known header, so unfamiliar files aren't blocked —
-    this is only meant to catch an obvious wrong-file upload (e.g. a
-    purchase export sent to the sale importer), not to validate the file.
+    column-header row's first cell or header markers. Returns None when nothing
+    in the first few rows matches a known header, so unfamiliar files aren't blocked.
     """
-    for row in rows[:5]:
+    for row in rows[:15]:
         if not row:
             continue
-        first = row[0].strip()
-        if first in _REPORT_TYPE_SIGNATURES:
-            return _REPORT_TYPE_SIGNATURES[first]
+        for cell in row:
+            val = cell.strip()
+            if not val:
+                continue
+            if val in _REPORT_TYPE_SIGNATURES:
+                return _REPORT_TYPE_SIGNATURES[val]
+            if "Stock Listing Report" in val:
+                return "inventory"
     return None
 
 
@@ -242,6 +259,7 @@ def new_import_batch(
     source_file: str | None,
     preview_data: dict | None,
     storage_key: str | None = None,
+    request_key: str | None = None,
 ) -> ImportBatch:
     """A fresh (not yet committed) ImportBatch header, identical across the three
     persist services — client-generated id so the data rows it creates can reference
@@ -255,6 +273,7 @@ def new_import_batch(
         summary={},
         preview_data=preview_data or {},
         storage_key=storage_key,
+        request_key=request_key,
     )
 
 

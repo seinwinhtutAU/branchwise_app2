@@ -24,6 +24,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
+from app.core.timestamps import utc_timestamp
 from app.retail.models.import_batch import ImportBatch
 from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
@@ -100,7 +101,7 @@ def _import_batch_meta(import_batch: ImportBatch | None) -> dict:
     return {
         "_ImportBatchId": import_batch.id if import_batch else None,
         "_ImportBatchFilename": import_batch.filename if import_batch else None,
-        "_ImportBatchDate": import_batch.created_at.isoformat() if import_batch else None,
+        "_ImportBatchDate": utc_timestamp(import_batch.created_at) if import_batch else None,
     }
 
 
@@ -682,7 +683,7 @@ def inventory_reconciliation_warnings(
                 _source_import(
                     source_batch.id,
                     source_batch.filename,
-                    source_batch.created_at.isoformat(),
+                    utc_timestamp(source_batch.created_at),
                 )
                 if source_batch
                 else None

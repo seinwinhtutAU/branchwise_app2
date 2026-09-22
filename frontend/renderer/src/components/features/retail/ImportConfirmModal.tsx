@@ -3,6 +3,7 @@ import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
 import { invalidateEverything } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
+import { formatRetailDate } from "@renderer/lib/retailDateTime";
 import { Button } from "@renderer/components/ui/Button";
 import { ProgressBar } from "@renderer/components/ui/ProgressBar";
 import {
@@ -24,6 +25,8 @@ interface FileInspection {
   dates: string[];
   purchase_number?: string | null;
   row_count: number;
+  zero_count?: number | null;
+  nonzero_count?: number | null;
   error_message?: string | null;
 }
 
@@ -32,6 +35,7 @@ interface ImportConfirmModalProps {
   profile: Profile | null;
   files: SelectedImportFile[];
   selectedBranchId?: string;
+  branchName?: string | null;
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (count: number) => void;
@@ -87,17 +91,7 @@ function getFileIcon(endpoint: string, isInvalid: boolean): React.JSX.Element {
 }
 
 function formatDateLabel(isoDate: string): string {
-  try {
-    const [y, m, d] = isoDate.split("-").map(Number);
-    if (!y || !m || !d) return isoDate;
-    const months = [
-      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    return `${d} ${months[m - 1]} ${y}`;
-  } catch {
-    return isoDate;
-  }
+  return formatRetailDate(isoDate);
 }
 
 function formatShortDate(isoDate: string): string {
@@ -105,8 +99,18 @@ function formatShortDate(isoDate: string): string {
     const [, m, d] = isoDate.split("-").map(Number);
     if (!m || !d) return isoDate;
     const months = [
-      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
     ];
     return `${d} ${months[m - 1]}`;
   } catch {
@@ -119,6 +123,7 @@ export default function ImportConfirmModal({
   profile,
   files,
   selectedBranchId,
+  branchName,
   isOpen,
   onClose,
   onSuccess,
@@ -127,8 +132,14 @@ export default function ImportConfirmModal({
 }: ImportConfirmModalProps): React.JSX.Element | null {
   const showToast = useToast();
   const [importing, setImporting] = useState(false);
-  const [progress, setProgress] = useState<{ current: number; total: number; filename: string } | null>(null);
-  const [inspections, setInspections] = useState<Record<string, FileInspection>>({});
+  const [progress, setProgress] = useState<{
+    current: number;
+    total: number;
+    filename: string;
+  } | null>(null);
+  const [inspections, setInspections] = useState<
+    Record<string, FileInspection>
+  >({});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const inspectedFileIdsRef = useRef<Set<string>>(new Set());
 
@@ -148,7 +159,7 @@ export default function ImportConfirmModal({
       return;
     }
 
-const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+    const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 
     files.forEach((item) => {
       if (inspectedFileIdsRef.current.has(item.id)) return;
@@ -232,7 +243,10 @@ const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
     });
   }, [isOpen, files, session.access_token]);
 
-  const totalSizeBytes = useMemo(() => files.reduce((acc, f) => acc + f.file.size, 0), [files]);
+  const totalSizeBytes = useMemo(
+    () => files.reduce((acc, f) => acc + f.file.size, 0),
+    [files],
+  );
   const isTotalSizeExceeded = totalSizeBytes > 50 * 1024 * 1024;
 
   // Track invalid files
@@ -267,17 +281,26 @@ const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
     (f) => !inspections[f.id] || inspections[f.id].status === "checking",
   );
   const hasInvalidFiles = invalidFiles.length > 0;
-  const canConfirm = !hasCheckingFiles && !hasInvalidFiles && !isTotalSizeExceeded && !isBranchMissing && !importing;
+  const canConfirm =
+    !hasCheckingFiles &&
+    !hasInvalidFiles &&
+    !isTotalSizeExceeded &&
+    !isBranchMissing &&
+    !importing;
 
   const allInvalidSelected =
-    invalidFiles.length > 0 && invalidFiles.every((f) => selectedIds.includes(f.id));
+    invalidFiles.length > 0 &&
+    invalidFiles.every((f) => selectedIds.includes(f.id));
 
   function toggleSelectAllInvalid(): void {
     if (allInvalidSelected) {
       const invalidSet = new Set(invalidFiles.map((f) => f.id));
       setSelectedIds((prev) => prev.filter((id) => !invalidSet.has(id)));
     } else {
-      const combined = new Set([...selectedIds, ...invalidFiles.map((f) => f.id)]);
+      const combined = new Set([
+        ...selectedIds,
+        ...invalidFiles.map((f) => f.id),
+      ]);
       setSelectedIds(Array.from(combined));
     }
   }
@@ -297,23 +320,29 @@ const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
     }
     const count = selectedIds.length;
     setSelectedIds([]);
-    showToast(
-      "info",
-      `Removed ${count} ${count === 1 ? "file" : "files"}.`,
-    );
+    showToast("info", `Removed ${count} ${count === 1 ? "file" : "files"}.`);
   }
 
   async function handleImportAll(): Promise<void> {
     if (isBranchMissing) {
-      showToast("error", "Please select a branch at the top right before confirming.");
+      showToast(
+        "error",
+        "Please select a branch at the top right before confirming.",
+      );
       return;
     }
     if (isTotalSizeExceeded) {
-      showToast("error", `Total upload size (${formatFileSize(totalSizeBytes)}) exceeds the 50 MB limit.`);
+      showToast(
+        "error",
+        `Total upload size (${formatFileSize(totalSizeBytes)}) exceeds the 50 MB limit.`,
+      );
       return;
     }
     if (hasInvalidFiles) {
-      showToast("error", `Please delete non-${expectedType} files before confirming.`);
+      showToast(
+        "error",
+        `Please delete non-${expectedType} files before confirming.`,
+      );
       return;
     }
 
@@ -332,7 +361,11 @@ const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
         if (!item) break;
 
         const inspection = inspections[item.id];
-        setProgress({ current: completedCount + 1, total, filename: item.file.name });
+        setProgress({
+          current: completedCount + 1,
+          total,
+          filename: item.file.name,
+        });
 
         try {
           if (item.revertBatchId) {
@@ -382,18 +415,27 @@ const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
             successCount++;
           } else {
             const body = await response.json().catch(() => null);
-            errors.push(`${item.file.name}: ${body?.detail ?? `Failed (${response.status})`}`);
+            errors.push(
+              `${item.file.name}: ${body?.detail ?? `Failed (${response.status})`}`,
+            );
           }
         } catch {
           errors.push(`${item.file.name}: Network error during upload`);
         } finally {
           completedCount++;
-          setProgress({ current: Math.min(completedCount, total), total, filename: item.file.name });
+          setProgress({
+            current: Math.min(completedCount, total),
+            total,
+            filename: item.file.name,
+          });
         }
       }
     }
 
-    const workers = Array.from({ length: Math.min(concurrency, files.length) }, () => uploadWorker());
+    const workers = Array.from(
+      { length: Math.min(concurrency, files.length) },
+      () => uploadWorker(),
+    );
     await Promise.all(workers);
 
     setImporting(false);
@@ -429,12 +471,23 @@ const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
               <UploadIcon className="w-3.5 h-3.5" />
             </div>
             <div>
-              <h3 id="import-modal-title" className="text-sm font-semibold text-text-primary">
-                Import {expectedTypeLabel} Files
-              </h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3
+                  id="import-modal-title"
+                  className="text-sm font-semibold text-text-primary"
+                >
+                  Import {expectedTypeLabel} Files
+                </h3>
+                {branchName && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-brand-subtle text-brand text-[10px] font-semibold border border-brand/20">
+                    Branch: {branchName}
+                  </span>
+                )}
+              </div>
               <p className="text-[11px] text-text-muted flex items-center gap-1.5 flex-wrap">
                 <span>
-                  {files.length} {files.length === 1 ? "file" : "files"} selected ({formatFileSize(totalSizeBytes)})
+                  {files.length} {files.length === 1 ? "file" : "files"}{" "}
+                  selected ({formatFileSize(totalSizeBytes)})
                 </span>
                 {isTotalSizeExceeded && (
                   <span className="text-amber-600 dark:text-amber-400 font-semibold">
@@ -476,7 +529,8 @@ const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
             <div className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/25 flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
               <WarningIcon className="w-3.5 h-3.5 shrink-0" />
               <span className="text-[11px]">
-                Select target branch from the top right of the page before confirming.
+                Select target branch from the top right of the page before
+                confirming.
               </span>
             </div>
           )}
@@ -499,7 +553,9 @@ const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
                       onChange={toggleSelectAllInvalid}
                       className="rounded border-border text-brand focus:ring-brand/30 cursor-pointer w-3.5 h-3.5"
                     />
-                    <span>Select non-{expectedType} ({invalidFiles.length})</span>
+                    <span>
+                      Select non-{expectedType} ({invalidFiles.length})
+                    </span>
                   </label>
                 )}
 
@@ -530,7 +586,8 @@ const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
             <div className="space-y-1.5">
               {files.map((item) => {
                 const inspection = inspections[item.id];
-                const isChecking = !inspection || inspection.status === "checking";
+                const isChecking =
+                  !inspection || inspection.status === "checking";
                 const isInvalid =
                   inspection &&
                   inspection.status !== "checking" &&
@@ -561,7 +618,9 @@ const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
                       />
 
                       {/* Compact Icon */}
-                      <div className="shrink-0">{getFileIcon(item.endpoint, isInvalid)}</div>
+                      <div className="shrink-0">
+                        {getFileIcon(item.endpoint, isInvalid)}
+                      </div>
 
                       {/* File Name & Size */}
                       <div className="min-w-0 flex-1 flex items-center gap-2 flex-wrap">
@@ -591,7 +650,8 @@ const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
                         {isInvalid && (
                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-bg-subtle text-text-muted border border-border shrink-0">
                             <WarningIcon className="w-2.5 h-2.5" />
-                            {inspection.error_message || `Not a ${expectedType} file`}
+                            {inspection.error_message ||
+                              `Not a ${expectedType} file`}
                           </span>
                         )}
                       </div>
@@ -619,7 +679,8 @@ const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
                         {inspection.dates && inspection.dates.length === 2 && (
                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-bg-subtle text-text-secondary text-[10px] font-medium border border-border">
                             <CalendarIcon className="w-2.5 h-2.5 text-text-muted" />
-                            {formatShortDate(inspection.dates[0])}, {formatShortDate(inspection.dates[1])}
+                            {formatShortDate(inspection.dates[0])},{" "}
+                            {formatShortDate(inspection.dates[1])}
                           </span>
                         )}
 
@@ -654,8 +715,18 @@ const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 
                         {/* Row count */}
                         {inspection.row_count > 0 && (
-                          <span className="text-[10px] font-medium text-text-muted">
-                            {inspection.row_count} lines
+                          <span
+                            className="text-[10px] font-medium text-text-muted"
+                            title={
+                              inspection.zero_count !== undefined &&
+                              inspection.zero_count !== null
+                                ? `Total: ${inspection.row_count.toLocaleString()} lines (${(inspection.nonzero_count ?? 0).toLocaleString()} active, ${inspection.zero_count.toLocaleString()} zero qty)`
+                                : undefined
+                            }
+                          >
+                            {expectedType === "inventory"
+                              ? `${inspection.row_count.toLocaleString()} total lines (incl. 0 qty)`
+                              : `${inspection.row_count.toLocaleString()} lines`}
                           </span>
                         )}
                       </div>
@@ -679,7 +750,12 @@ const MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 
         {/* Modal Footer */}
         <div className="px-5 py-3 border-t border-border bg-bg-base/30 flex items-center justify-end gap-2.5">
-          <Button variant="secondary" onClick={onClose} disabled={importing} className="h-8 text-xs">
+          <Button
+            variant="secondary"
+            onClick={onClose}
+            disabled={importing}
+            className="h-8 text-xs"
+          >
             Cancel
           </Button>
           <Button

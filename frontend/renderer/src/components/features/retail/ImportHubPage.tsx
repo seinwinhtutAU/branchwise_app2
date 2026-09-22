@@ -54,6 +54,10 @@ export default function ImportHubPage({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  const importBranchName =
+    profile?.branch_name ??
+    branches.find((branch) => branch.id === selectedBranchId)?.name ??
+    null;
 
   useEffect(() => {
     if (profile !== null && profile.branch_id !== null) return;
@@ -230,6 +234,7 @@ export default function ImportHubPage({
         profile={profile}
         files={selectedFiles}
         selectedBranchId={selectedBranchId}
+        branchName={importBranchName}
         isOpen={isModalOpen}
         onClose={() => {
           setIsModalOpen(false);

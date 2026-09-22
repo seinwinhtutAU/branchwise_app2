@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from app.config import get_settings
 from app.routers import auth, branches, health, settings, users
@@ -34,12 +35,20 @@ def create_app() -> FastAPI:
     app = FastAPI(title="branchwise-app2 backend")
     app_settings = get_settings()
 
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=app_settings.cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "User-Agent"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "Accept",
+            "Origin",
+            "User-Agent",
+            "Idempotency-Key",
+        ],
     )
 
     app.include_router(health.router)

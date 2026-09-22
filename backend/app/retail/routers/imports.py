@@ -1,18 +1,31 @@
 import datetime
 import io
-import json
 import logging
 from pathlib import Path
+from typing import Annotated
 import uuid
 
 logger = logging.getLogger(__name__)
 
 import pandas as pd
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, defer, joinedload
 
 from app.core.security import get_current_app_user, get_current_user
+from app.core.timestamps import utc_now, utc_timestamp
 from app.db.session import get_db
 from app.models.branch import Branch
 from app.retail.models.import_batch import ImportBatch, ImportBatchStatus, ImportType
@@ -21,28 +34,67 @@ from app.retail.models.sale import Sale, SaleLine
 from app.retail.models.stock_level import StockLevel
 from app.models.user import User, UserRole
 from app.services.branches import list_retail_branches
-from app.retail.services.import_common import SUPPORTED_EXTENSIONS, detect_report_type, validate_rows, read_raw_grid
-from app.retail.services.inventory_import import OUTPUT_COLUMNS as INVENTORY_OUTPUT_COLUMNS
-from app.retail.services.inventory_import import VALIDATION_RULES as INVENTORY_VALIDATION_RULES
-from app.retail.services.inventory_import import parse_inventory_upload, parse_inventory_export_from_grid
+from app.retail.services.import_common import (
+    SUPPORTED_EXTENSIONS,
+    detect_report_type,
+    pluralize,
+    read_raw_grid,
+    validate_rows,
+)
+from app.retail.services.inventory_import import (
+    OUTPUT_COLUMNS as INVENTORY_OUTPUT_COLUMNS,
+)
+from app.retail.services.inventory_import import (
+    VALIDATION_RULES as INVENTORY_VALIDATION_RULES,
+)
+from app.retail.services.inventory_import import (
+    parse_inventory_upload,
+    parse_inventory_export_from_grid,
+)
 from app.retail.services.inventory_persist import persist_inventory
+from app.retail.services.import_integrity import (
+    latest_daily_data_dates,
+    purchase_number_integrity,
+)
 from app.retail.services.pos_import import OUTPUT_COLUMNS as SALES_OUTPUT_COLUMNS
 from app.retail.services.pos_import import VALIDATION_RULES as SALES_VALIDATION_RULES
-from app.retail.services.pos_import import parse_pos_sale_upload, parse_pos_sale_export_from_grid
-from app.retail.services.purchase_import import OUTPUT_COLUMNS as PURCHASE_OUTPUT_COLUMNS
-from app.retail.services.purchase_import import VALIDATION_RULES as PURCHASE_VALIDATION_RULES
-from app.retail.services.purchase_import import parse_purchase_upload, parse_purchase_export_from_grid, extract_purchase_metadata
+from app.retail.services.pos_import import (
+    parse_pos_sale_upload,
+    parse_pos_sale_export_from_grid,
+)
+from app.retail.services.purchase_import import (
+    OUTPUT_COLUMNS as PURCHASE_OUTPUT_COLUMNS,
+)
+from app.retail.services.purchase_import import (
+    VALIDATION_RULES as PURCHASE_VALIDATION_RULES,
+)
+from app.retail.services.purchase_import import (
+    parse_purchase_upload,
+    parse_purchase_export_from_grid,
+    extract_purchase_metadata,
+)
 from app.retail.services.purchase_persist import persist_purchases
+from app.retail.services.preview_storage import (
+    PREVIEW_PAGE_SIZE,
+    read_preview_page,
+    read_preview_warnings,
+    upload_preview_pages,
+)
 from app.retail.services.sales_persist import persist_sales
 from app.retail.routers.common import require_retail_operations
 from app.services.storage import get_storage_service
 
-router = APIRouter(prefix="/api/imports", tags=["imports"], dependencies=[Depends(require_retail_operations)])
+router = APIRouter(
+    prefix="/api/imports",
+    tags=["imports"],
+    dependencies=[Depends(require_retail_operations)],
+)
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+IdempotencyKey = Annotated[str | None, Header(alias="Idempotency-Key", max_length=64)]
 
 
-def _upload_to_storage(contents: bytes, filename: str | None, preview_data: dict | None = None) -> str | None:
+def _upload_to_storage(contents: bytes, filename: str | None) -> str | None:
     if not filename:
         return None
     storage = get_storage_service()
@@ -61,14 +113,17 @@ def _upload_to_storage(contents: bytes, filename: str | None, preview_data: dict
         else "application/octet-stream"
     )
     uploaded_key = storage.upload_file_bytes(contents, key, content_type)
-    if preview_data:
-        json_key = f"imports/{batch_prefix}/preview_data.json"
-        storage.upload_file_bytes(
-            json.dumps(preview_data).encode("utf-8"),
-            json_key,
-            "application/json",
-        )
     return uploaded_key
+
+
+def _upload_preview_to_storage(batch_id: str, preview_data: dict) -> None:
+    storage = get_storage_service()
+    if storage.is_configured and not upload_preview_pages(
+        storage, batch_id, preview_data
+    ):
+        logger.warning(
+            "Failed to store paged preview in R2 for import batch %s", batch_id
+        )
 
 
 async def _read_upload(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> bytes:
@@ -158,7 +213,9 @@ def _parse_or_400(
     try:
         origin_rows, clean_df = parser(contents, filename or "", *parser_args)
     except Exception as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}") from exc
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"Could not parse file: {exc}"
+        ) from exc
     _check_report_type(origin_rows, expected_type)
     return origin_rows, clean_df
 
@@ -173,11 +230,15 @@ def _resolve_branch_id(user: User, branch_id: str | None, db: Session) -> str | 
             "This account has no branch assigned — pass branch_id to say which branch this import is for",
         )
     if db.get(Branch, branch_id) is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown branch_id: {branch_id}")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"Unknown branch_id: {branch_id}"
+        )
     return branch_id
 
 
-def _resolve_branch_for_preview(user: User, branch_id: str | None, db: Session) -> Branch | None:
+def _resolve_branch_for_preview(
+    user: User, branch_id: str | None, db: Session
+) -> Branch | None:
     """Like _resolve_branch_id, but tolerates the branch being unknown rather than
     erroring — a development account's first preview call happens before it has picked a
     branch on the review screen (the picker only appears there, and its value is only
@@ -192,7 +253,9 @@ def _resolve_branch_for_preview(user: User, branch_id: str | None, db: Session) 
         return None
     branch = db.get(Branch, resolved_id)
     if branch is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown branch_id: {branch_id}")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"Unknown branch_id: {branch_id}"
+        )
     return branch
 
 
@@ -217,6 +280,9 @@ def _origin_row_issues(
     return mapped
 
 
+MAX_PREVIEW_ROWS = 500
+
+
 def _build_preview(
     filename: str | None,
     origin_rows: list[list[str]],
@@ -225,17 +291,73 @@ def _build_preview(
     rules: list[tuple[str, float | None]],
 ) -> dict:
     row_issues = validate_rows(clean_df, rules)
+    total_clean_rows = len(clean_df)
+    total_origin_rows = len(origin_rows)
+
+    if total_clean_rows <= MAX_PREVIEW_ROWS:
+        return {
+            "filename": filename,
+            "origin": {
+                "rows": origin_rows,
+                "row_issues": _origin_row_issues(origin_rows, clean_df, row_issues),
+                "is_sampled": False,
+                "total_rows": total_origin_rows,
+            },
+            "clean": {
+                "columns": columns,
+                "rows": clean_df.to_dict(orient="records"),
+                "row_issues": row_issues,
+                "is_sampled": False,
+                "total_rows": total_clean_rows,
+            },
+            "is_sampled": False,
+            "total_origin_rows": total_origin_rows,
+            "total_clean_rows": total_clean_rows,
+            "slip_subtotal_mismatches": clean_df.attrs.get("subtotal_mismatches", []),
+        }
+
+    # For large datasets (e.g. 100k rows), sample first MAX_PREVIEW_ROWS + ALL rows with validation issues
+    issue_indices = {i for i, issues in enumerate(row_issues) if issues}
+    sample_indices = sorted(
+        set(range(min(MAX_PREVIEW_ROWS, total_clean_rows))) | issue_indices
+    )
+
+    clean_records = clean_df.to_dict(orient="records")
+    sampled_clean_rows = [clean_records[i] for i in sample_indices]
+    sampled_clean_issues = [row_issues[i] for i in sample_indices]
+
+    origin_indices = clean_df.attrs.get("origin_indices", [])
+    mapped_origin_issues = _origin_row_issues(origin_rows, clean_df, row_issues)
+
+    sampled_origin_idx_set = set(range(min(MAX_PREVIEW_ROWS, total_origin_rows)))
+    if origin_indices:
+        for ci in sample_indices:
+            if ci < len(origin_indices):
+                sampled_origin_idx_set.add(origin_indices[ci])
+    sorted_origin_indices = sorted(sampled_origin_idx_set)
+    sampled_origin_rows = [origin_rows[i] for i in sorted_origin_indices]
+    sampled_origin_issues = [mapped_origin_issues[i] for i in sorted_origin_indices]
+
     return {
         "filename": filename,
-        "origin": {"rows": origin_rows, "row_issues": _origin_row_issues(origin_rows, clean_df, row_issues)},
+        "origin": {
+            "rows": sampled_origin_rows,
+            "row_issues": sampled_origin_issues,
+            "is_sampled": True,
+            "total_rows": total_origin_rows,
+            "sample_count": len(sampled_origin_rows),
+        },
         "clean": {
             "columns": columns,
-            "rows": clean_df.to_dict(orient="records"),
-            "row_issues": row_issues,
+            "rows": sampled_clean_rows,
+            "row_issues": sampled_clean_issues,
+            "is_sampled": True,
+            "total_rows": total_clean_rows,
+            "sample_count": len(sampled_clean_rows),
         },
-        # Sales-only (empty for Inventory/Purchase) — see pos_import.py's subtotal_mismatches
-        # attr. Surfaced by Import Health's "slip-total mismatches" check rather than only
-        # reaching a server log, since it's already computed here and otherwise discarded.
+        "is_sampled": True,
+        "total_origin_rows": total_origin_rows,
+        "total_clean_rows": total_clean_rows,
         "slip_subtotal_mismatches": clean_df.attrs.get("subtotal_mismatches", []),
     }
 
@@ -244,6 +366,37 @@ def _can_access_batch(user: User, batch: ImportBatch) -> bool:
     """An account with no branch can see/revert any batch;
     everyone else only their own branch's — same rule as import confirmation."""
     return user.branch_id is None or batch.branch_id == user.branch_id
+
+
+def _confirmed_import_for_key(
+    db: Session, user: User, request_key: str | None
+) -> dict | None:
+    """Return the original result for a repeated confirm request.
+
+    A dropped mobile connection can lose the response after the database committed.
+    The client deliberately reuses its Idempotency-Key in that case, so returning the
+    already stored batch summary is both faster and, crucially, avoids duplicate
+    purchase or inventory records.
+    """
+    if not request_key:
+        return None
+    batch = (
+        db.query(ImportBatch)
+        .filter(
+            ImportBatch.request_key == request_key,
+            ImportBatch.uploaded_by == user.id,
+        )
+        .one_or_none()
+    )
+    return dict(batch.summary) if batch is not None else None
+
+
+def _replay_after_request_key_conflict(
+    db: Session, user: User, request_key: str | None
+) -> dict | None:
+    """Recover the first commit when two retries overlap on a weak connection."""
+    db.rollback()
+    return _confirmed_import_for_key(db, user, request_key)
 
 
 @router.post("/sales")
@@ -258,44 +411,72 @@ async def import_sales_file(
 
     contents = await _read_upload(file)
     origin_rows, clean_df = _parse_or_400(
-        parse_pos_sale_upload, contents, file.filename, "sale",
+        parse_pos_sale_upload,
+        contents,
+        file.filename,
+        "sale",
         branch.sale_date_format if branch else "MDY",
     )
 
-    return _build_preview(file.filename, origin_rows, clean_df, SALES_OUTPUT_COLUMNS, SALES_VALIDATION_RULES)
+    return _build_preview(
+        file.filename,
+        origin_rows,
+        clean_df,
+        SALES_OUTPUT_COLUMNS,
+        SALES_VALIDATION_RULES,
+    )
 
 
 @router.post("/sales/confirm")
 async def confirm_sales_file(
     file: UploadFile = File(...),
     branch_id: str | None = Form(None),
+    idempotency_key: IdempotencyKey = None,
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    previous = _confirmed_import_for_key(db, user, idempotency_key)
+    if previous is not None:
+        return previous
     _check_extension(file.filename)
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
     branch = db.get(Branch, resolved_branch_id)
 
     contents = await _read_upload(file)
     origin_rows, clean_df = _parse_or_400(
-        parse_pos_sale_upload, contents, file.filename, "sale",
+        parse_pos_sale_upload,
+        contents,
+        file.filename,
+        "sale",
         branch.sale_date_format if branch else "MDY",
     )
 
     preview_data = _build_preview(
-        file.filename, origin_rows, clean_df, SALES_OUTPUT_COLUMNS, SALES_VALIDATION_RULES
+        file.filename,
+        origin_rows,
+        clean_df,
+        SALES_OUTPUT_COLUMNS,
+        SALES_VALIDATION_RULES,
     )
     storage_key = _upload_to_storage(contents, file.filename)
-    return persist_sales(
-        db,
-        clean_df,
-        branch_id=resolved_branch_id,
-        location_raw=_location_raw(clean_df),
-        source_file=file.filename,
-        uploaded_by=user.id,
-        preview_data=preview_data,
-        storage_key=storage_key,
-    )
+    try:
+        summary = persist_sales(
+            db,
+            clean_df,
+            branch_id=resolved_branch_id,
+            location_raw=_location_raw(clean_df),
+            source_file=file.filename,
+            uploaded_by=user.id,
+            preview_data=preview_data,
+            storage_key=storage_key,
+            request_key=idempotency_key,
+        )
+    except IntegrityError:
+        summary = _replay_after_request_key_conflict(db, user, idempotency_key)
+        if summary is None:
+            raise
+    _upload_preview_to_storage(summary["batch_id"], preview_data)
+    return summary
 
 
 @router.post("/inventory")
@@ -310,12 +491,19 @@ async def import_inventory_file(
 
     contents = await _read_upload(file)
     origin_rows, clean_df = _parse_or_400(
-        parse_inventory_upload, contents, file.filename, "inventory",
+        parse_inventory_upload,
+        contents,
+        file.filename,
+        "inventory",
         branch.inventory_date_format if branch else "MDY",
     )
 
     return _build_preview(
-        file.filename, origin_rows, clean_df, INVENTORY_OUTPUT_COLUMNS, INVENTORY_VALIDATION_RULES
+        file.filename,
+        origin_rows,
+        clean_df,
+        INVENTORY_OUTPUT_COLUMNS,
+        INVENTORY_VALIDATION_RULES,
     )
 
 
@@ -323,33 +511,52 @@ async def import_inventory_file(
 async def confirm_inventory_file(
     file: UploadFile = File(...),
     branch_id: str | None = Form(None),
+    idempotency_key: IdempotencyKey = None,
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    previous = _confirmed_import_for_key(db, user, idempotency_key)
+    if previous is not None:
+        return previous
     _check_extension(file.filename)
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
     branch = db.get(Branch, resolved_branch_id)
 
     contents = await _read_upload(file)
     origin_rows, clean_df = _parse_or_400(
-        parse_inventory_upload, contents, file.filename, "inventory",
+        parse_inventory_upload,
+        contents,
+        file.filename,
+        "inventory",
         branch.inventory_date_format if branch else "MDY",
     )
 
     preview_data = _build_preview(
-        file.filename, origin_rows, clean_df, INVENTORY_OUTPUT_COLUMNS, INVENTORY_VALIDATION_RULES
+        file.filename,
+        origin_rows,
+        clean_df,
+        INVENTORY_OUTPUT_COLUMNS,
+        INVENTORY_VALIDATION_RULES,
     )
     storage_key = _upload_to_storage(contents, file.filename)
-    return persist_inventory(
-        db,
-        clean_df,
-        branch_id=resolved_branch_id,
-        location_raw=_location_raw(clean_df),
-        source_file=file.filename,
-        uploaded_by=user.id,
-        preview_data=preview_data,
-        storage_key=storage_key,
-    )
+    try:
+        summary = persist_inventory(
+            db,
+            clean_df,
+            branch_id=resolved_branch_id,
+            location_raw=_location_raw(clean_df),
+            source_file=file.filename,
+            uploaded_by=user.id,
+            preview_data=preview_data,
+            storage_key=storage_key,
+            request_key=idempotency_key,
+        )
+    except IntegrityError:
+        summary = _replay_after_request_key_conflict(db, user, idempotency_key)
+        if summary is None:
+            raise
+    _upload_preview_to_storage(summary["batch_id"], preview_data)
+    return summary
 
 
 @router.post("/purchase")
@@ -365,7 +572,11 @@ async def import_purchase_file(
     )
 
     return _build_preview(
-        file.filename, origin_rows, clean_df, PURCHASE_OUTPUT_COLUMNS, PURCHASE_VALIDATION_RULES
+        file.filename,
+        origin_rows,
+        clean_df,
+        PURCHASE_OUTPUT_COLUMNS,
+        PURCHASE_VALIDATION_RULES,
     )
 
 
@@ -375,9 +586,13 @@ async def confirm_purchase_file(
     branch_id: str | None = Form(None),
     purchase_date: str | None = Form(None),
     purchase_number: str | None = Form(None),
+    idempotency_key: IdempotencyKey = None,
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    previous = _confirmed_import_for_key(db, user, idempotency_key)
+    if previous is not None:
+        return previous
     _check_extension(file.filename)
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
 
@@ -389,7 +604,9 @@ async def confirm_purchase_file(
         try:
             resolved_purchase_date = datetime.date.fromisoformat(purchase_date)
         except ValueError as exc:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "purchase_date must be YYYY-MM-DD") from exc
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "purchase_date must be YYYY-MM-DD"
+            ) from exc
     elif extracted_date:
         resolved_purchase_date = extracted_date
 
@@ -399,21 +616,33 @@ async def confirm_purchase_file(
     )
 
     preview_data = _build_preview(
-        file.filename, origin_rows, clean_df, PURCHASE_OUTPUT_COLUMNS, PURCHASE_VALIDATION_RULES
+        file.filename,
+        origin_rows,
+        clean_df,
+        PURCHASE_OUTPUT_COLUMNS,
+        PURCHASE_VALIDATION_RULES,
     )
     storage_key = _upload_to_storage(contents, file.filename)
-    return persist_purchases(
-        db,
-        clean_df,
-        branch_id=resolved_branch_id,
-        location_raw=_location_raw(clean_df),
-        source_file=file.filename,
-        uploaded_by=user.id,
-        preview_data=preview_data,
-        purchase_date=resolved_purchase_date,
-        purchase_number=resolved_purchase_number,
-        storage_key=storage_key,
-    )
+    try:
+        summary = persist_purchases(
+            db,
+            clean_df,
+            branch_id=resolved_branch_id,
+            location_raw=_location_raw(clean_df),
+            source_file=file.filename,
+            uploaded_by=user.id,
+            preview_data=preview_data,
+            purchase_date=resolved_purchase_date,
+            purchase_number=resolved_purchase_number,
+            storage_key=storage_key,
+            request_key=idempotency_key,
+        )
+    except IntegrityError:
+        summary = _replay_after_request_key_conflict(db, user, idempotency_key)
+        if summary is None:
+            raise
+    _upload_preview_to_storage(summary["batch_id"], preview_data)
+    return summary
 
 
 @router.post("/inspect")
@@ -526,7 +755,9 @@ async def inspect_import_file(
                     "error_message": "Not a sale file",
                 }
             if not clean_df.empty and "Date" in clean_df.columns:
-                unique_dates = sorted(clean_df["Date"].dropna().astype(str).unique().tolist())
+                unique_dates = sorted(
+                    clean_df["Date"].dropna().astype(str).unique().tolist()
+                )
                 dates = unique_dates
         elif expected_type == "inventory":
             clean_df = parse_inventory_export_from_grid(rows)
@@ -558,8 +789,19 @@ async def inspect_import_file(
             "dates": dates,
             "purchase_number": purchase_number,
             "row_count": 0,
+            "zero_count": None,
+            "nonzero_count": None,
             "error_message": f"Could not parse file: {exc}",
         }
+
+    zero_count = None
+    nonzero_count = None
+    if expected_type == "inventory" and "clean_df" in locals():
+        zero_count = int(clean_df.attrs.get("zero_rows", 0))
+        nonzero_count = int(
+            clean_df.attrs.get("positive_rows", 0)
+            + clean_df.attrs.get("negative_rows", 0)
+        )
 
     return {
         "filename": file.filename,
@@ -569,6 +811,8 @@ async def inspect_import_file(
         "dates": dates,
         "purchase_number": purchase_number,
         "row_count": row_count,
+        "zero_count": zero_count,
+        "nonzero_count": nonzero_count,
         "error_message": None,
     }
 
@@ -577,14 +821,10 @@ async def inspect_import_file(
 def get_import_freshness(
     user: User = Depends(get_current_app_user), db: Session = Depends(get_db)
 ) -> list[dict]:
-    """Per branch, when sales/inventory/purchase were each last successfully
-    confirmed — surfacing a branch that quietly stopped uploading, not just
-    whether an individual import worked.
+    """Per-branch upload recency and the completeness of its imported data.
 
-    Only the timestamps are reported; deciding how late is "late" is left to the
-    caller, because it differs per type. Sales and inventory are exported daily,
-    but a purchase file only appears when a branch actually restocks, so an old
-    purchase import is normal rather than a gap (the UI shows it ungraded).
+    Sale and inventory records expose their own business date in addition to the
+    confirmation timestamp. Purchase numbers are checked for internal serial gaps.
     """
     branches_query = list_retail_branches(db)
     if user.branch_id is not None:
@@ -602,25 +842,38 @@ def get_import_freshness(
         .all()
     )
     last_by_branch_and_type = {
-        (branch_id, import_type.value): last_imported_at.isoformat()
+        (branch_id, import_type.value): utc_timestamp(last_imported_at)
         for branch_id, import_type, last_imported_at in latest_rows
         if branch_id is not None
     }
 
-    return [
-        {
-            "branch_id": branch.id,
-            "branch_name": branch.name,
-            "sales_last_imported_at": last_by_branch_and_type.get((branch.id, ImportType.SALES.value)),
-            "inventory_last_imported_at": last_by_branch_and_type.get(
-                (branch.id, ImportType.INVENTORY.value)
-            ),
-            "purchase_last_imported_at": last_by_branch_and_type.get(
-                (branch.id, ImportType.PURCHASE.value)
-            ),
-        }
-        for branch in branches
-    ]
+    response: list[dict] = []
+    for branch in branches:
+        sales_data_date, inventory_data_date = latest_daily_data_dates(db, branch.id)
+        purchase_integrity = purchase_number_integrity(db, branch.id)
+        response.append(
+            {
+                "branch_id": branch.id,
+                "branch_name": branch.name,
+                "sales_last_imported_at": last_by_branch_and_type.get(
+                    (branch.id, ImportType.SALES.value)
+                ),
+                "inventory_last_imported_at": last_by_branch_and_type.get(
+                    (branch.id, ImportType.INVENTORY.value)
+                ),
+                "purchase_last_imported_at": last_by_branch_and_type.get(
+                    (branch.id, ImportType.PURCHASE.value)
+                ),
+                "sales_data_date": sales_data_date.isoformat()
+                if sales_data_date
+                else None,
+                "inventory_data_date": inventory_data_date.isoformat()
+                if inventory_data_date
+                else None,
+                "purchase_number_integrity": purchase_integrity,
+            }
+        )
+    return response
 
 
 @router.get("/data-version")
@@ -687,8 +940,8 @@ def list_import_history(
             "uploaded_by_name": b.uploaded_by_user.name if b.uploaded_by_user else None,
             "status": b.status.value,
             "summary": b.summary,
-            "created_at": b.created_at.isoformat(),
-            "reverted_at": b.reverted_at.isoformat() if b.reverted_at else None,
+            "created_at": utc_timestamp(b.created_at),
+            "reverted_at": utc_timestamp(b.reverted_at) if b.reverted_at else None,
             "storage_key": b.storage_key,
             "has_file": bool(b.storage_key or b.original_file_size),
         }
@@ -696,54 +949,322 @@ def list_import_history(
     ]
 
 
+def _legacy_preview_result(preview_data: dict, tab: str, page: int) -> dict:
+    data = preview_data.get("clean" if tab == "clean" else "origin", {})
+    rows = data.get("rows", []) if isinstance(data, dict) else []
+    row_issues = data.get("row_issues", []) if isinstance(data, dict) else []
+    declared_total = (
+        data.get("total_rows", len(rows)) if isinstance(data, dict) else len(rows)
+    )
+    is_sampled = (
+        bool(data.get("is_sampled", False)) if isinstance(data, dict) else False
+    )
+    total_rows = len(rows) if is_sampled else declared_total
+    start = (page - 1) * PREVIEW_PAGE_SIZE
+    end = start + PREVIEW_PAGE_SIZE
+    return {
+        "columns": data.get("columns", [])
+        if tab == "clean" and isinstance(data, dict)
+        else [],
+        "rows": rows[start:end],
+        "row_issues": row_issues[start:end] if row_issues else [],
+        "page": page,
+        "page_size": PREVIEW_PAGE_SIZE,
+        "total_rows": total_rows,
+        "source_total_rows": declared_total,
+        "total_pages": max(
+            1, (total_rows + PREVIEW_PAGE_SIZE - 1) // PREVIEW_PAGE_SIZE
+        ),
+        "is_sampled": is_sampled,
+        "warning_count": sum(1 for issues in row_issues if issues),
+    }
+
+
+def _r2_preview_result(
+    manifest: dict, tab: str, page_data: dict | None, page: int
+) -> dict:
+    metadata = manifest.get(tab, {})
+    return {
+        "columns": metadata.get("columns", []) if tab == "clean" else [],
+        "rows": page_data.get("rows", []) if page_data else [],
+        "row_issues": page_data.get("row_issues", []) if page_data else [],
+        "page": page,
+        "page_size": metadata.get("page_size", PREVIEW_PAGE_SIZE),
+        "total_rows": metadata.get("total_rows", 0),
+        "source_total_rows": metadata.get("source_total_rows", 0),
+        "total_pages": metadata.get("total_pages", 1),
+        "is_sampled": bool(metadata.get("is_sampled", False)),
+        "warning_count": metadata.get("warning_count", 0),
+    }
+
+
+def _inactive_preview_result(manifest: dict, tab: str) -> dict:
+    return _r2_preview_result(manifest, tab, None, 1)
+
+
+def _format_history_summary_messages(batch: ImportBatch, total_rows: int = 0) -> list[str]:
+    summary = batch.summary or {}
+    messages = []
+
+    if batch.import_type == ImportType.INVENTORY:
+        created = summary.get("stock_levels_created", 0)
+        zero_skipped = summary.get("zero_stock_skipped", 0)
+        total = summary.get("total_rows") or total_rows or (created + zero_skipped) or (summary.get("products_created", 0) + summary.get("products_updated", 0))
+
+        messages.append(f"{total:,} total products in file")
+        messages.append(f"{created:,} product stocks recorded")
+        if zero_skipped > 0:
+            messages.append(f"{zero_skipped:,} products with 0 stock")
+
+        issue_count = max(summary.get("negative_stock_count", 0), summary.get("issue_count", 0))
+        if issue_count > 0:
+            messages.append(f"⚠️ Alert: {pluralize(issue_count, 'product')} recorded with invalid values")
+
+    elif batch.import_type == ImportType.SALES:
+        sales_created = summary.get("sales_created", 0)
+        lines_created = summary.get("sale_lines_created", 0)
+        total = summary.get("total_rows") or total_rows or lines_created
+
+        messages.append(f"{total:,} total sale lines in file")
+        messages.append(f"{sales_created:,} sales recorded ({lines_created:,} items)")
+        skipped = summary.get("sales_skipped_duplicate", 0)
+        if skipped > 0:
+            messages.append(f"{pluralize(skipped, 'sale')} skipped — already imported earlier")
+        issue_count = summary.get("issue_count", 0)
+        if issue_count > 0:
+            messages.append(f"⚠️ Alert: {pluralize(issue_count, 'sale item')} recorded with invalid values")
+
+    elif batch.import_type == ImportType.PURCHASE:
+        lines_created = summary.get("purchase_lines_created", 0)
+        total = summary.get("total_rows") or total_rows or lines_created
+
+        messages.append(f"{total:,} total purchase items in file")
+        messages.append(f"{lines_created:,} purchase items recorded")
+        issue_count = summary.get("issue_count", 0)
+        if issue_count > 0:
+            messages.append(f"⚠️ Alert: {pluralize(issue_count, 'item')} recorded with invalid values")
+
+    return messages if messages else summary.get("messages", [])
+
+
 @router.get("/history/{batch_id}")
 def get_import_history_detail(
     batch_id: str,
+    page: int = Query(1, ge=1),
+    tab: str = Query("clean", pattern="^(clean|original)$"),
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    batch = db.get(ImportBatch, batch_id, options=[defer(ImportBatch.original_file)])
+    batch = db.get(
+        ImportBatch,
+        batch_id,
+        options=[
+            defer(ImportBatch.preview_data),
+            defer(ImportBatch.original_file),
+            joinedload(ImportBatch.branch),
+            joinedload(ImportBatch.uploaded_by_user),
+        ],
+    )
     if batch is None or not _can_access_batch(user, batch):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
 
-    preview_data = None
     storage = get_storage_service()
-    if storage.is_configured:
-        try:
-            preview_key = f"imports/{batch.id}/preview_data.json"
-            res = storage.download_file_bytes(preview_key)
-            if res is not None:
-                data_bytes, _ = res
-                preview_data = json.loads(data_bytes.decode("utf-8"))
-        except Exception as exc:
-            logger.warning("Failed to fetch preview data from R2 for batch %s: %s", batch.id, exc)
-
-    if preview_data is None:
-        preview_data = batch.preview_data or {}
-
-    origin_data = preview_data.get("origin", {"rows": [], "row_issues": []})
-    clean_data = preview_data.get("clean", {"columns": [], "rows": [], "row_issues": []})
-
-    has_origin_rows = bool(
-        isinstance(origin_data, dict)
-        and origin_data.get("rows")
+    r2_preview = (
+        read_preview_page(storage, batch.id, tab, page)
+        if storage.is_configured
+        else None
     )
+    if r2_preview is not None:
+        manifest, page_data = r2_preview
+        selected_result = _r2_preview_result(manifest, tab, page_data, page)
+        other_tab = "original" if tab == "clean" else "clean"
+        other_result = _inactive_preview_result(manifest, other_tab)
+        clean_result = selected_result if tab == "clean" else other_result
+        origin_result = selected_result if tab == "original" else other_result
+    else:
+        # Pre-R2 batches retain their database snapshot as a compatibility fallback.
+        preview_data = batch.preview_data or {}
+        selected_result = _legacy_preview_result(preview_data, tab, page)
+        other_tab = "original" if tab == "clean" else "clean"
+        other_result = _legacy_preview_result(preview_data, other_tab, 1)
+        other_result["rows"] = []
+        other_result["row_issues"] = []
+        clean_result = selected_result if tab == "clean" else other_result
+        origin_result = selected_result if tab == "original" else other_result
+
+    has_origin_rows = bool(origin_result["total_rows"] > 0)
+    total_file_rows = origin_result.get("total_rows") or clean_result.get("total_rows") or 0
+
+    detail_summary = dict(batch.summary or {})
+    detail_summary["messages"] = _format_history_summary_messages(batch, total_file_rows)
 
     return {
         "id": batch.id,
         "import_type": batch.import_type.value,
         "filename": batch.filename,
         "branch_name": batch.branch.name if batch.branch else None,
-        "uploaded_by_name": batch.uploaded_by_user.name if batch.uploaded_by_user else None,
+        "uploaded_by_name": batch.uploaded_by_user.name
+        if batch.uploaded_by_user
+        else None,
         "status": batch.status.value,
-        "summary": batch.summary,
-        "created_at": batch.created_at.isoformat(),
-        "reverted_at": batch.reverted_at.isoformat() if batch.reverted_at else None,
+        "summary": detail_summary,
+        "created_at": utc_timestamp(batch.created_at),
+        "reverted_at": utc_timestamp(batch.reverted_at) if batch.reverted_at else None,
         "storage_key": batch.storage_key,
-        "has_file": bool(batch.storage_key or batch.original_file_size or has_origin_rows),
-        "origin": origin_data,
-        "clean": clean_data,
+        "has_file": bool(
+            batch.storage_key or batch.original_file_size or has_origin_rows
+        ),
+        "origin": origin_result,
+        "clean": clean_result,
     }
+
+
+@router.get("/history/{batch_id}/warnings")
+def get_import_history_warnings(
+    batch_id: str,
+    tab: str = Query("clean", pattern="^(clean|original)$"),
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    batch = db.get(
+        ImportBatch,
+        batch_id,
+        options=[defer(ImportBatch.preview_data), defer(ImportBatch.original_file)],
+    )
+    if batch is None or not _can_access_batch(user, batch):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
+
+    storage = get_storage_service()
+    warning_indices = (
+        read_preview_warnings(storage, batch.id, tab) if storage.is_configured else None
+    )
+    if warning_indices is None:
+        data = (batch.preview_data or {}).get(
+            "clean" if tab == "clean" else "origin", {}
+        )
+        row_issues = data.get("row_issues", []) if isinstance(data, dict) else []
+        warning_indices = [index for index, issues in enumerate(row_issues) if issues]
+    return {"indices": warning_indices}
+
+
+@router.get("/history/{batch_id}/download-clean")
+def download_clean_import_file(
+    batch_id: str,
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+):
+    """Download cleaned CSV data for any confirmed import batch."""
+    batch = db.get(ImportBatch, batch_id)
+    if batch is None or not _can_access_batch(user, batch):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    if batch.import_type == ImportType.INVENTORY:
+        writer.writerow(
+            [
+                "StockCode",
+                "Description",
+                "Location",
+                "Group",
+                "On_Hand_Qty",
+                "Buying_Price",
+                "Selling_Price",
+            ]
+        )
+        levels = (
+            db.query(StockLevel, Product)
+            .join(Product, StockLevel.product_id == Product.id)
+            .filter(StockLevel.import_batch_id == batch.id)
+            .order_by(Product.stock_code)
+            .all()
+        )
+        for level, product in levels:
+            writer.writerow(
+                [
+                    product.stock_code,
+                    product.description or "",
+                    level.location_raw or "",
+                    product.group_name or "",
+                    float(level.on_hand_qty) if level.on_hand_qty is not None else "",
+                    float(level.buying_price) if level.buying_price is not None else "",
+                    float(level.selling_price)
+                    if level.selling_price is not None
+                    else "",
+                ]
+            )
+    elif batch.import_type == ImportType.SALES:
+        writer.writerow(
+            [
+                "Date",
+                "Time",
+                "Slip_ID",
+                "StockCode",
+                "Description",
+                "Qty",
+                "Selling_Price",
+                "Discount_Amount",
+                "Net_Amount",
+            ]
+        )
+        lines = (
+            db.query(SaleLine, Sale, Product)
+            .join(Sale, SaleLine.sale_id == Sale.id)
+            .join(Product, SaleLine.product_id == Product.id)
+            .filter(Sale.import_batch_id == batch.id)
+            .order_by(Sale.sale_date, Sale.slip_id, SaleLine.line_id)
+            .all()
+        )
+        for line, sale, product in lines:
+            writer.writerow(
+                [
+                    sale.sale_date.isoformat() if sale.sale_date else "",
+                    sale.sale_time or "",
+                    sale.slip_id,
+                    product.stock_code,
+                    product.description or "",
+                    float(line.qty) if line.qty is not None else "",
+                    float(line.selling_price) if line.selling_price is not None else "",
+                    float(line.discount_amount)
+                    if line.discount_amount is not None
+                    else "",
+                    float(line.net_amount) if line.net_amount is not None else "",
+                ]
+            )
+    elif batch.import_type == ImportType.PURCHASE:
+        writer.writerow(
+            ["StockCode", "Description", "Qty", "Buying_Price", "Total_Amount"]
+        )
+        lines = (
+            db.query(PurchaseLine, Purchase, Product)
+            .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
+            .join(Product, PurchaseLine.product_id == Product.id)
+            .filter(Purchase.import_batch_id == batch.id)
+            .order_by(PurchaseLine.id)
+            .all()
+        )
+        for line, purchase, product in lines:
+            writer.writerow(
+                [
+                    product.stock_code,
+                    product.description or "",
+                    float(line.qty) if line.qty is not None else "",
+                    float(line.buying_price) if line.buying_price is not None else "",
+                    float(line.total_amount) if line.total_amount is not None else "",
+                ]
+            )
+    else:
+        return download_import_batch_file(batch_id, user, db)
+
+    csv_data = output.getvalue().encode("utf-8-sig")
+    stem = Path(batch.filename or "import").stem
+    clean_filename = f"{stem}_clean.csv"
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{clean_filename}"'},
+    )
 
 
 @router.get("/history/{batch_id}/download")
@@ -757,7 +1278,10 @@ def download_import_batch_file(
     if batch is None or not _can_access_batch(user, batch):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
 
-    if user.role not in (UserRole.ADMIN, UserRole.DEVELOPMENT) and batch.import_type != ImportType.GENERAL:
+    if (
+        user.role not in (UserRole.ADMIN, UserRole.DEVELOPMENT)
+        and batch.import_type != ImportType.GENERAL
+    ):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             "Only administrators can download original import files",
@@ -801,7 +1325,10 @@ def download_import_batch_file(
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
-    raise HTTPException(status.HTTP_404_NOT_FOUND, "Original file is not available for this import batch")
+    raise HTTPException(
+        status.HTTP_404_NOT_FOUND,
+        "Original file is not available for this import batch",
+    )
 
 
 @router.post("/history/{batch_id}/revert")
@@ -820,14 +1347,17 @@ def revert_import_batch(
     if not _can_access_batch(user, batch):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
     if batch.status != ImportBatchStatus.COMPLETED:
-        raise HTTPException(status.HTTP_409_CONFLICT, "This import was already removed or reimported")
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This import was already removed or reimported"
+        )
     if batch.import_type == ImportType.GENERAL:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "Daily operation cost files are stored only and cannot be reverted or reimported",
         )
-    if user.role == UserRole.RETAIL and datetime.datetime.now() - batch.created_at > datetime.timedelta(
-        days=1
+    if (
+        user.role == UserRole.RETAIL
+        and utc_now() - batch.created_at > datetime.timedelta(days=1)
     ):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
@@ -835,12 +1365,19 @@ def revert_import_batch(
         )
 
     if batch.import_type.value == "sales":
-        sale_ids = [s.id for s in db.query(Sale.id).filter(Sale.import_batch_id == batch_id)]
-        db.query(SaleLine).filter(SaleLine.sale_id.in_(sale_ids)).delete(synchronize_session=False)
-        db.query(Sale).filter(Sale.import_batch_id == batch_id).delete(synchronize_session=False)
+        sale_ids = [
+            s.id for s in db.query(Sale.id).filter(Sale.import_batch_id == batch_id)
+        ]
+        db.query(SaleLine).filter(SaleLine.sale_id.in_(sale_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Sale).filter(Sale.import_batch_id == batch_id).delete(
+            synchronize_session=False
+        )
     elif batch.import_type.value == "purchase":
         purchase_ids = [
-            p.id for p in db.query(Purchase.id).filter(Purchase.import_batch_id == batch_id)
+            p.id
+            for p in db.query(Purchase.id).filter(Purchase.import_batch_id == batch_id)
         ]
         db.query(PurchaseLine).filter(
             PurchaseLine.purchase_id.in_(purchase_ids)
@@ -853,13 +1390,15 @@ def revert_import_batch(
             synchronize_session=False
         )
 
-    batch.status = ImportBatchStatus.REIMPORTED if replaced else ImportBatchStatus.REVERTED
-    batch.reverted_at = datetime.datetime.now()
+    batch.status = (
+        ImportBatchStatus.REIMPORTED if replaced else ImportBatchStatus.REVERTED
+    )
+    batch.reverted_at = utc_now()
     batch.reverted_by = user.id
     db.commit()
 
     return {
         "id": batch.id,
         "status": batch.status.value,
-        "reverted_at": batch.reverted_at.isoformat(),
+        "reverted_at": utc_timestamp(batch.reverted_at),
     }

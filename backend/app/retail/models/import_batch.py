@@ -3,7 +3,18 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Index, Integer, LargeBinary, String, func
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -36,6 +47,9 @@ class ImportBatch(Base):
     __table_args__ = (
         # Serves GET /api/imports/history: filter by branch_id, order by created_at desc.
         Index("ix_import_batches_branch_id_created_at", "branch_id", "created_at"),
+        # A client retains this UUID when a weak connection forces it to retry a confirm.
+        # PostgreSQL allows multiple NULLs, so old imports without a key remain valid.
+        UniqueConstraint("request_key", name="uq_import_batches_request_key"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -59,6 +73,9 @@ class ImportBatch(Base):
     preview_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     # Object storage key in Cloudflare R2 where the raw uploaded spreadsheet file is preserved
     storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # The client-generated Idempotency-Key for a confirmed import.  It makes replaying
+    # the same request safe after the server committed but its answer was lost in transit.
+    request_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # General uploads are retained in the database as well as optionally mirrored to
     # object storage. Keeping these bytes makes the feature useful in installations
     # that have not configured Cloudflare R2 yet.

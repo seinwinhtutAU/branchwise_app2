@@ -8,7 +8,6 @@ from app.retail.services.import_common import (
     get_or_create_products,
     new_import_batch,
     pluralize,
-    product_summary_messages,
 )
 
 
@@ -22,6 +21,7 @@ def persist_inventory(
     uploaded_by: str | None = None,
     preview_data: dict | None = None,
     storage_key: str | None = None,
+    request_key: str | None = None,
 ) -> dict:
     """Persist an inventory import as a new batch of StockLevel snapshots.
 
@@ -36,6 +36,7 @@ def persist_inventory(
         source_file=source_file,
         preview_data=preview_data,
         storage_key=storage_key,
+        request_key=request_key,
     )
     db.add(batch)
 
@@ -66,14 +67,27 @@ def persist_inventory(
     # line, so this is left unset rather than passed as None.
     printed_at = df.attrs.get("printed_at")
 
+    zero_stock_skipped = 0
+    negative_stock_count = 0
+
     # Plain dicts, not iterrows() — same reasoning as validate_rows in import_common.
     for row in df.to_dict(orient="records"):
+        qty = row["On_Hand_Qty"]
+        # Skip zero-stock items from append-only snapshot table to avoid database bloat.
+        # Master product catalog is already updated above via get_or_create_products.
+        if qty == 0:
+            zero_stock_skipped += 1
+            continue
+
+        if qty is not None and qty < 0:
+            negative_stock_count += 1
+
         stock_level = StockLevel(
             branch_id=branch_id,
             import_batch_id=batch.id,
             location_raw=location_raw,
             product_id=products[row["StockCode"]].id,
-            on_hand_qty=row["On_Hand_Qty"],
+            on_hand_qty=qty,
             buying_price=row["Buying_Price"],
             selling_price=row["Selling_Price"],
             source_file=source_file,
@@ -83,10 +97,25 @@ def persist_inventory(
         db.add(stock_level)
         summary["stock_levels_created"] += 1
 
-    messages = [f"Inventory updated for {pluralize(summary['stock_levels_created'], 'product')}"]
-    messages.extend(product_summary_messages(summary["products_created"], summary["products_updated"]))
+    summary["zero_stock_skipped"] = zero_stock_skipped
+    summary["negative_stock_count"] = negative_stock_count
+
+    total_products = len(df)
+    recorded_msg = f"{summary['stock_levels_created']:,} product stocks recorded"
     if printed_at is not None:
-        messages[0] += f" (as of {printed_at.strftime('%b %-d, %Y, %-I:%M %p')})"
+        recorded_msg += f" (as of {printed_at.strftime('%b %-d, %Y, %-I:%M %p')})"
+
+    messages = [
+        f"{total_products:,} total products in file",
+        recorded_msg,
+    ]
+    if zero_stock_skipped > 0:
+        messages.append(f"{zero_stock_skipped:,} products with 0 stock")
+    issue_count = summary.get("issue_count", 0)
+    total_issues = max(negative_stock_count, issue_count)
+    if total_issues > 0:
+        messages.append(f"⚠️ Alert: {pluralize(total_issues, 'product')} recorded with invalid values")
+
     summary["messages"] = messages
 
     batch.summary = summary

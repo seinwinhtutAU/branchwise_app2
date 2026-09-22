@@ -12,6 +12,7 @@ from app.retail.services import early_warning
 def test_business_alerts_only_register_operational_rules():
     assert tuple(rule.__name__ for rule in early_warning.RULES) == (
         "daily_import_missing_rule",
+        "purchase_number_sequence_rule",
         "sale_data_quality_rule",
         "purchase_data_quality_rule",
         "urgent_reorder_rule",

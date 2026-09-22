@@ -110,6 +110,40 @@ function ScoreBar({
 // 1. Multi-Branch Overview Table (Admin Page 1)
 // ========================================================================================
 
+function BranchLoadingCard({ name }: { name: string }): React.JSX.Element {
+  return (
+    <Panel className="flex flex-col gap-3 p-4 sm:p-5 rounded-lg border border-border bg-bg-base shadow-xs">
+      <div className="flex items-center justify-between gap-2 pb-3 border-b border-border/70">
+        <h3 className="font-bold text-base text-text-primary truncate">{name}</h3>
+      </div>
+      <Skeleton className="h-40" />
+    </Panel>
+  );
+}
+
+function BranchFailedCard({
+  name,
+  onRetry,
+}: {
+  name: string;
+  onRetry: () => void;
+}): React.JSX.Element {
+  return (
+    <Panel className="flex flex-col gap-3 p-4 sm:p-5 rounded-lg border border-border bg-bg-base shadow-xs">
+      <div className="flex items-center justify-between gap-2 pb-3 border-b border-border/70">
+        <h3 className="font-bold text-base text-text-primary truncate">{name}</h3>
+      </div>
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 py-6 text-center">
+        <WarningIcon className="w-5 h-5 text-warning" />
+        <p className="text-xs text-text-muted">Couldn't load this branch's health data.</p>
+        <Button variant="secondary" size="sm" onClick={onRetry}>
+          Retry
+        </Button>
+      </div>
+    </Panel>
+  );
+}
+
 function MultiBranchComparisonView({
   session,
   branchOptions,
@@ -125,46 +159,29 @@ function MultiBranchComparisonView({
   dateTo: string;
   onOpen: (branchId: string) => void;
 }): React.JSX.Element {
-  const urls = branchOptions.map((b) =>
-    dashboardUrl("overview", b.id, { period, dateFrom, dateTo }),
+  const branchUrls = useMemo(
+    () =>
+      branchOptions.map((b) => ({
+        branch: b,
+        url: dashboardUrl("overview", b.id, { period, dateFrom, dateTo }),
+      })),
+    [branchOptions, period, dateFrom, dateTo],
   );
-  const { data, isLoading, isRefreshing, failedCount, reload } =
+  const urls = useMemo(() => branchUrls.map((b) => b.url), [branchUrls]);
+  const { data, failedUrls, isRefreshing, refetchUrl } =
     useUrlQueries<OverviewData>(urls, session, "all branches health");
+  const failedUrlSet = useMemo(() => new Set(failedUrls), [failedUrls]);
 
-  const branchList = Object.values(data);
-
-  // Summary statistics across all branches
-  // Sort branches by health score descending
-  const sortedBranches = useMemo(() => {
-    return [...branchList].sort(
-      (a, b) => (b.overall_score ?? -1) - (a.overall_score ?? -1),
+  // Every branch always renders its own card (loaded / loading / failed) rather than
+  // dropping out of the grid when its own request is slow or fails — a large branch's
+  // request failing used to make its whole card vanish instead of showing an error.
+  const loaded = branchUrls
+    .filter(({ url }) => data[url] !== undefined)
+    .map(({ branch, url }) => ({ branch, overview: data[url] }))
+    .sort(
+      (a, b) => (b.overview.overall_score ?? -1) - (a.overview.overall_score ?? -1),
     );
-  }, [branchList]);
-
-  if (isLoading) {
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <Skeleton className="h-64" />
-        <Skeleton className="h-64" />
-        <Skeleton className="h-64" />
-      </div>
-    );
-  }
-
-  if (branchList.length === 0 && failedCount > 0) {
-    return (
-      <EmptyState
-        icon={<WarningIcon />}
-        title="Couldn't load branch health data"
-        description="Something went wrong reaching the backend."
-        action={
-          <Button variant="secondary" size="sm" onClick={reload}>
-            Try again
-          </Button>
-        }
-      />
-    );
-  }
+  const notLoaded = branchUrls.filter(({ url }) => data[url] === undefined);
 
   return (
     <div className="flex flex-col gap-4">
@@ -183,14 +200,25 @@ function MultiBranchComparisonView({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {sortedBranches.map((branch, index) => (
+          {loaded.map(({ branch, overview }, index) => (
             <BranchHealthCard
-              key={branch.branch_id}
-              branch={branch}
+              key={branch.id}
+              branch={overview}
               rank={index + 1}
               onOpen={onOpen}
             />
           ))}
+          {notLoaded.map(({ branch, url }) =>
+            failedUrlSet.has(url) ? (
+              <BranchFailedCard
+                key={branch.id}
+                name={branch.name}
+                onRetry={() => void refetchUrl(url)}
+              />
+            ) : (
+              <BranchLoadingCard key={branch.id} name={branch.name} />
+            ),
+          )}
         </div>
       </div>
     </div>

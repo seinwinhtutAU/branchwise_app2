@@ -509,10 +509,7 @@ def _latest_stock_levels(
     for admin's "all branches" view (see compute_stock_health). The dashboard's own
     caller, _stock_summary, always passes a concrete branch_id — see the module
     docstring for why that stays true."""
-    query = latest_stock_query(db)
-    if branch_id is not None:
-        query = query.filter(StockLevel.branch_id == branch_id)
-    return query.all()
+    return latest_stock_query(db, branch_id).all()
 
 
 def _sales_velocity(

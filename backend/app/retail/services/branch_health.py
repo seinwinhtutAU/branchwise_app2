@@ -29,7 +29,7 @@ from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Callable
 
-from sqlalchemy import func
+from sqlalchemy import and_, case, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
@@ -38,6 +38,10 @@ from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.models.sale import Sale, SaleLine
 from app.retail.models.stock_level import StockLevel
 from app.retail.services import data_quality, explanation
+from app.retail.services.import_integrity import (
+    latest_daily_data_dates,
+    purchase_number_integrity,
+)
 from app.services.branches import list_retail_branches
 from app.services.settings import get_branch_health_weights
 from app.services.dashboard import (
@@ -221,7 +225,8 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 definition="Whether the branch is keeping more or less of each sale than it was before.",
                 calculation=lambda s: (
                     f"{s.gross_margin_pct:.1f}% this period, against {s.previous_gross_margin_pct:.1f}% before."
-                    if s.gross_margin_pct is not None and s.previous_gross_margin_pct is not None
+                    if s.gross_margin_pct is not None
+                    and s.previous_gross_margin_pct is not None
                     else None
                 ),
             ),
@@ -244,7 +249,9 @@ DIMENSIONS: tuple[Dimension, ...] = (
                     f"once in {DEAD_STOCK_WINDOW_DAYS} days."
                 ),
                 calculation=lambda s: (
-                    f"{s.dead_stock_count:,} of {s.sku_count:,} products with stock." if s.sku_count else None
+                    f"{s.dead_stock_count:,} of {s.sku_count:,} products with stock."
+                    if s.sku_count
+                    else None
                 ),
             ),
             SubMetric(
@@ -271,12 +278,22 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 0.3,
                 # Both ends are bad: under two weeks of cover is a stockout waiting to
                 # happen, over two months is cash sitting on a shelf.
-                ((0.0, 50.0), (15.0, 90.0), (30.0, 100.0), (45.0, 85.0), (60.0, 60.0), (90.0, 30.0), (120.0, 0.0)),
+                (
+                    (0.0, 50.0),
+                    (15.0, 90.0),
+                    (30.0, 100.0),
+                    (45.0, 85.0),
+                    (60.0, 60.0),
+                    (90.0, 30.0),
+                    (120.0, 0.0),
+                ),
                 definition="How long the stock now on the shelf would last at the rate the branch is selling.",
                 calculation=lambda s: (
                     f"{_ks(s.estimated_stock_value)} of stock ÷ "
                     f"{_ks(s.estimated_cogs / s.period_days)} of goods sold per day."
-                    if s.period_days and s.estimated_cogs > 0 and s.estimated_stock_value > 0
+                    if s.period_days
+                    and s.estimated_cogs > 0
+                    and s.estimated_stock_value > 0
                     else None
                 ),
             ),
@@ -468,6 +485,9 @@ class BranchSnapshot:
     # 7 Business Alerts Extensions
     has_today_sales: bool = True
     has_today_inventory: bool = True
+    sales_data_date: str | None = None
+    inventory_data_date: str | None = None
+    purchase_number_integrity: dict = field(default_factory=dict)
     is_after_8pm: bool = False
     daily_check_cutoff_time: str = "20:00"
     stock_allocations: tuple[dict, ...] = ()
@@ -506,7 +526,9 @@ def _trading_days(db: Session, branch_id: str, start: date, end: date) -> int:
     day was never imported, should not look like a branch nobody visited."""
     return (
         db.query(func.count(func.distinct(Sale.sale_date)))
-        .filter(Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end)
+        .filter(
+            Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end
+        )
         .scalar()
         or 0
     )
@@ -518,7 +540,9 @@ def _products_sold(db: Session, branch_id: str, start: date, end: date) -> int:
     return (
         db.query(func.count(func.distinct(SaleLine.product_id)))
         .join(Sale, SaleLine.sale_id == Sale.id)
-        .filter(Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end)
+        .filter(
+            Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end
+        )
         .scalar()
         or 0
     )
@@ -531,7 +555,9 @@ def _line_counts(db: Session, branch_id: str, start: date, end: date) -> int:
     sale_lines = (
         db.query(func.count(SaleLine.id))
         .join(Sale, SaleLine.sale_id == Sale.id)
-        .filter(Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end)
+        .filter(
+            Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end
+        )
         .scalar()
         or 0
     )
@@ -561,7 +587,9 @@ def _summarise_stock_risk(
     match is the most urgent; above the low-stock table's own item cap this measures the
     most urgent products rather than all of them, which is the right sample anyway.
     """
-    at_risk = [item for item in low_stock_items if item["status"] in {"Critical", "Low"}]
+    at_risk = [
+        item for item in low_stock_items if item["status"] in {"Critical", "Low"}
+    ]
     if not at_risk:
         return 0, 0, None, ()
 
@@ -598,7 +626,9 @@ def _summarise_stock_risk(
                     # business sells shoes, and "0.17 a day" describes nothing anyone in
                     # the shop recognises.
                     "on_hand_qty": item["on_hand_qty"],
-                    "sold_recent_qty": round(item["daily_velocity"] * STOCK_VELOCITY_WINDOW_DAYS),
+                    "sold_recent_qty": round(
+                        item["daily_velocity"] * STOCK_VELOCITY_WINDOW_DAYS
+                    ),
                     "demand_ratio": ratio,
                     # Carried as a decided fact rather than left to the reader to work
                     # out from the ratio, so the shortlist and the count above it can
@@ -620,6 +650,7 @@ def _check_daily_import_status(
 
     if cutoff_time is None:
         from app.services.settings import get_daily_check_cutoff_time
+
         cutoff_time = get_daily_check_cutoff_time(db)
 
     try:
@@ -628,17 +659,24 @@ def _check_daily_import_status(
     except Exception:
         cutoff_h, cutoff_m = 20, 0
 
-    is_after_cutoff = (now.hour > cutoff_h) or (now.hour == cutoff_h and now.minute >= cutoff_m)
+    is_after_cutoff = (now.hour > cutoff_h) or (
+        now.hour == cutoff_h and now.minute >= cutoff_m
+    )
 
     has_today_sales = (
         db.query(Sale.id)
         .filter(Sale.branch_id == branch_id, Sale.sale_date == today)
-        .first() is not None
+        .first()
+        is not None
     )
     has_today_inventory = (
         db.query(StockLevel.id)
-        .filter(StockLevel.branch_id == branch_id, func.date(StockLevel.snapshot_at) == today)
-        .first() is not None
+        .filter(
+            StockLevel.branch_id == branch_id,
+            func.date(StockLevel.snapshot_at) == today,
+        )
+        .first()
+        is not None
     )
     return has_today_sales, has_today_inventory, is_after_cutoff
 
@@ -650,7 +688,11 @@ def _find_stock_allocations(
         return ()
 
     since = date.today() - timedelta(days=lookback_days)
-    dead_codes = [item["stock_code"] for item in dead_stock_items if item.get("on_hand_qty", 0) > 0]
+    dead_codes = [
+        item["stock_code"]
+        for item in dead_stock_items
+        if item.get("on_hand_qty", 0) > 0
+    ]
     if not dead_codes:
         return ()
 
@@ -705,23 +747,28 @@ def _find_stock_allocations(
 
 def _find_urgent_reorders(low_stock_items: list[dict]) -> tuple[dict, ...]:
     critical_items = [
-        item for item in low_stock_items
+        item
+        for item in low_stock_items
         if item.get("status") == "Critical" and item.get("daily_velocity", 0) > 0
     ]
-    critical_items.sort(key=lambda x: (x.get("days_left", 999), -x.get("daily_velocity", 0)))
+    critical_items.sort(
+        key=lambda x: (x.get("days_left", 999), -x.get("daily_velocity", 0))
+    )
     result = []
     for item in critical_items[:10]:
         v = item.get("daily_velocity", 0)
         on_hand = item.get("on_hand_qty", 0)
         reorder_qty = max(1, round(v * 30 - on_hand))
-        result.append({
-            "stock_code": item["stock_code"],
-            "description": item["description"],
-            "days_left": round(item["days_left"]),
-            "on_hand_qty": round(on_hand),
-            "daily_velocity": v,
-            "recommended_reorder_qty": reorder_qty,
-        })
+        result.append(
+            {
+                "stock_code": item["stock_code"],
+                "description": item["description"],
+                "days_left": round(item["days_left"]),
+                "on_hand_qty": round(on_hand),
+                "daily_velocity": v,
+                "recommended_reorder_qty": reorder_qty,
+            }
+        )
     return tuple(result)
 
 
@@ -740,7 +787,12 @@ def _find_aged_footwear(
         return ()
 
     current_stocks = (
-        db.query(StockLevel.product_id, StockLevel.on_hand_qty, Product.stock_code, Product.description)
+        db.query(
+            StockLevel.product_id,
+            StockLevel.on_hand_qty,
+            Product.stock_code,
+            Product.description,
+        )
         .join(Product, StockLevel.product_id == Product.id)
         .filter(
             StockLevel.branch_id == branch_id,
@@ -799,14 +851,16 @@ def _find_aged_footwear(
         batch_prefix = f"Batch #{batch_id[:8]} · " if batch_id else ""
         type_prefix = "Purchased" if is_purchase else "First recorded"
         batch_label = f"{type_prefix}: {batch_prefix}{p_date.strftime('%d %b %Y')}"
-        aged_items.append({
-            "stock_code": code,
-            "description": desc,
-            "on_hand_qty": round(float(on_hand)),
-            "age_days": age,
-            "purchase_date": p_date.isoformat(),
-            "batch_label": batch_label,
-        })
+        aged_items.append(
+            {
+                "stock_code": code,
+                "description": desc,
+                "on_hand_qty": round(float(on_hand)),
+                "age_days": age,
+                "purchase_date": p_date.isoformat(),
+                "batch_label": batch_label,
+            }
+        )
 
     aged_items.sort(key=lambda x: -x["age_days"])
     return tuple(aged_items[:15])
@@ -817,7 +871,20 @@ def _find_seasonal_spikes(
 ) -> tuple[dict, ...]:
     today = today or date.today()
     target_month = today.month
-    month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    month_names = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    ]
     month_name = month_names[target_month - 1]
 
     prior_year = today.year - 1
@@ -880,7 +947,15 @@ def _find_weekly_patterns(
         return None
 
     # DOW convention (both Postgres and SQLite): 0=Sunday, 1=Monday, ..., 6=Saturday
-    dow_names = {0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday", 4: "Thursday", 5: "Friday", 6: "Saturday"}
+    dow_names = {
+        0: "Sunday",
+        1: "Monday",
+        2: "Tuesday",
+        3: "Wednesday",
+        4: "Thursday",
+        5: "Friday",
+        6: "Saturday",
+    }
     by_dow = {int(r[0]): float(r[1] or 0) for r in dow_counts}
 
     weekend_qty = by_dow.get(0, 0) + by_dow.get(6, 0)
@@ -901,12 +976,45 @@ def _find_weekly_patterns(
     return None
 
 
+# Shared by both checks below: a blank or placeholder description, the same set of
+# placeholder strings ("—", "-", "?", "None", "NULL") either check has always treated as
+# "no real description", trimmed the same way Python's str.strip() would.
+def _blank_description_condition():
+    trimmed = func.trim(Product.description)
+    return or_(
+        Product.description.is_(None),
+        trimmed == "",
+        trimmed.in_(("—", "-", "?", "None", "NULL")),
+    )
+
+
+def _sale_numeric_invalid_condition():
+    # Qty <= 0, Selling Price <= 0, Amount <= 0, Net Amount <= 0, Discount Amount < 0, or None.
+    return or_(
+        SaleLine.qty.is_(None),
+        SaleLine.qty <= 0,
+        SaleLine.selling_price.is_(None),
+        SaleLine.selling_price <= 0,
+        SaleLine.amount.is_(None),
+        SaleLine.amount <= 0,
+        SaleLine.net_amount.is_(None),
+        SaleLine.net_amount <= 0,
+        and_(SaleLine.discount_amount.is_not(None), SaleLine.discount_amount < 0),
+    )
+
+
 def _check_sale_data_quality(
     db: Session, branch_id: str, date_from: date, date_to: date
 ) -> dict:
     """Checks sale lines for zero/negative/invalid numbers and missing product descriptions.
-    Note: Missing buying price is ignored per requirements."""
-    rows = (
+    Note: Missing buying price is ignored per requirements.
+
+    Counts are a single SQL aggregate rather than pulling every line and classifying it
+    in Python — on a branch with a lot of sale lines in the period, `query.all()` used to
+    mean loading and converting every row just to throw almost all of them away. The
+    sample rows the response actually shows are then fetched with their own `LIMIT 5`
+    query, only for the rows that failed."""
+    base = (
         db.query(SaleLine, Sale, Product)
         .join(Sale, SaleLine.sale_id == Sale.id)
         .join(Product, SaleLine.product_id == Product.id)
@@ -915,112 +1023,132 @@ def _check_sale_data_quality(
             Sale.sale_date >= date_from,
             Sale.sale_date <= date_to,
         )
-        .all()
     )
+    numeric_invalid = _sale_numeric_invalid_condition()
+    missing_desc = _blank_description_condition()
 
-    invalid_numeric_lines = []
-    missing_desc_lines = []
+    invalid_numeric_count, missing_description_count = base.with_entities(
+        func.count(case((numeric_invalid, 1))),
+        func.count(case((missing_desc, 1))),
+    ).one()
 
-    for line, sale, product in rows:
-        # 1. Numeric validation:
-        # Qty <= 0, Selling Price <= 0, Amount <= 0, Net Amount <= 0, Discount Amount < 0, or None
-        is_num_invalid = False
-        if line.qty is None or float(line.qty) <= 0:
-            is_num_invalid = True
-        elif line.selling_price is None or float(line.selling_price) <= 0:
-            is_num_invalid = True
-        elif line.amount is None or float(line.amount) <= 0:
-            is_num_invalid = True
-        elif line.net_amount is None or float(line.net_amount) <= 0:
-            is_num_invalid = True
-        elif line.discount_amount is not None and float(line.discount_amount) < 0:
-            is_num_invalid = True
-
-        if is_num_invalid:
-            invalid_numeric_lines.append({
+    sample_numeric = (
+        [
+            {
                 "slip_id": sale.slip_id,
                 "slip_number": sale.slip_number,
                 "stock_code": product.stock_code,
                 "qty": float(line.qty) if line.qty is not None else None,
-                "selling_price": float(line.selling_price) if line.selling_price is not None else None,
-                "net_amount": float(line.net_amount) if line.net_amount is not None else None,
-                "discount_amount": float(line.discount_amount) if line.discount_amount is not None else None,
-            })
-
-        # 2. Description validation:
-        desc = (product.description or "").strip()
-        if not desc or desc in ("—", "-", "?", "None", "NULL"):
-            missing_desc_lines.append({
+                "selling_price": float(line.selling_price)
+                if line.selling_price is not None
+                else None,
+                "net_amount": float(line.net_amount)
+                if line.net_amount is not None
+                else None,
+                "discount_amount": float(line.discount_amount)
+                if line.discount_amount is not None
+                else None,
+            }
+            for line, sale, product in base.filter(numeric_invalid).limit(5).all()
+        ]
+        if invalid_numeric_count
+        else []
+    )
+    sample_missing_desc = (
+        [
+            {
                 "slip_id": sale.slip_id,
                 "slip_number": sale.slip_number,
                 "stock_code": product.stock_code,
-            })
+            }
+            for line, sale, product in base.filter(missing_desc).limit(5).all()
+        ]
+        if missing_description_count
+        else []
+    )
 
-    total_flawed = len(invalid_numeric_lines) + len(missing_desc_lines)
     return {
-        "invalid_numeric_count": len(invalid_numeric_lines),
-        "missing_description_count": len(missing_desc_lines),
-        "total_issues": total_flawed,
-        "sample_numeric": invalid_numeric_lines[:5],
-        "sample_missing_desc": missing_desc_lines[:5],
+        "invalid_numeric_count": invalid_numeric_count,
+        "missing_description_count": missing_description_count,
+        "total_issues": invalid_numeric_count + missing_description_count,
+        "sample_numeric": sample_numeric,
+        "sample_missing_desc": sample_missing_desc,
     }
+
+
+def _purchase_numeric_invalid_condition():
+    # Quantity <= 0, Buying Price (unit cost) <= 0, or None.
+    return or_(
+        PurchaseLine.quantity.is_(None),
+        PurchaseLine.quantity <= 0,
+        PurchaseLine.buying_price.is_(None),
+        PurchaseLine.buying_price <= 0,
+    )
 
 
 def _check_purchase_data_quality(
     db: Session, branch_id: str, date_from: date, date_to: date
 ) -> dict:
     """Checks purchase lines for zero/negative/invalid quantities or unit costs (buying prices),
-    and missing product descriptions."""
-    query = (
+    and missing product descriptions. Same SQL-aggregate approach as
+    _check_sale_data_quality above, for the same reason."""
+    base = (
         db.query(PurchaseLine, Purchase, Product)
         .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
         .join(Product, PurchaseLine.product_id == Product.id)
         .filter(
             Purchase.purchase_date >= date_from,
             Purchase.purchase_date <= date_to,
+            (Purchase.branch_id == branch_id) | (Purchase.branch_id.is_(None)),
         )
     )
-    query = query.filter((Purchase.branch_id == branch_id) | (Purchase.branch_id.is_(None)))
-    rows = query.all()
+    numeric_invalid = _purchase_numeric_invalid_condition()
+    missing_desc = _blank_description_condition()
 
-    invalid_numeric_lines = []
-    missing_desc_lines = []
+    invalid_numeric_count, missing_description_count = base.with_entities(
+        func.count(case((numeric_invalid, 1))),
+        func.count(case((missing_desc, 1))),
+    ).one()
 
-    for line, purchase, product in rows:
-        # 1. Numeric validation: Quantity <= 0, Buying Price (unit cost) <= 0, or None
-        is_num_invalid = False
-        if line.quantity is None or float(line.quantity) <= 0:
-            is_num_invalid = True
-        elif line.buying_price is None or float(line.buying_price) <= 0:
-            is_num_invalid = True
-
-        if is_num_invalid:
-            invalid_numeric_lines.append({
+    sample_numeric = (
+        [
+            {
                 "purchase_number": purchase.purchase_number,
                 "stock_code": product.stock_code,
                 "quantity": float(line.quantity) if line.quantity is not None else None,
-                "buying_price": float(line.buying_price) if line.buying_price is not None else None,
-            })
-
-        # 2. Description validation:
-        desc = (product.description or "").strip()
-        if not desc or desc in ("—", "-", "?", "None", "NULL"):
-            missing_desc_lines.append({
+                "buying_price": float(line.buying_price)
+                if line.buying_price is not None
+                else None,
+            }
+            for line, purchase, product in base.filter(numeric_invalid).limit(5).all()
+        ]
+        if invalid_numeric_count
+        else []
+    )
+    sample_missing_desc = (
+        [
+            {
                 "purchase_number": purchase.purchase_number,
                 "stock_code": product.stock_code,
-            })
+            }
+            for line, purchase, product in base.filter(missing_desc).limit(5).all()
+        ]
+        if missing_description_count
+        else []
+    )
 
-    total_flawed = len(invalid_numeric_lines) + len(missing_desc_lines)
     return {
-        "invalid_numeric_count": len(invalid_numeric_lines),
-        "missing_description_count": len(missing_desc_lines),
-        "total_issues": total_flawed,
-        "sample_numeric": invalid_numeric_lines[:5],
-        "sample_missing_desc": missing_desc_lines[:5],
+        "invalid_numeric_count": invalid_numeric_count,
+        "missing_description_count": missing_description_count,
+        "total_issues": invalid_numeric_count + missing_description_count,
+        "sample_numeric": sample_numeric,
+        "sample_missing_desc": sample_missing_desc,
     }
 
 
-def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> BranchSnapshot:
+def build_snapshot(
+    db: Session, branch_id: str, period_range: PeriodRange
+) -> BranchSnapshot:
     """The single gathering pass. Everything below delegates to the helper the
     matching dashboard tab already uses — see the module docstring's first rule."""
     net_revenue, transaction_count = _revenue_totals(
@@ -1085,19 +1213,28 @@ def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> Br
     )
     data_issue_count = sum(section["count"] for section in data_issue_sections)
     critical_data_issue_count = sum(
-        section["count"] for section in data_issue_sections if section["severity"] == "critical"
+        section["count"]
+        for section in data_issue_sections
+        if section["severity"] == "critical"
     )
 
     from app.services.settings import get_daily_check_cutoff_time
+
     cutoff_time = get_daily_check_cutoff_time(db)
     has_today_sales, has_today_inventory, is_after_8pm = _check_daily_import_status(
         db, branch_id, cutoff_time=cutoff_time
     )
-    stock_allocations = _find_stock_allocations(db, branch_id, stock.get("dead_stock_items", []))
+    sales_data_date, inventory_data_date = latest_daily_data_dates(db, branch_id)
+    purchase_integrity = purchase_number_integrity(db, branch_id)
+    stock_allocations = _find_stock_allocations(
+        db, branch_id, stock.get("dead_stock_items", [])
+    )
     urgent_reorders = _find_urgent_reorders(stock.get("low_stock_items", []))
     aged_footwear = _find_aged_footwear(db, branch_id)
     seasonal_spikes = _find_seasonal_spikes(db, branch_id)
-    weekly_pattern = _find_weekly_patterns(db, branch_id, period_range.start, period_range.end)
+    weekly_pattern = _find_weekly_patterns(
+        db, branch_id, period_range.start, period_range.end
+    )
     sale_data_quality_issues = _check_sale_data_quality(
         db, branch_id, period_range.start, period_range.end
     )
@@ -1111,13 +1248,17 @@ def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> Br
         transaction_count=transaction_count,
         previous_transaction_count=prev_transaction_count,
         avg_basket=net_revenue / transaction_count if transaction_count else 0.0,
-        previous_avg_basket=prev_net_revenue / prev_transaction_count if prev_transaction_count else 0.0,
+        previous_avg_basket=prev_net_revenue / prev_transaction_count
+        if prev_transaction_count
+        else 0.0,
         estimated_cogs=cogs,
         previous_estimated_cogs=prev_cogs,
         gross_margin_pct=_margin_pct(net_revenue, cogs),
         previous_gross_margin_pct=_margin_pct(prev_net_revenue, prev_cogs),
         cost_coverage_pct=_coverage_pct(priced_net_revenue, net_revenue),
-        previous_cost_coverage_pct=_coverage_pct(prev_priced_net_revenue, prev_net_revenue),
+        previous_cost_coverage_pct=_coverage_pct(
+            prev_priced_net_revenue, prev_net_revenue
+        ),
         sku_count=stock["sku_count"],
         critical_count=stock["critical_count"],
         low_count=stock["low_count"],
@@ -1138,14 +1279,18 @@ def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> Br
         previous_trading_days=_trading_days(
             db, branch_id, period_range.previous_start, period_range.previous_end
         ),
-        products_sold=_products_sold(db, branch_id, period_range.start, period_range.end),
+        products_sold=_products_sold(
+            db, branch_id, period_range.start, period_range.end
+        ),
         previous_products_sold=_products_sold(
             db, branch_id, period_range.previous_start, period_range.previous_end
         ),
         data_issue_count=data_issue_count,
         critical_data_issue_count=critical_data_issue_count,
         data_issue_sections=data_issue_sections,
-        records_checked=_line_counts(db, branch_id, period_range.start, period_range.end)
+        records_checked=_line_counts(
+            db, branch_id, period_range.start, period_range.end
+        )
         + stock["sku_count"],
         period_days=period_days,
         date_from=period_range.start.isoformat(),
@@ -1154,6 +1299,11 @@ def build_snapshot(db: Session, branch_id: str, period_range: PeriodRange) -> Br
         previous_date_to=period_range.previous_end.isoformat(),
         has_today_sales=has_today_sales,
         has_today_inventory=has_today_inventory,
+        sales_data_date=sales_data_date.isoformat() if sales_data_date else None,
+        inventory_data_date=inventory_data_date.isoformat()
+        if inventory_data_date
+        else None,
+        purchase_number_integrity=purchase_integrity,
         is_after_8pm=is_after_8pm,
         daily_check_cutoff_time=cutoff_time,
         stock_allocations=stock_allocations,
@@ -1177,7 +1327,9 @@ def sub_metric_values(snapshot: BranchSnapshot) -> dict[str, float | None]:
     entry here plus one to the table above.
     """
     profit_measurable = snapshot.cost_coverage_pct >= MIN_COST_COVERAGE_PCT
-    previous_profit_measurable = snapshot.previous_cost_coverage_pct >= MIN_COST_COVERAGE_PCT
+    previous_profit_measurable = (
+        snapshot.previous_cost_coverage_pct >= MIN_COST_COVERAGE_PCT
+    )
 
     margin_growth_pp = None
     if (
@@ -1186,17 +1338,24 @@ def sub_metric_values(snapshot: BranchSnapshot) -> dict[str, float | None]:
         and snapshot.gross_margin_pct is not None
         and snapshot.previous_gross_margin_pct is not None
     ):
-        margin_growth_pp = snapshot.gross_margin_pct - snapshot.previous_gross_margin_pct
+        margin_growth_pp = (
+            snapshot.gross_margin_pct - snapshot.previous_gross_margin_pct
+        )
 
     return {
-        "revenue_growth_pct": _growth_pct(snapshot.net_revenue, snapshot.previous_net_revenue),
+        "revenue_growth_pct": _growth_pct(
+            snapshot.net_revenue, snapshot.previous_net_revenue
+        ),
         "transaction_growth_pct": _growth_pct(
-            float(snapshot.transaction_count), float(snapshot.previous_transaction_count)
+            float(snapshot.transaction_count),
+            float(snapshot.previous_transaction_count),
         ),
         "products_sold_growth_pct": _growth_pct(
             float(snapshot.products_sold), float(snapshot.previous_products_sold)
         ),
-        "avg_basket_growth_pct": _growth_pct(snapshot.avg_basket, snapshot.previous_avg_basket),
+        "avg_basket_growth_pct": _growth_pct(
+            snapshot.avg_basket, snapshot.previous_avg_basket
+        ),
         # Sales per open day rather than raw sales: the Sales dimension already scores the
         # raw movement, and dividing by the days the shop actually traded is what stops a
         # short month, a holiday or a missing day's import from reading as lost customers.
@@ -1211,7 +1370,9 @@ def sub_metric_values(snapshot: BranchSnapshot) -> dict[str, float | None]:
         "gross_margin_pct": snapshot.gross_margin_pct if profit_measurable else None,
         "margin_growth_pp": margin_growth_pp,
         "dead_stock_share_pct": (
-            snapshot.dead_stock_count / snapshot.sku_count * 100 if snapshot.sku_count else None
+            snapshot.dead_stock_count / snapshot.sku_count * 100
+            if snapshot.sku_count
+            else None
         ),
         "stockout_risk_share_pct": (
             (snapshot.critical_count + snapshot.low_count) / snapshot.sku_count * 100
@@ -1225,7 +1386,9 @@ def sub_metric_values(snapshot: BranchSnapshot) -> dict[str, float | None]:
             else None
         ),
         "critical_data_issue_count": (
-            float(snapshot.critical_data_issue_count) if snapshot.records_checked else None
+            float(snapshot.critical_data_issue_count)
+            if snapshot.records_checked
+            else None
         ),
     }
 
@@ -1283,9 +1446,14 @@ def _score_dimension(
                 # and "why does that score what it does" without either explanation being
                 # written down a second time and left to drift.
                 "calculation": (
-                    sub_metric.calculation(snapshot) if value is not None and sub_metric.calculation else None
+                    sub_metric.calculation(snapshot)
+                    if value is not None and sub_metric.calculation
+                    else None
                 ),
-                "bands": [[band_value, band_score] for band_value, band_score in sub_metric.bands],
+                "bands": [
+                    [band_value, band_score]
+                    for band_value, band_score in sub_metric.bands
+                ],
             }
         )
 
@@ -1296,7 +1464,9 @@ def _score_dimension(
     return weighted_total / available_weight, sub_metric_payload
 
 
-def score_branch(snapshot: BranchSnapshot, weights: dict[str, float] | None = None) -> dict:
+def score_branch(
+    snapshot: BranchSnapshot, weights: dict[str, float] | None = None
+) -> dict:
     """The whole scoring step: sub-metric values -> dimension scores -> overall score.
 
     `weights` overrides the DIMENSIONS table's defaults, so the business can decide that
@@ -1335,7 +1505,9 @@ def score_branch(snapshot: BranchSnapshot, weights: dict[str, float] | None = No
                 "score": None if score is None else round(score, 1),
                 "status": health_status(score),
                 "insufficient_data_reason": (
-                    None if score is not None else _unavailable_reason(dimension.key, snapshot)
+                    None
+                    if score is not None
+                    else _unavailable_reason(dimension.key, snapshot)
                 ),
                 "sub_metrics": sub_metric_payload,
             }

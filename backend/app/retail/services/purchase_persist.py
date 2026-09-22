@@ -11,7 +11,6 @@ from app.retail.services.import_common import (
     get_or_create_products,
     new_import_batch,
     pluralize,
-    product_summary_messages,
 )
 
 
@@ -27,6 +26,7 @@ def persist_purchases(
     purchase_date: datetime.date | None = None,
     purchase_number: str | None = None,
     storage_key: str | None = None,
+    request_key: str | None = None,
 ) -> dict:
     """Persist a purchase import as one new Purchase batch per call.
 
@@ -46,6 +46,7 @@ def persist_purchases(
         source_file=source_file,
         preview_data=preview_data,
         storage_key=storage_key,
+        request_key=request_key,
     )
     db.add(batch)
 
@@ -97,8 +98,14 @@ def persist_purchases(
         )
         summary["purchase_lines_created"] += 1
 
-    messages = [f"{pluralize(summary['purchase_lines_created'], 'item')} added to your purchase record"]
-    messages.extend(product_summary_messages(summary["products_created"], summary["products_updated"]))
+    total_items = len(df)
+    messages = [
+        f"{total_items:,} total purchase items in file",
+        f"{summary['purchase_lines_created']:,} purchase items recorded",
+    ]
+    issue_count = summary.get("issue_count", 0)
+    if issue_count > 0:
+        messages.append(f"⚠️ Alert: {pluralize(issue_count, 'item')} recorded with invalid values")
     summary["messages"] = messages
 
     batch.summary = summary

@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
+from app.core.timestamps import utc_now
 from app.retail.models.import_batch import ImportBatch, ImportBatchStatus
 from app.retail.models.sale import Sale, SaleLine
 from app.models.user import User, UserRole
@@ -73,6 +74,7 @@ def test_history_lists_own_branch_only(authed_client: TestClient, db_session: Se
     assert rows[0]["import_type"] == "sales"
     assert rows[0]["branch_name"] == "Retail 1"
     assert rows[0]["status"] == "completed"
+    assert rows[0]["created_at"].endswith("Z")
 
 
 def test_admin_sees_all_branches(authed_client: TestClient, db_session: Session):
@@ -89,7 +91,7 @@ def test_admin_sees_all_branches(authed_client: TestClient, db_session: Session)
     assert len(response.json()) == 1
 
 
-def test_history_detail_returns_origin_and_clean_data(
+def test_history_detail_returns_only_the_selected_tab_page(
     authed_client: TestClient, db_session: Session
 ):
     _make_user(db_session, branch_name="Retail 1")
@@ -104,7 +106,13 @@ def test_history_detail_returns_origin_and_clean_data(
     assert body["clean"]["columns"]
     assert len(body["clean"]["rows"]) == 1
     assert body["clean"]["rows"][0]["StockCode"] == "U16085"
-    assert len(body["origin"]["rows"]) > 0
+    assert body["origin"]["rows"] == []
+
+    original_response = authed_client.get(
+        f"/api/imports/history/{batch_id}?tab=original"
+    )
+    assert original_response.status_code == 200
+    assert len(original_response.json()["origin"]["rows"]) > 0
 
 
 def test_general_file_is_stored_unchanged_and_retail_can_download_it(
@@ -155,7 +163,7 @@ def test_history_detail_other_branch_404(authed_client: TestClient, db_session: 
     )
     db_session.commit()
 
-    response = authed_client.get(f"/api/imports/history/{batch_id}")
+    response = authed_client.get(f"/api/imports/history/{batch_id}?tab=original")
     assert response.status_code == 404
 
 
@@ -245,7 +253,7 @@ def test_retail_can_revert_within_one_day(authed_client: TestClient, db_session:
     batch_id = summary["batch_id"]
 
     db_session.query(ImportBatch).filter(ImportBatch.id == batch_id).update(
-        {"created_at": datetime.now() - timedelta(hours=23)}
+        {"created_at": utc_now() - timedelta(hours=23)}
     )
     db_session.commit()
 
@@ -259,7 +267,7 @@ def test_retail_cannot_revert_after_one_day(authed_client: TestClient, db_sessio
     batch_id = summary["batch_id"]
 
     db_session.query(ImportBatch).filter(ImportBatch.id == batch_id).update(
-        {"created_at": datetime.now() - timedelta(days=1, minutes=1)}
+        {"created_at": utc_now() - timedelta(days=1, minutes=1)}
     )
     db_session.commit()
 
@@ -276,7 +284,7 @@ def test_admin_can_revert_after_one_day(authed_client: TestClient, db_session: S
     batch_id = summary["batch_id"]
 
     db_session.query(ImportBatch).filter(ImportBatch.id == batch_id).update(
-        {"created_at": datetime.now() - timedelta(days=30)}
+        {"created_at": utc_now() - timedelta(days=30)}
     )
     db_session.query(User).filter(User.id == "test-user-id").update(
         {"branch_id": None, "role": UserRole.ADMIN}
@@ -386,7 +394,7 @@ def test_download_file_retail_forbidden(authed_client: TestClient, db_session: S
     assert "Only administrators can download" in response.json()["detail"]
 
 
-def test_get_history_detail_prefers_r2_preview_data(
+def test_get_history_detail_reads_only_the_requested_r2_preview_page(
     authed_client: TestClient, db_session: Session, monkeypatch
 ):
     _make_user(db_session, branch_name="Retail 1")
@@ -398,12 +406,21 @@ def test_get_history_detail_prefers_r2_preview_data(
         is_configured = True
 
         def download_file_bytes(self, key: str):
-            if key == f"imports/{batch_id}/preview_data.json":
-                r2_content = json.dumps({
-                    "origin": {"rows": [{"Source": "Cloudflare R2"}]},
-                    "clean": {"columns": ["Source"], "rows": [{"Source": "Cloudflare R2"}]}
-                }).encode("utf-8")
-                return r2_content, "application/json"
+            if key == f"imports/{batch_id}/preview/v1/manifest.json":
+                manifest = {
+                    "clean": {
+                        "columns": ["Source"],
+                        "total_rows": 1,
+                        "source_total_rows": 1,
+                        "total_pages": 1,
+                        "warning_count": 0,
+                    },
+                    "original": {"total_rows": 1, "source_total_rows": 1, "total_pages": 1, "warning_count": 0},
+                }
+                return json.dumps(manifest).encode("utf-8"), "application/json"
+            if key == f"imports/{batch_id}/preview/v1/clean/pages/1.json":
+                page = {"rows": [{"Source": "Cloudflare R2"}], "row_issues": []}
+                return json.dumps(page).encode("utf-8"), "application/json"
             return None
 
     monkeypatch.setattr("app.retail.routers.imports.get_storage_service", lambda: MockStorage())
@@ -411,8 +428,8 @@ def test_get_history_detail_prefers_r2_preview_data(
     response = authed_client.get(f"/api/imports/history/{batch_id}")
     assert response.status_code == 200
     data = response.json()
-    assert data["origin"]["rows"] == [{"Source": "Cloudflare R2"}]
     assert data["clean"]["rows"] == [{"Source": "Cloudflare R2"}]
+    assert data["origin"]["rows"] == []
 
 
 def test_get_history_detail_falls_back_to_db_when_r2_missing(
@@ -431,7 +448,7 @@ def test_get_history_detail_falls_back_to_db_when_r2_missing(
 
     monkeypatch.setattr("app.retail.routers.imports.get_storage_service", lambda: MockStorage())
 
-    response = authed_client.get(f"/api/imports/history/{batch_id}")
+    response = authed_client.get(f"/api/imports/history/{batch_id}?tab=original")
     assert response.status_code == 200
     data = response.json()
     # Should fall back to DB origin data

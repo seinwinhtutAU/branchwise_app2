@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 from app.core.security import get_current_app_user
 from app.db.session import get_db
 from app.retail.models.product import Product
-from app.retail.models.stock_level import StockLevel
 from app.models.user import User
 from app.services.dashboard import compute_stock_health
 from app.retail.services.stock import latest_stock_query
@@ -50,9 +49,7 @@ def list_inventory(user: User = Depends(get_current_app_user), db: Session = Dep
     """Current stock: the latest snapshot per product+branch, not full import
     history (see app/retail/services/stock.py) — this is exactly what the
     ix_stock_levels_product_branch_snapshot index is for."""
-    query = latest_stock_query(db).order_by(Product.stock_code)
-    if user.branch_id is not None:
-        query = query.filter(StockLevel.branch_id == user.branch_id)
+    query = latest_stock_query(db, user.branch_id).order_by(Product.stock_code)
 
     return [
         {

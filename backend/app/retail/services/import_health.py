@@ -24,6 +24,7 @@ from app.retail.models.import_batch import ImportBatch, ImportBatchStatus, Impor
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.models.stock_level import StockLevel
 from app.models.user import User
+from app.core.timestamps import utc_timestamp
 from app.services.branches import list_retail_branches
 
 # A skip rate this high is well outside the 0-4% normal range seen on real re-uploads
@@ -106,7 +107,7 @@ def _review_row(batch: ImportBatch, branch_names: dict[str, str], note: str, sta
         "branch_id": batch.branch_id,
         "branch_name": branch_names.get(batch.branch_id, "—"),
         "filename": batch.filename,
-        "confirmed_at": batch.created_at.isoformat(),
+        "confirmed_at": utc_timestamp(batch.created_at),
         "note": note,
         "status": status,
     }

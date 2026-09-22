@@ -5,6 +5,7 @@ import {
   reportRequestSuccess,
   watchBrowserOfflineEvent,
 } from "@renderer/lib/connection";
+import { readOfflineRead, saveOfflineRead } from "@renderer/lib/offlineReadCache";
 
 /**
  * Makes every call to this app's API survive a weak connection: a request that hangs is
@@ -21,24 +22,40 @@ import {
  * still gets a refreshed token if it needs one.
  */
 
-// A dashboard query against Neon can legitimately take several seconds on a good link
-// and much longer on a bad one, so this is a "something is wrong" limit, not a
-// performance target. Uploads get their own, far longer, budget below.
-const READ_TIMEOUT_MS = 45_000;
+// A dashboard query against Neon can legitimately take several seconds.  Fifteen seconds
+// is long enough for that, but short enough that a dropped mobile link falls back to the
+// last saved view instead of leaving a branch user staring at a spinner for minutes.
+const READ_TIMEOUT_MS = 15_000;
 // Import files are a few hundred KB and are parsed and written server-side before the
 // response comes back; on a slow link that is minutes, and cutting it off would waste
 // work that may already be half-done.
 const WRITE_TIMEOUT_MS = 5 * 60_000;
 
-// Two extra attempts, backing off, is enough to ride out the few-second dropouts that a
-// mobile-tethered branch connection produces; beyond that the honest answer is "you're
-// offline" rather than a longer wait.
-const RETRY_DELAYS_MS = [500, 2000];
+// Two extra attempts ride out short mobile dropouts.  The short timeout above bounds the
+// total wait; after that the app shows a cached result when it has one.
+const RETRY_DELAYS_MS = [750, 2_000];
 
 // How often to check whether the connection is back while we believe it is down. Cheap
 // (one SELECT 1) and unauthenticated, so this keeps working even if the token expired
 // while offline.
 const PROBE_INTERVAL_MS = 5000;
+
+function isImportConfirm(url: string): boolean {
+  return /\/api\/imports\/(sales|inventory|purchase)\/confirm(?:\?|$)/.test(url);
+}
+
+function addIdempotencyKey(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  shouldAdd: boolean,
+): RequestInit | undefined {
+  if (!shouldAdd) return init;
+  const headers = new Headers(
+    init?.headers ?? (input instanceof Request ? input.headers : undefined),
+  );
+  if (!headers.has("Idempotency-Key")) headers.set("Idempotency-Key", crypto.randomUUID());
+  return { ...init, headers };
+}
 
 /**
  * Thrown when a request was cut off for taking too long, as opposed to failing to leave
@@ -173,10 +190,15 @@ export function installNetworkResilience(): () => void {
     // Only reads are retried. A confirm, a revert, or a wholesale order is not safe to
     // send twice — a request that may already have been applied server-side has to come
     // back to the user, who can decide to press the button again.
-    const canRetry = method === "GET" || method === "HEAD";
+    const isRead = method === "GET" || method === "HEAD";
+    // Import confirmations are the one file write endpoint that has server-side
+    // idempotency.  Giving it a stable key makes retrying safe even if its first answer
+    // was lost after the database committed.
+    const requestInit = addIdempotencyKey(input, init, method === "POST" && isImportConfirm(url));
+    const canRetry = isRead || isImportConfirm(url);
     const timeoutMs = canRetry ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS;
     const callerSignal =
-      init?.signal ?? (input instanceof Request ? input.signal : null);
+      requestInit?.signal ?? (input instanceof Request ? input.signal : null);
 
     const attempts = canRetry ? RETRY_DELAYS_MS.length + 1 : 1;
     let lastError: unknown = null;
@@ -186,12 +208,13 @@ export function installNetworkResilience(): () => void {
       const timeout = withTimeout(callerSignal, timeoutMs);
       try {
         const response = await original(input, {
-          ...init,
+          ...requestInit,
           signal: timeout.signal,
         });
         // An HTTP error still travelled the wire, so the connection is fine — whether
         // the *answer* was good is the caller's business, not this layer's.
         reportRequestSuccess(Date.now() - startedAt);
+        if (isRead) void saveOfflineRead(url, response.clone());
         return response;
       } catch (error) {
         // The caller gave up (navigated away, typed a new filter). Not a failure, and
@@ -217,6 +240,14 @@ export function installNetworkResilience(): () => void {
 
     reportRequestFailure();
     startProbing();
+    if (isRead) {
+      const cached = await readOfflineRead(url);
+      if (cached) {
+        // eslint-disable-next-line no-console -- confirms an intentional local fallback.
+        console.info(`[connection] serving cached response while offline: ${url}`);
+        return cached;
+      }
+    }
     throw lastError;
   };
 

@@ -28,22 +28,31 @@ from app.retail.models.product import Product
 from app.retail.models.stock_level import StockLevel
 
 
-def latest_stock_query(db: Session) -> Query:
-    """(StockLevel, Product, Branch) rows from each branch's latest snapshot, unordered
-    and unscoped — callers add their own branch filters and ordering.
+def latest_stock_query(db: Session, branch_id: str | None = None) -> Query:
+    """(StockLevel, Product, Branch) rows from each branch's latest snapshot, ordered
+    by nothing in particular — callers add their own ordering.
 
-    `branch_id` is nullable, so the join back uses a null-safe comparison rather than
-    `==` (NULL = NULL is never true in SQL).
+    `branch_id=None` (the default) is unscoped: every branch's latest snapshot, for a
+    caller that genuinely needs all of them (an admin's "all branches" view) or that
+    applies its own filter afterwards for a reason that can't be expressed here (e.g.
+    data_quality.py's `_branch_filter`, shared across several differently-shaped
+    queries). Passing a concrete `branch_id` filters *before* the grouping subquery
+    runs, not just on the result — so Postgres only aggregates that one branch's rows
+    instead of every branch's just to throw the rest away. Callers that already know
+    which single branch they want should always pass it.
+
+    `StockLevel.branch_id` is nullable, so the join back uses a null-safe comparison
+    rather than `==` (NULL = NULL is never true in SQL).
     """
-    latest = (
-        db.query(
-            StockLevel.branch_id,
-            func.max(StockLevel.snapshot_at).label("snapshot_at"),
-        )
-        .group_by(StockLevel.branch_id)
-        .subquery()
+    latest_base = db.query(
+        StockLevel.branch_id,
+        func.max(StockLevel.snapshot_at).label("snapshot_at"),
     )
-    return (
+    if branch_id is not None:
+        latest_base = latest_base.filter(StockLevel.branch_id == branch_id)
+    latest = latest_base.group_by(StockLevel.branch_id).subquery()
+
+    query = (
         db.query(StockLevel, Product, Branch)
         .join(Product, StockLevel.product_id == Product.id)
         .outerjoin(Branch, StockLevel.branch_id == Branch.id)
@@ -53,3 +62,6 @@ def latest_stock_query(db: Session) -> Query:
             & (StockLevel.snapshot_at == latest.c.snapshot_at),
         )
     )
+    if branch_id is not None:
+        query = query.filter(StockLevel.branch_id == branch_id)
+    return query

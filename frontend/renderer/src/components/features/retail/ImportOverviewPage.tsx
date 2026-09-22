@@ -1,5 +1,6 @@
 import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
+import { formatRetailDateTime } from "@renderer/lib/retailDateTime";
 import { useUrlQuery } from "@renderer/lib/queryClient";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 import { Badge } from "@renderer/components/ui/Badge";
@@ -23,18 +24,36 @@ interface FreshnessRow {
   sales_last_imported_at: string | null;
   inventory_last_imported_at: string | null;
   purchase_last_imported_at: string | null;
+  sales_data_date: string | null;
+  inventory_data_date: string | null;
+  // Optional while a desktop client is connected to an older backend that has not
+  // deployed the sequence check yet. A missing field must not take down the page.
+  purchase_number_integrity?: PurchaseNumberIntegrity;
 }
+
+interface PurchaseNumberGap {
+  start_number: string;
+  end_number: string;
+  missing_count: number;
+}
+
+interface PurchaseNumberIntegrity {
+  numbered_purchase_count: number;
+  gap_count: number;
+  missing_number_count: number;
+  gaps: PurchaseNumberGap[];
+}
+
+const EMPTY_PURCHASE_NUMBER_INTEGRITY: PurchaseNumberIntegrity = {
+  numbered_purchase_count: 0,
+  gap_count: 0,
+  missing_number_count: 0,
+  gaps: [],
+};
 
 interface Props {
   session: Session;
   onViewImportBatch?: (batchId: string) => void;
-}
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
 }
 
 function daysSince(iso: string): number {
@@ -52,12 +71,26 @@ function agoLabel(iso: string): string {
 
 // Sales and inventory files are exported daily, so "fresh" has a narrow window:
 // today is fine, yesterday is a soft warning, older or never imported is an error.
-function freshnessBadge(iso: string | null): {
+function daysSinceDataDate(iso: string): number {
+  const [year, month, day] = iso.split("-").map(Number);
+  const dataDate = new Date(year, month - 1, day);
+  const today = new Date();
+  const currentDate = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+  );
+  return Math.floor(
+    (currentDate.getTime() - dataDate.getTime()) / (1000 * 60 * 60 * 24),
+  );
+}
+
+function dataDateBadge(iso: string | null): {
   variant: "success" | "warning" | "error";
   label: string;
 } {
-  if (!iso) return { variant: "error", label: "Never imported" };
-  const days = daysSince(iso);
+  if (!iso) return { variant: "error", label: "No update today" };
+  const days = daysSinceDataDate(iso);
   if (days <= 0) return { variant: "success", label: "Today" };
   if (days === 1) return { variant: "warning", label: "Yesterday" };
   return { variant: "error", label: `${days} days ago` };
@@ -72,27 +105,65 @@ function occasionalBadge(iso: string | null): {
 }
 
 function FreshnessCell({
-  iso,
-  expectedDaily = true,
+  uploadedAt,
+  dataDate,
 }: {
-  iso: string | null;
-  expectedDaily?: boolean;
+  uploadedAt: string | null;
+  dataDate: string | null;
 }): React.JSX.Element {
-  const { variant, label } = expectedDaily
-    ? freshnessBadge(iso)
-    : occasionalBadge(iso);
+  const { variant, label } = dataDateBadge(dataDate);
   return (
     <div className="flex flex-col items-start justify-center gap-1 min-h-[44px]">
       <Badge variant={variant} dot>
         {label}
       </Badge>
-      {iso ? (
-        <span className="text-[11px] text-text-muted whitespace-nowrap tabular-nums">
-          {formatDateTime(iso)}
+      <span className="text-[11px] text-text-muted whitespace-nowrap tabular-nums">
+        For: {dataDate ?? "—"}
+      </span>
+      <span className="text-[11px] text-text-muted whitespace-nowrap tabular-nums">
+        Uploaded: {uploadedAt ? formatRetailDateTime(uploadedAt) : "—"}
+      </span>
+    </div>
+  );
+}
+
+function PurchaseFreshnessCell({
+  uploadedAt,
+  integrity,
+}: {
+  uploadedAt: string | null;
+  integrity?: PurchaseNumberIntegrity;
+}): React.JSX.Element {
+  const checkedIntegrity = {
+    ...EMPTY_PURCHASE_NUMBER_INTEGRITY,
+    ...integrity,
+    gaps: integrity?.gaps ?? EMPTY_PURCHASE_NUMBER_INTEGRITY.gaps,
+  };
+  const firstGap = checkedIntegrity.gaps[0];
+  const hasGaps = checkedIntegrity.missing_number_count > 0;
+  const upload = occasionalBadge(uploadedAt);
+  return (
+    <div className="flex flex-col items-start justify-center gap-1 min-h-[44px]">
+      <Badge variant={upload.variant} dot>
+        {upload.label}
+      </Badge>
+      <span className="text-[11px] text-text-muted whitespace-nowrap tabular-nums">
+        Uploaded: {uploadedAt ? formatRetailDateTime(uploadedAt) : "—"}
+      </span>
+      {checkedIntegrity.numbered_purchase_count === 0 ? (
+        <span className="text-[11px] text-text-muted">
+          No numbered purchases
+        </span>
+      ) : hasGaps && firstGap ? (
+        <span className="text-[11px] font-medium text-error">
+          Gap: {firstGap.start_number}–{firstGap.end_number} (
+          {checkedIntegrity.missing_number_count} missing)
         </span>
       ) : (
-        <span className="text-[11px] text-text-muted/40 whitespace-nowrap select-none">
-          —
+        <span className="text-[11px] font-medium text-success">
+          {checkedIntegrity.numbered_purchase_count} numbered purchase
+          {checkedIntegrity.numbered_purchase_count === 1 ? "" : "s"} · sequence
+          complete
         </span>
       )}
     </div>
@@ -126,8 +197,8 @@ export function ImportOverviewPage({ session }: Props): React.JSX.Element {
                 Import Freshness
               </h2>
               <span className="text-xs text-text-muted hidden sm:inline">
-                Live tracking of the latest sales, inventory, and purchase
-                uploads across branches.
+                Confirms upload time, the day covered by Sale/Inventory, and
+                Purchase-number continuity across branches.
               </span>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -179,13 +250,13 @@ export function ImportOverviewPage({ session }: Props): React.JSX.Element {
                   #
                 </Th>
                 <Th className="min-w-[140px]">Branch</Th>
-                <Th className="min-w-[170px]">Sales</Th>
-                <Th className="min-w-[170px]">Inventory</Th>
+                <Th className="min-w-[220px]">Sales</Th>
+                <Th className="min-w-[220px]">Inventory</Th>
                 <Th className="min-w-[170px]">
                   <div className="flex items-center gap-1.5">
                     <span>Purchase</span>
                     <span className="font-normal normal-case text-xs text-text-muted">
-                      (not daily)
+                      (not daily · sequence checked)
                     </span>
                   </div>
                 </Th>
@@ -201,15 +272,21 @@ export function ImportOverviewPage({ session }: Props): React.JSX.Element {
                     {row.branch_name}
                   </Td>
                   <Td>
-                    <FreshnessCell iso={row.sales_last_imported_at} />
-                  </Td>
-                  <Td>
-                    <FreshnessCell iso={row.inventory_last_imported_at} />
+                    <FreshnessCell
+                      uploadedAt={row.sales_last_imported_at}
+                      dataDate={row.sales_data_date}
+                    />
                   </Td>
                   <Td>
                     <FreshnessCell
-                      iso={row.purchase_last_imported_at}
-                      expectedDaily={false}
+                      uploadedAt={row.inventory_last_imported_at}
+                      dataDate={row.inventory_data_date}
+                    />
+                  </Td>
+                  <Td>
+                    <PurchaseFreshnessCell
+                      uploadedAt={row.purchase_last_imported_at}
+                      integrity={row.purchase_number_integrity}
                     />
                   </Td>
                 </Tr>

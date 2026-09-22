@@ -16,12 +16,38 @@ export interface CleanResult {
   columns: string[];
   rows: Record<string, unknown>[];
   row_issues: RowIssue[][];
+  is_sampled?: boolean;
+  total_rows?: number;
+  sample_count?: number;
+  page?: number;
+  page_size?: number;
+  total_pages?: number;
+  warning_indices?: number[];
+  warning_count?: number;
+  source_total_rows?: number;
+}
+
+export interface OriginResult {
+  rows: string[][];
+  row_issues: RowIssue[][];
+  is_sampled?: boolean;
+  total_rows?: number;
+  sample_count?: number;
+  page?: number;
+  page_size?: number;
+  total_pages?: number;
+  warning_indices?: number[];
+  warning_count?: number;
+  source_total_rows?: number;
 }
 
 export interface ImportPreviewResult {
   filename: string;
-  origin: { rows: string[][]; row_issues: RowIssue[][] };
+  origin: OriginResult;
   clean: CleanResult;
+  is_sampled?: boolean;
+  total_origin_rows?: number;
+  total_clean_rows?: number;
 }
 
 export interface SelectedImportFile {
@@ -61,6 +87,6 @@ export interface ImportHistoryDetail {
   reverted_at: string | null;
   storage_key?: string | null;
   has_file?: boolean;
-  origin: { rows: string[][]; row_issues: RowIssue[][] };
+  origin: OriginResult;
   clean: CleanResult;
 }

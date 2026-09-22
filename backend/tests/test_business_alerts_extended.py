@@ -79,6 +79,7 @@ def _base_snapshot(**overrides) -> BranchSnapshot:
 # Rule 1: Daily Import Missing Check (Critical)
 # ---------------------------------------------------------------------------
 
+
 def test_daily_import_no_alert_before_8pm():
     """Before 8:00 PM, no alert should fire even if today's imports have not arrived yet."""
     snap = _base_snapshot(
@@ -101,7 +102,7 @@ def test_daily_import_fires_critical_after_8pm_when_both_missing():
     alert = next(a for a in alerts if a.id == "daily_import_missing")
     assert alert.severity == early_warning.CRITICAL
     assert "Sale and Inventory" in alert.title
-    assert alert.link == "import"
+    assert alert.link == "import_freshness"
 
 
 def test_daily_import_fires_critical_after_8pm_when_only_sales_missing():
@@ -140,9 +141,55 @@ def test_daily_import_clears_when_both_today_imports_present():
     assert not any(a.id == "daily_import_missing" for a in alerts)
 
 
+def test_daily_import_alert_identifies_data_uploaded_for_an_older_day():
+    snap = _base_snapshot(
+        is_after_8pm=True,
+        has_today_sales=False,
+        has_today_inventory=False,
+        sales_data_date="2026-09-20",
+        inventory_data_date="2026-09-19",
+    )
+
+    alert = next(
+        alert
+        for alert in early_warning.evaluate(snap)
+        if alert.id == "daily_import_missing"
+    )
+    facts = {fact["label"]: fact["value"] for fact in alert.facts}
+    assert facts["Sale Day"] == "2026-09-20 (not today)"
+    assert facts["Inventory Day"] == "2026-09-19 (not today)"
+
+
+def test_purchase_number_sequence_gap_fires_critical_alert():
+    snap = _base_snapshot(
+        purchase_number_integrity={
+            "numbered_purchase_count": 2,
+            "gap_count": 1,
+            "missing_number_count": 61,
+            "gaps": [
+                {
+                    "start_number": "STR00050",
+                    "end_number": "STR00110",
+                    "missing_count": 61,
+                }
+            ],
+        }
+    )
+
+    alert = next(
+        alert
+        for alert in early_warning.evaluate(snap)
+        if alert.id == "purchase_number_sequence_gap"
+    )
+    assert alert.severity == early_warning.CRITICAL
+    assert alert.link == "import_freshness"
+    assert "STR00050–STR00110" in alert.summary
+
+
 # ---------------------------------------------------------------------------
 # Rule 2: Physical Stock Audit Alert on Inventory Data Quality
 # ---------------------------------------------------------------------------
+
 
 def test_physical_stock_audit_quiet_when_no_data_issues():
     snap = _base_snapshot(data_issue_count=0)
@@ -182,6 +229,7 @@ def test_physical_stock_audit_fires_when_data_issues_exist():
 # Rule 3: Inter-Branch Stock Allocation (Dead Stock 90d)
 # ---------------------------------------------------------------------------
 
+
 def test_stock_allocation_alert_fires_with_table():
     allocations = (
         {
@@ -209,6 +257,7 @@ def test_stock_allocation_alert_fires_with_table():
 # Rule 4: Urgent Reorder Alert (Critical)
 # ---------------------------------------------------------------------------
 
+
 def test_urgent_reorder_alert_fires_with_table():
     reorders = (
         {
@@ -231,6 +280,7 @@ def test_urgent_reorder_alert_fires_with_table():
 # ---------------------------------------------------------------------------
 # Rule 5: Footwear Aging > 6 Months (180 days)
 # ---------------------------------------------------------------------------
+
 
 def test_footwear_aging_alert_fires_with_purchase_labels():
     aged = (
@@ -257,6 +307,7 @@ def test_footwear_aging_alert_fires_with_purchase_labels():
 # Rule 6: Seasonal Demand Spike Alert
 # ---------------------------------------------------------------------------
 
+
 def test_seasonal_spike_alert():
     spikes = (
         {
@@ -278,6 +329,7 @@ def test_seasonal_spike_alert():
 # Rule 7: Weekly Pattern Demand Alert
 # ---------------------------------------------------------------------------
 
+
 def test_weekly_pattern_alert():
     pattern = {
         "peak_day": "Saturday",
@@ -297,9 +349,12 @@ def test_weekly_pattern_alert():
 # Database & Checking API Endpoints Integration Test
 # ---------------------------------------------------------------------------
 
+
 def test_checking_api_status_and_export(db_session: Session, authed_client: TestClient):
     # Setup test branch
-    branch = Branch(id="test_br_01", name="Test Branch", phone_number="123456", address="Main St")
+    branch = Branch(
+        id="test_br_01", name="Test Branch", phone_number="123456", address="Main St"
+    )
     db_session.add(branch)
 
     # Setup admin user
@@ -307,7 +362,7 @@ def test_checking_api_status_and_export(db_session: Session, authed_client: Test
         id="test-user-id",
         name="Admin User",
         email="test@example.com",
-            role=UserRole.DEVELOPMENT,
+        role=UserRole.DEVELOPMENT,
         auth_user_id="test-user-id",
         branch_id="test_br_01",
     )
@@ -333,11 +388,22 @@ def test_checking_api_status_and_export(db_session: Session, authed_client: Test
     db_session.add(stock)
     db_session.commit()
 
-    mock_items = [{"stock_code": "TEST-SKU-01", "description": "Test Shoe Description", "on_hand_qty": 15.0}]
+    mock_items = [
+        {
+            "stock_code": "TEST-SKU-01",
+            "description": "Test Shoe Description",
+            "on_hand_qty": 15.0,
+        }
+    ]
 
-    with patch("app.retail.routers.checking.build_checking_items", return_value=mock_items):
+    with patch(
+        "app.retail.routers.checking.build_checking_items", return_value=mock_items
+    ):
         # 1. Query checking status when locked (< 8pm or imports missing)
-        with patch("app.retail.routers.checking._check_daily_import_status", return_value=(False, False, False)):
+        with patch(
+            "app.retail.routers.checking._check_daily_import_status",
+            return_value=(False, False, False),
+        ):
             res = authed_client.get("/api/checking")
             assert res.status_code == 200
             data = res.json()
@@ -347,7 +413,10 @@ def test_checking_api_status_and_export(db_session: Session, authed_client: Test
             assert "Audit sheet unlocks" in data["reason"]
 
         # 2. Query checking status when eligible (after 8pm and imports present)
-        with patch("app.retail.routers.checking._check_daily_import_status", return_value=(True, True, True)):
+        with patch(
+            "app.retail.routers.checking._check_daily_import_status",
+            return_value=(True, True, True),
+        ):
             res = authed_client.get("/api/checking")
             assert res.status_code == 200
             data = res.json()
@@ -356,12 +425,18 @@ def test_checking_api_status_and_export(db_session: Session, authed_client: Test
             assert data["items"][0]["stock_code"] == "TEST-SKU-01"
 
         # 3. Test export CSV: when locked (< 8pm or imports missing), should return 400
-        with patch("app.retail.routers.checking._check_daily_import_status", return_value=(False, False, False)):
+        with patch(
+            "app.retail.routers.checking._check_daily_import_status",
+            return_value=(False, False, False),
+        ):
             res_locked = authed_client.get("/api/checking/export")
             assert res_locked.status_code == 400
 
         # 4. Test export CSV: when unlocked (after 8pm and imports present), should return CSV
-        with patch("app.retail.routers.checking._check_daily_import_status", return_value=(True, True, True)):
+        with patch(
+            "app.retail.routers.checking._check_daily_import_status",
+            return_value=(True, True, True),
+        ):
             res_csv = authed_client.get("/api/checking/export")
             assert res_csv.status_code == 200
             assert res_csv.headers["content-type"].startswith("text/csv")
@@ -381,14 +456,19 @@ def test_custom_daily_check_cutoff_time_formats_in_alerts_and_checking(
     db_session: Session, authed_client: TestClient
 ):
     """Verify that changing daily_check_cutoff_time changes alert copy and checking locking messages."""
-    branch = Branch(id="test_br_02", name="Cutoff Test Branch", phone_number="123456", address="Main St")
+    branch = Branch(
+        id="test_br_02",
+        name="Cutoff Test Branch",
+        phone_number="123456",
+        address="Main St",
+    )
     db_session.add(branch)
 
     user = User(
         id="test-user-id",
         name="Admin User",
         email="test@example.com",
-            role=UserRole.DEVELOPMENT,
+        role=UserRole.DEVELOPMENT,
         auth_user_id="test-user-id",
         branch_id="test_br_02",
     )
@@ -416,7 +496,10 @@ def test_custom_daily_check_cutoff_time_formats_in_alerts_and_checking(
     assert res_update.json()["daily_check_cutoff_time"] == "21:30"
 
     # 3. Checking status endpoint reflects new cutoff time and 9:30 PM in reason when locked
-    with patch("app.retail.routers.checking._check_daily_import_status", return_value=(False, False, False)):
+    with patch(
+        "app.retail.routers.checking._check_daily_import_status",
+        return_value=(False, False, False),
+    ):
         res = authed_client.get("/api/checking")
         assert res.status_code == 200
         data = res.json()
@@ -425,7 +508,10 @@ def test_custom_daily_check_cutoff_time_formats_in_alerts_and_checking(
         assert "9:30 PM" in data["reason"]
 
     # 4. Checking export reflects new cutoff time when locked
-    with patch("app.retail.routers.checking._check_daily_import_status", return_value=(False, False, False)):
+    with patch(
+        "app.retail.routers.checking._check_daily_import_status",
+        return_value=(False, False, False),
+    ):
         res_exp = authed_client.get("/api/checking/export")
         assert res_exp.status_code == 400
         assert "9:30 PM" in res_exp.json()["detail"]
@@ -434,6 +520,7 @@ def test_custom_daily_check_cutoff_time_formats_in_alerts_and_checking(
 # ---------------------------------------------------------------------------
 # Rule 15 & 16: Sale & Purchase Data Quality Alerts (Critical)
 # ---------------------------------------------------------------------------
+
 
 def test_sale_data_quality_fires_critical_on_negative_or_zero_values():
     """Flags critical alert when sale lines have zero/negative/invalid quantities or prices."""
@@ -534,11 +621,15 @@ def test_db_check_sale_and_purchase_data_quality(db_session: Session):
         _check_purchase_data_quality,
     )
 
-    branch = Branch(id="test_br_dq", name="DQ Branch", phone_number="123", address="Main")
+    branch = Branch(
+        id="test_br_dq", name="DQ Branch", phone_number="123", address="Main"
+    )
     db_session.add(branch)
 
     # 1. Product with valid description
-    p1 = Product(id="prod_valid", stock_code="SKU-VALID", description="Good Leather Shoes")
+    p1 = Product(
+        id="prod_valid", stock_code="SKU-VALID", description="Good Leather Shoes"
+    )
     # 2. Product with empty/missing description
     p2 = Product(id="prod_nodesc", stock_code="SKU-NODESC", description="   ")
     db_session.add_all([p1, p2])
@@ -547,24 +638,94 @@ def test_db_check_sale_and_purchase_data_quality(db_session: Session):
     today = date(2026, 9, 21)
 
     # Sale 1: valid line
-    s1 = Sale(id="sale_1", branch_id="test_br_dq", slip_id="SL-1", slip_number="001", sale_date=today)
-    l1 = SaleLine(id="sl_1", sale_id="sale_1", line_id="sl-1-1", line_no=1, product_id="prod_valid", qty=2.0, selling_price=50.0, net_amount=100.0, amount=100.0)
+    s1 = Sale(
+        id="sale_1",
+        branch_id="test_br_dq",
+        slip_id="SL-1",
+        slip_number="001",
+        sale_date=today,
+    )
+    l1 = SaleLine(
+        id="sl_1",
+        sale_id="sale_1",
+        line_id="sl-1-1",
+        line_no=1,
+        product_id="prod_valid",
+        qty=2.0,
+        selling_price=50.0,
+        net_amount=100.0,
+        amount=100.0,
+    )
 
     # Sale 2: invalid qty (-1) and invalid price (0)
-    s2 = Sale(id="sale_2", branch_id="test_br_dq", slip_id="SL-2", slip_number="002", sale_date=today)
-    l2 = SaleLine(id="sl_2", sale_id="sale_2", line_id="sl-2-1", line_no=1, product_id="prod_valid", qty=-1.0, selling_price=0.0, net_amount=0.0, amount=0.0)
+    s2 = Sale(
+        id="sale_2",
+        branch_id="test_br_dq",
+        slip_id="SL-2",
+        slip_number="002",
+        sale_date=today,
+    )
+    l2 = SaleLine(
+        id="sl_2",
+        sale_id="sale_2",
+        line_id="sl-2-1",
+        line_no=1,
+        product_id="prod_valid",
+        qty=-1.0,
+        selling_price=0.0,
+        net_amount=0.0,
+        amount=0.0,
+    )
 
     # Sale 3: missing description on product
-    s3 = Sale(id="sale_3", branch_id="test_br_dq", slip_id="SL-3", slip_number="003", sale_date=today)
-    l3 = SaleLine(id="sl_3", sale_id="sale_3", line_id="sl-3-1", line_no=1, product_id="prod_nodesc", qty=1.0, selling_price=30.0, net_amount=30.0, amount=30.0)
+    s3 = Sale(
+        id="sale_3",
+        branch_id="test_br_dq",
+        slip_id="SL-3",
+        slip_number="003",
+        sale_date=today,
+    )
+    l3 = SaleLine(
+        id="sl_3",
+        sale_id="sale_3",
+        line_id="sl-3-1",
+        line_no=1,
+        product_id="prod_nodesc",
+        qty=1.0,
+        selling_price=30.0,
+        net_amount=30.0,
+        amount=30.0,
+    )
 
     # Purchase 1: valid
-    pur1 = Purchase(id="pur_1", branch_id="test_br_dq", purchase_number="STR-001", purchase_date=today)
-    pl1 = PurchaseLine(id="pl_1", purchase_id="pur_1", product_id="prod_valid", quantity=10.0, buying_price=25.0)
+    pur1 = Purchase(
+        id="pur_1",
+        branch_id="test_br_dq",
+        purchase_number="STR-001",
+        purchase_date=today,
+    )
+    pl1 = PurchaseLine(
+        id="pl_1",
+        purchase_id="pur_1",
+        product_id="prod_valid",
+        quantity=10.0,
+        buying_price=25.0,
+    )
 
     # Purchase 2: invalid unit cost (0) and missing description
-    pur2 = Purchase(id="pur_2", branch_id="test_br_dq", purchase_number="STR-002", purchase_date=today)
-    pl2 = PurchaseLine(id="pl_2", purchase_id="pur_2", product_id="prod_nodesc", quantity=5.0, buying_price=0.0)
+    pur2 = Purchase(
+        id="pur_2",
+        branch_id="test_br_dq",
+        purchase_number="STR-002",
+        purchase_date=today,
+    )
+    pl2 = PurchaseLine(
+        id="pl_2",
+        purchase_id="pur_2",
+        product_id="prod_nodesc",
+        quantity=5.0,
+        buying_price=0.0,
+    )
 
     db_session.add_all([s1, l1, s2, l2, s3, l3, pur1, pl1, pur2, pl2])
     db_session.commit()
@@ -580,4 +741,3 @@ def test_db_check_sale_and_purchase_data_quality(db_session: Session):
     assert pur_dq["invalid_numeric_count"] == 1  # pl_2 (unit cost = 0)
     assert pur_dq["missing_description_count"] == 1  # pl_2 (prod_nodesc)
     assert pur_dq["total_issues"] == 2
-

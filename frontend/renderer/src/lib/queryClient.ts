@@ -147,11 +147,17 @@ export function useUrlQuery<T>(
 export interface UrlQueriesResult<T> {
   /** Keyed by URL, so the caller keeps whatever it already knows about each one. */
   data: Record<string, T>;
+  /** URLs with no cached data yet, still fetching for the first time. */
+  pendingUrls: string[];
+  /** URLs with no cached data, whose request has failed. */
+  failedUrls: string[];
   /** True only while there is nothing at all to show yet. */
   isLoading: boolean;
   isRefreshing: boolean;
   failedCount: number;
   reload: () => Promise<void>;
+  /** Retries a single URL — for a per-item retry action rather than reloading everything. */
+  refetchUrl: (url: string) => Promise<void>;
 }
 
 /** The several-URL replacement for useCachedFetchMany — the Alerts page needs every
@@ -175,12 +181,21 @@ export function useUrlQueries<T>(
   });
 
   const data: Record<string, T> = {};
+  const pendingUrls: string[] = [];
+  const failedUrls: string[] = [];
   let failedCount = 0;
   let isRefreshing = false;
   for (const [index, result] of results.entries()) {
-    if (result.data !== undefined) data[urls[index]] = result.data;
+    const url = urls[index];
+    if (result.data !== undefined) {
+      data[url] = result.data;
+      if (result.isFetching) isRefreshing = true;
+    } else if (result.isFetching) {
+      pendingUrls.push(url);
+    } else if (result.isError) {
+      failedUrls.push(url);
+    }
     if (result.isError) failedCount += 1;
-    if (result.isFetching) isRefreshing = true;
   }
 
   useEffect(() => {
@@ -200,12 +215,19 @@ export function useUrlQueries<T>(
     );
   }
 
+  async function refetchUrl(url: string): Promise<void> {
+    await queryClient.refetchQueries({ queryKey: urlQueryKey(url) });
+  }
+
   return {
     data,
+    pendingUrls,
+    failedUrls,
     isLoading: urls.length > 0 && Object.keys(data).length === 0 && failedCount === 0,
     isRefreshing,
     failedCount,
     reload,
+    refetchUrl,
   };
 }
 

@@ -11,7 +11,6 @@ from app.retail.services.import_common import (
     get_or_create_products,
     new_import_batch,
     pluralize,
-    product_summary_messages,
 )
 
 
@@ -25,6 +24,7 @@ def persist_sales(
     uploaded_by: str | None = None,
     preview_data: dict | None = None,
     storage_key: str | None = None,
+    request_key: str | None = None,
 ) -> dict:
     batch = new_import_batch(
         ImportType.SALES,
@@ -33,6 +33,7 @@ def persist_sales(
         source_file=source_file,
         preview_data=preview_data,
         storage_key=storage_key,
+        request_key=request_key,
     )
     db.add(batch)
 
@@ -105,16 +106,20 @@ def persist_sales(
             )
             summary["sale_lines_created"] += 1
 
-    messages = []
-    if summary["sales_created"]:
-        messages.append(f"{pluralize(summary['sales_created'], 'sale')} imported")
+    total_lines = len(df)
+    messages = [
+        f"{total_lines:,} total sale lines in file",
+        f"{summary['sales_created']:,} sales recorded ({summary['sale_lines_created']:,} items)",
+    ]
     if summary["sales_skipped_duplicate"]:
         messages.append(
             f"{pluralize(summary['sales_skipped_duplicate'], 'sale')} skipped — already imported earlier"
         )
-    messages.extend(product_summary_messages(summary["products_created"], summary["products_updated"]))
-    if not messages:
-        messages.append("No new sales were found in this file.")
+    issue_count = summary.get("issue_count", 0)
+    if issue_count > 0:
+        messages.append(f"⚠️ Alert: {pluralize(issue_count, 'sale item')} recorded with invalid values")
+    if not summary["sales_created"] and not summary["sales_skipped_duplicate"]:
+        messages = ["No new sales were found in this file."]
     summary["messages"] = messages
 
     batch.summary = summary

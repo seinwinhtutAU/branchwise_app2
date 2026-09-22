@@ -10,6 +10,10 @@ import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
 import { useUrlQuery } from "@renderer/lib/queryClient";
 import { cn } from "@renderer/lib/utils";
+import {
+  formatRetailDate,
+  formatRetailTime,
+} from "@renderer/lib/retailDateTime";
 import { useToast } from "@renderer/lib/useToast";
 import { formatBuyingPriceSource } from "@renderer/lib/buyingPriceSource";
 import { downloadCsv } from "@renderer/lib/csv";
@@ -205,8 +209,16 @@ const BAND_COLOR: Record<Band, string> = {
 
 const DEFAULT_SALE_COLUMNS: DataTableColumn<SaleRow>[] = [
   { key: "Branch", label: "Branch" },
-  { key: "Date", label: "Date" },
-  { key: "Time", label: "Time" },
+  {
+    key: "Date",
+    label: "Date",
+    format: (value) => formatRetailDate(String(value)),
+  },
+  {
+    key: "Time",
+    label: "Time",
+    format: (value) => formatRetailTime(value as string | null),
+  },
   { key: "SlipID", label: "Slip ID" },
   { key: "SlipNumber", label: "Slip Number" },
   { key: "LineNo", label: "Line No", align: "right" },
@@ -241,7 +253,11 @@ const DEFAULT_SALE_COLUMNS: DataTableColumn<SaleRow>[] = [
 const DEFAULT_PURCHASE_COLUMNS: DataTableColumn<PurchaseRow>[] = [
   { key: "PurchaseNumber", label: "Purchase Number", copyable: true },
   { key: "Branch", label: "Branch" },
-  { key: "Date", label: "Date" },
+  {
+    key: "Date",
+    label: "Date",
+    format: (value) => formatRetailDate(String(value)),
+  },
   { key: "StockCode", label: "Stock Code", copyable: true },
   { key: "Description", label: "Description" },
   { key: "Quantity", label: "Quantity", align: "right" },
@@ -314,6 +330,8 @@ function formatCell(col: OverviewColumn, value: unknown): string {
   if (col.key === "Buying_Price_Source")
     return formatBuyingPriceSource(value as string | null);
   if (value === null || value === undefined || value === "") return "—";
+  if (col.key === "Date") return formatRetailDate(String(value));
+  if (col.key === "Time") return formatRetailTime(value as string | null);
   if (col.key === "profit_margin_pct")
     return `${formatNumber(value as number)}%`;
   if (
@@ -353,7 +371,9 @@ function MergedDataOverviewTable({
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState<"csv" | "excel" | null>(null);
-  const [exportFormat, setExportFormat] = useState<"csv" | "excel" | null>(null);
+  const [exportFormat, setExportFormat] = useState<"csv" | "excel" | null>(
+    null,
+  );
 
   const appliedSearch = useSettled(search, FILTER_SETTLE_MS);
   const appliedDateFrom = useSettled(dateFrom, FILTER_SETTLE_MS);
@@ -499,7 +519,9 @@ function MergedDataOverviewTable({
     );
   }
 
-  async function fetchAllForExport(exportRange: ExportDateRange): Promise<OverviewRow[] | null> {
+  async function fetchAllForExport(
+    exportRange: ExportDateRange,
+  ): Promise<OverviewRow[] | null> {
     // The download range is intentionally separate from all table filter controls.
     const params = new URLSearchParams({ export: "true" });
     params.set("date_from", exportRange.from);
@@ -523,7 +545,9 @@ function MergedDataOverviewTable({
     }
   }
 
-  async function handleDownloadCsv(exportRange: ExportDateRange): Promise<void> {
+  async function handleDownloadCsv(
+    exportRange: ExportDateRange,
+  ): Promise<void> {
     setExporting("csv");
     const allRows = await fetchAllForExport(exportRange);
     setExporting(null);
@@ -535,7 +559,9 @@ function MergedDataOverviewTable({
     );
   }
 
-  async function handleDownloadExcel(exportRange: ExportDateRange): Promise<void> {
+  async function handleDownloadExcel(
+    exportRange: ExportDateRange,
+  ): Promise<void> {
     setExporting("excel");
     const allRows = await fetchAllForExport(exportRange);
     setExporting(null);

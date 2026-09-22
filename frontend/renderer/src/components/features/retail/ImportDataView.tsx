@@ -10,17 +10,23 @@ import {
 import { Button } from "@renderer/components/ui/Button";
 import { TabBar } from "@renderer/components/ui/Tabs";
 import { Pagination } from "@renderer/components/ui/Pagination";
+import { Spinner } from "@renderer/components/ui/Spinner";
 import { ChevronUpIcon, ChevronDownIcon } from "@renderer/components/ui/icons";
 import { cn } from "@renderer/lib/utils";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 import { usePagination } from "@renderer/lib/usePagination";
-import type { CleanResult, RowIssue } from "../types";
+import type { CleanResult, OriginResult, RowIssue } from "../types";
 
 interface Props {
   clean: CleanResult;
-  origin: { rows: string[][]; row_issues: RowIssue[][] };
+  origin: OriginResult;
   // Rendered between the validation banner and the table — e.g. branch picker + Confirm/Cancel on the review page.
   controls?: ReactNode;
+  isServerPaginated?: boolean;
+  onPageChange?: (page: number, tab: "clean" | "original") => void;
+  loadingPage?: boolean;
+  warningIndices?: Partial<Record<"clean" | "original", number[]>>;
+  onWarningIndicesNeeded?: (tab: "clean" | "original") => void;
 }
 
 const ROW_NUM_CLASS =
@@ -48,32 +54,44 @@ export function ImportDataView({
   clean,
   origin,
   controls,
+  isServerPaginated = false,
+  onPageChange,
+  loadingPage = false,
+  warningIndices,
+  onWarningIndicesNeeded,
 }: Props): React.JSX.Element {
   const [activeTab, setActiveTab] = useState<"clean" | "original">("clean");
-  const invalidRowCount = clean.row_issues.filter(
-    (issues) => issues.length > 0,
-  ).length;
 
-  const rowIssues =
-    activeTab === "clean" ? clean.row_issues : origin.row_issues;
-  const warningRowIndices = useMemo(
-    () =>
-      rowIssues.reduce<number[]>(
-        (acc, issues, i) => (issues.length > 0 ? [...acc, i] : acc),
-        [],
-      ),
-    [rowIssues],
-  );
+  const clientCleanIssues = clean.row_issues;
+  const clientOriginIssues = origin.row_issues;
+
+  const warningRowIndices = useMemo(() => {
+    if (isServerPaginated) {
+      return warningIndices?.[activeTab] ?? [];
+    }
+    const issues =
+      activeTab === "clean" ? clientCleanIssues : clientOriginIssues;
+    return issues.reduce<number[]>(
+      (acc, iss, i) => (iss.length > 0 ? [...acc, i] : acc),
+      [],
+    );
+  }, [
+    isServerPaginated,
+    activeTab,
+    warningIndices,
+    clientCleanIssues,
+    clientOriginIssues,
+  ]);
+
+  const activePreview = activeTab === "clean" ? clean : origin;
+  const invalidRowCount = isServerPaginated
+    ? (activePreview.warning_count ?? 0)
+    : activePreview.row_issues.filter((issues) => issues.length > 0).length;
 
   const [warningPos, setWarningPos] = useState(0);
   const [highlightedRow, setHighlightedRow] = useState<number | null>(null);
-  // Set by scrollToRow when the target row isn't on the current page — the page change
-  // has to commit and re-render before the row's ref exists to scroll to.
   const [pendingScrollRow, setPendingScrollRow] = useState<number | null>(null);
   const rowRefs = useRef(new Map<number, HTMLTableRowElement>());
-  // Stable per-row-index ref callbacks so switching tabs/pages doesn't hand React a brand
-  // new callback for every visible row on every render (which would detach/reattach every
-  // row ref each time, even for rows whose content hasn't changed).
   const rowRefCallbacks = useRef(
     new Map<number, (el: HTMLTableRowElement | null) => void>(),
   );
@@ -96,18 +114,82 @@ export function ImportDataView({
     setWarningPos(0);
   }, [activeTab, warningRowIndices]);
 
+  useEffect(() => {
+    if (
+      isServerPaginated &&
+      invalidRowCount > 0 &&
+      warningIndices?.[activeTab] === undefined
+    ) {
+      onWarningIndicesNeeded?.(activeTab);
+    }
+  }, [
+    activeTab,
+    invalidRowCount,
+    isServerPaginated,
+    onWarningIndicesNeeded,
+    warningIndices,
+  ]);
+
   const { aboveRef, containerStyle } = useStickyAbove();
 
-  // Each tab's row set is paginated independently — this bounds the number of table rows
-  // in the DOM at once (files can run to ~1000 rows) the same way the rest of the app's
-  // large tables already do (SimpleDataTable, DataOverviewTable), rather than rendering
-  // every row unconditionally. Two separate hook calls (rather than one keyed off
-  // activeRows) so TypeScript keeps clean.rows' and origin.rows' distinct element types.
+  // Client-side pagination hooks (used when isServerPaginated is false)
   const cleanPagination = usePagination(clean.rows);
   const originPagination = usePagination(origin.rows);
-  const { page, setPage, totalPages, pageSize } =
-    activeTab === "clean" ? cleanPagination : originPagination;
-  const pageStart = (page - 1) * pageSize;
+
+  const activePage = isServerPaginated
+    ? activeTab === "clean"
+      ? (clean.page ?? 1)
+      : (origin.page ?? 1)
+    : activeTab === "clean"
+      ? cleanPagination.page
+      : originPagination.page;
+
+  const activePageSize = isServerPaginated
+    ? activeTab === "clean"
+      ? (clean.page_size ?? 50)
+      : (origin.page_size ?? 50)
+    : activeTab === "clean"
+      ? cleanPagination.pageSize
+      : originPagination.pageSize;
+
+  const activeTotalItems = isServerPaginated
+    ? activeTab === "clean"
+      ? (clean.total_rows ?? clean.rows.length)
+      : (origin.total_rows ?? origin.rows.length)
+    : activeTab === "clean"
+      ? clean.rows.length
+      : origin.rows.length;
+
+  const activeTotalPages = isServerPaginated
+    ? activeTab === "clean"
+      ? (clean.total_pages ??
+        Math.max(1, Math.ceil(activeTotalItems / activePageSize)))
+      : (origin.total_pages ??
+        Math.max(1, Math.ceil(activeTotalItems / activePageSize)))
+    : activeTab === "clean"
+      ? cleanPagination.totalPages
+      : originPagination.totalPages;
+
+  const pageStart = (activePage - 1) * activePageSize;
+
+  function handleSetPage(newPage: number): void {
+    if (isServerPaginated) {
+      onPageChange?.(newPage, activeTab);
+    } else {
+      if (activeTab === "clean") {
+        cleanPagination.setPage(newPage);
+      } else {
+        originPagination.setPage(newPage);
+      }
+    }
+  }
+
+  function handleTabSelect(tab: "clean" | "original"): void {
+    setActiveTab(tab);
+    if (isServerPaginated) {
+      onPageChange?.(1, tab);
+    }
+  }
 
   function highlightRow(rowIndex: number): void {
     setHighlightedRow(rowIndex);
@@ -119,10 +201,10 @@ export function ImportDataView({
   }
 
   function scrollToRow(rowIndex: number): void {
-    const targetPage = Math.floor(rowIndex / pageSize) + 1;
-    if (targetPage !== page) {
+    const targetPage = Math.floor(rowIndex / activePageSize) + 1;
+    if (targetPage !== activePage) {
       setPendingScrollRow(rowIndex);
-      setPage(targetPage);
+      handleSetPage(targetPage);
       return;
     }
     const el = rowRefs.current.get(rowIndex);
@@ -137,9 +219,9 @@ export function ImportDataView({
     if (el) {
       el.scrollIntoView({ block: "center" });
       highlightRow(pendingScrollRow);
+      setPendingScrollRow(null);
     }
-    setPendingScrollRow(null);
-  }, [page, pendingScrollRow]);
+  }, [activePage, clean.rows, origin.rows, pendingScrollRow]);
 
   function goToWarning(direction: 1 | -1): void {
     if (warningRowIndices.length === 0) return;
@@ -149,6 +231,13 @@ export function ImportDataView({
     setWarningPos(next);
     scrollToRow(warningRowIndices[next]);
   }
+
+  const activeCleanRows = isServerPaginated
+    ? clean.rows
+    : (cleanPagination.pageItems ?? []);
+  const activeOriginRows = isServerPaginated
+    ? origin.rows
+    : (originPagination.pageItems ?? []);
 
   return (
     <div className="flex flex-col gap-4" style={containerStyle}>
@@ -162,7 +251,7 @@ export function ImportDataView({
             { id: "original", label: "Original data" },
           ]}
           activeTab={activeTab}
-          onSelect={setActiveTab}
+          onSelect={handleTabSelect}
         />
 
         {invalidRowCount > 0 && (
@@ -214,17 +303,43 @@ export function ImportDataView({
           </div>
         )}
 
+        {clean.is_sampled && (
+          <div className="px-3 py-2 rounded-lg bg-sky-500/10 border border-sky-500/25 flex items-center justify-between gap-2 text-xs text-sky-600 dark:text-sky-400">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-xs">
+                ⚡ Fast Preview Mode:
+              </span>
+              <span>
+                Showing preview of{" "}
+                {(clean.total_rows ?? clean.rows.length).toLocaleString()} rows
+                (first {clean.sample_count || 500} items + all warning items) of{" "}
+                {(
+                  clean.source_total_rows ??
+                  clean.total_rows ??
+                  clean.rows.length
+                ).toLocaleString()}{" "}
+                total records.
+              </span>
+            </div>
+          </div>
+        )}
+
         {controls}
       </div>
 
       {activeTab === "clean" ? (
         <>
           <TableContainer
-            className="overflow-y-auto"
+            className="overflow-y-auto relative"
             style={{
               maxHeight: "calc(100vh - var(--sticky-offset, 0px) - 10rem)",
             }}
           >
+            {loadingPage && (
+              <div className="absolute inset-0 bg-bg-base/60 backdrop-blur-[1px] flex items-center justify-center z-20">
+                <Spinner className="w-5 h-5 text-brand" />
+              </div>
+            )}
             <Thead className="top-0">
               <Tr>
                 <Th className={cn(ROW_NUM_CLASS, "bg-info-subtle")}>#</Th>
@@ -236,18 +351,23 @@ export function ImportDataView({
                 )}
               </Tr>
             </Thead>
-            <Tbody>
-              {(cleanPagination.pageItems ?? []).map((row, localIndex) => {
-                const i = pageStart + localIndex;
-                const issues = clean.row_issues[i] ?? [];
+            <Tbody
+              className={cn(loadingPage && "opacity-50 transition-opacity")}
+            >
+              {activeCleanRows.map((row, localIndex) => {
+                const globalIndex = pageStart + localIndex;
+                const issues = isServerPaginated
+                  ? (clean.row_issues[localIndex] ?? [])
+                  : (clean.row_issues[globalIndex] ?? []);
                 const hasIssue = issues.length > 0;
                 return (
                   <Tr
-                    key={i}
-                    ref={rowRefCallback(i)}
+                    key={globalIndex}
+                    ref={rowRefCallback(globalIndex)}
                     className={cn(
                       hasIssue && "bg-warning-subtle hover:bg-warning-subtle",
-                      highlightedRow === i && "ring-2 ring-inset ring-warning",
+                      highlightedRow === globalIndex &&
+                        "ring-2 ring-inset ring-warning",
                     )}
                   >
                     <Td
@@ -256,7 +376,7 @@ export function ImportDataView({
                         hasIssue ? "bg-warning-subtle" : "bg-bg-base",
                       )}
                     >
-                      {i + 1}
+                      {globalIndex + 1}
                     </Td>
                     {clean.columns.map((col) => (
                       <Td
@@ -276,33 +396,43 @@ export function ImportDataView({
             </Tbody>
           </TableContainer>
           <Pagination
-            page={page}
-            totalPages={totalPages}
-            totalItems={clean.rows.length}
-            pageSize={pageSize}
-            onPageChange={setPage}
+            page={activePage}
+            totalPages={activeTotalPages}
+            totalItems={activeTotalItems}
+            pageSize={activePageSize}
+            onPageChange={handleSetPage}
           />
         </>
       ) : (
         <>
           <TableContainer
-            className="overflow-y-auto"
+            className="overflow-y-auto relative"
             style={{
               maxHeight: "calc(100vh - var(--sticky-offset, 0px) - 10rem)",
             }}
           >
-            <Tbody>
-              {(originPagination.pageItems ?? []).map((row, localIndex) => {
-                const i = pageStart + localIndex;
-                const issues = origin.row_issues[i] ?? [];
+            {loadingPage && (
+              <div className="absolute inset-0 bg-bg-base/60 backdrop-blur-[1px] flex items-center justify-center z-20">
+                <Spinner className="w-5 h-5 text-brand" />
+              </div>
+            )}
+            <Tbody
+              className={cn(loadingPage && "opacity-50 transition-opacity")}
+            >
+              {activeOriginRows.map((row, localIndex) => {
+                const globalIndex = pageStart + localIndex;
+                const issues = isServerPaginated
+                  ? (origin.row_issues[localIndex] ?? [])
+                  : (origin.row_issues[globalIndex] ?? []);
                 const hasIssue = issues.length > 0;
                 return (
                   <Tr
-                    key={i}
-                    ref={rowRefCallback(i)}
+                    key={globalIndex}
+                    ref={rowRefCallback(globalIndex)}
                     className={cn(
                       hasIssue && "bg-warning-subtle hover:bg-warning-subtle",
-                      highlightedRow === i && "ring-2 ring-inset ring-warning",
+                      highlightedRow === globalIndex &&
+                        "ring-2 ring-inset ring-warning",
                     )}
                   >
                     <Td
@@ -311,7 +441,7 @@ export function ImportDataView({
                         hasIssue ? "bg-warning-subtle" : "bg-bg-base",
                       )}
                     >
-                      {i + 1}
+                      {globalIndex + 1}
                     </Td>
                     {row.map((cell, j) => (
                       <Td key={j} className="text-text-muted">
@@ -325,11 +455,11 @@ export function ImportDataView({
             </Tbody>
           </TableContainer>
           <Pagination
-            page={page}
-            totalPages={totalPages}
-            totalItems={origin.rows.length}
-            pageSize={pageSize}
-            onPageChange={setPage}
+            page={activePage}
+            totalPages={activeTotalPages}
+            totalItems={activeTotalItems}
+            pageSize={activePageSize}
+            onPageChange={handleSetPage}
           />
         </>
       )}

@@ -1,6 +1,6 @@
 # Import Health
 
-**Status: implemented.** `GET /api/imports/health` (`app/retail/routers/import_health.py`, `app/retail/services/import_health.py`) plus the existing `GET /api/imports/freshness`, wired into `frontend/renderer/src/components/features/retail/ImportOverviewPage.tsx` and the retail nav as **"Import Overview"** — a single nav item with two internal tabs, **"Import freshness"** and **"Import Health"** (`ImportOverviewPage.tsx`'s `OverviewTabBar`, same pill-tab pattern as Dashboard's tab bar). "Import Health" is the tab/feature name this doc documents; "Import Overview" is just the nav item it now lives under, alongside its older sibling. A layout sketch (HTML mock, not real data) was published as a Claude Artifact during the original design conversation; ask in a new session if the link is needed, since artifact URLs aren't durable enough to paste into a doc that outlives one conversation.
+**Status: implemented.** `GET /api/imports/health` (`app/retail/routers/import_health.py`, `app/retail/services/import_health.py`) plus `GET /api/imports/freshness`, wired into `frontend/renderer/src/components/features/retail/ImportOverviewPage.tsx` and the retail nav as **"Import Overview"** — a single nav item with two internal tabs, **"Import freshness"** and **"Import Health"** (`ImportOverviewPage.tsx`'s `OverviewTabBar`, same pill-tab pattern as Dashboard's tab bar). "Import Health" is the tab/feature name this doc documents; "Import Overview" is just the nav item it now lives under, alongside its older sibling. A layout sketch (HTML mock, not real data) was published as a Claude Artifact during the original design conversation; ask in a new session if the link is needed, since artifact URLs aren't durable enough to paste into a doc that outlives one conversation.
 
 ## Why this exists
 
@@ -20,9 +20,9 @@ Both "Import freshness" (the original per-branch, per-import-type "when was this
 
 ## Sections
 
-### 1. Upload freshness — implemented, unchanged behavior
+### 1. Upload and data freshness — implemented
 
-Per retail branch, per import type: a badge for when it was last confirmed, plus the exact timestamp. Reuses `GET /api/imports/freshness` as-is — the endpoint just reports the last confirmed time per type and does no grading; how late counts as late is a frontend decision.
+Per retail branch, the page shows the latest confirmation time and also verifies what date the file actually contains. Sale uses the newest `sales.sale_date`; Inventory uses the newest `stock_levels.snapshot_at` date. The daily badge grades those data dates, so confirming yesterday's report today remains visibly stale rather than reading as a fresh upload. Purchase is not graded as late because it is not daily; instead, its numeric purchase numbers are grouped by prefix and checked for internal gaps (for example, `STR00049` followed by `STR00111` flags `STR00050`–`STR00110`). The same two checks surface as critical Business Alerts and link back here.
 
 **Sales and Inventory are graded as daily** — Today (success), Yesterday (warning, maybe just not uploaded yet today), "N days ago" or "Never imported" (error). **Purchase is not.** The business only buys stock when it restocks, not every day, so a purchase import that is a week old means "nothing was bought that week," not "someone stopped uploading" — grading it daily made a normal branch look permanently red. Its cell shows the same "N days ago"/"None yet" wording in a neutral badge, and the column header is marked "(not daily)" so the missing color isn't read as a bug. No longer threshold was substituted, because any number would be arbitrary: purchasing frequency isn't fixed, and this table has no way to know when a branch _should_ have restocked.
 
