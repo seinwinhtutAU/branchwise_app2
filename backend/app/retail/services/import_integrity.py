@@ -34,6 +34,40 @@ def latest_daily_data_dates(
     return sales_date, inventory_snapshot.date() if inventory_snapshot else None
 
 
+def imported_data_date_ranges(
+    db: Session, branch_id: str
+) -> dict[str, tuple[date | None, date | None]]:
+    """Return each import type's earliest and latest business dates.
+
+    These are coverage ranges for Import Health, so they use the records' business
+    dates rather than ImportBatch.created_at: a file confirmed today can contain an
+    older report.
+    """
+    query_ranges = {
+        "sales": db.query(func.min(Sale.sale_date), func.max(Sale.sale_date))
+        .filter(Sale.branch_id == branch_id)
+        .one(),
+        "inventory": db.query(
+            func.min(StockLevel.snapshot_at), func.max(StockLevel.snapshot_at)
+        )
+        .filter(StockLevel.branch_id == branch_id)
+        .one(),
+        "purchase": db.query(
+            func.min(Purchase.purchase_date), func.max(Purchase.purchase_date)
+        )
+        .filter(Purchase.branch_id == branch_id)
+        .one(),
+    }
+
+    def as_date(value: date | None) -> date | None:
+        return value.date() if hasattr(value, "date") else value
+
+    return {
+        import_type: (as_date(earliest), as_date(latest))
+        for import_type, (earliest, latest) in query_ranges.items()
+    }
+
+
 def purchase_number_integrity(db: Session, branch_id: str) -> dict:
     """Find internal gaps in each purchase-number prefix sequence.
 

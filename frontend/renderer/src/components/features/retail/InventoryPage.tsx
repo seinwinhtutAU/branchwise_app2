@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { cn } from "@renderer/lib/utils";
+import { formatRetailDateTime } from "@renderer/lib/retailDateTime";
 import {
   SimpleDataTable,
   type DataTableColumn,
@@ -38,7 +39,11 @@ interface InventoryRow {
 
 const INVENTORY_COLUMNS: DataTableColumn<InventoryRow>[] = [
   { key: "Branch", label: "Branch" },
-  { key: "Snapshot_At", label: "Last Updated" },
+  {
+    key: "Snapshot_At",
+    label: "Last Updated",
+    format: (value) => formatRetailDateTime(String(value)),
+  },
   { key: "StockCode", label: "Stock Code", copyable: true },
   { key: "Description", label: "Description" },
   { key: "Group", label: "Group" },

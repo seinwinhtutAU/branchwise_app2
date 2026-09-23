@@ -49,6 +49,10 @@ import {
 } from "@renderer/lib/useBranches";
 import { formatBuyingPriceSource } from "@renderer/lib/buyingPriceSource";
 import { useAppSettings } from "@renderer/lib/appSettings";
+import {
+  formatRetailDate,
+  formatRetailTime,
+} from "@renderer/lib/retailDateTime";
 import { Spinner } from "@renderer/components/ui/Spinner";
 import { ErrorBoundary } from "@renderer/components/ui/ErrorBoundary";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
@@ -333,8 +337,16 @@ interface SaleRow {
 
 const SALE_COLUMNS: DataTableColumn<SaleRow>[] = [
   { key: "Branch", label: "Branch" },
-  { key: "Date", label: "Date" },
-  { key: "Time", label: "Time" },
+  {
+    key: "Date",
+    label: "Date",
+    format: (value) => formatRetailDate(String(value)),
+  },
+  {
+    key: "Time",
+    label: "Time",
+    format: (value) => formatRetailTime(value as string | null),
+  },
   { key: "SlipID", label: "Slip ID" },
   { key: "SlipNumber", label: "Slip Number" },
   { key: "LineNo", label: "Line No", align: "right" },
@@ -381,7 +393,11 @@ interface PurchaseRow {
 const PURCHASE_COLUMNS: DataTableColumn<PurchaseRow>[] = [
   { key: "PurchaseNumber", label: "Purchase Number", copyable: true },
   { key: "Branch", label: "Branch" },
-  { key: "Date", label: "Date" },
+  {
+    key: "Date",
+    label: "Date",
+    format: (value) => formatRetailDate(String(value)),
+  },
   { key: "StockCode", label: "Stock Code", copyable: true },
   { key: "Description", label: "Description" },
   { key: "Quantity", label: "Quantity", align: "right" },

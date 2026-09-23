@@ -56,6 +56,7 @@ from app.retail.services.inventory_import import (
 )
 from app.retail.services.inventory_persist import persist_inventory
 from app.retail.services.import_integrity import (
+    imported_data_date_ranges,
     latest_daily_data_dates,
     purchase_number_integrity,
 )
@@ -869,6 +870,7 @@ def get_import_freshness(
     response: list[dict] = []
     for branch in branches:
         sales_data_date, inventory_data_date = latest_daily_data_dates(db, branch.id)
+        data_ranges = imported_data_date_ranges(db, branch.id)
         purchase_integrity = purchase_number_integrity(db, branch.id)
         response.append(
             {
@@ -889,6 +891,18 @@ def get_import_freshness(
                 "inventory_data_date": inventory_data_date.isoformat()
                 if inventory_data_date
                 else None,
+                **{
+                    f"{import_type}_earliest_data_date": earliest.isoformat()
+                    if earliest
+                    else None
+                    for import_type, (earliest, _) in data_ranges.items()
+                },
+                **{
+                    f"{import_type}_latest_data_date": latest.isoformat()
+                    if latest
+                    else None
+                    for import_type, (_, latest) in data_ranges.items()
+                },
                 "purchase_number_integrity": purchase_integrity,
             }
         )

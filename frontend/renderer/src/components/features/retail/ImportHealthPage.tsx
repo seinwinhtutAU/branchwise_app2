@@ -40,6 +40,12 @@ interface FreshnessRow {
   purchase_last_imported_at: string | null;
   sales_data_date: string | null;
   inventory_data_date: string | null;
+  sales_earliest_data_date: string | null;
+  sales_latest_data_date: string | null;
+  inventory_earliest_data_date: string | null;
+  inventory_latest_data_date: string | null;
+  purchase_earliest_data_date: string | null;
+  purchase_latest_data_date: string | null;
   purchase_number_integrity?: PurchaseNumberIntegrity;
 }
 
@@ -118,6 +124,33 @@ function freshnessLabel(dataDate: string | null): string {
   if (days <= 0) return "Today";
   if (days === 1) return "Yesterday";
   return `${days} days ago`;
+}
+
+function dataRangeLabel(
+  earliest: string | null,
+  latest: string | null,
+): string | null {
+  if (!earliest || !latest) return null;
+  return `${earliest} → ${latest}`;
+}
+
+function DataRangeNote({
+  category,
+  earliest,
+  latest,
+}: {
+  category: IssueCategory;
+  earliest: string | null;
+  latest: string | null;
+}): React.JSX.Element | null {
+  const range = dataRangeLabel(earliest, latest);
+  if (!range) return null;
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[11px]">
+      <CategoryTag category={category} />
+      <span className="text-brand">{range}</span>
+    </span>
+  );
 }
 
 /** One "Latest sales: Today" style fact, shown unconditionally next to
@@ -252,13 +285,16 @@ function NeedsAttentionCard({
   const integrity = branch.freshness?.purchase_number_integrity;
   const firstGap = integrity?.gaps[0];
   const ignoredCount = completeness ? countIgnoredDays(completeness) : 0;
+  const freshness = branch.freshness;
 
   return (
     <div className="border-b border-border bg-bg-base p-3.5 last:border-b-0">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-text-primary">
-          {branch.branch_name}
-        </h3>
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <h3 className="text-sm font-semibold text-text-primary">
+            {branch.branch_name}
+          </h3>
+        </div>
         {ignoredCount > 0 && (
           <button
             type="button"
@@ -280,6 +316,23 @@ function NeedsAttentionCard({
         <FreshnessNote
           label="Latest inventory"
           value={freshnessLabel(branch.freshness?.inventory_data_date ?? null)}
+        />
+      </div>
+      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <DataRangeNote
+          category="Sales"
+          earliest={freshness?.sales_earliest_data_date ?? null}
+          latest={freshness?.sales_latest_data_date ?? null}
+        />
+        <DataRangeNote
+          category="Inventory"
+          earliest={freshness?.inventory_earliest_data_date ?? null}
+          latest={freshness?.inventory_latest_data_date ?? null}
+        />
+        <DataRangeNote
+          category="Purchase"
+          earliest={freshness?.purchase_earliest_data_date ?? null}
+          latest={freshness?.purchase_latest_data_date ?? null}
         />
       </div>
       <div className="flex flex-col gap-1.5">
@@ -327,6 +380,7 @@ function UpToDateRow({
   const ignoredCount = branch.completeness
     ? countIgnoredDays(branch.completeness)
     : 0;
+  const freshness = branch.freshness;
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-border/60 px-3.5 py-2 last:border-b-0">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -336,6 +390,23 @@ function UpToDateRow({
             {branch.branch_name}
           </span>
           <span className="text-text-muted">— up to date</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <DataRangeNote
+            category="Sales"
+            earliest={freshness?.sales_earliest_data_date ?? null}
+            latest={freshness?.sales_latest_data_date ?? null}
+          />
+          <DataRangeNote
+            category="Inventory"
+            earliest={freshness?.inventory_earliest_data_date ?? null}
+            latest={freshness?.inventory_latest_data_date ?? null}
+          />
+          <DataRangeNote
+            category="Purchase"
+            earliest={freshness?.purchase_earliest_data_date ?? null}
+            latest={freshness?.purchase_latest_data_date ?? null}
+          />
         </div>
         <FreshnessNote
           label="Latest sales"
