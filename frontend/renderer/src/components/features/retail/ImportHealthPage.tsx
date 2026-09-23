@@ -22,13 +22,8 @@ import {
   type CompletenessResponse,
   type DrawerPanel,
   type ImportKind,
+  type PurchaseNumberGap,
 } from "@renderer/components/features/retail/ImportCompletenessControls";
-
-interface PurchaseNumberGap {
-  start_number: string;
-  end_number: string;
-  missing_count: number;
-}
 
 interface PurchaseNumberIntegrity {
   numbered_purchase_count: number;
@@ -99,6 +94,61 @@ function countIgnoredDays(branch: CompletenessBranch): number {
   );
 }
 
+function daysSinceDataDate(iso: string): number {
+  const [year, month, day] = iso.split("-").map(Number);
+  const dataDate = new Date(year, month - 1, day);
+  const today = new Date();
+  const currentDate = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+  );
+  return Math.floor(
+    (currentDate.getTime() - dataDate.getTime()) / (1000 * 60 * 60 * 24),
+  );
+}
+
+// Plain "when was this last imported" — not an alert judgement, so no colour
+// coding: a branch with no open days can still show "3 days ago" here if those
+// days were ignored rather than actually imported, and that's a fact worth
+// seeing, not a problem worth flagging.
+function freshnessLabel(dataDate: string | null): string {
+  if (!dataDate) return "No data yet";
+  const days = daysSinceDataDate(dataDate);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return `${days} days ago`;
+}
+
+/** One "Latest sales: Today" style fact, shown unconditionally next to
+ * whatever it's about — freshness is a fact worth knowing regardless of
+ * whether that same type also has an open-days problem below it. */
+function FreshnessNote({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}): React.JSX.Element {
+  return (
+    <span className="text-[11px] text-text-muted">
+      {label}:{" "}
+      <span
+        className={cn(
+          "font-medium",
+          value === "Today"
+            ? "text-success"
+            : value === "Yesterday"
+              ? "text-warning"
+              : "text-error",
+        )}
+      >
+        {value}
+      </span>
+    </span>
+  );
+}
+
 /**
  * Whether a branch needs a decision at all — the only question this page's summary
  * and grouping care about. A purchase file with no numbered purchases, or a sequence
@@ -138,9 +188,9 @@ function CategoryTag({ category }: { category: IssueCategory }): React.JSX.Eleme
 
 /** One issue line inside a branch's card: which of Sales/Inventory/Purchase it's
  * about, what's wrong, and — when there's something this page can do about it — a
- * button straight to fixing it. A purchase gap has no button here: fixing it means
- * re-importing the missing purchase file from the Import tab, not picking dates, so
- * it's stated as a fact rather than offered as an action. */
+ * button straight to the relevant detail. A purchase gap opens its missing-number
+ * list; fixing it still means re-importing the missing purchase file from the Import
+ * tab, not picking dates. */
 function IssueRow({
   category,
   text,
@@ -219,6 +269,19 @@ function NeedsAttentionCard({
           </button>
         )}
       </div>
+      {/* Freshness is shown unconditionally, whether or not that type also has
+          an issue row below — "58 days behind" doesn't say whether that backlog
+          is old-and-stuck or just started, and this is where that shows up. */}
+      <div className="mb-2 flex flex-wrap items-center gap-3">
+        <FreshnessNote
+          label="Latest sales"
+          value={freshnessLabel(branch.freshness?.sales_data_date ?? null)}
+        />
+        <FreshnessNote
+          label="Latest inventory"
+          value={freshnessLabel(branch.freshness?.inventory_data_date ?? null)}
+        />
+      </div>
       <div className="flex flex-col gap-1.5">
         {salesMissing > 0 && (
           <IssueRow
@@ -241,6 +304,9 @@ function NeedsAttentionCard({
         {firstGap && (integrity?.missing_number_count ?? 0) > 0 && (
           <IssueRow
             category="Purchase"
+            actionLabel="View"
+            isActive={activePanel === "purchase"}
+            onClick={() => onOpenPanel(branch.branch_id, "purchase")}
             text={`${integrity.missing_number_count} purchase number${integrity.missing_number_count === 1 ? "" : "s"} ${integrity.missing_number_count === 1 ? "is" : "are"} missing, between ${firstGap.start_number} and ${firstGap.end_number}.`}
           />
         )}
@@ -262,13 +328,23 @@ function UpToDateRow({
     ? countIgnoredDays(branch.completeness)
     : 0;
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3.5 py-2 last:border-b-0">
-      <div className="flex items-center gap-2 text-xs text-text-secondary">
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
-        <span className="font-medium text-text-primary">
-          {branch.branch_name}
-        </span>
-        <span className="text-text-muted">— up to date</span>
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-border/60 px-3.5 py-2 last:border-b-0">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <div className="flex items-center gap-2 text-xs text-text-secondary">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
+          <span className="font-medium text-text-primary">
+            {branch.branch_name}
+          </span>
+          <span className="text-text-muted">— up to date</span>
+        </div>
+        <FreshnessNote
+          label="Latest sales"
+          value={freshnessLabel(branch.freshness?.sales_data_date ?? null)}
+        />
+        <FreshnessNote
+          label="Latest inventory"
+          value={freshnessLabel(branch.freshness?.inventory_data_date ?? null)}
+        />
       </div>
       {ignoredCount > 0 && (
         <button
@@ -537,6 +613,9 @@ export default function ImportHealthPage({
         target={drawerTarget}
         branchName={drawerBranch?.branch_name ?? null}
         completeness={drawerBranch?.completeness ?? null}
+        purchaseGaps={
+          drawerBranch?.freshness?.purchase_number_integrity?.gaps ?? []
+        }
         canManage={canManage}
         isUpdating={isUpdating}
         onIgnore={handleIgnore}

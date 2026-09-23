@@ -26,6 +26,12 @@ export interface CompletenessBranch {
   inventory: CompletenessTypeSection;
 }
 
+export interface PurchaseNumberGap {
+  start_number: string;
+  end_number: string;
+  missing_count: number;
+}
+
 export interface CompletenessResponse {
   checked_through: string;
   branches: CompletenessBranch[];
@@ -57,6 +63,37 @@ export interface DaySectionProps extends DaySectionActions {
   isUpdating: boolean;
 }
 
+interface DayMonthGroup {
+  key: string;
+  year: number;
+  monthLabel: string;
+  days: CompletenessDay[];
+}
+
+function groupDaysByMonth(days: CompletenessDay[]): DayMonthGroup[] {
+  const groups = new Map<string, DayMonthGroup>();
+
+  for (const day of days) {
+    const [year, month] = day.date.split("-").map(Number);
+    const key = String(year) + "-" + String(month).padStart(2, "0");
+    const existing = groups.get(key);
+    if (existing) {
+      existing.days.push(day);
+      continue;
+    }
+    groups.set(key, {
+      key,
+      year,
+      monthLabel: new Intl.DateTimeFormat("en", { month: "long" }).format(
+        new Date(year, month - 1, 1),
+      ),
+      days: [day],
+    });
+  }
+
+  return [...groups.values()];
+}
+
 export function DaySection({
   title,
   branchId,
@@ -75,6 +112,7 @@ export function DaySection({
   const [ignoreNote, setIgnoreNote] = useState("");
   const selected = days.filter((day) => selectedDates.has(day.date));
   const isIgnoreMode = mode === "missing";
+  const monthGroups = groupDaysByMonth(days);
 
   function toggleDate(date: string): void {
     setSelectedDates((current) => {
@@ -168,44 +206,103 @@ export function DaySection({
         </div>
       )}
 
-      <div className="grid max-h-72 grid-cols-2 gap-1.5 overflow-y-auto pr-1">
-        {days.map((day) => (
-          <label
-            key={day.date}
-            className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-bg-base px-2.5 py-1.5"
-          >
-            {canManage && (
-              <input
-                type="checkbox"
-                checked={selectedDates.has(day.date)}
-                disabled={isUpdating || isConfirming}
-                onChange={() => toggleDate(day.date)}
-                className="h-3.5 w-3.5 shrink-0 accent-brand"
-                aria-label={`Select ${day.date}`}
-              />
-            )}
-            <span className="text-xs font-medium tabular-nums text-text-primary">
-              {day.date}
-            </span>
-          </label>
-        ))}
+      <div className="pr-1">
+        <div className="flex flex-col gap-3">
+          {monthGroups.map((group, index) => {
+            const previous = monthGroups[index - 1];
+            const showYear = previous === undefined || previous.year !== group.year;
+            return (
+              <div
+                key={group.key}
+                className={
+                  showYear && previous !== undefined
+                    ? "border-t border-border pt-3"
+                    : undefined
+                }
+              >
+                {showYear && (
+                  <div className="mb-1.5 text-sm font-bold text-text-primary">
+                    {group.year}
+                  </div>
+                )}
+                <div className="mb-1.5 text-sm font-semibold text-text-secondary">
+                  {group.monthLabel} ({group.days.length}{" "}
+                  {group.days.length === 1 ? "day" : "days"})
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {group.days.map((day) => (
+                    <label
+                      key={day.date}
+                      className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-bg-base px-2.5 py-1.5"
+                    >
+                      {canManage && (
+                        <input
+                          type="checkbox"
+                          checked={selectedDates.has(day.date)}
+                          disabled={isUpdating || isConfirming}
+                          onChange={() => toggleDate(day.date)}
+                          className="h-3.5 w-3.5 shrink-0 accent-brand"
+                          aria-label={"Select " + day.date}
+                        />
+                      )}
+                      <span className="text-xs font-medium tabular-nums text-text-primary">
+                        {day.date}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 }
 
 /** Which branch/panel the Import Health drawer is open on, or closed when null. */
-export type DrawerPanel = "sales" | "inventory" | "ignored";
+export type DrawerPanel = "sales" | "inventory" | "purchase" | "ignored";
 
 export interface ImportHealthDrawerTarget {
   branchId: string;
   panel: DrawerPanel;
 }
 
+function PurchaseGapSection({
+  gaps,
+}: {
+  gaps: PurchaseNumberGap[];
+}): React.JSX.Element {
+  return (
+    <div className="min-w-0 flex-1">
+      <div className="mb-2 text-sm font-semibold text-text-secondary">
+        Missing purchase numbers
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {gaps.map((gap) => (
+          <div
+            key={gap.start_number + "-" + gap.end_number}
+            className="flex items-center justify-between gap-3 rounded-md border border-border bg-bg-base px-2.5 py-1.5"
+          >
+            <span className="text-xs font-medium tabular-nums text-text-primary">
+              {gap.start_number}–{gap.end_number}
+            </span>
+            <span className="shrink-0 text-xs text-text-muted">
+              {gap.missing_count}{" "}
+              {gap.missing_count === 1 ? "number" : "numbers"}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 interface ImportHealthDrawerProps extends DaySectionActions {
   target: ImportHealthDrawerTarget | null;
   branchName: string | null;
   completeness: CompletenessBranch | null;
+  purchaseGaps: PurchaseNumberGap[];
   canManage: boolean;
   isUpdating: boolean;
   onClose: () => void;
@@ -221,13 +318,17 @@ export function ImportHealthDrawer({
   target,
   branchName,
   completeness,
+  purchaseGaps,
   canManage,
   isUpdating,
   onIgnore,
   onRestore,
   onClose,
 }: ImportHealthDrawerProps): React.JSX.Element | null {
-  const isOpen = target !== null && completeness !== null;
+  const isOpen =
+    target !== null &&
+    (completeness !== null ||
+      (target.panel === "purchase" && purchaseGaps.length > 0));
 
   useEffect(() => {
     if (!isOpen) return;
@@ -241,14 +342,18 @@ export function ImportHealthDrawer({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
-  if (!isOpen || !target || !completeness) return null;
+  if (!isOpen || !target) return null;
 
   const panelLabel =
     target.panel === "ignored"
       ? "Dates you've chosen to skip"
       : target.panel === "sales"
         ? "Sales days to import"
-        : "Inventory days to import";
+        : target.panel === "inventory"
+          ? "Inventory days to import"
+          : "Purchase numbers to import";
+
+  if (target.panel !== "purchase" && !completeness) return null;
 
   return (
     <FloatingPortal>
@@ -278,7 +383,15 @@ export function ImportHealthDrawer({
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
-          {target.panel === "ignored" ? (
+          {target.panel === "purchase" ? (
+            <div className="flex flex-col gap-4">
+              <p className="text-xs text-text-muted">
+                These purchase numbers are missing from the sequence. Find the
+                corresponding purchase files and import them.
+              </p>
+              <PurchaseGapSection gaps={purchaseGaps} />
+            </div>
+          ) : target.panel === "ignored" ? (
             <div className="flex flex-col gap-5">
               <p className="text-xs text-text-muted">
                 These dates were marked as not needing an import. Tick one and
@@ -288,7 +401,7 @@ export function ImportHealthDrawer({
                 title="Sales"
                 branchId={target.branchId}
                 importType="sales"
-                days={completeness.sales.days.filter(
+                days={completeness!.sales.days.filter(
                   (day) => day.status === "closed",
                 )}
                 mode="ignored"
@@ -301,7 +414,7 @@ export function ImportHealthDrawer({
                 title="Inventory"
                 branchId={target.branchId}
                 importType="inventory"
-                days={completeness.inventory.days.filter(
+                days={completeness!.inventory.days.filter(
                   (day) => day.status === "closed",
                 )}
                 mode="ignored"
@@ -322,8 +435,8 @@ export function ImportHealthDrawer({
                 branchId={target.branchId}
                 importType={target.panel}
                 days={(target.panel === "sales"
-                  ? completeness.sales
-                  : completeness.inventory
+                  ? completeness!.sales
+                  : completeness!.inventory
                 ).days.filter((day) => day.status === "open")}
                 mode="missing"
                 canManage={canManage}

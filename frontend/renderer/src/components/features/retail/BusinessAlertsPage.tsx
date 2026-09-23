@@ -3,7 +3,7 @@ import type { Session } from "@renderer/lib/auth";
 import { cn } from "@renderer/lib/utils";
 import { useUrlQueries } from "@renderer/lib/queryClient";
 import type { BranchOption } from "@renderer/lib/useBranches";
-import { Badge } from "@renderer/components/ui/Badge";
+import { Badge, type BadgeVariant } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
@@ -39,6 +39,32 @@ const CATEGORY_LABEL: Record<string, string> = {
   inventory: "Inventory",
   customer: "Customer",
   data_quality: "Data quality",
+};
+
+const CATEGORY_META: Record<
+  string,
+  { label: string; variant: BadgeVariant; className: string }
+> = {
+  sales: {
+    label: "Sales",
+    variant: "default",
+    className: "bg-info-subtle text-info border-info/20",
+  },
+  inventory: {
+    label: "Inventory",
+    variant: "brand",
+    className: "bg-brand-subtle text-brand border-brand/40",
+  },
+  customer: {
+    label: "Customer",
+    variant: "success",
+    className: "bg-success-subtle text-success border-success-pill",
+  },
+  data_quality: {
+    label: "Data quality",
+    variant: "warning",
+    className: "bg-warning-subtle text-warning border-warning-pill",
+  },
 };
 
 const CATEGORY_ORDER = [
@@ -95,9 +121,17 @@ function AlertListRow({
               {alert.branchName}
             </span>
           )}
-          <span className="truncate">
-            {CATEGORY_LABEL[alert.dimension] ?? alert.dimension}
-          </span>
+          <Badge
+            variant={CATEGORY_META[alert.dimension]?.variant ?? "default"}
+            className={cn(
+              "text-[10px] px-1.5 py-0",
+              CATEGORY_META[alert.dimension]?.className,
+            )}
+          >
+            {CATEGORY_META[alert.dimension]?.label ??
+              CATEGORY_LABEL[alert.dimension] ??
+              alert.dimension}
+          </Badge>
         </div>
         <div
           className={cn(
@@ -159,9 +193,17 @@ function AlertInspector({
           <Badge variant={meta.badge} dot>
             {meta.label}
           </Badge>
-          <span className="text-xs font-medium text-text-muted">
-            {CATEGORY_LABEL[alert.dimension] ?? alert.dimension}
-          </span>
+          <Badge
+            variant={CATEGORY_META[alert.dimension]?.variant ?? "default"}
+            className={cn(
+              "text-[11px] px-1.5 py-0",
+              CATEGORY_META[alert.dimension]?.className,
+            )}
+          >
+            {CATEGORY_META[alert.dimension]?.label ??
+              CATEGORY_LABEL[alert.dimension] ??
+              alert.dimension}
+          </Badge>
           {showBranch && (
             <span className="text-xs text-text-muted">
               · {alert.branchName}
