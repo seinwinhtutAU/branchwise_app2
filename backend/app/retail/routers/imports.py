@@ -505,7 +505,11 @@ async def import_sales_file(
     _check_extension(filename)
     branch = _resolve_branch_for_preview(user, branch_id, db)
 
-    origin_rows, clean_df = _parse_or_400(
+    # Off the event loop for the same reason confirm's own parsing already is —
+    # this is CPU-bound pandas work with no further awaits, so left inline it blocks
+    # every other request (including a sibling preview call) until it finishes.
+    origin_rows, clean_df = await run_in_threadpool(
+        _parse_or_400,
         parse_pos_sale_upload,
         contents,
         filename,
@@ -513,7 +517,8 @@ async def import_sales_file(
         branch.sale_date_format if branch else "MDY",
     )
 
-    preview = _build_preview(
+    preview = await run_in_threadpool(
+        _build_preview,
         filename,
         origin_rows,
         clean_df,
@@ -598,7 +603,9 @@ async def import_inventory_file(
     _check_extension(filename)
     branch = _resolve_branch_for_preview(user, branch_id, db)
 
-    origin_rows, clean_df = _parse_or_400(
+    # Off the event loop — see the matching comment on the /sales preview route.
+    origin_rows, clean_df = await run_in_threadpool(
+        _parse_or_400,
         parse_inventory_upload,
         contents,
         filename,
@@ -606,7 +613,8 @@ async def import_inventory_file(
         branch.inventory_date_format if branch else "MDY",
     )
 
-    preview = _build_preview(
+    preview = await run_in_threadpool(
+        _build_preview,
         filename,
         origin_rows,
         clean_df,
@@ -689,11 +697,13 @@ async def import_purchase_file(
     contents, filename = await _resolve_upload(db, file, staged_upload_id)
     _check_extension(filename)
 
-    origin_rows, clean_df = _parse_or_400(
-        parse_purchase_upload, contents, filename, "purchase"
+    # Off the event loop — see the matching comment on the /sales preview route.
+    origin_rows, clean_df = await run_in_threadpool(
+        _parse_or_400, parse_purchase_upload, contents, filename, "purchase"
     )
 
-    preview = _build_preview(
+    preview = await run_in_threadpool(
+        _build_preview,
         filename,
         origin_rows,
         clean_df,
@@ -805,7 +815,6 @@ async def inspect_import_file(
 
     try:
         contents = await _read_upload(file)
-        rows = read_raw_grid(contents, file.filename or "")
     except HTTPException as exc:
         msg = str(exc.detail)
         if exc.status_code == 413 or "too large" in msg.lower():
@@ -822,6 +831,21 @@ async def inspect_import_file(
             "row_count": 0,
             "error_message": err_msg,
         }
+
+    # Everything from here on is CPU-bound (pandas parsing a whole grid, potentially
+    # several thousand rows) with no more `await`s of its own, so it used to run
+    # straight on the event loop — one file's inspect blocked every other request
+    # (and every other file's own inspect, despite the frontend firing them in
+    # parallel) until it finished. run_in_threadpool moves it off the loop, same as
+    # every confirm endpoint already does for its own parsing.
+    return await run_in_threadpool(_inspect_parsed_file, contents, file.filename, expected_type, db)
+
+
+def _inspect_parsed_file(
+    contents: bytes, filename: str | None, expected_type: str, db: Session
+) -> dict:
+    try:
+        rows = read_raw_grid(contents, filename or "")
     except Exception as exc:
         msg = str(exc)
         if "too large" in msg.lower() or "413" in msg:
@@ -829,7 +853,7 @@ async def inspect_import_file(
         else:
             err_msg = f"Could not read file: {exc}"
         return {
-            "filename": file.filename,
+            "filename": filename,
             "status": "invalid",
             "detected_type": "unknown",
             "expected_type": expected_type,
@@ -846,7 +870,7 @@ async def inspect_import_file(
 
     if detected is not None and detected != expected_type:
         return {
-            "filename": file.filename,
+            "filename": filename,
             "status": "wrong_type",
             "detected_type": detected,
             "expected_type": expected_type,
@@ -858,14 +882,14 @@ async def inspect_import_file(
 
     try:
         if expected_type == "purchase":
-            purchase_number, p_date = extract_purchase_metadata(file.filename or "")
+            purchase_number, p_date = extract_purchase_metadata(filename or "")
             if p_date:
                 dates = [p_date.isoformat()]
             clean_df = parse_purchase_export_from_grid(rows)
             row_count = len(clean_df)
             if row_count == 0 and detected is None:
                 return {
-                    "filename": file.filename,
+                    "filename": filename,
                     "status": "unrecognized",
                     "detected_type": "unknown",
                     "expected_type": expected_type,
@@ -879,7 +903,7 @@ async def inspect_import_file(
             row_count = len(clean_df)
             if row_count == 0 and detected is None:
                 return {
-                    "filename": file.filename,
+                    "filename": filename,
                     "status": "unrecognized",
                     "detected_type": "unknown",
                     "expected_type": expected_type,
@@ -898,7 +922,7 @@ async def inspect_import_file(
             row_count = len(clean_df)
             if row_count == 0 and detected is None:
                 return {
-                    "filename": file.filename,
+                    "filename": filename,
                     "status": "unrecognized",
                     "detected_type": "unknown",
                     "expected_type": expected_type,
@@ -911,12 +935,12 @@ async def inspect_import_file(
             if printed_at:
                 dates = [printed_at.date().isoformat()]
             else:
-                _, f_date = extract_purchase_metadata(file.filename or "")
+                _, f_date = extract_purchase_metadata(filename or "")
                 if f_date:
                     dates = [f_date.isoformat()]
     except Exception as exc:
         return {
-            "filename": file.filename,
+            "filename": filename,
             "status": "invalid",
             "detected_type": detected or "unknown",
             "expected_type": expected_type,
@@ -938,7 +962,7 @@ async def inspect_import_file(
         )
 
     return {
-        "filename": file.filename,
+        "filename": filename,
         "status": "valid",
         "detected_type": detected or expected_type,
         "expected_type": expected_type,
@@ -947,7 +971,7 @@ async def inspect_import_file(
         "row_count": row_count,
         "zero_count": zero_count,
         "nonzero_count": nonzero_count,
-        "staged_upload_id": _stage_upload(db, contents, file.filename),
+        "staged_upload_id": _stage_upload(db, contents, filename),
         "error_message": None,
     }
 
