@@ -1,3 +1,4 @@
+import gzip
 import io
 
 from fastapi.testclient import TestClient
@@ -196,3 +197,24 @@ def test_sales_preview_defaults_to_mdy_when_development_has_not_picked_a_branch_
     assert response.status_code == 200
     row = response.json()["clean"]["rows"][0]
     assert row["Date"] == "2026-05-06"  # month-first default: May 6
+
+
+def test_purchase_preview_accepts_gzip_compressed_upload(
+    authed_client: TestClient, db_session: Session
+):
+    """The renderer gzips CSV uploads on a slow connection (see frontend's
+    `lib/uploadCompression.ts`); the backend must transparently decompress
+    them in `_read_upload` and parse exactly as it would the raw file."""
+    _make_retail_user(db_session)
+    compressed = gzip.compress(PURCHASE_CSV.encode())
+    response = authed_client.post(
+        "/api/imports/purchase",
+        files={"file": ("purchase.csv", io.BytesIO(compressed), "text/csv")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    clean_issues = body["clean"]["row_issues"]
+    assert clean_issues[0] == []
+    assert clean_issues[1] == [
+        {"column": "Buying_Price", "message": "Buying Price can't be a negative number"}
+    ]

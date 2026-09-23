@@ -3,6 +3,7 @@ import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
 import { invalidateEverything } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
+import { maybeCompressFile } from "@renderer/lib/uploadCompression";
 import { Card, CardHeader } from "@renderer/components/ui/Card";
 import { UploadIcon } from "@renderer/components/ui/icons";
 
@@ -34,7 +35,7 @@ function GeneralFileImportCard({ session, branchId }: Props): React.JSX.Element 
       const results = await Promise.all(
         files.map(async (file) => {
           const formData = new FormData();
-          formData.append("file", file);
+          formData.append("file", await maybeCompressFile(file));
           if (branchId) formData.append("branch_id", branchId);
 
           const response = await fetch(`${apiBaseUrl}/api/imports/general`, {

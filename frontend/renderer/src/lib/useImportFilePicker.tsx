@@ -2,6 +2,7 @@ import { useRef, useState, type ChangeEvent } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
 import { useToast } from "@renderer/lib/useToast";
+import { maybeCompressFile } from "@renderer/lib/uploadCompression";
 import type {
   PendingImport,
   SelectedImportFile,
@@ -60,7 +61,7 @@ export function useImportFilePicker(
     setPicking(true);
     try {
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file", await maybeCompressFile(file));
       const response = await fetch(`${apiBaseUrl}${context.endpoint}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${session.access_token}` },

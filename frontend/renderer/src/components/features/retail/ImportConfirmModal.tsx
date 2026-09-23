@@ -4,6 +4,7 @@ import { apiBaseUrl } from "@renderer/lib/auth";
 import { invalidateEverything } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
 import { formatRetailDate } from "@renderer/lib/retailDateTime";
+import { maybeCompressFile } from "@renderer/lib/uploadCompression";
 import { Button } from "@renderer/components/ui/Button";
 import { ProgressBar } from "@renderer/components/ui/ProgressBar";
 import {
@@ -190,15 +191,19 @@ export default function ImportConfirmModal({
       }));
 
       const expType = getExpectedType(item.endpoint);
-      const formData = new FormData();
-      formData.append("file", item.file);
-      formData.append("expected_type", expType);
 
-      fetch(`${apiBaseUrl}/api/imports/inspect`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        body: formData,
-      })
+      maybeCompressFile(item.file)
+        .then((uploadFile) => {
+          const formData = new FormData();
+          formData.append("file", uploadFile);
+          formData.append("expected_type", expType);
+
+          return fetch(`${apiBaseUrl}/api/imports/inspect`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${session.access_token}` },
+            body: formData,
+          });
+        })
         .then(async (res) => {
           if (!res.ok) {
             const body = await res.json().catch(() => null);
@@ -387,7 +392,7 @@ export default function ImportConfirmModal({
           }
 
           const formData = new FormData();
-          formData.append("file", item.file);
+          formData.append("file", await maybeCompressFile(item.file));
           if (needsBranchSelection && selectedBranchId) {
             formData.append("branch_id", selectedBranchId);
           }

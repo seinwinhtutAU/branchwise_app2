@@ -1,5 +1,6 @@
 import csv
 import datetime
+import gzip
 import io
 import logging
 from pathlib import Path
@@ -147,8 +148,25 @@ def _upload_preview_to_storage(batch_id: str, preview_data: dict) -> None:
         )
 
 
+GZIP_MAGIC = b"\x1f\x8b"
+
+
 async def _read_upload(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> bytes:
-    contents = await file.read(max_bytes + 1)
+    """Read an uploaded file's bytes, transparently decompressing it first when the
+    renderer sent it gzip-compressed (see frontend's `lib/uploadCompression.ts`) —
+    the raw POS exports are printed-report CSV/XLS text and compress to a fraction
+    of their size, which is what actually makes a large upload slow on a weak
+    connection, not anything server-side. The size cap still applies to the
+    decompressed bytes, so it means the same thing it always did."""
+    contents = await file.read(max_bytes * 4 + 1)
+    if contents[:2] == GZIP_MAGIC:
+        try:
+            contents = gzip.decompress(contents)
+        except OSError as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Uploaded file could not be decompressed",
+            ) from exc
     if len(contents) > max_bytes:
         raise HTTPException(
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,

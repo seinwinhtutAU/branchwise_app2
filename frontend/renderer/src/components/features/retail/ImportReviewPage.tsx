@@ -5,6 +5,7 @@ import { useConnectionStatus } from "@renderer/lib/connection";
 import { RequestTimeoutError } from "@renderer/lib/network";
 import { invalidateEverything } from "@renderer/lib/queryClient";
 import { useToast } from "@renderer/lib/useToast";
+import { maybeCompressFile } from "@renderer/lib/uploadCompression";
 import { Button } from "@renderer/components/ui/Button";
 import { Input } from "@renderer/components/ui/Input";
 import { ProgressBar } from "@renderer/components/ui/ProgressBar";
@@ -100,15 +101,18 @@ function ImportReviewPage({
     let cancelled = false;
     setRepreviewing(true);
 
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("branch_id", selectedBranchId);
+    maybeCompressFile(file)
+      .then((uploadFile) => {
+        const formData = new FormData();
+        formData.append("file", uploadFile);
+        formData.append("branch_id", selectedBranchId);
 
-    fetch(`${apiBaseUrl}${endpoint}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${session.access_token}` },
-      body: formData,
-    })
+        return fetch(`${apiBaseUrl}${endpoint}`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          body: formData,
+        });
+      })
       .then(async (r) =>
         r.ok ? ((await r.json()) as ImportPreviewResult) : null,
       )
@@ -167,7 +171,7 @@ function ImportReviewPage({
       }
 
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file", await maybeCompressFile(file));
       if (needsBranchSelection) formData.append("branch_id", selectedBranchId);
       if (isPurchaseImport && purchaseDate)
         formData.append("purchase_date", purchaseDate);
