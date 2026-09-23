@@ -508,6 +508,27 @@ def _replay_after_request_key_conflict(
     return _confirmed_import_for_key(db, user, request_key)
 
 
+@router.get("/confirm-status")
+def get_confirm_status(
+    request_key: Annotated[str, Query(min_length=1, max_length=64)],
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Tell a reconnecting client whether its idempotent confirm already committed."""
+    batch = (
+        db.query(ImportBatch)
+        .filter(
+            ImportBatch.request_key == request_key,
+            ImportBatch.uploaded_by == user.id,
+        )
+        .one_or_none()
+    )
+    return {
+        "confirmed": batch is not None,
+        "batch_id": batch.id if batch is not None else None,
+    }
+
+
 @router.post("/sales")
 async def import_sales_file(
     file: UploadFile | None = File(None),
@@ -1344,6 +1365,11 @@ def _format_history_summary_messages(batch: ImportBatch, total_rows: int = 0) ->
         skipped = summary.get("sales_skipped_duplicate", 0)
         if skipped > 0:
             messages.append(f"{pluralize(skipped, 'sale')} skipped — already imported earlier")
+        duplicate_lines_skipped = summary.get("sale_lines_skipped_duplicate", 0)
+        if duplicate_lines_skipped > 0:
+            messages.append(
+                f"{pluralize(duplicate_lines_skipped, 'duplicate sale item')} skipped within this file"
+            )
         issue_count = summary.get("issue_count", 0)
         if issue_count > 0:
             messages.append(f"⚠️ Alert: {pluralize(issue_count, 'sale item')} recorded with invalid values")

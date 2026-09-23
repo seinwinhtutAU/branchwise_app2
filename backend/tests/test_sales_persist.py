@@ -56,6 +56,8 @@ def test_creates_sale_header_and_lines(db_session: Session):
         "sales_created": 1,
         "sales_skipped_duplicate": 0,
         "sale_lines_created": 2,
+        "sale_lines_skipped_duplicate": 0,
+        "total_rows": 2,
         "products_created": 2,
         "products_updated": 0,
         "issue_count": 0,
@@ -76,6 +78,21 @@ def test_reimporting_same_slip_is_skipped(db_session: Session):
 
     assert summary["sales_created"] == 0
     assert summary["sales_skipped_duplicate"] == 1
+    assert db_session.query(Sale).count() == 1
+    assert db_session.query(SaleLine).count() == 2
+
+
+def test_duplicate_line_within_a_file_is_skipped(db_session: Session):
+    duplicate_df = pd.concat([SALE_DF, SALE_DF.iloc[[0]]], ignore_index=True)
+
+    summary = persist_sales(
+        db_session, duplicate_df, branch_id=None, location_raw=None, source_file="sale.csv"
+    )
+
+    assert summary["total_rows"] == 3
+    assert summary["sale_lines_created"] == 2
+    assert summary["sale_lines_skipped_duplicate"] == 1
+    assert summary["messages"][-1] == "1 duplicate sale item skipped within this file"
     assert db_session.query(Sale).count() == 1
     assert db_session.query(SaleLine).count() == 2
 

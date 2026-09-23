@@ -369,6 +369,9 @@ export default function ImportConfirmModal({
         if (!item) break;
 
         const inspection = inspections[item.id];
+        // Keep this key for both the original confirmation and a later status check.
+        // A lost response must never make an already-committed import look failed.
+        const idempotencyKey = crypto.randomUUID();
         setProgress({
           current: completedCount + 1,
           total,
@@ -420,7 +423,10 @@ export default function ImportConfirmModal({
             formData.append("file", await maybeCompressFile(item.file));
             return fetch(`${apiBaseUrl}${endpoint}`, {
               method: "POST",
-              headers: { Authorization: `Bearer ${session.access_token}` },
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+                "Idempotency-Key": idempotencyKey,
+              },
               body: formData,
             });
           }
@@ -435,7 +441,10 @@ export default function ImportConfirmModal({
             formData.append("staged_upload_id", inspection.staged_upload_id);
             response = await fetch(`${apiBaseUrl}${endpoint}`, {
               method: "POST",
-              headers: { Authorization: `Bearer ${session.access_token}` },
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+                "Idempotency-Key": idempotencyKey,
+              },
               body: formData,
             });
             if (response.status === 404) {
@@ -454,7 +463,24 @@ export default function ImportConfirmModal({
             );
           }
         } catch {
-          errors.push(`${item.file.name}: Network error during upload`);
+          // The database can commit just before a connection drops. Ask the server
+          // about this exact idempotency key before treating the import as failed.
+          try {
+            const statusResponse = await fetch(
+              `${apiBaseUrl}/api/imports/confirm-status?request_key=${encodeURIComponent(idempotencyKey)}`,
+              { headers: { Authorization: `Bearer ${session.access_token}` } },
+            );
+            const statusBody = await statusResponse.json().catch(() => null);
+            if (statusResponse.ok && statusBody?.confirmed === true) {
+              successCount++;
+              continue;
+            }
+          } catch {
+            // The original message below tells the user exactly where to verify.
+          }
+          errors.push(
+            `${item.file.name}: We could not confirm the result. Check Import History before uploading it again.`,
+          );
         } finally {
           completedCount++;
           setProgress({

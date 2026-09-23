@@ -198,7 +198,15 @@ export function installNetworkResilience(): () => void {
     // was lost after the database committed.
     const requestInit = addIdempotencyKey(input, init, method === "POST" && isImportConfirm(url));
     const canRetry = isRead || isImportConfirm(url);
-    const timeoutMs = canRetry ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS;
+    // Confirming an import parses and writes a whole report before the API can answer.
+    // It is safe to retry because it carries an Idempotency-Key, but it is not a
+    // lightweight read: give it the write timeout so a large inventory is not marked
+    // as a network failure after only 15 seconds.
+    const timeoutMs = isImportConfirm(url)
+      ? WRITE_TIMEOUT_MS
+      : isRead
+        ? READ_TIMEOUT_MS
+        : WRITE_TIMEOUT_MS;
     const callerSignal =
       requestInit?.signal ?? (input instanceof Request ? input.signal : null);
 

@@ -98,6 +98,30 @@ def test_confirm_purchase_replays_the_same_idempotency_key(
     assert db_session.query(Purchase).count() == 1
 
 
+def test_confirm_status_reports_a_saved_idempotent_import(
+    authed_client: TestClient, db_session: Session
+):
+    _make_branch_user(db_session, with_branch=True)
+    headers = {"Idempotency-Key": "weak-network-status-001"}
+
+    confirmed = authed_client.post(
+        "/api/imports/purchase/confirm",
+        files={"file": ("purchase.csv", io.BytesIO(PURCHASE_CSV.encode()), "text/csv")},
+        headers=headers,
+    )
+    status_response = authed_client.get(
+        "/api/imports/confirm-status",
+        params={"request_key": headers["Idempotency-Key"]},
+    )
+
+    assert confirmed.status_code == 200
+    assert status_response.status_code == 200
+    assert status_response.json() == {
+        "confirmed": True,
+        "batch_id": confirmed.json()["batch_id"],
+    }
+
+
 def test_confirm_purchase_with_date_override(authed_client: TestClient, db_session: Session):
     _make_branch_user(db_session, with_branch=True)
 

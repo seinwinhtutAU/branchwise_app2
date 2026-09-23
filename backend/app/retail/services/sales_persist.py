@@ -26,6 +26,17 @@ def persist_sales(
     storage_key: str | None = None,
     request_key: str | None = None,
 ) -> dict:
+    # A POS report can occasionally repeat the same item row.  A sale line is
+    # uniquely identified within a sale by its SlipID + LineID, so keep the first
+    # occurrence before building SaleLine records.  This prevents a whole import
+    # from failing because of one duplicated source row while preserving the
+    # original file's row count in the import summary.
+    total_lines = len(df)
+    duplicate_line_mask = df.duplicated(subset=["SlipID", "LineID"], keep="first")
+    duplicate_lines_skipped = int(duplicate_line_mask.sum())
+    if duplicate_lines_skipped:
+        df = df.loc[~duplicate_line_mask].copy()
+
     batch = new_import_batch(
         ImportType.SALES,
         branch_id=branch_id,
@@ -41,6 +52,8 @@ def persist_sales(
         "sales_created": 0,
         "sales_skipped_duplicate": 0,
         "sale_lines_created": 0,
+        "sale_lines_skipped_duplicate": duplicate_lines_skipped,
+        "total_rows": total_lines,
         "products_created": 0,
         "products_updated": 0,
         "issue_count": issue_count,
@@ -111,7 +124,6 @@ def persist_sales(
             )
             summary["sale_lines_created"] += 1
 
-    total_lines = len(df)
     messages = [
         f"{total_lines:,} total sale lines in file",
         f"{summary['sales_created']:,} sales recorded ({summary['sale_lines_created']:,} items)",
@@ -119,6 +131,10 @@ def persist_sales(
     if summary["sales_skipped_duplicate"]:
         messages.append(
             f"{pluralize(summary['sales_skipped_duplicate'], 'sale')} skipped — already imported earlier"
+        )
+    if duplicate_lines_skipped:
+        messages.append(
+            f"{pluralize(duplicate_lines_skipped, 'duplicate sale item')} skipped within this file"
         )
     issue_count = summary.get("issue_count", 0)
     if issue_count > 0:
