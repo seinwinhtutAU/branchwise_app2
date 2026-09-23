@@ -148,7 +148,7 @@ function DataRangeNote({
   return (
     <span className="inline-flex items-center gap-1.5 text-[11px]">
       <CategoryTag category={category} />
-      <span className="text-brand">{range}</span>
+      <span className="text-text-secondary">{range}</span>
     </span>
   );
 }
