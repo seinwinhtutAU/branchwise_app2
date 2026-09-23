@@ -38,8 +38,6 @@ interface FreshnessRow {
   sales_last_imported_at: string | null;
   inventory_last_imported_at: string | null;
   purchase_last_imported_at: string | null;
-  sales_data_date: string | null;
-  inventory_data_date: string | null;
   sales_earliest_data_date: string | null;
   sales_latest_data_date: string | null;
   inventory_earliest_data_date: string | null;
@@ -100,38 +98,29 @@ function countIgnoredDays(branch: CompletenessBranch): number {
   );
 }
 
-function daysSinceDataDate(iso: string): number {
-  const [year, month, day] = iso.split("-").map(Number);
-  const dataDate = new Date(year, month - 1, day);
-  const today = new Date();
-  const currentDate = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate(),
-  );
-  return Math.floor(
-    (currentDate.getTime() - dataDate.getTime()) / (1000 * 60 * 60 * 24),
-  );
-}
-
-// Plain "when was this last imported" — not an alert judgement, so no colour
-// coding: a branch with no open days can still show "3 days ago" here if those
-// days were ignored rather than actually imported, and that's a fact worth
-// seeing, not a problem worth flagging.
-function freshnessLabel(dataDate: string | null): string {
-  if (!dataDate) return "No data yet";
-  const days = daysSinceDataDate(dataDate);
-  if (days <= 0) return "Today";
-  if (days === 1) return "Yesterday";
-  return `${days} days ago`;
-}
-
 function dataRangeLabel(
   earliest: string | null,
   latest: string | null,
 ): string | null {
   if (!earliest || !latest) return null;
   return `${earliest} → ${latest}`;
+}
+
+function hasAnyDataRange(freshness: FreshnessRow | null): boolean {
+  return Boolean(
+    dataRangeLabel(
+      freshness?.sales_earliest_data_date ?? null,
+      freshness?.sales_latest_data_date ?? null,
+    ) ||
+      dataRangeLabel(
+        freshness?.inventory_earliest_data_date ?? null,
+        freshness?.inventory_latest_data_date ?? null,
+      ) ||
+      dataRangeLabel(
+        freshness?.purchase_earliest_data_date ?? null,
+        freshness?.purchase_latest_data_date ?? null,
+      ),
+  );
 }
 
 function DataRangeNote({
@@ -148,36 +137,7 @@ function DataRangeNote({
   return (
     <span className="inline-flex items-center gap-1.5 text-[11px]">
       <CategoryTag category={category} />
-      <span className="text-text-secondary">{range}</span>
-    </span>
-  );
-}
-
-/** One "Latest sales: Today" style fact, shown unconditionally next to
- * whatever it's about — freshness is a fact worth knowing regardless of
- * whether that same type also has an open-days problem below it. */
-function FreshnessNote({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}): React.JSX.Element {
-  return (
-    <span className="text-[11px] text-text-muted">
-      {label}:{" "}
-      <span
-        className={cn(
-          "font-medium",
-          value === "Today"
-            ? "text-success"
-            : value === "Yesterday"
-              ? "text-warning"
-              : "text-error",
-        )}
-      >
-        {value}
-      </span>
+      <span className="text-brand">{range}</span>
     </span>
   );
 }
@@ -289,11 +249,29 @@ function NeedsAttentionCard({
 
   return (
     <div className="border-b border-border bg-bg-base p-3.5 last:border-b-0">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      <div className="mb-2 flex items-center justify-between gap-2 border-b border-border/60 pb-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <h3 className="text-sm font-semibold text-text-primary">
             {branch.branch_name}
           </h3>
+          {hasAnyDataRange(freshness) && (
+            <span className="h-3.5 w-px bg-border" aria-hidden="true" />
+          )}
+          <DataRangeNote
+            category="Sales"
+            earliest={freshness?.sales_earliest_data_date ?? null}
+            latest={freshness?.sales_latest_data_date ?? null}
+          />
+          <DataRangeNote
+            category="Inventory"
+            earliest={freshness?.inventory_earliest_data_date ?? null}
+            latest={freshness?.inventory_latest_data_date ?? null}
+          />
+          <DataRangeNote
+            category="Purchase"
+            earliest={freshness?.purchase_earliest_data_date ?? null}
+            latest={freshness?.purchase_latest_data_date ?? null}
+          />
         </div>
         {ignoredCount > 0 && (
           <button
@@ -304,36 +282,6 @@ function NeedsAttentionCard({
             {ignoredCount} ignored
           </button>
         )}
-      </div>
-      {/* Freshness is shown unconditionally, whether or not that type also has
-          an issue row below — "58 days behind" doesn't say whether that backlog
-          is old-and-stuck or just started, and this is where that shows up. */}
-      <div className="mb-2 flex flex-wrap items-center gap-3">
-        <FreshnessNote
-          label="Latest sales"
-          value={freshnessLabel(branch.freshness?.sales_data_date ?? null)}
-        />
-        <FreshnessNote
-          label="Latest inventory"
-          value={freshnessLabel(branch.freshness?.inventory_data_date ?? null)}
-        />
-      </div>
-      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <DataRangeNote
-          category="Sales"
-          earliest={freshness?.sales_earliest_data_date ?? null}
-          latest={freshness?.sales_latest_data_date ?? null}
-        />
-        <DataRangeNote
-          category="Inventory"
-          earliest={freshness?.inventory_earliest_data_date ?? null}
-          latest={freshness?.inventory_latest_data_date ?? null}
-        />
-        <DataRangeNote
-          category="Purchase"
-          earliest={freshness?.purchase_earliest_data_date ?? null}
-          latest={freshness?.purchase_latest_data_date ?? null}
-        />
       </div>
       <div className="flex flex-col gap-1.5">
         {salesMissing > 0 && (
@@ -389,9 +337,9 @@ function UpToDateRow({
           <span className="font-medium text-text-primary">
             {branch.branch_name}
           </span>
-          <span className="text-text-muted">— up to date</span>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {hasAnyDataRange(freshness) && (
+            <span className="h-3.5 w-px bg-border" aria-hidden="true" />
+          )}
           <DataRangeNote
             category="Sales"
             earliest={freshness?.sales_earliest_data_date ?? null}
@@ -407,15 +355,8 @@ function UpToDateRow({
             earliest={freshness?.purchase_earliest_data_date ?? null}
             latest={freshness?.purchase_latest_data_date ?? null}
           />
+          <span className="text-text-muted">— up to date</span>
         </div>
-        <FreshnessNote
-          label="Latest sales"
-          value={freshnessLabel(branch.freshness?.sales_data_date ?? null)}
-        />
-        <FreshnessNote
-          label="Latest inventory"
-          value={freshnessLabel(branch.freshness?.inventory_data_date ?? null)}
-        />
       </div>
       {ignoredCount > 0 && (
         <button
