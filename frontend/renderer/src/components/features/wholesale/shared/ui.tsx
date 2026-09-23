@@ -530,12 +530,15 @@ export function MenuItem({
   icon?: React.ReactNode;
   label: string;
   danger?: boolean;
-  onClick: () => void;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }): React.JSX.Element {
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick(event);
+      }}
       className={cn(
         "w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-left",
         "transition-colors duration-150",
@@ -603,6 +606,7 @@ export function FloatingLayer({
           zIndex: 100,
         }}
         onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
         className={className}
       >
         {children}

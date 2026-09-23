@@ -32,6 +32,27 @@ def _filter_records(query, user: User, branch: str | None, date_from: date | Non
     return query
 
 
+@router.get("/date-bounds")
+@router.get("/conversion/date-bounds")
+def zero_selling_date_bounds(
+    branch: str | None = Query(None, description="Branch name"),
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    query = _filter_records(
+        db.query(func.min(ZeroSellingRecord.sale_date), func.max(ZeroSellingRecord.sale_date)),
+        user,
+        branch,
+        None,
+        None,
+    )
+    earliest_date, latest_date = query.first() or (None, None)
+    return {
+        "earliest_date": earliest_date.isoformat() if earliest_date else None,
+        "latest_date": latest_date.isoformat() if latest_date else None,
+    }
+
+
 @router.get("")
 def list_zero_selling_records(
     date_from: date | None = Query(None),

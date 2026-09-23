@@ -170,7 +170,11 @@ function ImportHistoryActions({
   }
 
   return (
-    <div className="relative inline-block" ref={ref}>
+    <div
+      className="relative inline-block"
+      ref={ref}
+      onClick={(event) => event.stopPropagation()}
+    >
       <button
         type="button"
         aria-label="Import actions"
@@ -417,17 +421,24 @@ function ImportHistoryTable({
         id: "type",
         accessorFn: (row) => row.import_type,
         header: "Type",
-        cell: (info) => importTypeLabel(String(info.getValue())),
-      },
-      {
-        id: "filename",
-        accessorFn: (row) => row.filename,
-        header: "Filename",
-        cell: (info) => (
-          <span className="truncate font-mono text-xs">
-            {info.getValue<string>() ?? "—"}
-          </span>
-        ),
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <div className="min-w-0">
+              <div className="font-medium text-text-primary capitalize">
+                {importTypeLabel(row.import_type)}
+              </div>
+              {row.filename && (
+                <div
+                  className="font-mono text-xs text-text-muted truncate max-w-[16rem] sm:max-w-[20rem]"
+                  title={row.filename}
+                >
+                  {row.filename}
+                </div>
+              )}
+            </div>
+          );
+        },
       },
       {
         id: "branch",
@@ -480,7 +491,10 @@ function ImportHistoryTable({
             ? `${issueCount} validation issue${issueCount === 1 ? "" : "s"} found — click to inspect origin vs clean data`
             : null;
           return (
-            <div className="flex items-center justify-end gap-1">
+            <div
+              className="flex items-center justify-end gap-1"
+              onClick={(event) => event.stopPropagation()}
+            >
               {issueLabel && (
                 <span
                   aria-label={issueLabel}
@@ -765,14 +779,18 @@ function ImportHistoryTable({
                       <Td
                         key={cell.id}
                         className={cn(
-                          cell.column.id === "type" && "capitalize font-medium",
-                          cell.column.id === "filename" &&
-                            "max-w-[14rem] truncate font-mono text-xs",
+                          cell.column.id === "type" &&
+                            "max-w-[16rem] sm:max-w-[20rem]",
                           cell.column.id === "created" &&
                             "text-text-muted whitespace-nowrap text-xs",
                           cell.column.columnDef.meta?.align === "right" &&
                             "text-right tabular-nums",
                         )}
+                        onClick={
+                          cell.column.id === "actions"
+                            ? (event) => event.stopPropagation()
+                            : undefined
+                        }
                       >
                         {flexRender(
                           cell.column.columnDef.cell,

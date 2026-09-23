@@ -21,14 +21,20 @@ PAGE_SIZE = 20
 
 @router.get("/date-bounds")
 def purchase_date_bounds(
+    branch: str | None = Query(None, description="Branch name"),
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    query = db.query(func.min(Purchase.purchase_date))
+    query = db.query(func.min(Purchase.purchase_date), func.max(Purchase.purchase_date))
     if user.branch_id is not None:
         query = query.filter(Purchase.branch_id == user.branch_id)
-    earliest_date = query.scalar()
-    return {"earliest_date": earliest_date.isoformat() if earliest_date else None}
+    elif branch:
+        query = query.join(Branch, Purchase.branch_id == Branch.id).filter(Branch.name == branch)
+    earliest_date, latest_date = query.first() or (None, None)
+    return {
+        "earliest_date": earliest_date.isoformat() if earliest_date else None,
+        "latest_date": latest_date.isoformat() if latest_date else None,
+    }
 
 
 @router.get("")

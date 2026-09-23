@@ -45,7 +45,7 @@ import { useStickyAbove } from "@renderer/lib/useStickyAbove";
 import { useSettled } from "@renderer/lib/useSettled";
 import {
   ExportDateRangeDialog,
-  type ExportDateRange,
+  type ExportOptions,
 } from "@renderer/components/features/ExportDateRangeDialog";
 import {
   SimpleDataTable,
@@ -572,12 +572,16 @@ function MergedDataOverviewTable({
   }
 
   async function fetchAllForExport(
-    exportRange: ExportDateRange,
+    exportOptions?: ExportOptions,
   ): Promise<OverviewRow[] | null> {
-    // The download range is intentionally separate from all table filter controls.
     const params = new URLSearchParams({ export: "true" });
-    params.set("date_from", exportRange.from);
-    params.set("date_to", exportRange.to);
+    if (exportOptions?.branch) {
+      params.set("branch", exportOptions.branch);
+    }
+    if (exportOptions?.from && exportOptions?.to) {
+      params.set("date_from", exportOptions.from);
+      params.set("date_to", exportOptions.to);
+    }
     try {
       const response = await fetch(
         `${apiBaseUrl}/api/data-overview?${params.toString()}`,
@@ -597,29 +601,43 @@ function MergedDataOverviewTable({
     }
   }
 
+  function makeOverviewFilename(
+    ext: "csv" | "xlsx",
+    exportOptions?: ExportOptions,
+  ): string {
+    const parts = ["data-overview"];
+    if (exportOptions?.branch) {
+      parts.push(exportOptions.branch.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
+    }
+    if (exportOptions?.from && exportOptions?.to) {
+      parts.push(`${exportOptions.from}_to_${exportOptions.to}`);
+    }
+    return `${parts.join("_")}.${ext}`;
+  }
+
   async function handleDownloadCsv(
-    exportRange: ExportDateRange,
+    exportOptions?: ExportOptions,
   ): Promise<void> {
     setExporting("csv");
-    const allRows = await fetchAllForExport(exportRange);
+    const allRows = await fetchAllForExport(exportOptions);
     setExporting(null);
     if (!allRows) return;
     downloadCsv(
-      `data-overview_${exportRange.from}_to_${exportRange.to}.csv`,
+      makeOverviewFilename("csv", exportOptions),
       visibleColumns.map((col) => col.label),
       overviewCsvRows(allRows),
     );
   }
 
   async function handleDownloadExcel(
-    exportRange: ExportDateRange,
+    exportOptions?: ExportOptions,
   ): Promise<void> {
     setExporting("excel");
-    const allRows = await fetchAllForExport(exportRange);
+    const allRows = await fetchAllForExport(exportOptions);
     setExporting(null);
     if (!allRows) return;
     downloadExcel(
-      `data-overview_${exportRange.from}_to_${exportRange.to}.xlsx`,
+      makeOverviewFilename("xlsx", exportOptions),
       "Data overview",
       visibleColumns.map((col) => col.label),
       overviewCsvRows(allRows),
@@ -634,12 +652,14 @@ function MergedDataOverviewTable({
           boundsEndpoint="/api/data-overview/date-bounds"
           format={exportFormat}
           title="Data overview"
+          branchOptions={branchOptions}
+          initialBranch={branchFilter}
           onClose={() => setExportFormat(null)}
-          onConfirm={(range) => {
+          onConfirm={(options) => {
             const format = exportFormat;
             setExportFormat(null);
-            if (format === "csv") void handleDownloadCsv(range);
-            else void handleDownloadExcel(range);
+            if (format === "csv") void handleDownloadCsv(options);
+            else void handleDownloadExcel(options);
           }}
         />
       )}

@@ -173,13 +173,16 @@ def test_export_date_bounds_return_the_earliest_visible_record(
     ).status_code == 200
 
     assert authed_client.get("/api/sales/date-bounds").json() == {
-        "earliest_date": "2026-08-21"
+        "earliest_date": "2026-08-21",
+        "latest_date": "2026-08-21",
     }
     assert authed_client.get("/api/purchases/date-bounds").json() == {
-        "earliest_date": "2026-01-15"
+        "earliest_date": "2026-01-15",
+        "latest_date": "2026-01-15",
     }
     assert authed_client.get("/api/data-overview/date-bounds").json() == {
-        "earliest_date": "2026-08-21"
+        "earliest_date": "2026-08-21",
+        "latest_date": "2026-08-21",
     }
 
 

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import get_current_app_user
 from app.db.session import get_db
+from app.models.branch import Branch
 from app.retail.models.product import Product
 from app.models.user import User
 from app.services.dashboard import compute_stock_health
@@ -45,11 +46,18 @@ def _filter_and_page(
 
 
 @router.get("")
-def list_inventory(user: User = Depends(get_current_app_user), db: Session = Depends(get_db)) -> list[dict]:
+def list_inventory(
+    branch: str | None = Query(None, description="Branch name"),
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
     """Current stock: the latest snapshot per product+branch, not full import
     history (see app/retail/services/stock.py) — this is exactly what the
     ix_stock_levels_product_branch_snapshot index is for."""
-    query = latest_stock_query(db, user.branch_id).order_by(Product.stock_code)
+    query = latest_stock_query(db, user.branch_id)
+    if branch:
+        query = query.filter(Branch.name == branch)
+    query = query.order_by(Product.stock_code)
 
     return [
         {

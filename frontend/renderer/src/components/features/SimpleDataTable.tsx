@@ -40,7 +40,7 @@ import { Pagination } from "@renderer/components/ui/Pagination";
 import { DownloadIcon, SearchIcon } from "@renderer/components/ui/icons";
 import {
   ExportDateRangeDialog,
-  type ExportDateRange,
+  type ExportOptions,
 } from "@renderer/components/features/ExportDateRangeDialog";
 import { CopyButton } from "@renderer/components/ui/CopyButton";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
@@ -222,6 +222,18 @@ export function SimpleDataTable<T extends object>({
     [filters],
   );
 
+  const branchFilter = useMemo(
+    () =>
+      selectFilters.find(
+        (f) =>
+          String(f.key).toLowerCase() === "branch" ||
+          f.label.toLowerCase() === "branch",
+      ),
+    [selectFilters],
+  );
+
+
+
   // Settled (debounced) versions of the free-typed filters — see useSettled. Only
   // matters for serverPaged, where these feed the fetch URL; harmless to compute either
   // way since a value nobody reads costs nothing.
@@ -281,17 +293,31 @@ export function SimpleDataTable<T extends object>({
     ? ((data as ServerPage<T> | null)?.total ?? 0)
     : null;
 
+  const branchOptions = useMemo(() => {
+    if (!branchFilter) return undefined;
+    return (
+      branchFilter.options ??
+      (rows ? distinctValues(rows, branchFilter.key) : [])
+    );
+  }, [branchFilter, rows]);
+
+  const activeBranch = branchFilter
+    ? selectValues[String(branchFilter.key)] ?? ""
+    : "";
+
+  const hasExportDialog = Boolean(dateServerParam || branchFilter);
+
   // Resets to page 1 whenever a settled filter changes — otherwise narrowing the result
   // set can strand the user on a now-empty page.
+  const serializedSelectValues = JSON.stringify(selectValues);
   useEffect(() => {
     if (serverPaged) setPage(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     serverPaged,
     settledSearch,
     settledDateFrom,
     settledDateTo,
-    JSON.stringify(selectValues),
+    serializedSelectValues,
   ]);
 
   const hasActiveFilters =
@@ -408,15 +434,57 @@ export function SimpleDataTable<T extends object>({
     return source.map((row) => columns.map((col) => toCsvValue(row[col.key])));
   }
 
-  async function fetchAllForExport(exportRange?: ExportDateRange): Promise<T[] | null> {
-    // A range picked for download is deliberately independent of the table's search,
-    // select, and Date filter controls.
-    const params = exportRange
-      ? new URLSearchParams({ export: "true" })
-      : buildServerParams({ export: "true" });
-    if (dateServerParam && exportRange) {
-      params.set(dateServerParam.from, exportRange.from);
-      params.set(dateServerParam.to, exportRange.to);
+  function makeExportFilename(
+    ext: "csv" | "xlsx",
+    exportOptions?: ExportOptions,
+  ): string {
+    const parts = [slugify(title)];
+    if (exportOptions?.branch) {
+      parts.push(slugify(exportOptions.branch));
+    }
+    if (exportOptions?.from && exportOptions?.to) {
+      parts.push(`${exportOptions.from}_to_${exportOptions.to}`);
+    }
+    return `${parts.join("_")}.${ext}`;
+  }
+
+  function getRowsForClientExport(
+    allRows: T[],
+    exportOptions?: ExportOptions,
+  ): T[] {
+    let result = allRows;
+    if (exportOptions?.branch && branchFilter) {
+      result = result.filter(
+        (r) => String(r[branchFilter.key]) === exportOptions.branch,
+      );
+    }
+    if (dateRangeFilter && exportOptions?.from && exportOptions?.to) {
+      result = result.filter((r) =>
+        inDateRange(r[dateRangeFilter.key] as unknown, {
+          from: exportOptions.from!,
+          to: exportOptions.to!,
+        }),
+      );
+    }
+    return result;
+  }
+
+  async function fetchAllForExport(
+    exportOptions?: ExportOptions,
+  ): Promise<T[] | null> {
+    const params = new URLSearchParams({ export: "true" });
+    if (exportOptions) {
+      if (exportOptions.branch && branchFilter?.serverParam) {
+        params.set(branchFilter.serverParam, exportOptions.branch);
+      }
+      if (dateServerParam && exportOptions.from && exportOptions.to) {
+        params.set(dateServerParam.from, exportOptions.from);
+        params.set(dateServerParam.to, exportOptions.to);
+      }
+    } else {
+      buildServerParams({ export: "true" }).forEach((val, key) =>
+        params.set(key, val),
+      );
     }
     try {
       const response = await fetch(
@@ -426,8 +494,8 @@ export function SimpleDataTable<T extends object>({
         },
       );
       if (!response.ok) throw new Error(String(response.status));
-      const body = (await response.json()) as ServerPage<T>;
-      return body.rows;
+      const body = (await response.json()) as ServerPage<T> | T[];
+      return Array.isArray(body) ? body : body.rows;
     } catch {
       showToast(
         "error",
@@ -437,49 +505,59 @@ export function SimpleDataTable<T extends object>({
     }
   }
 
-  async function handleDownloadCsv(exportRange?: ExportDateRange): Promise<void> {
+  async function handleDownloadCsv(
+    exportOptions?: ExportOptions,
+  ): Promise<void> {
     if (serverPaged) {
-      if (totalItems === 0 && !exportRange) return;
+      if (totalItems === 0 && !exportOptions) return;
       setExporting("csv");
-      const allRows = await fetchAllForExport(exportRange);
+      const allRows = await fetchAllForExport(exportOptions);
       setExporting(null);
       if (!allRows) return;
       downloadCsv(
-        `${slugify(title)}${exportRange ? `_${exportRange.from}_to_${exportRange.to}` : ""}.csv`,
+        makeExportFilename("csv", exportOptions),
         columns.map((col) => col.label),
         csvRows(allRows),
       );
       return;
     }
-    if (!filteredRows || filteredRows.length === 0) return;
+    const sourceRows = exportOptions
+      ? getRowsForClientExport(rows ?? [], exportOptions)
+      : (filteredRows ?? []);
+    if (!sourceRows || sourceRows.length === 0) return;
     downloadCsv(
-      `${slugify(title)}.csv`,
+      makeExportFilename("csv", exportOptions),
       columns.map((col) => col.label),
-      csvRows(filteredRows),
+      csvRows(sourceRows),
     );
   }
 
-  async function handleDownloadExcel(exportRange?: ExportDateRange): Promise<void> {
+  async function handleDownloadExcel(
+    exportOptions?: ExportOptions,
+  ): Promise<void> {
     if (serverPaged) {
-      if (totalItems === 0 && !exportRange) return;
+      if (totalItems === 0 && !exportOptions) return;
       setExporting("excel");
-      const allRows = await fetchAllForExport(exportRange);
+      const allRows = await fetchAllForExport(exportOptions);
       setExporting(null);
       if (!allRows) return;
       downloadExcel(
-        `${slugify(title)}${exportRange ? `_${exportRange.from}_to_${exportRange.to}` : ""}.xlsx`,
+        makeExportFilename("xlsx", exportOptions),
         title,
         columns.map((col) => col.label),
         csvRows(allRows),
       );
       return;
     }
-    if (!filteredRows || filteredRows.length === 0) return;
+    const sourceRows = exportOptions
+      ? getRowsForClientExport(rows ?? [], exportOptions)
+      : (filteredRows ?? []);
+    if (!sourceRows || sourceRows.length === 0) return;
     downloadExcel(
-      `${slugify(title)}.xlsx`,
+      makeExportFilename("xlsx", exportOptions),
       title,
       columns.map((col) => col.label),
-      csvRows(filteredRows),
+      csvRows(sourceRows),
     );
   }
 
@@ -488,9 +566,11 @@ export function SimpleDataTable<T extends object>({
       <Button
         variant="secondary"
         size="sm"
-        onClick={() => dateServerParam ? setExportFormat("csv") : void handleDownloadCsv()}
+        onClick={() =>
+          hasExportDialog ? setExportFormat("csv") : void handleDownloadCsv()
+        }
         disabled={
-          dateServerParam
+          hasExportDialog
             ? rows === null
             : serverPaged
             ? totalItems === 0
@@ -504,9 +584,11 @@ export function SimpleDataTable<T extends object>({
       <Button
         variant="secondary"
         size="sm"
-        onClick={() => dateServerParam ? setExportFormat("excel") : void handleDownloadExcel()}
+        onClick={() =>
+          hasExportDialog ? setExportFormat("excel") : void handleDownloadExcel()
+        }
         disabled={
-          dateServerParam
+          hasExportDialog
             ? rows === null
             : serverPaged
             ? totalItems === 0
@@ -616,18 +698,21 @@ export function SimpleDataTable<T extends object>({
 
   return (
     <div className="flex flex-col" style={containerStyle}>
-      {exportFormat && dateServerParam && (
+      {exportFormat && hasExportDialog && (
         <ExportDateRangeDialog
           session={session}
-          boundsEndpoint={`${endpoint}/date-bounds`}
+          boundsEndpoint={dateServerParam ? `${endpoint}/date-bounds` : undefined}
           format={exportFormat}
           title={title}
+          branchOptions={branchOptions}
+          initialBranch={activeBranch}
+          showDateRange={Boolean(dateServerParam)}
           onClose={() => setExportFormat(null)}
-          onConfirm={(range) => {
+          onConfirm={(options) => {
             const format = exportFormat;
             setExportFormat(null);
-            if (format === "csv") void handleDownloadCsv(range);
-            else void handleDownloadExcel(range);
+            if (format === "csv") void handleDownloadCsv(options);
+            else void handleDownloadExcel(options);
           }}
         />
       )}

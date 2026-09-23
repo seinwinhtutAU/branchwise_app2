@@ -35,11 +35,20 @@ def _scoped_query(db: Session, user: User) -> ORMQuery:
 
 @router.get("/date-bounds")
 def data_overview_date_bounds(
+    branch: str | None = Query(None, description="Branch name"),
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    earliest_date = _scoped_query(db, user).with_entities(func.min(Sale.sale_date)).scalar()
-    return {"earliest_date": earliest_date.isoformat() if earliest_date else None}
+    query = _scoped_query(db, user)
+    if user.branch_id is None and branch:
+        query = query.filter(Branch.name == branch)
+    earliest_date, latest_date = query.with_entities(
+        func.min(Sale.sale_date), func.max(Sale.sale_date)
+    ).first() or (None, None)
+    return {
+        "earliest_date": earliest_date.isoformat() if earliest_date else None,
+        "latest_date": latest_date.isoformat() if latest_date else None,
+    }
 
 
 @router.get("")

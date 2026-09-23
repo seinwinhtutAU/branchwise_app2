@@ -1,6 +1,7 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_app_user
@@ -16,6 +17,24 @@ router = APIRouter(
 )
 
 PAGE_SIZE = 20
+
+
+@router.get("/date-bounds")
+def daily_costs_date_bounds(
+    branch: str | None = Query(None, description="Branch name"),
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    query = db.query(func.min(DailyCostRecord.cost_date), func.max(DailyCostRecord.cost_date))
+    if user.branch_id is not None:
+        query = query.filter(DailyCostRecord.branch_id == user.branch_id)
+    elif branch:
+        query = query.filter(DailyCostRecord.branch == branch)
+    earliest_date, latest_date = query.first() or (None, None)
+    return {
+        "earliest_date": earliest_date.isoformat() if earliest_date else None,
+        "latest_date": latest_date.isoformat() if latest_date else None,
+    }
 
 
 @router.get("")
