@@ -45,7 +45,10 @@ def test_inspect_valid_purchase_file_stages_the_upload(
     """The heavy parsing here moved off the event loop into a threadpool call (see
     _inspect_parsed_file in app.retail.routers.imports) — this pins down that the
     endpoint still behaves the same afterwards, including staging the upload for
-    a subsequent confirm."""
+    a subsequent confirm. A recognized header (the common case) takes the fast
+    path, which skips row_count/zero_count/nonzero_count entirely rather than
+    running the full per-row parse just to fill in numbers this screen doesn't
+    strictly need — see the "if detected == expected_type" branch."""
     _make_retail_user(db_session)
     response = authed_client.post(
         "/api/imports/inspect",
@@ -55,7 +58,7 @@ def test_inspect_valid_purchase_file_stages_the_upload(
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "valid"
-    assert body["row_count"] == 1
+    assert body["row_count"] == 0
     assert body["staged_upload_id"]
     assert db_session.query(StagedImportUpload).count() == 1
 
@@ -73,7 +76,53 @@ def test_inspect_accepts_gzip_compressed_upload(
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "valid"
+
+
+def test_inspect_falls_back_to_a_full_parse_when_the_header_is_not_recognized(
+    authed_client: TestClient, db_session: Session
+):
+    """A file whose header doesn't match any known signature can't take the fast
+    path above (detect_report_type returns None) — inspect falls back to actually
+    parsing it, which is how it tells a genuinely empty/unrelated file (row_count
+    stays 0, status "unrecognized") apart from an unusual-but-valid one like this,
+    whose data rows still parse fine structurally."""
+    _make_retail_user(db_session)
+    unrecognized_header_csv = PURCHASE_CSV.replace("Stock Code", "Item Code", 1)
+    response = authed_client.post(
+        "/api/imports/inspect",
+        data={"expected_type": "purchase"},
+        files={
+            "file": (
+                "purchase.csv",
+                io.BytesIO(unrecognized_header_csv.encode()),
+                "text/csv",
+            )
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "valid"
     assert body["row_count"] == 1
+
+
+def test_inspect_unrecognized_header_and_no_data_rows_is_flagged(
+    authed_client: TestClient, db_session: Session
+):
+    _make_retail_user(db_session)
+    response = authed_client.post(
+        "/api/imports/inspect",
+        data={"expected_type": "purchase"},
+        files={
+            "file": (
+                "purchase.csv",
+                io.BytesIO(b"Item Code,Description\r\n"),
+                "text/csv",
+            )
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "unrecognized"
 
 
 def test_inspect_flags_wrong_type(authed_client: TestClient, db_session: Session):

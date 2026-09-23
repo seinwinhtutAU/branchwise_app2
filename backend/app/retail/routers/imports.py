@@ -867,6 +867,8 @@ def _inspect_parsed_file(
     dates: list[str] = []
     purchase_number: str | None = None
     row_count = 0
+    zero_count = None
+    nonzero_count = None
 
     if detected is not None and detected != expected_type:
         return {
@@ -880,14 +882,44 @@ def _inspect_parsed_file(
             "error_message": f"Not a {expected_type} file",
         }
 
+    if expected_type == "purchase":
+        # Free either way — purchase's date/number come from the filename, not from
+        # parsing any row (see extract_purchase_metadata), so there's no cost to
+        # keep filling these in on the fast path below too.
+        purchase_number, p_date = extract_purchase_metadata(filename or "")
+        if p_date:
+            dates = [p_date.isoformat()]
+
+    if detected == expected_type:
+        # The header confidently matched this type's own signature — that's the
+        # overwhelming majority of real uploads, so stop here rather than also
+        # running the full row-by-row parse just to fill in the row count/dates/
+        # zero-vs-nonzero stats this screen displays. Those numbers cost real time
+        # on a large file and add nothing to the one question this check answers
+        # ("is this a {expected_type} file?"); confirm still parses every row for
+        # real when it actually persists the data.
+        return {
+            "filename": filename,
+            "status": "valid",
+            "detected_type": detected,
+            "expected_type": expected_type,
+            "dates": dates,
+            "purchase_number": purchase_number,
+            "row_count": 0,
+            "zero_count": None,
+            "nonzero_count": None,
+            "staged_upload_id": _stage_upload(db, contents, filename),
+            "error_message": None,
+        }
+
+    # No header this confident about, so this could just as easily be an empty or
+    # genuinely unrelated file slipping past — worth the full parse here (a rare
+    # path) to tell those apart, same as before this endpoint's fast path existed.
     try:
         if expected_type == "purchase":
-            purchase_number, p_date = extract_purchase_metadata(filename or "")
-            if p_date:
-                dates = [p_date.isoformat()]
             clean_df = parse_purchase_export_from_grid(rows)
             row_count = len(clean_df)
-            if row_count == 0 and detected is None:
+            if row_count == 0:
                 return {
                     "filename": filename,
                     "status": "unrecognized",
@@ -901,7 +933,7 @@ def _inspect_parsed_file(
         elif expected_type == "sale":
             clean_df = parse_pos_sale_export_from_grid(rows)
             row_count = len(clean_df)
-            if row_count == 0 and detected is None:
+            if row_count == 0:
                 return {
                     "filename": filename,
                     "status": "unrecognized",
@@ -920,7 +952,7 @@ def _inspect_parsed_file(
         elif expected_type == "inventory":
             clean_df = parse_inventory_export_from_grid(rows)
             row_count = len(clean_df)
-            if row_count == 0 and detected is None:
+            if row_count == 0:
                 return {
                     "filename": filename,
                     "status": "unrecognized",
@@ -938,6 +970,11 @@ def _inspect_parsed_file(
                 _, f_date = extract_purchase_metadata(filename or "")
                 if f_date:
                     dates = [f_date.isoformat()]
+            zero_count = int(clean_df.attrs.get("zero_rows", 0))
+            nonzero_count = int(
+                clean_df.attrs.get("positive_rows", 0)
+                + clean_df.attrs.get("negative_rows", 0)
+            )
     except Exception as exc:
         return {
             "filename": filename,
@@ -951,15 +988,6 @@ def _inspect_parsed_file(
             "nonzero_count": None,
             "error_message": f"Could not parse file: {exc}",
         }
-
-    zero_count = None
-    nonzero_count = None
-    if expected_type == "inventory" and "clean_df" in locals():
-        zero_count = int(clean_df.attrs.get("zero_rows", 0))
-        nonzero_count = int(
-            clean_df.attrs.get("positive_rows", 0)
-            + clean_df.attrs.get("negative_rows", 0)
-        )
 
     return {
         "filename": filename,
