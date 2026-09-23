@@ -101,18 +101,30 @@ function ImportReviewPage({
     let cancelled = false;
     setRepreviewing(true);
 
-    maybeCompressFile(file)
-      .then((uploadFile) => {
-        const formData = new FormData();
-        formData.append("file", uploadFile);
-        formData.append("branch_id", selectedBranchId);
-
-        return fetch(`${apiBaseUrl}${endpoint}`, {
+    // Reuse the staged copy of this file from the initial preview instead of
+    // re-uploading it — only falls back to sending the file itself if that preview
+    // never staged one (e.g. an older backend).
+    (result.staged_upload_id
+      ? Promise.resolve(result.staged_upload_id).then((stagedUploadId) => {
+          const formData = new FormData();
+          formData.append("staged_upload_id", stagedUploadId);
+          formData.append("branch_id", selectedBranchId);
+          return formData;
+        })
+      : maybeCompressFile(file).then((uploadFile) => {
+          const formData = new FormData();
+          formData.append("file", uploadFile);
+          formData.append("branch_id", selectedBranchId);
+          return formData;
+        })
+    )
+      .then((formData) =>
+        fetch(`${apiBaseUrl}${endpoint}`, {
           method: "POST",
           headers: { Authorization: `Bearer ${session.access_token}` },
           body: formData,
-        });
-      })
+        }),
+      )
       .then(async (r) =>
         r.ok ? ((await r.json()) as ImportPreviewResult) : null,
       )
@@ -170,17 +182,42 @@ function ImportReviewPage({
         alreadyReverted.current = true;
       }
 
-      const formData = new FormData();
-      formData.append("file", await maybeCompressFile(file));
-      if (needsBranchSelection) formData.append("branch_id", selectedBranchId);
-      if (isPurchaseImport && purchaseDate)
-        formData.append("purchase_date", purchaseDate);
+      function buildFormData(): FormData {
+        const formData = new FormData();
+        if (needsBranchSelection) formData.append("branch_id", selectedBranchId);
+        if (isPurchaseImport && purchaseDate)
+          formData.append("purchase_date", purchaseDate);
+        return formData;
+      }
 
-      const response = await fetch(`${apiBaseUrl}${endpoint}/confirm`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        body: formData,
-      });
+      async function confirmWithFile(): Promise<Response> {
+        const formData = buildFormData();
+        formData.append("file", await maybeCompressFile(file));
+        return fetch(`${apiBaseUrl}${endpoint}/confirm`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          body: formData,
+        });
+      }
+
+      // The preview screen already staged this file's bytes server-side (the initial
+      // preview, or its branch-aware repreview) — send that id instead of the file
+      // itself. Only falls back to uploading the file when that id has since expired.
+      let response: Response;
+      if (displayResult.staged_upload_id) {
+        const formData = buildFormData();
+        formData.append("staged_upload_id", displayResult.staged_upload_id);
+        response = await fetch(`${apiBaseUrl}${endpoint}/confirm`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          body: formData,
+        });
+        if (response.status === 404) {
+          response = await confirmWithFile();
+        }
+      } else {
+        response = await confirmWithFile();
+      }
 
       const body = await response.json().catch(() => null);
       if (!response.ok) {

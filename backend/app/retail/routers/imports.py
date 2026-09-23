@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 import pandas as pd
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -35,6 +36,7 @@ from app.retail.models.import_batch import ImportBatch, ImportBatchStatus, Impor
 from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.models.sale import Sale, SaleLine
+from app.retail.models.staged_upload import StagedImportUpload
 from app.retail.models.stock_level import StockLevel
 from app.models.user import User, UserRole
 from app.services.branches import list_retail_branches
@@ -175,8 +177,69 @@ async def _read_upload(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> b
     return contents
 
 
+STAGED_UPLOAD_MAX_AGE = datetime.timedelta(hours=24)
+
+
+def _sweep_stale_staged_uploads(db: Session) -> None:
+    """Delete abandoned staged uploads opportunistically on the next preview/inspect
+    call. A preview is followed by a confirm within seconds in the overwhelming
+    majority of cases, so in practice this only ever clears rows nobody came back
+    to confirm (the importer picked a different file, or just closed the screen)."""
+    cutoff = utc_now() - STAGED_UPLOAD_MAX_AGE
+    db.query(StagedImportUpload).filter(StagedImportUpload.created_at < cutoff).delete()
+    db.commit()
+
+
+def _stage_upload(db: Session, contents: bytes, filename: str | None) -> str:
+    """Save a freshly-parsed upload's bytes so the confirm that (usually) follows a
+    preview/inspect can reference them by id instead of sending the whole file over
+    the wire a second time — see the frontend's ImportConfirmModal/ImportReviewPage/
+    useImportFilePicker, which hold onto this id and pass it back as
+    `staged_upload_id` on confirm instead of re-attaching `file`."""
+    _sweep_stale_staged_uploads(db)
+    staged = StagedImportUpload(id=str(uuid.uuid4()), filename=filename, content=contents)
+    db.add(staged)
+    db.commit()
+    return staged.id
+
+
+async def _resolve_upload(
+    db: Session,
+    file: UploadFile | None,
+    staged_upload_id: str | None,
+    max_bytes: int = MAX_UPLOAD_BYTES,
+) -> tuple[bytes, str | None]:
+    """Read an upload's bytes either from a freshly-posted `file`, or — the "upload
+    once" path — from a row a preceding preview/inspect call staged via
+    `_stage_upload`. A missing/expired id (server restarted since, or the 24h sweep
+    already cleared it) surfaces as a 404 the frontend falls back to by resending
+    the file directly rather than failing the confirm outright."""
+    if staged_upload_id:
+        staged = db.get(StagedImportUpload, staged_upload_id)
+        if staged is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "That upload is no longer available on the server — please choose the file again.",
+            )
+        return staged.content, staged.filename
+    if file is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Choose a file to upload")
+    contents = await _read_upload(file, max_bytes)
+    return contents, file.filename
+
+
+def _consume_staged_upload(db: Session, staged_upload_id: str | None) -> None:
+    """Delete a staged upload once its confirm has succeeded — the row only needs to
+    outlive the gap between preview/inspect and confirm, not the imported data."""
+    if not staged_upload_id:
+        return
+    db.query(StagedImportUpload).filter(StagedImportUpload.id == staged_upload_id).delete()
+    db.commit()
+
+
 @router.post("/general")
 async def import_general_file(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     branch_id: str | None = Form(None),
     user: User = Depends(get_current_app_user),
@@ -211,8 +274,12 @@ async def import_general_file(
     db.refresh(batch)
     # Only upload to R2 once the batch is actually committed — uploading first (the old
     # order here) left an orphaned R2 object with no matching row whenever the commit
-    # itself then failed; see _finalize_original_file_storage's docstring.
-    _finalize_original_file_storage(db, batch.id, contents, file.filename)
+    # itself then failed; see _finalize_original_file_storage's docstring. Backgrounded
+    # so the response doesn't wait on R2 — the file is already durably saved in
+    # `original_file` above, so R2 here is only ever a mirror. FastAPI runs background
+    # tasks after the response is sent but before this request's `db` dependency is torn
+    # down, so reusing it here is safe.
+    background_tasks.add_task(_finalize_original_file_storage, db, batch.id, contents, file.filename)
     return {
         "id": batch.id,
         "filename": batch.filename,
@@ -428,35 +495,40 @@ def _replay_after_request_key_conflict(
 
 @router.post("/sales")
 async def import_sales_file(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    staged_upload_id: str | None = Form(None),
     branch_id: str | None = Form(None),
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _check_extension(file.filename)
+    contents, filename = await _resolve_upload(db, file, staged_upload_id)
+    _check_extension(filename)
     branch = _resolve_branch_for_preview(user, branch_id, db)
 
-    contents = await _read_upload(file)
     origin_rows, clean_df = _parse_or_400(
         parse_pos_sale_upload,
         contents,
-        file.filename,
+        filename,
         "sale",
         branch.sale_date_format if branch else "MDY",
     )
 
-    return _build_preview(
-        file.filename,
+    preview = _build_preview(
+        filename,
         origin_rows,
         clean_df,
         SALES_OUTPUT_COLUMNS,
         SALES_VALIDATION_RULES,
     )
+    preview["staged_upload_id"] = staged_upload_id or _stage_upload(db, contents, filename)
+    return preview
 
 
 @router.post("/sales/confirm")
 async def confirm_sales_file(
-    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks,
+    file: UploadFile | None = File(None),
+    staged_upload_id: str | None = Form(None),
     branch_id: str | None = Form(None),
     idempotency_key: IdempotencyKey = None,
     user: User = Depends(get_current_app_user),
@@ -465,23 +537,23 @@ async def confirm_sales_file(
     previous = _confirmed_import_for_key(db, user, idempotency_key)
     if previous is not None:
         return previous
-    _check_extension(file.filename)
+    contents, filename = await _resolve_upload(db, file, staged_upload_id)
+    _check_extension(filename)
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
     branch = db.get(Branch, resolved_branch_id)
 
-    contents = await _read_upload(file)
     origin_rows, clean_df = await run_in_threadpool(
         _parse_or_400,
         parse_pos_sale_upload,
         contents,
-        file.filename,
+        filename,
         "sale",
         branch.sale_date_format if branch else "MDY",
     )
 
     preview_data = await run_in_threadpool(
         _build_preview,
-        file.filename,
+        filename,
         origin_rows,
         clean_df,
         SALES_OUTPUT_COLUMNS,
@@ -494,7 +566,7 @@ async def confirm_sales_file(
             clean_df,
             branch_id=resolved_branch_id,
             location_raw=_location_raw(clean_df),
-            source_file=file.filename,
+            source_file=filename,
             uploaded_by=user.id,
             preview_data=_preview_for_db(preview_data),
             request_key=idempotency_key,
@@ -503,44 +575,53 @@ async def confirm_sales_file(
         summary = _replay_after_request_key_conflict(db, user, idempotency_key)
         if summary is None:
             raise
-    await run_in_threadpool(
-        _finalize_original_file_storage, db, summary["batch_id"], contents, file.filename
+    _consume_staged_upload(db, staged_upload_id)
+    # Backgrounded so the response doesn't wait on R2 — the data is already durably
+    # committed above, R2 is only ever a mirror of the original file/preview (see
+    # _finalize_original_file_storage's docstring and the note on the /general route).
+    background_tasks.add_task(
+        _finalize_original_file_storage, db, summary["batch_id"], contents, filename
     )
-    await run_in_threadpool(_upload_preview_to_storage, summary["batch_id"], preview_data)
+    background_tasks.add_task(_upload_preview_to_storage, summary["batch_id"], preview_data)
     return summary
 
 
 @router.post("/inventory")
 async def import_inventory_file(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    staged_upload_id: str | None = Form(None),
     branch_id: str | None = Form(None),
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    _check_extension(file.filename)
+    contents, filename = await _resolve_upload(db, file, staged_upload_id)
+    _check_extension(filename)
     branch = _resolve_branch_for_preview(user, branch_id, db)
 
-    contents = await _read_upload(file)
     origin_rows, clean_df = _parse_or_400(
         parse_inventory_upload,
         contents,
-        file.filename,
+        filename,
         "inventory",
         branch.inventory_date_format if branch else "MDY",
     )
 
-    return _build_preview(
-        file.filename,
+    preview = _build_preview(
+        filename,
         origin_rows,
         clean_df,
         INVENTORY_OUTPUT_COLUMNS,
         INVENTORY_VALIDATION_RULES,
     )
+    preview["staged_upload_id"] = staged_upload_id or _stage_upload(db, contents, filename)
+    return preview
 
 
 @router.post("/inventory/confirm")
 async def confirm_inventory_file(
-    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks,
+    file: UploadFile | None = File(None),
+    staged_upload_id: str | None = Form(None),
     branch_id: str | None = Form(None),
     idempotency_key: IdempotencyKey = None,
     user: User = Depends(get_current_app_user),
@@ -549,23 +630,23 @@ async def confirm_inventory_file(
     previous = _confirmed_import_for_key(db, user, idempotency_key)
     if previous is not None:
         return previous
-    _check_extension(file.filename)
+    contents, filename = await _resolve_upload(db, file, staged_upload_id)
+    _check_extension(filename)
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
     branch = db.get(Branch, resolved_branch_id)
 
-    contents = await _read_upload(file)
     origin_rows, clean_df = await run_in_threadpool(
         _parse_or_400,
         parse_inventory_upload,
         contents,
-        file.filename,
+        filename,
         "inventory",
         branch.inventory_date_format if branch else "MDY",
     )
 
     preview_data = await run_in_threadpool(
         _build_preview,
-        file.filename,
+        filename,
         origin_rows,
         clean_df,
         INVENTORY_OUTPUT_COLUMNS,
@@ -578,7 +659,7 @@ async def confirm_inventory_file(
             clean_df,
             branch_id=resolved_branch_id,
             location_raw=_location_raw(clean_df),
-            source_file=file.filename,
+            source_file=filename,
             uploaded_by=user.id,
             preview_data=_preview_for_db(preview_data),
             request_key=idempotency_key,
@@ -587,37 +668,47 @@ async def confirm_inventory_file(
         summary = _replay_after_request_key_conflict(db, user, idempotency_key)
         if summary is None:
             raise
-    await run_in_threadpool(
-        _finalize_original_file_storage, db, summary["batch_id"], contents, file.filename
+    _consume_staged_upload(db, staged_upload_id)
+    # Backgrounded so the response doesn't wait on R2 — the data is already durably
+    # committed above, R2 is only ever a mirror of the original file/preview (see
+    # _finalize_original_file_storage's docstring and the note on the /general route).
+    background_tasks.add_task(
+        _finalize_original_file_storage, db, summary["batch_id"], contents, filename
     )
-    await run_in_threadpool(_upload_preview_to_storage, summary["batch_id"], preview_data)
+    background_tasks.add_task(_upload_preview_to_storage, summary["batch_id"], preview_data)
     return summary
 
 
 @router.post("/purchase")
 async def import_purchase_file(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    staged_upload_id: str | None = Form(None),
     user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
 ) -> dict:
-    _check_extension(file.filename)
+    contents, filename = await _resolve_upload(db, file, staged_upload_id)
+    _check_extension(filename)
 
-    contents = await _read_upload(file)
     origin_rows, clean_df = _parse_or_400(
-        parse_purchase_upload, contents, file.filename, "purchase"
+        parse_purchase_upload, contents, filename, "purchase"
     )
 
-    return _build_preview(
-        file.filename,
+    preview = _build_preview(
+        filename,
         origin_rows,
         clean_df,
         PURCHASE_OUTPUT_COLUMNS,
         PURCHASE_VALIDATION_RULES,
     )
+    preview["staged_upload_id"] = staged_upload_id or _stage_upload(db, contents, filename)
+    return preview
 
 
 @router.post("/purchase/confirm")
 async def confirm_purchase_file(
-    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks,
+    file: UploadFile | None = File(None),
+    staged_upload_id: str | None = Form(None),
     branch_id: str | None = Form(None),
     purchase_date: str | None = Form(None),
     purchase_number: str | None = Form(None),
@@ -628,10 +719,11 @@ async def confirm_purchase_file(
     previous = _confirmed_import_for_key(db, user, idempotency_key)
     if previous is not None:
         return previous
-    _check_extension(file.filename)
+    contents, filename = await _resolve_upload(db, file, staged_upload_id)
+    _check_extension(filename)
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
 
-    extracted_number, extracted_date = extract_purchase_metadata(file.filename or "")
+    extracted_number, extracted_date = extract_purchase_metadata(filename or "")
     resolved_purchase_number = purchase_number or extracted_number
 
     resolved_purchase_date = None
@@ -645,14 +737,13 @@ async def confirm_purchase_file(
     elif extracted_date:
         resolved_purchase_date = extracted_date
 
-    contents = await _read_upload(file)
     origin_rows, clean_df = await run_in_threadpool(
-        _parse_or_400, parse_purchase_upload, contents, file.filename, "purchase"
+        _parse_or_400, parse_purchase_upload, contents, filename, "purchase"
     )
 
     preview_data = await run_in_threadpool(
         _build_preview,
-        file.filename,
+        filename,
         origin_rows,
         clean_df,
         PURCHASE_OUTPUT_COLUMNS,
@@ -665,7 +756,7 @@ async def confirm_purchase_file(
             clean_df,
             branch_id=resolved_branch_id,
             location_raw=_location_raw(clean_df),
-            source_file=file.filename,
+            source_file=filename,
             uploaded_by=user.id,
             preview_data=_preview_for_db(preview_data),
             purchase_date=resolved_purchase_date,
@@ -676,10 +767,14 @@ async def confirm_purchase_file(
         summary = _replay_after_request_key_conflict(db, user, idempotency_key)
         if summary is None:
             raise
-    await run_in_threadpool(
-        _finalize_original_file_storage, db, summary["batch_id"], contents, file.filename
+    _consume_staged_upload(db, staged_upload_id)
+    # Backgrounded so the response doesn't wait on R2 — the data is already durably
+    # committed above, R2 is only ever a mirror of the original file/preview (see
+    # _finalize_original_file_storage's docstring and the note on the /general route).
+    background_tasks.add_task(
+        _finalize_original_file_storage, db, summary["batch_id"], contents, filename
     )
-    await run_in_threadpool(_upload_preview_to_storage, summary["batch_id"], preview_data)
+    background_tasks.add_task(_upload_preview_to_storage, summary["batch_id"], preview_data)
     return summary
 
 
@@ -688,6 +783,7 @@ async def inspect_import_file(
     file: UploadFile = File(...),
     expected_type: str = Form(...),
     user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
 ) -> dict:
     """Fast inspection of an import file before confirmation.
 
@@ -851,6 +947,7 @@ async def inspect_import_file(
         "row_count": row_count,
         "zero_count": zero_count,
         "nonzero_count": nonzero_count,
+        "staged_upload_id": _stage_upload(db, contents, file.filename),
         "error_message": None,
     }
 

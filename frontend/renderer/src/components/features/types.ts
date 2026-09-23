@@ -48,6 +48,10 @@ export interface ImportPreviewResult {
   is_sampled?: boolean;
   total_origin_rows?: number;
   total_clean_rows?: number;
+  // The backend's copy of the file this preview parsed — confirm can send this id
+  // back instead of re-attaching the (possibly large) file a second time. See
+  // backend's _stage_upload/_resolve_upload in app.retail.routers.imports.
+  staged_upload_id?: string;
 }
 
 export interface SelectedImportFile {

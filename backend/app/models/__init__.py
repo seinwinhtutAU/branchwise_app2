@@ -5,6 +5,7 @@ from app.retail.models.import_batch import ImportBatch, ImportBatchStatus, Impor
 from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.models.sale import Sale, SaleLine
+from app.retail.models.staged_upload import StagedImportUpload
 from app.retail.models.stock_level import StockLevel
 from app.models.user import User, UserRole
 from app.wholesale.models.master_data import (
@@ -54,6 +55,7 @@ __all__ = [
     "ReceivingPackage",
     "Sale",
     "SaleLine",
+    "StagedImportUpload",
     "Shipment",
     "ShipmentLeg",
     "SupplierVoucher",

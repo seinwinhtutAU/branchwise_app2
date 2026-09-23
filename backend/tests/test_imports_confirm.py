@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.branch import Branch
 from app.retail.models.purchase import Purchase
 from app.retail.models.sale import Sale
+from app.retail.models.staged_upload import StagedImportUpload
 from app.retail.models.stock_level import StockLevel
 from app.models.user import User, UserRole
 
@@ -194,3 +195,44 @@ def test_confirm_rejects_unsupported_extension(authed_client: TestClient, db_ses
         files={"file": ("sale.txt", io.BytesIO(b"not a csv"), "text/plain")},
     )
     assert response.status_code == 400
+
+
+def test_confirm_sales_via_staged_upload_id_does_not_need_the_file_again(
+    authed_client: TestClient, db_session: Session
+):
+    """The preview call stages the upload and hands back a staged_upload_id; confirm
+    can then send just that id instead of re-attaching the whole file — see
+    _resolve_upload/_stage_upload in app.retail.routers.imports."""
+    _make_branch_user(db_session, with_branch=True)
+
+    preview = authed_client.post(
+        "/api/imports/sales",
+        files={"file": ("sale.csv", io.BytesIO(SALE_CSV.encode()), "text/csv")},
+    )
+    assert preview.status_code == 200
+    staged_upload_id = preview.json()["staged_upload_id"]
+    assert staged_upload_id
+    assert db_session.query(StagedImportUpload).count() == 1
+
+    confirm = authed_client.post(
+        "/api/imports/sales/confirm",
+        data={"staged_upload_id": staged_upload_id},
+    )
+    assert confirm.status_code == 200
+    assert confirm.json()["sales_created"] == 1
+    assert db_session.query(Sale).count() == 1
+    # Confirming consumes the staged row — it only needs to outlive the gap between
+    # preview and confirm, not the imported data.
+    assert db_session.query(StagedImportUpload).count() == 0
+
+
+def test_confirm_with_unknown_staged_upload_id_returns_404(
+    authed_client: TestClient, db_session: Session
+):
+    _make_branch_user(db_session, with_branch=True)
+
+    response = authed_client.post(
+        "/api/imports/sales/confirm",
+        data={"staged_upload_id": "does-not-exist"},
+    )
+    assert response.status_code == 404

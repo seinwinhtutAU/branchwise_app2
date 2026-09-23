@@ -29,6 +29,9 @@ interface FileInspection {
   zero_count?: number | null;
   nonzero_count?: number | null;
   error_message?: string | null;
+  // Set on a "valid" result — the backend's copy of this file, so Confirm can send
+  // this id back instead of re-uploading the file a second time.
+  staged_upload_id?: string;
 }
 
 interface ImportConfirmModalProps {
@@ -391,30 +394,56 @@ export default function ImportConfirmModal({
             }
           }
 
-          const formData = new FormData();
-          formData.append("file", await maybeCompressFile(item.file));
-          if (needsBranchSelection && selectedBranchId) {
-            formData.append("branch_id", selectedBranchId);
-          }
-
-          if (item.endpoint.includes("purchase")) {
-            if (inspection?.dates?.[0]) {
-              formData.append("purchase_date", inspection.dates[0]);
-            }
-            if (inspection?.purchase_number) {
-              formData.append("purchase_number", inspection.purchase_number);
-            }
-          }
-
           const endpoint = item.endpoint.endsWith("/confirm")
             ? item.endpoint
             : `${item.endpoint}/confirm`;
 
-          const response = await fetch(`${apiBaseUrl}${endpoint}`, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${session.access_token}` },
-            body: formData,
-          });
+          // Shared fields every confirm needs regardless of how the file itself is sent.
+          function buildFormData(): FormData {
+            const formData = new FormData();
+            if (needsBranchSelection && selectedBranchId) {
+              formData.append("branch_id", selectedBranchId);
+            }
+            if (item.endpoint.includes("purchase")) {
+              if (inspection?.dates?.[0]) {
+                formData.append("purchase_date", inspection.dates[0]);
+              }
+              if (inspection?.purchase_number) {
+                formData.append("purchase_number", inspection.purchase_number);
+              }
+            }
+            return formData;
+          }
+
+          async function confirmWithFile(): Promise<Response> {
+            const formData = buildFormData();
+            formData.append("file", await maybeCompressFile(item.file));
+            return fetch(`${apiBaseUrl}${endpoint}`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${session.access_token}` },
+              body: formData,
+            });
+          }
+
+          // The Inspect step already staged this file's bytes server-side — send its
+          // id instead of the (possibly large) file a second time. Only if that id
+          // has since expired (server restart, or the 24h sweep) does this fall back
+          // to uploading the file itself, same as before staging existed.
+          let response: Response;
+          if (inspection?.staged_upload_id) {
+            const formData = buildFormData();
+            formData.append("staged_upload_id", inspection.staged_upload_id);
+            response = await fetch(`${apiBaseUrl}${endpoint}`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${session.access_token}` },
+              body: formData,
+            });
+            if (response.status === 404) {
+              response = await confirmWithFile();
+            }
+          } else {
+            response = await confirmWithFile();
+          }
 
           if (response.ok) {
             successCount++;
