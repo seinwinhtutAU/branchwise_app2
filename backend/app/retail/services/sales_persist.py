@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.retail.models.import_batch import ImportType
 from app.retail.models.sale import Sale, SaleLine
 from app.retail.services.import_common import (
-    count_preview_issues,
     get_or_create_products,
     new_import_batch,
     pluralize,
@@ -22,7 +21,8 @@ def persist_sales(
     location_raw: str | None,
     source_file: str | None,
     uploaded_by: str | None = None,
-    preview_data: dict | None = None,
+    issue_count: int = 0,
+    slip_subtotal_mismatches: list[dict] | None = None,
     storage_key: str | None = None,
     request_key: str | None = None,
 ) -> dict:
@@ -31,7 +31,6 @@ def persist_sales(
         branch_id=branch_id,
         uploaded_by=uploaded_by,
         source_file=source_file,
-        preview_data=preview_data,
         storage_key=storage_key,
         request_key=request_key,
     )
@@ -44,9 +43,9 @@ def persist_sales(
         "sale_lines_created": 0,
         "products_created": 0,
         "products_updated": 0,
+        "issue_count": issue_count,
+        "slip_subtotal_mismatches": slip_subtotal_mismatches or [],
     }
-    if preview_data is not None:
-        summary["issue_count"] = count_preview_issues(preview_data)
 
     if df.empty:
         summary["messages"] = ["No sales were found in this file — nothing was imported."]
@@ -68,12 +67,19 @@ def persist_sales(
     summary["products_created"] = created
     summary["products_updated"] = updated
 
-    for slip_id, group in df.groupby("SlipID", sort=False):
+    # Group in plain Python rather than df.groupby(): every groupby slice deep-copies
+    # df.attrs (which carries the whole file's origin_indices list), so a year-long
+    # export with ~5,000 slips spent about 85 seconds just copying that list.
+    lines_by_slip: dict[str, list[dict]] = {}
+    for row in df.to_dict(orient="records"):
+        lines_by_slip.setdefault(row["SlipID"], []).append(row)
+
+    for slip_id, slip_lines in lines_by_slip.items():
         if slip_id in existing_slip_ids:
             summary["sales_skipped_duplicate"] += 1
             continue
 
-        first = group.iloc[0]
+        first = slip_lines[0]
         sale = Sale(
             id=str(uuid.uuid4()),
             branch_id=branch_id,
@@ -88,8 +94,7 @@ def persist_sales(
         db.add(sale)
         summary["sales_created"] += 1
 
-        # Plain dicts, not iterrows() — same reasoning as validate_rows in import_common.
-        for row in group.to_dict(orient="records"):
+        for row in slip_lines:
             db.add(
                 SaleLine(
                     sale_id=sale.id,

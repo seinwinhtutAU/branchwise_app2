@@ -328,7 +328,7 @@ def urgent_reorder_rule(snapshot: BranchSnapshot) -> list[Alert]:
         Alert(
             id="urgent_reorder",
             severity=CRITICAL,
-            dimension="inventory",
+            dimension="reorder",
             title=f"Urgent reorder needed for {_count_products(count)}",
             summary=(
                 f"{count} product{'s' if count != 1 else ''} may run out within "

@@ -15,6 +15,17 @@ export interface PeriodRange {
   clearCustomRange: () => void;
   /** What to actually fetch with — see the settle comment below. */
   applied: { from: string; to: string };
+  /** Which calendar month `period === "monthly"` means (YYYY-MM) — only the Dashboard's
+   *  own period picker uses this; Business Alerts never sets period to "monthly", so it
+   *  stays at its default and is simply never read. Unlike the date inputs above, a
+   *  month is picked from a closed list rather than typed, so it applies immediately —
+   *  no settle delay needed. */
+  month: string;
+  setMonth: (month: string) => void;
+}
+
+function currentMonth(): string {
+  return new Date().toISOString().slice(0, 7);
 }
 
 /**
@@ -33,6 +44,7 @@ export function usePeriodRange(initialPeriod: PeriodKey = "30d"): PeriodRange {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [applied, setApplied] = useState({ from: "", to: "" });
+  const [month, setMonth] = useState(currentMonth);
 
   useEffect(() => {
     const next =
@@ -60,5 +72,7 @@ export function usePeriodRange(initialPeriod: PeriodKey = "30d"): PeriodRange {
       setDateTo("");
     },
     applied,
+    month,
+    setMonth,
   };
 }

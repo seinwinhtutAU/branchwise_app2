@@ -66,19 +66,15 @@ class ImportBatch(Base):
         default=ImportBatchStatus.COMPLETED,
     )
     summary: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    # Snapshot of the origin/clean grids shown at confirm time (same shape as the
-    # preview endpoints' response) — the persisted Sale/PurchaseLine/StockLevel rows
-    # don't preserve the original file layout or row-level validation notes, so this
-    # is what backs the "view this past import" history detail page.
-    preview_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     # Object storage key in Cloudflare R2 where the raw uploaded spreadsheet file is preserved
     storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # The client-generated Idempotency-Key for a confirmed import.  It makes replaying
     # the same request safe after the server committed but its answer was lost in transit.
     request_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # General uploads are retained in the database as well as optionally mirrored to
-    # object storage. Keeping these bytes makes the feature useful in installations
-    # that have not configured Cloudflare R2 yet.
+    # Legacy: general uploads used to also be retained in the database, in addition to
+    # being mirrored to R2. New general uploads no longer write here — R2 is now the
+    # sole durability path, same as sales/inventory/purchase — but these columns stay
+    # populated (and readable) on rows created before that change.
     original_file: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     original_file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     original_file_content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)

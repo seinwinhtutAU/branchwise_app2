@@ -14,12 +14,25 @@ interface Props {
   branchId: string;
 }
 
-function GeneralFileImportCard({ session, branchId }: Props): React.JSX.Element {
+type GeneralUploadResult =
+  | {
+      salary_records_created: number;
+      zero_selling_records_created: number;
+      daily_cost_records_created: number;
+    }
+  | { error: string };
+
+function GeneralFileImportCard({
+  session,
+  branchId,
+}: Props): React.JSX.Element {
   const showToast = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+  async function handleFileSelected(
+    e: React.ChangeEvent<HTMLInputElement>,
+  ): Promise<void> {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
     if (files.length === 0) return;
@@ -43,21 +56,79 @@ function GeneralFileImportCard({ session, branchId }: Props): React.JSX.Element 
             headers: { Authorization: `Bearer ${session.access_token}` },
             body: formData,
           });
-          if (response.ok) return null;
+          if (response.ok) {
+            const body = (await response.json()) as {
+              salary_records_created?: number;
+              zero_selling_records_created?: number;
+              daily_cost_records_created?: number;
+            };
+            return {
+              salary_records_created: body.salary_records_created ?? 0,
+              zero_selling_records_created:
+                body.zero_selling_records_created ?? 0,
+              daily_cost_records_created: body.daily_cost_records_created ?? 0,
+            };
+          }
           const body = await response.json().catch(() => null);
-          return body?.detail ?? `${file.name}: upload failed (${response.status})`;
+          return {
+            error:
+              body?.detail ??
+              `${file.name}: upload failed (${response.status})`,
+          };
         }),
       );
-      const errors = results.filter((result): result is string => result !== null);
+      const errors = results
+        .filter(
+          (result): result is Extract<GeneralUploadResult, { error: string }> =>
+            "error" in result,
+        )
+        .map((result) => result.error);
       if (errors.length > 0) {
         showToast("error", errors.join(" "));
         return;
       }
 
+      const salaryRecordsCreated = results.reduce(
+        (total, result) =>
+          total +
+          ("salary_records_created" in result
+            ? (result.salary_records_created ?? 0)
+            : 0),
+        0,
+      );
+      const zeroSellingRecordsCreated = results.reduce(
+        (total, result) =>
+          total +
+          ("zero_selling_records_created" in result
+            ? (result.zero_selling_records_created ?? 0)
+            : 0),
+        0,
+      );
+      const dailyCostRecordsCreated = results.reduce(
+        (total, result) =>
+          total +
+          ("daily_cost_records_created" in result
+            ? (result.daily_cost_records_created ?? 0)
+            : 0),
+        0,
+      );
+
       invalidateEverything();
       showToast(
         "success",
-        `${files.length} daily operation cost ${files.length === 1 ? "file" : "files"} stored unchanged.`,
+        `${files.length} daily operation cost ${files.length === 1 ? "file" : "files"} stored unchanged.${
+          salaryRecordsCreated > 0
+            ? ` ${salaryRecordsCreated} salary ${salaryRecordsCreated === 1 ? "record" : "records"} added.`
+            : ""
+        }${
+          zeroSellingRecordsCreated > 0
+            ? ` ${zeroSellingRecordsCreated} zero-selling ${zeroSellingRecordsCreated === 1 ? "record" : "records"} added.`
+            : ""
+        }${
+          dailyCostRecordsCreated > 0
+            ? ` ${dailyCostRecordsCreated} daily usage ${dailyCostRecordsCreated === 1 ? "record" : "records"} added.`
+            : ""
+        }`,
       );
     } catch {
       showToast("error", "Upload failed — is the backend running?");

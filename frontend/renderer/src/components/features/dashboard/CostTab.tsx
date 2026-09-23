@@ -126,6 +126,7 @@ interface Props {
   period: PeriodKey;
   dateFrom: string;
   dateTo: string;
+  month: string;
   canLoad: boolean;
   onViewWarnings: () => void;
 }
@@ -136,6 +137,7 @@ export function CostTab({
   period,
   dateFrom,
   dateTo,
+  month,
   canLoad,
   onViewWarnings,
 }: Props): React.JSX.Element {
@@ -144,7 +146,7 @@ export function CostTab({
   // selection shows the numbers it showed last time instead of a skeleton. See
   // lib/queryClient.ts.
   const url = canLoad
-    ? dashboardUrl("cost", branchId, { period, dateFrom, dateTo })
+    ? dashboardUrl("cost", branchId, { period, dateFrom, dateTo, month })
     : null;
   const { data: fetched, isRefreshing, failed, reload } =
     useUrlQuery<CostDashboardData>(url, session, "Cost dashboard");
@@ -189,19 +191,19 @@ export function CostTab({
           label="Estimated Cost of Goods Sold"
           value={formatMoney(data.estimated_cogs.value)}
           deltaPct={data.estimated_cogs.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
         />
         <StatTile
           label="Estimated Gross Margin"
           value={formatPercent(data.estimated_gross_margin_pct.value)}
           deltaPct={data.estimated_gross_margin_pct.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
         />
         <StatTile
           label="Estimated Margin per Transaction"
           value={formatMoney(data.estimated_margin_per_basket.value)}
           deltaPct={data.estimated_margin_per_basket.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
         />
       </div>
 

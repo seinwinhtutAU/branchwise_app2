@@ -93,6 +93,65 @@ def test_resolve_period_today_and_7d():
     assert r.previous_start == r.previous_end - datetime.timedelta(days=6)
 
 
+def test_resolve_period_monthly_current_month_ends_today():
+    # TODAY is 2026-08-30 — the in-progress month reads "1st to today", not the whole
+    # month, matching the frontend's own "Aug 1-30" vs "Sep 1-23" style labels.
+    r = dashboard_service.resolve_period("monthly", today=TODAY, month="2026-08")
+    assert r.start == datetime.date(2026, 8, 1)
+    assert r.end == TODAY
+
+
+def test_resolve_period_monthly_past_month_spans_whole_month():
+    r = dashboard_service.resolve_period("monthly", today=TODAY, month="2026-07")
+    assert r.start == datetime.date(2026, 7, 1)
+    assert r.end == datetime.date(2026, 7, 31)
+    # 31-day window -> previous 31-day window ending the day before.
+    assert r.previous_end == datetime.date(2026, 6, 30)
+    assert r.previous_start == datetime.date(2026, 5, 31)
+
+
+def test_resolve_period_monthly_defaults_to_current_month_when_omitted():
+    r = dashboard_service.resolve_period("monthly", today=TODAY)
+    assert r.start == datetime.date(2026, 8, 1)
+    assert r.end == TODAY
+
+
+def test_resolve_period_year_ago_comparison_today():
+    r = dashboard_service.resolve_period("today", today=TODAY, comparison="year_ago")
+    assert r.start == r.end == TODAY
+    assert r.previous_start == r.previous_end == datetime.date(2025, 8, 30)
+
+
+def test_resolve_period_year_ago_comparison_monthly():
+    r = dashboard_service.resolve_period(
+        "monthly", today=TODAY, month="2026-07", comparison="year_ago"
+    )
+    assert r.start == datetime.date(2026, 7, 1)
+    assert r.end == datetime.date(2026, 7, 31)
+    assert r.previous_start == datetime.date(2025, 7, 1)
+    assert r.previous_end == datetime.date(2025, 7, 31)
+
+
+def test_resolve_period_year_ago_comparison_custom_range():
+    r = dashboard_service.resolve_period(
+        "today",  # ignored — date_from/date_to take over
+        date_from=datetime.date(2026, 8, 10),
+        date_to=datetime.date(2026, 8, 14),
+        comparison="year_ago",
+    )
+    assert r.previous_start == datetime.date(2025, 8, 10)
+    assert r.previous_end == datetime.date(2025, 8, 14)
+
+
+def test_resolve_period_year_ago_clamps_leap_day():
+    # 2024 is a leap year; 2023 has no Feb 29, so it clamps to Feb 28 rather than
+    # rolling over into March.
+    r = dashboard_service.resolve_period(
+        "today", today=datetime.date(2024, 2, 29), comparison="year_ago"
+    )
+    assert r.previous_start == r.previous_end == datetime.date(2023, 2, 28)
+
+
 def test_dashboard_endpoint_retail_account_uses_own_branch(
     authed_client: TestClient, db_session: Session
 ):
@@ -155,20 +214,28 @@ def test_dashboard_rejects_wholesale_branch(authed_client: TestClient, db_sessio
     assert response_inv.status_code == 400
 
 
-def test_dashboard_kpis_and_delta_vs_previous_period(
+def test_dashboard_kpis_and_delta_vs_same_day_last_year(
     authed_client: TestClient, db_session: Session
 ):
+    # Revenue (and Cost/Customer alongside it) compare against the same date one year
+    # earlier, not the day right before — see resolve_period's `comparison="year_ago"`.
     branch = _make_branch(db_session)
     _make_retail_user(db_session, branch)
     product = _make_product(db_session, "SKU-1")
     today = datetime.date.today()
+    last_year = today.replace(year=today.year - 1)
     _make_sale(
         db_session, branch=branch, product=product, slip_id="today-1",
         sale_date=today, sale_time="10:00", qty=2, net_amount=2000,
     )
     _make_sale(
+        db_session, branch=branch, product=product, slip_id="last-year-1",
+        sale_date=last_year, sale_time="10:00", qty=1, net_amount=1000,
+    )
+    # Proves yesterday's sale is NOT what "previous" means any more.
+    _make_sale(
         db_session, branch=branch, product=product, slip_id="yesterday-1",
-        sale_date=today - datetime.timedelta(days=1), sale_time="10:00", qty=1, net_amount=1000,
+        sale_date=today - datetime.timedelta(days=1), sale_time="10:00", qty=9, net_amount=9999,
     )
     db_session.commit()
 
@@ -719,6 +786,53 @@ def test_dashboard_rejects_inverted_custom_range(
 
     response = authed_client.get(
         "/api/dashboard/revenue?date_from=2026-08-14&date_to=2026-08-10"
+    )
+    assert response.status_code == 400
+
+
+def test_dashboard_monthly_period_uses_whole_of_a_past_month(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    # A definitely-in-the-past month, so this doesn't depend on which day of the
+    # current month the suite happens to run on.
+    last_month_end = datetime.date.today().replace(day=1) - datetime.timedelta(days=1)
+    last_month_start = last_month_end.replace(day=1)
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-last-month",
+        sale_date=last_month_end, sale_time="10:00", qty=1, net_amount=2500,
+    )
+    db_session.commit()
+
+    response = authed_client.get(
+        f"/api/dashboard/revenue?period=monthly&month={last_month_start:%Y-%m}"
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["date_from"] == last_month_start.isoformat()
+    assert body["date_to"] == last_month_end.isoformat()
+    assert body["net_revenue"]["value"] == 2500.0
+
+
+def test_dashboard_rejects_malformed_month(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    db_session.commit()
+
+    response = authed_client.get("/api/dashboard/revenue?period=monthly&month=2026-13")
+    assert response.status_code == 400
+
+
+def test_dashboard_rejects_future_month(authed_client: TestClient, db_session: Session):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    db_session.commit()
+
+    next_month = (datetime.date.today().replace(day=1) + datetime.timedelta(days=32)).replace(day=1)
+    response = authed_client.get(
+        f"/api/dashboard/revenue?period=monthly&month={next_month:%Y-%m}"
     )
     assert response.status_code == 400
 

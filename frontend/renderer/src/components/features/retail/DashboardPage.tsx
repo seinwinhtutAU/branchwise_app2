@@ -5,7 +5,6 @@ import type { BranchOption } from "@renderer/lib/useBranches";
 import { refreshEverything } from "@renderer/lib/queryClient";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
-import { Select } from "@renderer/components/ui/Select";
 import { TabBar } from "@renderer/components/ui/Tabs";
 import { DashboardIcon } from "@renderer/components/ui/icons";
 import type { Profile } from "@renderer/components/features/types";
@@ -19,6 +18,7 @@ import {
 import { RevenueTab } from "@renderer/components/features/dashboard/RevenueTab";
 import { SummaryTab } from "@renderer/components/features/dashboard/SummaryTab";
 import { PeriodControls } from "@renderer/components/features/dashboard/shared";
+import { DASHBOARD_PERIOD_OPTIONS } from "@renderer/components/features/dashboard/helpers";
 import { usePeriodRange } from "@renderer/components/features/dashboard/usePeriodRange";
 
 interface Props {
@@ -32,6 +32,10 @@ interface Props {
   // branch at a time, never a cross-branch rollup, so admin needs a way to pick which
   // one. A branch-scoped account never sees this control at all.
   branchOptions: BranchOption[];
+  // The left-nav branch switcher's current choice ("" = All branches) and setter — the
+  // page's own branch picker was removed in favour of that one control (see AppShell).
+  selectedBranchId: string;
+  onBranchChange: (branchId: string) => void;
   // Every tab's data-quality tile links out to the full Warning page instead of just
   // naming it in text — this is the app-level nav switch that gets it there.
   onViewWarnings: () => void;
@@ -86,6 +90,8 @@ export function DashboardPage({
   session,
   profile,
   branchOptions,
+  selectedBranchId,
+  onBranchChange,
   onViewWarnings,
   onViewBusinessAlerts,
   onViewInventoryList,
@@ -100,12 +106,14 @@ export function DashboardPage({
   // Admin has no fixed branch_id — same convention used everywhere else in the app.
   const isAdmin = profile !== null && profile.branch_id === null;
   const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? "overview");
-  const [branchId, setBranchId] = useState(initialBranchId ?? "");
-  // 30d, not today: Overview is the landing tab and it is built on vs-previous-period
-  // growth, where one day against the day before is mostly noise. The control is shared
-  // across tabs, so switching keeps whatever is selected.
-  const range = usePeriodRange("30d");
-  const { period } = range;
+  const [branchId, setBranchId] = useState(
+    initialBranchId ?? selectedBranchId ?? "",
+  );
+  // Yesterday, not today: a full completed day reads more sensibly than a still-filling
+  // one, on every tab this control drives — including Overview's vs-previous-period
+  // growth. The control is shared across tabs, so switching keeps whatever is selected.
+  const range = usePeriodRange("yesterday");
+  const { period, month } = range;
   const appliedRange = range.applied;
 
   useEffect(() => {
@@ -114,9 +122,19 @@ export function DashboardPage({
     }
   }, [activeTab, showAdvancedTabs]);
 
-  // Defaults admin to the first retail branch once the list loads — a branch-scoped
-  // account never needs this (its own branch is resolved server-side regardless of
-  // what branch_id, if any, gets sent).
+  // Follows the left-nav branch switcher — "All branches" there just leaves this page
+  // showing whichever branch it already had, since (unlike Business Alerts) it always
+  // needs exactly one.
+  useEffect(() => {
+    if (isAdmin && selectedBranchId) {
+      setBranchId(selectedBranchId);
+    }
+  }, [isAdmin, selectedBranchId]);
+
+  // Defaults admin to the first retail branch once the list loads — when the sidebar is
+  // on "All branches" and nothing has been picked yet. A branch-scoped account never
+  // needs this (its own branch is resolved server-side regardless of what branch_id, if
+  // any, gets sent).
   useEffect(() => {
     if (isAdmin && !branchId && branchOptions.length > 0) {
       setBranchId(branchOptions[0].id);
@@ -137,41 +155,25 @@ export function DashboardPage({
   return (
     <div className="flex flex-col gap-3">
       {/* Streamlined Dashboard Navigation & Filters Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-2 border-b border-border">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold tracking-tight text-text-primary shrink-0 hidden sm:block">
-            Dashboard
-          </h1>
-          <DashboardTabBar
-            activeTab={activeTab}
-            onSelect={setActiveTab}
-            showAdvancedTabs={showAdvancedTabs}
-          />
+      <div className="flex flex-col gap-2 pb-2 border-b border-border">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex items-center gap-3">
+            <h1 className="text-lg font-bold tracking-tight text-text-primary shrink-0 hidden sm:block">
+              Dashboard
+            </h1>
+            <DashboardTabBar
+              activeTab={activeTab}
+              onSelect={setActiveTab}
+              showAdvancedTabs={showAdvancedTabs}
+            />
+          </div>
+
+          <RefreshButton onClick={refreshEverything} refreshing={isFetching} />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {isAdmin && branchOptions.length > 0 && activeTab !== "overview" && (
-            <div className="w-36">
-              <Select
-                size="sm"
-                value={branchId}
-                onChange={(e) => setBranchId(e.target.value)}
-                aria-label="Branch"
-              >
-                {branchOptions.map((branch) => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          )}
-          {activeTab !== "inventory" && <PeriodControls range={range} />}
-          <RefreshButton
-            onClick={refreshEverything}
-            refreshing={isFetching}
-          />
-        </div>
+        {activeTab !== "inventory" && (
+          <PeriodControls range={range} options={DASHBOARD_PERIOD_OPTIONS} />
+        )}
       </div>
 
       {waitingOnBranch && (
@@ -189,6 +191,7 @@ export function DashboardPage({
           period={period}
           dateFrom={appliedRange.from}
           dateTo={appliedRange.to}
+          month={month}
           canLoad={canLoad}
           onOpenDashboard={showAdvancedTabs ? setActiveTab : undefined}
         />
@@ -203,6 +206,7 @@ export function DashboardPage({
           period={period}
           dateFrom={appliedRange.from}
           dateTo={appliedRange.to}
+          month={month}
           canLoad={canLoad}
           onViewBusinessAlerts={onViewBusinessAlerts}
           openBranchId={overviewBranchId}
@@ -211,12 +215,14 @@ export function DashboardPage({
           // it — four of the five open the tab holding that evidence, and Data Quality
           // leaves the dashboard for the Warning page entirely. The branch comes along
           // too, so drilling in from a branch card shows that branch, not whichever one
-          // the shared selector happened to be on.
+          // the shared selector happened to be on — and the left-nav switcher follows
+          // along too, so it doesn't disagree with what's now on screen.
           onOpenEvidence={(
             target: EvidenceTarget,
             evidenceBranchId: string,
           ) => {
             setBranchId(evidenceBranchId);
+            onBranchChange(evidenceBranchId);
             if (target === "warnings") {
               onViewWarnings();
             } else if (target === "checking") {
@@ -236,6 +242,7 @@ export function DashboardPage({
           period={period}
           dateFrom={appliedRange.from}
           dateTo={appliedRange.to}
+          month={month}
           canLoad={canLoad}
           onViewWarnings={onViewWarnings}
         />
@@ -247,6 +254,7 @@ export function DashboardPage({
           period={period}
           dateFrom={appliedRange.from}
           dateTo={appliedRange.to}
+          month={month}
           canLoad={canLoad}
           onViewWarnings={onViewWarnings}
         />
@@ -267,6 +275,7 @@ export function DashboardPage({
           period={period}
           dateFrom={appliedRange.from}
           dateTo={appliedRange.to}
+          month={month}
           canLoad={canLoad}
           onViewWarnings={onViewWarnings}
         />

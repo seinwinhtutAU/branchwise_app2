@@ -285,6 +285,7 @@ def test_urgent_reorder_alert_fires_with_table():
     alerts = early_warning.evaluate(snap)
     alert = next(a for a in alerts if a.id == "urgent_reorder")
     assert alert.severity == early_warning.CRITICAL
+    assert alert.dimension == "reorder"
     assert alert.link == "inventory"
     assert "SNK-01" in alert.table["rows"][0][0]
 

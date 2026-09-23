@@ -40,7 +40,7 @@ One shared table (`batches_to_review` in the response), but what makes a batch "
 
 ### 3. Slip-total mismatches — implemented (Sales only)
 
-`app/retail/services/pos_import.py`'s `parse_pos_sale_export_from_grid` already compared each slip's line-item total against its own printed subtotal row and only ever logged the mismatch (`logger.warning`, never reaching a user). It now also appends each mismatch to `df.attrs["subtotal_mismatches"]` (same mechanism as the existing `origin_indices` attr), which `_build_preview` (`app/retail/routers/imports.py`) threads into the stored `preview_data` as `slip_subtotal_mismatches` — so it rides along with every confirm, no new persistence needed. `import_health.slip_total_mismatches` just reads that key back out of each Sales batch's `preview_data` within the requested window. Batches confirmed before this change simply have no `slip_subtotal_mismatches` key and are skipped (`.get(..., [])`), not an error.
+`app/retail/services/pos_import.py`'s `parse_pos_sale_export_from_grid` already compared each slip's line-item total against its own printed subtotal row and only ever logged the mismatch (`logger.warning`, never reaching a user). It now also appends each mismatch to `df.attrs["subtotal_mismatches"]` (same mechanism as the existing `origin_indices` attr), which `confirm_sales_file` (`app/retail/routers/imports.py`) reads straight off the parsed DataFrame and passes into `persist_sales`, which stores it as `slip_subtotal_mismatches` on the batch's own `summary` JSON — so it rides along with every confirm, no separate persistence needed. `import_health.slip_total_mismatches` just reads that key back out of each Sales batch's `summary` within the requested window. Batches confirmed before this change simply have no `slip_subtotal_mismatches` key and are skipped (`.get(..., [])`), not an error.
 
 ### 4. Dismissing a flagged batch — implemented
 
@@ -54,7 +54,7 @@ Clicking a missing-day chip expands the relevant date selector below that card. 
 
 ## Tests
 
-`backend/tests/test_import_health.py` covers: Sales flags a high skip rate but not a normal one, ignores tiny batches below the minimum count, and ignores `[recovery replay] `-prefixed batches; Purchase flags two same-branch batches with matching totals but not a different branch's matching total; Inventory requires enough baseline history before flagging, then flags a sparse batch once it has one; slip-total mismatches read back correctly from stored `preview_data`; dismiss hides a batch and undismiss restores it; dismiss respects branch scoping (404 for another branch's batch); and `build_import_health`'s aggregate counts.
+`backend/tests/test_import_health.py` covers: Sales flags a high skip rate but not a normal one, ignores tiny batches below the minimum count, and ignores `[recovery replay] `-prefixed batches; Purchase flags two same-branch batches with matching totals but not a different branch's matching total; Inventory requires enough baseline history before flagging, then flags a sparse batch once it has one; slip-total mismatches read back correctly from stored `summary`; dismiss hides a batch and undismiss restores it; dismiss respects branch scoping (404 for another branch's batch); and `build_import_health`'s aggregate counts.
 
 ## Known simplifications vs. the original design (intentional, not gaps)
 

@@ -150,6 +150,7 @@ function MultiBranchComparisonView({
   period,
   dateFrom,
   dateTo,
+  month,
   onOpen,
 }: {
   session: Session;
@@ -157,15 +158,16 @@ function MultiBranchComparisonView({
   period: PeriodKey;
   dateFrom: string;
   dateTo: string;
+  month: string;
   onOpen: (branchId: string) => void;
 }): React.JSX.Element {
   const branchUrls = useMemo(
     () =>
       branchOptions.map((b) => ({
         branch: b,
-        url: dashboardUrl("overview", b.id, { period, dateFrom, dateTo }),
+        url: dashboardUrl("overview", b.id, { period, dateFrom, dateTo, month }),
       })),
-    [branchOptions, period, dateFrom, dateTo],
+    [branchOptions, period, dateFrom, dateTo, month],
   );
   const urls = useMemo(() => branchUrls.map((b) => b.url), [branchUrls]);
   const { data, failedUrls, isRefreshing, refetchUrl } =
@@ -494,6 +496,7 @@ function BranchDetailView({
   period,
   dateFrom,
   dateTo,
+  month,
   onBack,
   onOpenEvidence,
   onViewBusinessAlerts,
@@ -503,12 +506,13 @@ function BranchDetailView({
   period: PeriodKey;
   dateFrom: string;
   dateTo: string;
+  month: string;
   onBack: (() => void) | null;
   onOpenEvidence: (target: EvidenceTarget) => void;
   onViewBusinessAlerts: () => void;
 }): React.JSX.Element {
   const { data: fetched, isRefreshing, failed, reload } = useUrlQuery<OverviewData>(
-    dashboardUrl("overview", branchId, { period, dateFrom, dateTo }),
+    dashboardUrl("overview", branchId, { period, dateFrom, dateTo, month }),
     session,
     "Branch health detail",
   );
@@ -614,6 +618,7 @@ interface Props {
   period: PeriodKey;
   dateFrom: string;
   dateTo: string;
+  month: string;
   canLoad: boolean;
   onOpenEvidence: (target: EvidenceTarget, branchId: string) => void;
   onViewBusinessAlerts: () => void;
@@ -631,6 +636,7 @@ export function OverviewTab({
   period,
   dateFrom,
   dateTo,
+  month,
   canLoad,
   onOpenEvidence,
   onViewBusinessAlerts,
@@ -648,6 +654,7 @@ export function OverviewTab({
         period={period}
         dateFrom={dateFrom}
         dateTo={dateTo}
+        month={month}
         onOpen={onOpenBranchChange}
       />
     );
@@ -661,6 +668,7 @@ export function OverviewTab({
       period={period}
       dateFrom={dateFrom}
       dateTo={dateTo}
+      month={month}
       onBack={isAdmin ? () => onOpenBranchChange(null) : null}
       onOpenEvidence={(target) => onOpenEvidence(target, shownBranchId)}
       onViewBusinessAlerts={onViewBusinessAlerts}

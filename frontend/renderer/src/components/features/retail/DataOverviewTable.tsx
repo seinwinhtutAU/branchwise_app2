@@ -56,9 +56,18 @@ import {
   InventoryPage,
   type InventorySubTab,
 } from "@renderer/components/features/retail/InventoryPage";
+import ZeroSellingPage from "@renderer/components/features/retail/ZeroSellingPage";
+import DailyCostPage from "@renderer/components/features/retail/DailyCostPage";
 import "@renderer/lib/reactTable";
 
-export type DataOverviewSubTab = "overview" | "sale" | "inventory" | "purchase";
+export type DataOverviewSubTab =
+  | "overview"
+  | "sale"
+  | "inventory"
+  | "purchase"
+  | "salary"
+  | "zeroSelling"
+  | "dailyCost";
 
 export interface SaleRow {
   Branch: string | null;
@@ -93,6 +102,14 @@ export interface PurchaseRow {
   UOM: string | null;
   Buying_Price: number | null;
   Location: string | null;
+}
+
+export interface SalaryRow {
+  Month: string;
+  Name: string;
+  Branch: string;
+  Salary: number;
+  Bonus: number | null;
 }
 
 interface OverviewRow {
@@ -266,6 +283,14 @@ const DEFAULT_PURCHASE_COLUMNS: DataTableColumn<PurchaseRow>[] = [
   { key: "Location", label: "Location" },
 ];
 
+const SALARY_COLUMNS: DataTableColumn<SalaryRow>[] = [
+  { key: "Month", label: "Month" },
+  { key: "Name", label: "Name", copyable: true },
+  { key: "Branch", label: "Branch" },
+  { key: "Salary", label: "Salary", align: "right" },
+  { key: "Bonus", label: "Bonus", align: "right" },
+];
+
 const SUB_TABS: TabItem<DataOverviewSubTab>[] = [
   {
     id: "overview",
@@ -296,6 +321,33 @@ const SUB_TABS: TabItem<DataOverviewSubTab>[] = [
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-3 w-5 rounded-sm bg-pink-400 shrink-0" />
         <span>Purchase</span>
+      </span>
+    ),
+  },
+  {
+    id: "salary",
+    label: (
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-3 w-5 rounded-sm bg-amber-400 shrink-0" />
+        <span>Salary</span>
+      </span>
+    ),
+  },
+  {
+    id: "zeroSelling",
+    label: (
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-3 w-5 rounded-sm bg-violet-400 shrink-0" />
+        <span>Zero Selling</span>
+      </span>
+    ),
+  },
+  {
+    id: "dailyCost",
+    label: (
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-3 w-5 rounded-sm bg-orange-400 shrink-0" />
+        <span>Daily Usage</span>
       </span>
     ),
   },
@@ -932,6 +984,25 @@ export default function DataOverviewTable({
     [purchaseFilters, branchOptions],
   );
 
+  const salaryFilters: DataTableFilter<SalaryRow>[] = useMemo(
+    () => [
+      {
+        type: "search",
+        keys: ["Name"],
+        placeholder: "Employee name",
+        serverParam: "search",
+      },
+      {
+        type: "select",
+        key: "Branch",
+        label: "Branch",
+        options: branchOptions,
+        serverParam: "branch",
+      },
+    ],
+    [branchOptions],
+  );
+
   return (
     <div className="flex flex-col gap-3">
       <div className="border-b border-border">
@@ -992,6 +1063,30 @@ export default function DataOverviewTable({
           defaultWindowDays={purchaseListWindowDays}
           serverPaged
         />
+      )}
+
+      {activeTab === "salary" && (
+        <SimpleDataTable<SalaryRow>
+          session={session}
+          endpoint="/api/salaries"
+          title="Salary"
+          description="Employee salary and bonus records from daily operation cost uploads."
+          icon={<div className="h-3.5 w-5 rounded-sm bg-amber-400 shrink-0" />}
+          columns={SALARY_COLUMNS}
+          filters={salaryFilters}
+          rowKey={(row, i) => `${row.Name}-${row.Branch}-${i}`}
+          emptyTitle="No salary records yet"
+          emptyDescription="Upload a salary workbook in Daily Operation Cost to populate this table."
+          serverPaged
+        />
+      )}
+
+      {activeTab === "zeroSelling" && (
+        <ZeroSellingPage session={session} branchOptions={branchOptions} />
+      )}
+
+      {activeTab === "dailyCost" && (
+        <DailyCostPage session={session} branchOptions={branchOptions} />
       )}
     </div>
   );

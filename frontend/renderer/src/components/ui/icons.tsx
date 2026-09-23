@@ -671,28 +671,28 @@ export function StoreIcon({
   return (
     <svg {...base} className={className}>
       <path
-        d="M2 9.5L4 4h16l2 5.5"
+        d="M3 9l1.5-5h15L21 9"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
-        d="M2 9.5a2.5 2.5 0 005 0 2.5 2.5 0 005 0 2.5 2.5 0 005 0 2.5 2.5 0 005 0"
+        d="M3 9a2.25 2.25 0 0 1 4.5 0 2.25 2.25 0 0 1 4.5 0 2.25 2.25 0 0 1 4.5 0 2.25 2.25 0 0 1 4.5 0"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
-        d="M4 12v7.5a1.5 1.5 0 001.5 1.5h13a1.5 1.5 0 001.5-1.5V12"
+        d="M4.5 10.5V19a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-8.5"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
-        d="M10 21v-5a1 1 0 011-1h2a1 1 0 011 1v5"
+        d="M10 21v-5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -701,6 +701,27 @@ export function StoreIcon({
     </svg>
   );
 }
+
+export function BranchIcon({
+  className = "w-5 h-5",
+}: {
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path
+        d="M12 21c-4-4.5-7-8.5-7-12a7 7 0 1114 0c0 3.5-3 7.5-7 12z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="9" r="2.5" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+export { BranchIcon as LocationPinIcon, BranchIcon as MapPinIcon };
 
 export function FactoryIcon({
   className = "w-5 h-5",

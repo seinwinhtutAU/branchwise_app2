@@ -41,7 +41,6 @@ def _batch(
     branch: Branch,
     import_type: ImportType,
     summary: dict | None = None,
-    preview_data: dict | None = None,
     created_at: datetime.datetime,
     filename: str = "file.csv",
 ) -> ImportBatch:
@@ -51,7 +50,6 @@ def _batch(
         filename=filename,
         status=ImportBatchStatus.COMPLETED,
         summary=summary or {},
-        preview_data=preview_data or {},
         created_at=created_at,
     )
     db_session.add(batch)
@@ -189,7 +187,7 @@ def test_inventory_anomaly_needs_baseline_history(db_session: Session):
     assert sparse.id in flagged_ids
 
 
-def test_slip_total_mismatches_reads_stored_preview_data(db_session: Session):
+def test_slip_total_mismatches_reads_stored_summary(db_session: Session):
     branch = _branch(db_session)
     admin = _user(db_session, None, UserRole.ADMIN)
     _batch(
@@ -197,7 +195,7 @@ def test_slip_total_mismatches_reads_stored_preview_data(db_session: Session):
         branch=branch,
         import_type=ImportType.SALES,
         created_at=datetime.datetime(2026, 8, 14),
-        preview_data={
+        summary={
             "slip_subtotal_mismatches": [
                 {
                     "SlipID": "20260214-088",

@@ -22,7 +22,6 @@ def _make_import_batch(db_session: Session, branch: Branch, **kwargs) -> ImportB
         branch_id=branch.id,
         status="confirmed",
         summary={},
-        preview_data={},
         **kwargs,
     )
     db_session.add(batch)

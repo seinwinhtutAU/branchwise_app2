@@ -3,6 +3,10 @@
 Business Alerts presents the operational issues that require action. It is separate
 from the Dashboard's performance reporting and from the row-level Warning page.
 
+Alerts are grouped into Sales, Inventory, Reorder, Customer, and Data quality tabs.
+Urgent reorder is intentionally in **Reorder**, rather than Inventory, so stock
+operations and immediate purchasing decisions can be reviewed separately.
+
 ## Active alerts
 
 | Alert | Severity | When it appears | Action |

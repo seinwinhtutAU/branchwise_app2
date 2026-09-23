@@ -441,6 +441,10 @@ function App(): React.JSX.Element {
   // and coming back should return to the branch you were reading, not to the branch list.
   // Only "← All branches" clears it.
   const [overviewBranchId, setOverviewBranchId] = useState<string | null>(null);
+  // Which retail branch the left-nav branch switcher is set to; "" means "All branches".
+  // Read by Dashboard, Business Alerts and Warnings so those pages stay in sync with the
+  // one sidebar control instead of each keeping its own separate branch filter.
+  const [selectedBranchId, setSelectedBranchId] = useState("");
   // Seeded from the last time the server answered, so a launch on a dead connection still
   // knows the role and branch — without which an unscoped account renders as a branch-scoped
   // retail one and every page below it loads the wrong thing (see lib/lastKnown.ts).
@@ -596,6 +600,11 @@ function App(): React.JSX.Element {
           : (WORKSPACE_NAV_ITEMS[effectiveWorkspace][0].id as Section);
   const branchOptions = useBranches(canManageRetail ? session : null);
   const retailBranchOptions = useRetailBranchOptions(canManageRetail ? session : null);
+  // Warnings filters by branch name, not id (see WarningsPage) — resolved once here
+  // rather than in that page so it stays a plain prop.
+  const selectedBranchName =
+    retailBranchOptions.find((branch) => branch.id === selectedBranchId)
+      ?.name ?? "";
 
 
   // The Business Alerts badge, counted from the same per-branch overview payloads the
@@ -1004,6 +1013,13 @@ function App(): React.JSX.Element {
       workspaces={workspaceTabs}
       activeWorkspace={effectiveWorkspace}
       onWorkspaceChange={handleWorkspaceChange}
+      retailBranches={
+        canManageRetail && effectiveWorkspace === "retail"
+          ? retailBranchOptions
+          : []
+      }
+      selectedBranchId={selectedBranchId}
+      onBranchChange={setSelectedBranchId}
       email={session.user.email}
       profile={profile}
       onSignOut={handleSignOut}
@@ -1061,6 +1077,8 @@ function App(): React.JSX.Element {
                   session={session}
                   profile={profile}
                   branchOptions={retailBranchOptions}
+                  selectedBranchId={selectedBranchId}
+                  onBranchChange={setSelectedBranchId}
                   onViewWarnings={() => handleSectionChange("warnings")}
                   onViewBusinessAlerts={() =>
                     handleSectionChange("businessAlerts")
@@ -1085,6 +1103,7 @@ function App(): React.JSX.Element {
                   session={session}
                   profile={profile}
                   branchOptions={retailBranchOptions}
+                  branchFilter={selectedBranchId}
                   onOpenEvidence={(target, branchId) => {
                     if (target === "warnings") {
                       handleSectionChange("warnings");
@@ -1167,7 +1186,7 @@ function App(): React.JSX.Element {
                   profile={profile}
                   saleWindowDays={saleWindowDays}
                   purchaseWindowDays={purchaseWindowDays}
-                  branchOptions={branchOptions}
+                  branchFilter={selectedBranchName}
                   onViewImportBatch={handleViewImportBatch}
                   onFileReady={handleFileReady}
                 />

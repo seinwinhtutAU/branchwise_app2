@@ -7,7 +7,6 @@ import { Badge, type BadgeVariant } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
-import { Select } from "@renderer/components/ui/Select";
 import { Skeleton } from "@renderer/components/ui/Skeleton";
 import { Panel } from "@renderer/components/ui/Panel";
 import {
@@ -31,12 +30,19 @@ import {
 } from "@renderer/components/features/dashboard/helpers";
 import type { Profile } from "@renderer/components/features/types";
 
-type Tab = "all" | "sales" | "inventory" | "customer" | "data_quality";
+type Tab =
+  | "all"
+  | "sales"
+  | "inventory"
+  | "reorder"
+  | "customer"
+  | "data_quality";
 type SeverityFilter = "all" | AlertSeverity;
 
 const CATEGORY_LABEL: Record<string, string> = {
   sales: "Sales",
   inventory: "Inventory",
+  reorder: "Reorder",
   customer: "Customer",
   data_quality: "Data quality",
 };
@@ -55,6 +61,11 @@ const CATEGORY_META: Record<
     variant: "brand",
     className: "bg-brand-subtle text-brand border-brand/40",
   },
+  reorder: {
+    label: "Reorder",
+    variant: "error",
+    className: "bg-error-subtle text-error border-error/20",
+  },
   customer: {
     label: "Customer",
     variant: "success",
@@ -70,6 +81,7 @@ const CATEGORY_META: Record<
 const CATEGORY_ORDER = [
   "sales",
   "inventory",
+  "reorder",
   "customer",
   "data_quality",
 ] as const;
@@ -258,6 +270,9 @@ interface Props {
   session: Session;
   profile: Profile | null;
   branchOptions: BranchOption[];
+  // The left-nav branch switcher's current choice ("" = All branches) — this page's own
+  // branch filter dropdown was removed in favour of that one control (see AppShell).
+  branchFilter: string;
   onOpenEvidence: (target: EvidenceTarget, branchId: string) => void;
 }
 
@@ -265,11 +280,11 @@ export function BusinessAlertsPage({
   session,
   profile,
   branchOptions,
+  branchFilter,
   onOpenEvidence,
 }: Props): React.JSX.Element {
   const isAdmin = profile !== null && profile.branch_id === null;
   const range = usePeriodRange("30d");
-  const [branchFilter, setBranchFilter] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("all");
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -339,6 +354,7 @@ export function BusinessAlertsPage({
       all: inBranch.length,
       sales: inBranch.filter((a) => a.dimension === "sales").length,
       inventory: inBranch.filter((a) => a.dimension === "inventory").length,
+      reorder: inBranch.filter((a) => a.dimension === "reorder").length,
       customer: inBranch.filter((a) => a.dimension === "customer").length,
       data_quality: inBranch.filter((a) => a.dimension === "data_quality")
         .length,
@@ -356,11 +372,9 @@ export function BusinessAlertsPage({
     [inBranch],
   );
 
-  const isFiltered =
-    branchFilter !== "" || activeTab !== "all" || severityFilter !== "all";
+  const isFiltered = activeTab !== "all" || severityFilter !== "all";
 
   const resetFilters = (): void => {
-    setBranchFilter("");
     setActiveTab("all");
     setSeverityFilter("all");
   };
@@ -464,23 +478,6 @@ export function BusinessAlertsPage({
 
             <div className="flex items-center gap-2 flex-wrap shrink-0">
               <PeriodControls range={range} />
-              {branches.length > 1 && (
-                <div className="w-36 sm:w-44">
-                  <Select
-                    size="sm"
-                    value={branchFilter}
-                    onChange={(e) => setBranchFilter(e.target.value)}
-                    className="h-8 text-xs"
-                  >
-                    <option value="">All branches</option>
-                    {branches.map((branch) => (
-                      <option key={branch.branch_id} value={branch.branch_id}>
-                        {branch.branch_name}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              )}
               <RefreshButton onClick={reload} refreshing={isRefreshing} />
             </div>
           </div>
@@ -492,6 +489,7 @@ export function BusinessAlertsPage({
                   "all",
                   "sales",
                   "inventory",
+                  "reorder",
                   "customer",
                   "data_quality",
                 ] as Tab[]

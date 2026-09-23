@@ -4,7 +4,10 @@ import { apiBaseUrl } from "@renderer/lib/auth";
 // (components only) so Vite Fast Refresh can hot-swap that file in dev — a module
 // that exports both components and plain values/functions can't be refreshed in place.
 
-export type PeriodKey = "today" | "yesterday" | "7d" | "30d";
+// "7d"/"30d" are kept for Business Alerts, which still fetches /api/dashboard/overview
+// with its own, separate period control (see BusinessAlertsPage) — the Dashboard's own
+// picker dropped them in favour of "monthly" (see DASHBOARD_PERIOD_OPTIONS below).
+export type PeriodKey = "today" | "yesterday" | "7d" | "30d" | "monthly";
 
 export const PERIOD_OPTIONS: { value: PeriodKey; label: string }[] = [
   { value: "today", label: "Today" },
@@ -13,13 +16,33 @@ export const PERIOD_OPTIONS: { value: PeriodKey; label: string }[] = [
   { value: "30d", label: "Last 30 days" },
 ];
 
+// The Dashboard page's own period choices — Business Alerts keeps PERIOD_OPTIONS above
+// unchanged. Order matches how the business asked for them: Yesterday is the default.
+export const DASHBOARD_PERIOD_OPTIONS: { value: PeriodKey; label: string }[] = [
+  { value: "yesterday", label: "Yesterday" },
+  { value: "monthly", label: "Monthly" },
+  { value: "today", label: "Today" },
+];
+
 // `dateFrom`/`dateTo` (a custom range, both set) always wins over `period` — matches
 // the backend's own resolve_period rule (app/services/dashboard.py).
+//
+// `comparison` mirrors the backend's own resolve_period parameter of the same name:
+// Revenue/Cost/Customer pass "year_ago" (their KPI deltas compare against the same
+// dates one year earlier); every other caller (Overview, Summary, Business Alerts,
+// wholesale Reports) keeps the default, vs the window right before this one.
 export function previousPeriodLabel(
   period: PeriodKey,
   dateFrom?: string,
   dateTo?: string,
+  comparison: "previous_period" | "year_ago" = "previous_period",
 ): string {
+  if (comparison === "year_ago") {
+    if (dateFrom && dateTo) return "vs the same dates last year";
+    return period === "monthly"
+      ? "vs the same month last year"
+      : "vs the same day last year";
+  }
   if (dateFrom && dateTo) return "vs the same-length period right before it";
   switch (period) {
     case "today":
@@ -30,7 +53,50 @@ export function previousPeriodLabel(
       return "vs the previous 7 days";
     case "30d":
       return "vs the previous 30 days";
+    case "monthly":
+      return "vs the previous month";
   }
+}
+
+function daysInMonth(year: number, monthIndex0: number): number {
+  return new Date(year, monthIndex0 + 1, 0).getDate();
+}
+
+export const MONTH_SHORT_LABELS = Array.from({ length: 12 }, (_, i) =>
+  new Date(2000, i, 1).toLocaleDateString("en-US", { month: "short" }),
+);
+
+export function parseMonth(month: string): { year: number; monthIndex0: number } {
+  return { year: Number(month.slice(0, 4)), monthIndex0: Number(month.slice(5, 7)) - 1 };
+}
+
+export function formatMonth(year: number, monthIndex0: number): string {
+  return `${year}-${String(monthIndex0 + 1).padStart(2, "0")}`;
+}
+
+// The Dashboard's Monthly picker label for one specific month (YYYY-MM) — the current,
+// in-progress month reads "1st to today" (e.g. "Sep 1-23"); any earlier one reads its
+// full span (e.g. "Aug 1-31"), matching the backend's own resolve_period (_resolve_month).
+export function monthLabel(month: string, today: Date = new Date()): string {
+  const { year, monthIndex0 } = parseMonth(month);
+  const isCurrentMonth =
+    year === today.getFullYear() && monthIndex0 === today.getMonth();
+  const endDay = isCurrentMonth ? today.getDate() : daysInMonth(year, monthIndex0);
+  const yearSuffix = year === today.getFullYear() ? "" : `, ${year}`;
+  return `${MONTH_SHORT_LABELS[monthIndex0]} 1–${endDay}${yearSuffix}`;
+}
+
+// Whether `year`/`monthIndex0` names a month later than today's — the Monthly picker
+// disables these rather than letting someone pick data that can't exist yet.
+export function isFutureMonth(
+  year: number,
+  monthIndex0: number,
+  today: Date = new Date(),
+): boolean {
+  return (
+    year > today.getFullYear() ||
+    (year === today.getFullYear() && monthIndex0 > today.getMonth())
+  );
 }
 
 // Builds the period/date query params shared by every period-scoped dashboard tab
@@ -39,6 +105,9 @@ export function periodQueryParams(
   period: PeriodKey,
   dateFrom: string,
   dateTo: string,
+  // Which calendar month `period === "monthly"` means (YYYY-MM) — ignored otherwise,
+  // and by any custom dateFrom/dateTo range, same as `period` itself.
+  month?: string,
 ): URLSearchParams {
   const params = new URLSearchParams();
   if (dateFrom && dateTo) {
@@ -46,6 +115,7 @@ export function periodQueryParams(
     params.set("date_to", dateTo);
   } else {
     params.set("period", period);
+    if (period === "monthly" && month) params.set("month", month);
   }
   return params;
 }
@@ -57,10 +127,10 @@ export function dashboardUrl(
   tab: "overview" | "summary" | "revenue" | "cost" | "inventory" | "customer",
   branchId: string,
   // Omitted for Inventory, which has no period control at all.
-  window?: { period: PeriodKey; dateFrom: string; dateTo: string },
+  window?: { period: PeriodKey; dateFrom: string; dateTo: string; month?: string },
 ): string {
   const params = window
-    ? periodQueryParams(window.period, window.dateFrom, window.dateTo)
+    ? periodQueryParams(window.period, window.dateFrom, window.dateTo, window.month)
     : new URLSearchParams();
   if (branchId) params.set("branch_id", branchId);
   const query = params.toString();

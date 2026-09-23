@@ -32,7 +32,7 @@ from app.retail.models.sale import Sale, SaleLine
 from app.retail.models.stock_level import StockLevel
 from app.models.user import User
 from app.services.branches import list_retail_branches
-from app.retail.services.import_common import NumericRule, validate_rows
+from app.retail.services.import_common import numeric_failures
 from app.retail.services.stock import latest_stock_query
 from app.retail.services.inventory_import import VALIDATION_RULES as INVENTORY_VALIDATION_RULES
 from app.retail.services.pos_import import VALIDATION_RULES as SALES_VALIDATION_RULES
@@ -105,30 +105,6 @@ def _import_batch_meta(import_batch: ImportBatch | None) -> dict:
     }
 
 
-def _numeric_failures(
-    validation_records: list[dict], rules: list[NumericRule]
-) -> list[tuple[int, list[dict]]]:
-    """`(row index, issues)` for the rows that failed, and nothing for the rows that
-    passed.
-
-    Split out from building the warning rows so a caller can validate a *cheap
-    projection* — just the numeric columns the rules actually read — and then pay for
-    the expensive display enrichment (point-in-time pricing, the source import batch)
-    only on the handful of rows that failed. That ordering matters a lot in practice:
-    on a real branch this check reads a few hundred sale lines and finds zero problems,
-    and enriching all of them first meant ~750ms of prefetching whose entire output was
-    then thrown away.
-
-    The projection must contain every column the rules name — validate_rows treats a
-    missing column as an unparseable value, so an incomplete projection would flag
-    every row rather than fail loudly.
-    """
-    if not validation_records:
-        return []
-    row_issues = validate_rows(pd.DataFrame.from_records(validation_records), rules)
-    return [(index, issues) for index, issues in enumerate(row_issues) if issues]
-
-
 def _numeric_warning_row(
     record: dict, issues: list[dict], field_builder, column_labels: dict[str, str]
 ) -> dict:
@@ -172,8 +148,8 @@ def sale_numeric_warnings(
 
     # Validate the five numeric columns first — everything below is display detail for
     # rows that turn out to be wrong, and on clean data there are none. See
-    # _numeric_failures.
-    failures = _numeric_failures(
+    # numeric_failures (app.retail.services.import_common).
+    failures = numeric_failures(
         [
             {
                 "Selling_Price": sale_line.selling_price,
@@ -277,7 +253,7 @@ def inventory_numeric_warnings(db: Session, user: User) -> list[dict]:
     query = _branch_filter(latest_stock_query(db), user, StockLevel.branch_id)
     query_rows = query.all()
 
-    failures = _numeric_failures(
+    failures = numeric_failures(
         [
             {
                 "On_Hand_Qty": stock_level.on_hand_qty,
@@ -352,7 +328,7 @@ def purchase_numeric_warnings(
         query = query.filter(Purchase.purchase_date >= since)
     query_rows = query.all()
 
-    failures = _numeric_failures(
+    failures = numeric_failures(
         [
             {"Quantity": purchase_line.quantity, "Buying_Price": purchase_line.buying_price}
             for purchase_line, _, _, _ in query_rows

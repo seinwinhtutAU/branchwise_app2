@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
 from app.models.user import User, UserRole
-from app.retail.models.staged_upload import StagedImportUpload
+from app.retail.services import staged_uploads
 
 PURCHASE_CSV = (
     "Stock Code,Description,Location,Bin,Quantity,UOM,Unit Cost\r\n"
@@ -60,7 +60,7 @@ def test_inspect_valid_purchase_file_stages_the_upload(
     assert body["status"] == "valid"
     assert body["row_count"] == 0
     assert body["staged_upload_id"]
-    assert db_session.query(StagedImportUpload).count() == 1
+    assert staged_uploads.load(body["staged_upload_id"]) is not None
 
 
 def test_inspect_accepts_gzip_compressed_upload(

@@ -101,6 +101,7 @@ interface Props {
   period: PeriodKey;
   dateFrom: string;
   dateTo: string;
+  month: string;
   canLoad: boolean;
   onViewWarnings: () => void;
 }
@@ -111,6 +112,7 @@ export function CustomerTab({
   period,
   dateFrom,
   dateTo,
+  month,
   canLoad,
   onViewWarnings,
 }: Props): React.JSX.Element {
@@ -119,7 +121,7 @@ export function CustomerTab({
   // selection shows the numbers it showed last time instead of a skeleton. See
   // lib/queryClient.ts.
   const url = canLoad
-    ? dashboardUrl("customer", branchId, { period, dateFrom, dateTo })
+    ? dashboardUrl("customer", branchId, { period, dateFrom, dateTo, month })
     : null;
   const { data: fetched, isRefreshing, failed, reload } =
     useUrlQuery<CustomerDashboardData>(url, session, "Customer dashboard");
@@ -169,13 +171,13 @@ export function CustomerTab({
           label="Average Items per Transaction"
           value={data.avg_items_per_basket.value.toFixed(1)}
           deltaPct={data.avg_items_per_basket.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
         />
         <StatTile
           label="Single-Item Transaction Share"
           value={formatPercent(data.single_item_basket_share_pct.value)}
           deltaPct={data.single_item_basket_share_pct.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
         />
         <StatTile
           label="Busiest Hour"

@@ -77,13 +77,11 @@ interface Props {
   onCountChange?: (count: number) => void;
   saleWindowDays: number;
   purchaseWindowDays: number;
-  // Every real branch, for the Branch filter dropdown — admin accounts see every
-  // branch's rows merged together (retail and wholesale, though wholesale never has any
-  // sale/inventory/purchase data to warn about), so admin is the only role that can
-  // usefully narrow down to one. A branch-scoped account already only ever sees its own
-  // branch's rows, so passing an empty list here (as App.tsx does for non-admin) hides
-  // the filter entirely rather than showing a pointless single-option dropdown.
-  branchOptions: string[];
+  // The left-nav branch switcher's current choice, resolved to a branch name ("" = All
+  // branches — App.tsx does this mapping since this page's rows carry a branch name, not
+  // an id). This page's own branch filter dropdown was removed in favour of that one
+  // control (see AppShell).
+  branchFilter: string;
   onViewImportBatch?: (batchId: string) => void;
   // Hands off a picked-and-parsed file to the app-level confirm flow — used by every
   // "Reimport to fix" button below.
@@ -166,18 +164,6 @@ const DATE_LABELS = ["Date", "Last Updated", "Last Date", "Until"];
 
 function fieldValue(fields: WarningField[], label: string): string {
   return fields.find((f) => f.label === label)?.value ?? "—";
-}
-
-function distinctBranches(sections: WarningSection[] | null): string[] {
-  if (!sections) return [];
-  const values = new Set<string>();
-  for (const section of sections) {
-    for (const row of section.rows) {
-      const branch = fieldValue(row.fields, "Branch");
-      if (branch && branch !== "—") values.add(branch);
-    }
-  }
-  return Array.from(values).sort();
 }
 
 function filterSections(
@@ -881,7 +867,7 @@ function WarningsPage({
   onCountChange,
   saleWindowDays,
   purchaseWindowDays,
-  branchOptions,
+  branchFilter,
   onViewImportBatch,
   onFileReady,
 }: Props): React.JSX.Element {
@@ -900,7 +886,6 @@ function WarningsPage({
   const sections = data?.sections ?? null;
   const [activeTab, setActiveTab] = useState<Tab>("All");
   const [search, setSearch] = useState("");
-  const [branchFilter, setBranchFilter] = useState("");
   const [severityFilter, setSeverityFilter] = useState("");
   const {
     trigger: triggerFilePicker,
@@ -914,8 +899,6 @@ function WarningsPage({
     () => filterSections(sections, branchFilter, severityFilter, search),
     [sections, branchFilter, severityFilter, search],
   );
-  const branchFilterOptions =
-    branchOptions.length > 0 ? branchOptions : distinctBranches(sections);
 
   // The nav badge's count follows whatever the fetch produced, cached or fresh.
   useEffect(() => {
@@ -940,12 +923,10 @@ function WarningsPage({
     });
   }
 
-  const hasActiveFilters =
-    search !== "" || branchFilter !== "" || severityFilter !== "";
+  const hasActiveFilters = search !== "" || severityFilter !== "";
 
   function clearFilters(): void {
     setSearch("");
-    setBranchFilter("");
     setSeverityFilter("");
   }
 
@@ -1077,23 +1058,6 @@ function WarningsPage({
                 startIcon={<SearchIcon className="w-3.5 h-3.5" />}
               />
             </div>
-
-            {branchFilterOptions.length > 1 && (
-              <div className="w-40 max-w-full">
-                <Select
-                  size="sm"
-                  value={branchFilter}
-                  onChange={(e) => setBranchFilter(e.target.value)}
-                >
-                  <option value="">All branches</option>
-                  {branchFilterOptions.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            )}
 
             <div className="w-36 max-w-full">
               <Select

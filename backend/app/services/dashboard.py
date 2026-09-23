@@ -32,8 +32,11 @@ from app.services.settings import (
 from app.retail.services.stock import latest_stock_query
 from app.retail.services.reporting import each_day, kpi_value
 
-PeriodKey = Literal["today", "yesterday", "7d", "30d"]
-VALID_PERIODS: frozenset[str] = frozenset({"today", "yesterday", "7d", "30d"})
+PeriodKey = Literal["today", "yesterday", "7d", "30d", "monthly"]
+# "7d"/"30d" are no longer offered by the Dashboard's own period picker (see
+# dashboard/usePeriodRange.ts on the frontend) but stay valid here — the Health
+# (Overview) tab and Business Alerts still use them and share this same set.
+VALID_PERIODS: frozenset[str] = frozenset({"today", "yesterday", "7d", "30d", "monthly"})
 
 TOP_PRODUCTS_LIMIT = 10
 # Sales/footfall-by-day-&-hour heatmap columns — one column per hour, business hours
@@ -81,45 +84,79 @@ class PeriodRange:
     previous_end: date
 
 
+def _resolve_month(month: str, today: date) -> tuple[date, date]:
+    """The calendar month named by `month` (`YYYY-MM`) — the current, in-progress month
+    reads as "1st to today" (e.g. "Sep 1-23"), same as the frontend's own month labels;
+    any earlier month reads as its full span (e.g. "Aug 1-30")."""
+    year_str, _, month_str = month.partition("-")
+    start = date(int(year_str), int(month_str), 1)
+    if start.year == today.year and start.month == today.month:
+        return start, today
+    next_month = date(start.year + start.month // 12, start.month % 12 + 1, 1)
+    return start, next_month - timedelta(days=1)
+
+
+def _year_ago(d: date) -> date:
+    """The same month/day one year earlier — Feb 29 in a leap year clamps to Feb 28,
+    since the year before (or after) it usually has no Feb 29 of its own."""
+    try:
+        return d.replace(year=d.year - 1)
+    except ValueError:
+        return d.replace(year=d.year - 1, day=28)
+
+
+ComparisonMode = Literal["previous_period", "year_ago"]
+
+
 def resolve_period(
     period: PeriodKey,
     today: date | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
+    # Which calendar month `period="monthly"` means, as `YYYY-MM` — defaults to the
+    # current month (the router validates the format and that it isn't in the future
+    # before this ever runs; see _validate_period_or_dates).
+    month: str | None = None,
+    # "previous_period" (the default) is the immediately-preceding window of the same
+    # length — Overview and Summary still compare this way. Revenue/Cost/Customer pass
+    # "year_ago" instead: the same dates one year earlier, since a shop's day-to-day
+    # swings (a slow Tuesday, a holiday week) make the window right before it a noisy
+    # baseline, and this business's real sales pattern repeats yearly, not weekly.
+    comparison: ComparisonMode = "previous_period",
 ) -> PeriodRange:
-    """The selected window, plus the immediately-preceding window of the same
-    length — used for every KPI's vs-previous-period delta.
+    """The selected window, plus a comparison window used for every KPI's delta — see
+    `comparison` above for which window that is.
 
     A caller-chosen `date_from`/`date_to` (both required together) overrides `period`
-    entirely — "the previous period" then just means the same number of days
-    immediately before `date_from`, the same rule the four named presets already use.
+    entirely.
     """
     today = today or date.today()
     if date_from is not None and date_to is not None:
         if date_from > date_to:
             raise ValueError("date_from must be on or before date_to")
-        window_days = (date_to - date_from).days + 1
-        previous_end = date_from - timedelta(days=1)
-        previous_start = previous_end - timedelta(days=window_days - 1)
-        return PeriodRange(date_from, date_to, previous_start, previous_end)
-    if period == "today":
+        start, end = date_from, date_to
+    elif period == "monthly":
+        start, end = _resolve_month(month or today.strftime("%Y-%m"), today)
+    elif period == "today":
         start = end = today
-        previous_start = previous_end = today - timedelta(days=1)
     elif period == "yesterday":
         start = end = today - timedelta(days=1)
-        previous_start = previous_end = today - timedelta(days=2)
     elif period == "7d":
         start = today - timedelta(days=6)
         end = today
-        previous_end = start - timedelta(days=1)
-        previous_start = previous_end - timedelta(days=6)
     elif period == "30d":
         start = today - timedelta(days=29)
         end = today
-        previous_end = start - timedelta(days=1)
-        previous_start = previous_end - timedelta(days=29)
     else:
         raise ValueError(f"Unknown period: {period!r}")
+
+    if comparison == "year_ago":
+        previous_start = _year_ago(start)
+        previous_end = _year_ago(end)
+    else:
+        window_days = (end - start).days + 1
+        previous_end = start - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=window_days - 1)
     return PeriodRange(start, end, previous_start, previous_end)
 
 
@@ -274,8 +311,11 @@ def build_revenue_dashboard(
     period: PeriodKey,
     date_from: date | None = None,
     date_to: date | None = None,
+    month: str | None = None,
 ) -> dict:
-    period_range = resolve_period(period, date_from=date_from, date_to=date_to)
+    period_range = resolve_period(
+        period, date_from=date_from, date_to=date_to, month=month, comparison="year_ago"
+    )
     net_revenue, transaction_count = _revenue_totals(
         db, branch_id, period_range.start, period_range.end
     )
@@ -454,8 +494,11 @@ def build_cost_dashboard(
     period: PeriodKey,
     date_from: date | None = None,
     date_to: date | None = None,
+    month: str | None = None,
 ) -> dict:
-    period_range = resolve_period(period, date_from=date_from, date_to=date_to)
+    period_range = resolve_period(
+        period, date_from=date_from, date_to=date_to, month=month, comparison="year_ago"
+    )
     net_revenue, cogs, _priced, transaction_count, products, trend = _cost_totals_and_products(
         db, branch_id, period_range.start, period_range.end
     )
@@ -829,8 +872,11 @@ def build_customer_dashboard(
     period: PeriodKey,
     date_from: date | None = None,
     date_to: date | None = None,
+    month: str | None = None,
 ) -> dict:
-    period_range = resolve_period(period, date_from=date_from, date_to=date_to)
+    period_range = resolve_period(
+        period, date_from=date_from, date_to=date_to, month=month, comparison="year_ago"
+    )
     avg_items, single_share, _txn_count, histogram = _basket_stats(
         db, branch_id, period_range.start, period_range.end
     )
@@ -961,8 +1007,9 @@ def build_summary_dashboard(
     period: PeriodKey,
     date_from: date | None = None,
     date_to: date | None = None,
+    month: str | None = None,
 ) -> dict:
-    period_range = resolve_period(period, date_from=date_from, date_to=date_to)
+    period_range = resolve_period(period, date_from=date_from, date_to=date_to, month=month)
     net_revenue, transaction_count = _revenue_totals(
         db, branch_id, period_range.start, period_range.end
     )

@@ -58,6 +58,8 @@ def test_creates_sale_header_and_lines(db_session: Session):
         "sale_lines_created": 2,
         "products_created": 2,
         "products_updated": 0,
+        "issue_count": 0,
+        "slip_subtotal_mismatches": [],
         "messages": ["2 total sale lines in file", "1 sales recorded (2 items)"],
     }
 

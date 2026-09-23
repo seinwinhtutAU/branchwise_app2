@@ -7,7 +7,9 @@ from pathlib import Path
 
 import pandas as pd
 import pyidaungsu as pds
+from sqlalchemy import case, update
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.retail.models.import_batch import ImportBatch, ImportType
 from app.retail.models.product import Product
@@ -240,15 +242,27 @@ def product_summary_messages(created: int, updated: int) -> list[str]:
     return messages
 
 
-def count_preview_issues(preview_data: dict | None) -> int:
-    """Calculate the total count of row issues and validation warnings in preview_data."""
-    if not preview_data:
-        return 0
-    clean_issues = preview_data.get("clean", {}).get("row_issues", [])
-    count = sum(len(issues) for issues in clean_issues if issues)
-    mismatches = preview_data.get("slip_subtotal_mismatches", [])
-    count += len(mismatches)
-    return count
+def numeric_failures(
+    validation_records: list[dict], rules: list[NumericRule]
+) -> list[tuple[int, list[dict]]]:
+    """`(row index, issues)` for the rows that failed, and nothing for the rows that
+    passed.
+
+    Split out from building a warning row so a caller can validate a *cheap
+    projection* — just the numeric columns the rules actually read — and then pay for
+    any expensive display enrichment only on the handful of rows that failed. That
+    ordering matters a lot in practice: on a real branch this check reads a few
+    hundred sale lines and finds zero problems, and enriching all of them first cost
+    ~750ms of prefetching whose entire output was then thrown away.
+
+    The projection must contain every column the rules name — validate_rows treats a
+    missing column as an unparseable value, so an incomplete projection would flag
+    every row rather than fail loudly.
+    """
+    if not validation_records:
+        return []
+    row_issues = validate_rows(pd.DataFrame.from_records(validation_records), rules)
+    return [(index, issues) for index, issues in enumerate(row_issues) if issues]
 
 
 def new_import_batch(
@@ -257,7 +271,6 @@ def new_import_batch(
     branch_id: str | None,
     uploaded_by: str | None,
     source_file: str | None,
-    preview_data: dict | None,
     storage_key: str | None = None,
     request_key: str | None = None,
 ) -> ImportBatch:
@@ -271,7 +284,6 @@ def new_import_batch(
         uploaded_by=uploaded_by,
         filename=source_file,
         summary={},
-        preview_data=preview_data or {},
         storage_key=storage_key,
         request_key=request_key,
     )
@@ -303,6 +315,7 @@ def get_or_create_products(
     }
 
     products: dict[str, Product] = {}
+    changes: list[tuple[Product, str, str | None]] = []
     created = 0
     updated = 0
 
@@ -318,10 +331,45 @@ def get_or_create_products(
             db.add(product)
             created += 1
         else:
-            product.description = description
-            if group_name is not None:
-                product.group_name = group_name
+            new_group = group_name if group_name is not None else product.group_name
+            if product.description != description or product.group_name != new_group:
+                changes.append((product, description, new_group))
             updated += 1
         products[stock_code] = product
 
+    _bulk_update_products(db, changes)
     return products, created, updated
+
+
+_PRODUCT_UPDATE_CHUNK = 300
+
+
+def _bulk_update_products(
+    db: Session, changes: list[tuple[Product, str, str | None]]
+) -> None:
+    """One UPDATE per chunk of changed products, not one per product. Letting the ORM
+    flush these individually costs a full round trip to the remote Postgres each —
+    about 70ms apiece, so a year-long sales export that touched ~150 existing
+    products spent over 10 seconds on it. Values are also pushed into the loaded
+    objects without marking them dirty, so the ORM doesn't repeat the UPDATE."""
+    for start in range(0, len(changes), _PRODUCT_UPDATE_CHUNK):
+        chunk = changes[start : start + _PRODUCT_UPDATE_CHUNK]
+        ids = [product.id for product, _, _ in chunk]
+        db.execute(
+            update(Product)
+            .where(Product.id.in_(ids))
+            .values(
+                description=case(
+                    {product.id: description for product, description, _ in chunk},
+                    value=Product.id,
+                ),
+                group_name=case(
+                    {product.id: group for product, _, group in chunk},
+                    value=Product.id,
+                ),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        for product, description, group in chunk:
+            set_committed_value(product, "description", description)
+            set_committed_value(product, "group_name", group)

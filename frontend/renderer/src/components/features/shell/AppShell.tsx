@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "@renderer/lib/utils";
 import { Badge } from "@renderer/components/ui/Badge";
 import {
+  BranchIcon,
+  CheckIcon,
+  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   LogOutIcon,
@@ -11,11 +14,22 @@ import {
   SwapIcon,
 } from "@renderer/components/ui/icons";
 import { LogoChip, LogoWordmark } from "@renderer/components/ui/Logo";
+import { Select } from "@renderer/components/ui/Select";
 import type { Profile } from "@renderer/components/features/types";
+import type { BranchOption } from "@renderer/lib/useBranches";
 import {
   NetworkStatusDetails,
   NetworkStatusDot,
 } from "@renderer/components/features/shell/NetworkIndicator";
+// Generic dropdown-menu plumbing (open/dismiss state, portal-positioned floating panel,
+// one menu row) — lives under wholesale/shared because that's where 3+ near-identical
+// copies first showed up, but it's business-agnostic; ImportHistoryTable (retail) already
+// imports it the same way this collapsed branch menu does.
+import {
+  FloatingLayer,
+  MenuItem,
+} from "@renderer/components/features/wholesale/shared/ui";
+import { useDismissableMenu } from "@renderer/components/features/wholesale/shared/useDismissableMenu";
 
 export interface NavItem {
   id: string;
@@ -49,6 +63,13 @@ interface AppShellProps {
   workspaces?: WorkspaceTab[];
   activeWorkspace?: string;
   onWorkspaceChange?: (id: string) => void;
+  // Which retail branch the app is currently scoped to, for accounts that can see more
+  // than one (development/admin/retail_management) — "" means "All branches". Only
+  // rendered when `retailBranches` is non-empty, so a branch-scoped account (retail,
+  // wholesale) never sees it.
+  retailBranches?: BranchOption[];
+  selectedBranchId?: string;
+  onBranchChange?: (branchId: string) => void;
   email: string | null | undefined;
   profile: Profile | null;
   onSignOut: () => void;
@@ -94,6 +115,119 @@ function accountInitials(
   return (compact[0] + compact[compact.length - 1]).toUpperCase();
 }
 
+// The collapsed rail's stand-in for the expanded Select above: a raised store badge tile
+// with a floating selector caret that opens the branch list as a floating popup.
+function BranchSwitcherCollapsed({
+  branches,
+  selectedBranchId,
+  onBranchChange,
+}: {
+  branches: BranchOption[];
+  selectedBranchId: string;
+  onBranchChange?: (branchId: string) => void;
+}): React.JSX.Element {
+  const { open, setOpen, ref, toggle } = useDismissableMenu();
+  const currentLabel =
+    branches.find((branch) => branch.id === selectedBranchId)?.name ??
+    "All branches";
+
+  return (
+    <div className="relative w-full flex flex-col items-center" ref={ref}>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label={`Active branch: ${currentLabel}. Click to change.`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={`Active Branch: ${currentLabel} (Click to switch)`}
+        className="group flex flex-col items-center justify-center w-full focus-visible:outline-none app-no-drag"
+      >
+        <div
+          className={cn(
+            "relative w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-150 border shadow-xs",
+            "group-focus-visible:ring-2 group-focus-visible:ring-brand group-focus-visible:ring-offset-1 group-focus-visible:ring-offset-bg-base",
+            selectedBranchId
+              ? "border-brand/40 bg-brand-subtle/50 text-brand group-hover:border-brand group-hover:bg-brand-subtle/80 active:scale-95"
+              : "border-border/90 bg-bg-base text-text-secondary group-hover:border-border-strong group-hover:text-text-primary group-hover:bg-bg-raised active:scale-95",
+          )}
+        >
+          <BranchIcon className="w-4 h-4 transition-transform duration-150 group-hover:scale-110" />
+
+          {/* Floating corner indicator badge */}
+          <span
+            className={cn(
+              "absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-bg-base border flex items-center justify-center shadow-xs transition-colors",
+              selectedBranchId
+                ? "border-brand/50 text-brand group-hover:border-brand group-hover:bg-brand-subtle"
+                : "border-border text-text-muted group-hover:border-border-strong group-hover:text-text-secondary",
+            )}
+          >
+            <ChevronDownIcon className="w-2 h-2 stroke-[2.4]" />
+          </span>
+        </div>
+
+        {/* Branch Name Label */}
+        <span
+          className={cn(
+            "text-[10px] font-medium leading-tight text-center max-w-[68px] truncate mt-1 transition-colors",
+            selectedBranchId
+              ? "text-brand font-semibold"
+              : "text-text-secondary group-hover:text-text-primary",
+          )}
+        >
+          {selectedBranchId ? currentLabel : "All branches"}
+        </span>
+      </button>
+
+      {open && (
+        <FloatingLayer
+          anchorRef={ref}
+          align="right"
+          className="min-w-52 bg-bg-base border border-border rounded-xl shadow-lg p-1.5 animate-fade-in z-50"
+        >
+          <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">
+            Retail Branch
+          </div>
+          <MenuItem
+            label="All branches"
+            icon={
+              selectedBranchId === "" ? (
+                <CheckIcon className="w-4 h-4 text-brand" />
+              ) : (
+                <BranchIcon className="w-4 h-4 text-text-muted/60" />
+              )
+            }
+            onClick={() => {
+              setOpen(false);
+              onBranchChange?.("");
+            }}
+          />
+          {branches.map((branch) => {
+            const isSelected = branch.id === selectedBranchId;
+            return (
+              <MenuItem
+                key={branch.id}
+                label={branch.name}
+                icon={
+                  isSelected ? (
+                    <CheckIcon className="w-4 h-4 text-brand" />
+                  ) : (
+                    <BranchIcon className="w-4 h-4 text-text-muted/60" />
+                  )
+                }
+                onClick={() => {
+                  setOpen(false);
+                  onBranchChange?.(branch.id);
+                }}
+              />
+            );
+          })}
+        </FloatingLayer>
+      )}
+    </div>
+  );
+}
+
 // Layout wrapper — no skeleton/empty state (exempt per rubric).
 export function AppShell({
   navItems,
@@ -102,6 +236,9 @@ export function AppShell({
   workspaces = [],
   activeWorkspace,
   onWorkspaceChange,
+  retailBranches = [],
+  selectedBranchId = "",
+  onBranchChange,
   email,
   profile,
   onSignOut,
@@ -263,9 +400,9 @@ export function AppShell({
                 const icon =
                   currentWs.icon ??
                   (currentWs.id === "retail" ? (
-                    <StoreIcon className="w-5 h-5" />
+                    <StoreIcon className="w-4 h-4" />
                   ) : (
-                    <FactoryIcon className="w-5 h-5" />
+                    <FactoryIcon className="w-4 h-4" />
                   ));
                 return (
                   <button
@@ -275,14 +412,14 @@ export function AppShell({
                     }}
                     aria-label={`Current workspace: ${currentWs.label}. Click to switch to ${nextWs.label}`}
                     title={`${currentWs.label} (Click to switch to ${nextWs.label})`}
-                    className="w-10 h-10 rounded-lg flex items-center justify-center relative transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base border border-brand/40 bg-bg-base text-brand hover:border-brand hover:bg-brand-subtle/30 active:bg-brand-subtle/50 shadow-xs group app-no-drag"
+                    className="w-9 h-9 rounded-lg flex items-center justify-center relative transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base border border-brand/40 bg-bg-base text-brand hover:border-brand hover:bg-brand-subtle/30 active:bg-brand-subtle/50 shadow-xs group app-no-drag"
                   >
                     <div className="relative shrink-0 flex items-center justify-center">
                       {icon}
                     </div>
                     {/* Floating Swap Badge at bottom-right */}
-                    <span className="absolute -bottom-1 -right-1 flex items-center justify-center w-4 h-4 rounded-full bg-bg-base border border-brand/50 text-brand shadow-xs transition-colors group-hover:bg-brand-subtle group-hover:border-brand">
-                      <SwapIcon className="w-2.5 h-2.5" />
+                    <span className="absolute -bottom-1 -right-1 flex items-center justify-center w-3.5 h-3.5 rounded-full bg-bg-base border border-brand/50 text-brand shadow-xs transition-colors group-hover:bg-brand-subtle group-hover:border-brand">
+                      <SwapIcon className="w-2 h-2" />
                     </span>
                   </button>
                 );
@@ -327,6 +464,51 @@ export function AppShell({
                   );
                 })}
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Branch switcher — a branch-scoped account never gets `retailBranches` at all.
+            Collapsed rail has no room for a Select, so it gets a dedicated store badge tile
+            that opens the same choice as a floating popup instead. */}
+        {retailBranches.length > 0 && (
+          <div
+            className={cn(
+              "pt-3 shrink-0 app-no-drag",
+              isCollapsed ? "px-1.5 flex flex-col items-center" : "px-3",
+            )}
+          >
+            {isCollapsed ? (
+              <>
+                <BranchSwitcherCollapsed
+                  branches={retailBranches}
+                  selectedBranchId={selectedBranchId}
+                  onBranchChange={onBranchChange}
+                />
+                <div
+                  className="w-10 h-px bg-border-strong mt-3 mb-0.5"
+                  aria-hidden="true"
+                />
+              </>
+            ) : (
+              <Select
+                size="sm"
+                label={
+                  <span className="flex items-center gap-1.5 text-xs font-medium text-text-secondary">
+                    <BranchIcon className="w-3.5 h-3.5 text-text-muted" />
+                    <span>Branch</span>
+                  </span>
+                }
+                value={selectedBranchId}
+                onChange={(e) => onBranchChange?.(e.target.value)}
+              >
+                <option value="">All branches</option>
+                {retailBranches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </option>
+                ))}
+              </Select>
             )}
           </div>
         )}

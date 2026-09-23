@@ -5,6 +5,7 @@ import { Button } from "@renderer/components/ui/Button";
 import { Card } from "@renderer/components/ui/Card";
 import { Input } from "@renderer/components/ui/Input";
 import { Select } from "@renderer/components/ui/Select";
+import { ChevronLeftIcon, ChevronRightIcon } from "@renderer/components/ui/icons";
 import {
   TableContainer,
   Tbody,
@@ -13,10 +14,20 @@ import {
   Thead,
   Tr,
 } from "@renderer/components/ui/Table";
+// Generic dropdown-menu plumbing (open/dismiss state, portal-positioned floating panel)
+// — see AppShell's collapsed branch switcher for the same pattern; it's business-agnostic
+// despite living under wholesale/shared (see that file's own import for why).
+import { FloatingLayer } from "@renderer/components/features/wholesale/shared/ui";
+import { useDismissableMenu } from "@renderer/components/features/wholesale/shared/useDismissableMenu";
 import {
+  MONTH_SHORT_LABELS,
   PERIOD_OPTIONS,
   WEEKDAY_LABELS,
+  formatMonth,
   formatShortDate,
+  isFutureMonth,
+  monthLabel,
+  parseMonth,
   type AlertFact,
   type AlertTable,
   type HealthAlert,
@@ -398,16 +409,141 @@ export function AlertExplanation({
   );
 }
 
+// A calendar-style month picker: a button showing the selected month's day range
+// ("Sep 1-23"), opening a popup with a year header and a 12-month grid — lets someone
+// jump straight to any month/year rather than scrolling a long flat list, and isn't
+// capped to a fixed lookback the way that list was.
+function MonthPicker({
+  month,
+  onChange,
+}: {
+  month: string;
+  onChange: (month: string) => void;
+}): React.JSX.Element {
+  const { open, setOpen, ref, toggle } = useDismissableMenu();
+  const selected = parseMonth(month);
+  // Reset to the selected month's year each time the popup opens, rather than
+  // remembering wherever it was last left — key remounts MonthPickerGrid on every
+  // open, discarding its own viewYear state.
+  const [openKey, setOpenKey] = useState(0);
+
+  return (
+    <div className="relative" ref={ref}>
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => {
+          if (!open) setOpenKey((k) => k + 1);
+          toggle();
+        }}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        className="h-8 text-xs font-medium gap-1.5"
+      >
+        {monthLabel(month)}
+      </Button>
+      {open && (
+        <FloatingLayer
+          anchorRef={ref}
+          align="left"
+          className="w-56 bg-bg-base border border-border rounded-lg shadow-lg p-2 animate-fade-in"
+        >
+          <MonthPickerGrid
+            key={openKey}
+            initialYear={selected.year}
+            selectedYear={selected.year}
+            selectedMonthIndex0={selected.monthIndex0}
+            onPick={(year, monthIndex0) => {
+              onChange(formatMonth(year, monthIndex0));
+              setOpen(false);
+            }}
+          />
+        </FloatingLayer>
+      )}
+    </div>
+  );
+}
+
+function MonthPickerGrid({
+  initialYear,
+  selectedYear,
+  selectedMonthIndex0,
+  onPick,
+}: {
+  initialYear: number;
+  selectedYear: number;
+  selectedMonthIndex0: number;
+  onPick: (year: number, monthIndex0: number) => void;
+}): React.JSX.Element {
+  const [viewYear, setViewYear] = useState(initialYear);
+  const today = new Date();
+
+  return (
+    <div>
+      <div className="flex items-center justify-between px-1 pb-2">
+        <button
+          type="button"
+          onClick={() => setViewYear((y) => y - 1)}
+          aria-label="Previous year"
+          className="p-1 rounded text-text-secondary hover:bg-bg-subtle hover:text-text-primary"
+        >
+          <ChevronLeftIcon className="w-4 h-4" />
+        </button>
+        <span className="text-sm font-semibold text-text-primary">{viewYear}</span>
+        <button
+          type="button"
+          onClick={() => setViewYear((y) => y + 1)}
+          disabled={viewYear >= today.getFullYear()}
+          aria-label="Next year"
+          className="p-1 rounded text-text-secondary hover:bg-bg-subtle hover:text-text-primary disabled:opacity-30 disabled:pointer-events-none"
+        >
+          <ChevronRightIcon className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-1">
+        {MONTH_SHORT_LABELS.map((label, monthIndex0) => {
+          const disabled = isFutureMonth(viewYear, monthIndex0, today);
+          const selected =
+            viewYear === selectedYear && monthIndex0 === selectedMonthIndex0;
+          return (
+            <button
+              key={label}
+              type="button"
+              disabled={disabled}
+              onClick={() => onPick(viewYear, monthIndex0)}
+              className={cn(
+                "h-9 rounded-md text-xs font-medium transition-colors",
+                disabled
+                  ? "text-text-muted/40 cursor-not-allowed"
+                  : selected
+                    ? "bg-brand text-white"
+                    : "text-text-secondary hover:bg-bg-subtle hover:text-text-primary",
+              )}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // The period preset + custom range controls, shared by the Dashboard and the Business
 // Alerts page. Driven by usePeriodRange, which owns the state and the settle timing.
 export function PeriodControls({
   range,
+  // Business Alerts relies on the default (its period control wasn't part of the
+  // Dashboard's Yesterday/Monthly/Today change) — the Dashboard passes its own
+  // DASHBOARD_PERIOD_OPTIONS instead.
+  options = PERIOD_OPTIONS,
 }: {
   range: PeriodRange;
+  options?: { value: PeriodKey; label: string }[];
 }): React.JSX.Element {
   return (
     <div className="flex items-center gap-2">
-      <div className="w-36">
+      <div className="w-32">
         <Select
           size="sm"
           value={range.period}
@@ -415,13 +551,16 @@ export function PeriodControls({
           onChange={(e) => range.setPeriod(e.target.value as PeriodKey)}
           aria-label="Period"
         >
-          {PERIOD_OPTIONS.map((option) => (
+          {options.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
           ))}
         </Select>
       </div>
+      {range.period === "monthly" && !range.hasCustomRange && (
+        <MonthPicker month={range.month} onChange={range.setMonth} />
+      )}
       <span className="text-text-muted text-xs font-medium select-none">From</span>
       <div className="w-32">
         <Input

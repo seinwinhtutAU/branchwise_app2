@@ -11,6 +11,9 @@ if TYPE_CHECKING:
     from app.retail.models.purchase import Purchase
     from app.retail.models.sale import Sale
     from app.retail.models.stock_level import StockLevel
+    from app.retail.models.salary import SalaryRecord
+    from app.retail.models.daily_cost import DailyCostRecord
+    from app.retail.models.zero_selling import ZeroSellingRecord
     from app.models.user import User
 
 
@@ -37,3 +40,6 @@ class Branch(Base):
     purchases: Mapped[list["Purchase"]] = relationship(back_populates="branch")
     stock_levels: Mapped[list["StockLevel"]] = relationship(back_populates="branch")
     import_batches: Mapped[list["ImportBatch"]] = relationship(back_populates="branch")
+    salary_records: Mapped[list["SalaryRecord"]] = relationship(back_populates="branch_record")
+    daily_cost_records: Mapped[list["DailyCostRecord"]] = relationship(back_populates="branch_record")
+    zero_selling_records: Mapped[list["ZeroSellingRecord"]] = relationship(back_populates="branch_record")

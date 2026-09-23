@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.branch import Branch
 from app.retail.models.purchase import Purchase
 from app.retail.models.sale import Sale
-from app.retail.models.staged_upload import StagedImportUpload
+from app.retail.services import staged_uploads
 from app.retail.models.stock_level import StockLevel
 from app.models.user import User, UserRole
 
@@ -212,7 +212,7 @@ def test_confirm_sales_via_staged_upload_id_does_not_need_the_file_again(
     assert preview.status_code == 200
     staged_upload_id = preview.json()["staged_upload_id"]
     assert staged_upload_id
-    assert db_session.query(StagedImportUpload).count() == 1
+    assert staged_uploads.load(staged_upload_id) is not None
 
     confirm = authed_client.post(
         "/api/imports/sales/confirm",
@@ -223,7 +223,7 @@ def test_confirm_sales_via_staged_upload_id_does_not_need_the_file_again(
     assert db_session.query(Sale).count() == 1
     # Confirming consumes the staged row — it only needs to outlive the gap between
     # preview and confirm, not the imported data.
-    assert db_session.query(StagedImportUpload).count() == 0
+    assert staged_uploads.load(staged_upload_id) is None
 
 
 def test_confirm_with_unknown_staged_upload_id_returns_404(
@@ -236,3 +236,33 @@ def test_confirm_with_unknown_staged_upload_id_returns_404(
         data={"staged_upload_id": "does-not-exist"},
     )
     assert response.status_code == 404
+
+
+def test_persist_calls_run_one_at_a_time():
+    """Bulk import confirms several files at once; two writing at the same moment both
+    see a shared new product as missing and the second insert fails on its unique
+    constraint, so the writes must take turns."""
+    import threading
+    import time
+
+    from app.retail.routers.imports import _persist_one_at_a_time
+
+    running = 0
+    peak = 0
+    guard = threading.Lock()
+
+    def persist():
+        nonlocal running, peak
+        with guard:
+            running += 1
+            peak = max(peak, running)
+        time.sleep(0.05)
+        with guard:
+            running -= 1
+
+    threads = [threading.Thread(target=_persist_one_at_a_time, args=(persist,)) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert peak == 1

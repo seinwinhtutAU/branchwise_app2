@@ -48,10 +48,11 @@ INVENTORY_BASELINE_LOOKBACK_BATCHES = 10
 INVENTORY_BASELINE_MIN_BATCHES = 3
 INVENTORY_ANOMALY_RATIO = 0.5
 
-# A manual data-recovery replay (re-running a historical batch's stored preview_data
-# through persist_sales to catch slips a since-fixed bug wrongly skipped — see
-# docs/retail/import_health.md's "Known simplifications", there is no in-page recovery
-# action yet) is *expected* to skip most of its rows: that's it correctly avoiding
+# A manual data-recovery replay (re-parsing a historical batch's original file — from
+# its R2 storage_key — and running it back through persist_sales to catch slips a
+# since-fixed bug wrongly skipped — see docs/retail/import_health.md's "Known
+# simplifications", there is no in-page recovery action yet) is *expected* to skip
+# most of its rows: that's it correctly avoiding
 # re-creating what's already there, not a sign of anything wrong. Flagging it would
 # be a false positive, so any batch whose filename carries this convention's prefix
 # (the 2026-08-30 incident recovery used exactly this) is excluded from the skip-rate
@@ -266,7 +267,7 @@ def slip_total_mismatches(db: Session, user: User, since: date) -> list[dict]:
     branch_names = _branch_names(db)
     rows = []
     for batch in _branch_scoped_batches(db, user, ImportType.SALES, since):
-        mismatches = (batch.preview_data or {}).get("slip_subtotal_mismatches", [])
+        mismatches = (batch.summary or {}).get("slip_subtotal_mismatches", [])
         for mismatch in mismatches:
             rows.append(
                 {

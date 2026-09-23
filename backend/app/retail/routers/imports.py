@@ -3,6 +3,8 @@ import datetime
 import gzip
 import io
 import logging
+import math
+import threading
 from pathlib import Path
 from typing import Annotated
 import uuid
@@ -33,11 +35,12 @@ from app.core.timestamps import utc_now, utc_timestamp
 from app.db.session import get_db
 from app.models.branch import Branch
 from app.retail.models.import_batch import ImportBatch, ImportBatchStatus, ImportType
-from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.models.sale import Sale, SaleLine
-from app.retail.models.staged_upload import StagedImportUpload
 from app.retail.models.stock_level import StockLevel
+from app.retail.models.salary import SalaryRecord
+from app.retail.models.daily_cost import DailyCostRecord
+from app.retail.models.zero_selling import ZeroSellingRecord
 from app.models.user import User, UserRole
 from app.services.branches import list_retail_branches
 from app.retail.services.import_common import (
@@ -81,13 +84,18 @@ from app.retail.services.purchase_import import (
     extract_purchase_metadata,
 )
 from app.retail.services.purchase_persist import persist_purchases
-from app.retail.services.preview_storage import (
-    PREVIEW_PAGE_SIZE,
-    read_preview_page,
-    read_preview_warnings,
-    upload_preview_pages,
+from app.retail.services.clean_rows import (
+    CLEAN_ROW_SPECS,
+    clean_row_count,
+    clean_rows_page,
+    clean_warning_scan,
 )
+from app.retail.services import original_file_cache, staged_uploads
+from app.services import response_cache
 from app.retail.services.sales_persist import persist_sales
+from app.retail.services.salary_import import parse_salary_upload
+from app.retail.services.zero_selling_import import parse_zero_selling_upload
+from app.retail.services.daily_cost_import import parse_daily_cost_upload
 from app.retail.routers.common import require_retail_operations
 from app.services.storage import get_storage_service
 
@@ -98,13 +106,24 @@ router = APIRouter(
 )
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
+# The bulk import confirms several files at once, and files from the same branch share
+# new products and overlapping slips. Each confirm looks products/slips up and inserts
+# what's missing, so two running together both see "not there yet" and the second
+# insert hits a unique constraint (a 500). This backend is a single process (see
+# backend/Dockerfile), so a plain lock is enough to make the writes take turns.
+_persist_lock = threading.Lock()
+
+
+def _persist_one_at_a_time(persist, *args, **kwargs):
+    with _persist_lock:
+        return persist(*args, **kwargs)
 IdempotencyKey = Annotated[str | None, Header(alias="Idempotency-Key", max_length=64)]
 
 
 def _upload_to_storage(contents: bytes, filename: str | None, batch_id: str) -> str | None:
-    """Store the raw upload under the batch's own id, next to its preview pages
-    (imports/{batch_id}/original/{filename}), so the two are filed together in R2
-    instead of the original sitting under an unrelated, unguessable folder."""
+    """Store the raw upload in R2 under the batch's own id
+    (imports/{batch_id}/original/{filename})."""
     if not filename:
         return None
     storage = get_storage_service()
@@ -131,6 +150,7 @@ def _finalize_original_file_storage(
     """Upload the original file once the batch id it's filed under actually exists,
     then record the key — a confirm can't know that id up front, since it's generated
     inside the persist step (see new_import_batch)."""
+    original_file_cache.save(batch_id, contents)
     storage_key = _upload_to_storage(contents, filename, batch_id)
     if storage_key is None:
         return
@@ -138,16 +158,6 @@ def _finalize_original_file_storage(
         {"storage_key": storage_key}
     )
     db.commit()
-
-
-def _upload_preview_to_storage(batch_id: str, preview_data: dict) -> None:
-    storage = get_storage_service()
-    if storage.is_configured and not upload_preview_pages(
-        storage, batch_id, preview_data
-    ):
-        logger.warning(
-            "Failed to store paged preview in R2 for import batch %s", batch_id
-        )
 
 
 GZIP_MAGIC = b"\x1f\x8b"
@@ -177,64 +187,43 @@ async def _read_upload(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> b
     return contents
 
 
-STAGED_UPLOAD_MAX_AGE = datetime.timedelta(hours=24)
-
-
-def _sweep_stale_staged_uploads(db: Session) -> None:
-    """Delete abandoned staged uploads opportunistically on the next preview/inspect
-    call. A preview is followed by a confirm within seconds in the overwhelming
-    majority of cases, so in practice this only ever clears rows nobody came back
-    to confirm (the importer picked a different file, or just closed the screen)."""
-    cutoff = utc_now() - STAGED_UPLOAD_MAX_AGE
-    db.query(StagedImportUpload).filter(StagedImportUpload.created_at < cutoff).delete()
-    db.commit()
-
-
-def _stage_upload(db: Session, contents: bytes, filename: str | None) -> str:
-    """Save a freshly-parsed upload's bytes so the confirm that (usually) follows a
+def _stage_upload(contents: bytes, filename: str | None) -> str:
+    """Hold a freshly-parsed upload's bytes so the confirm that (usually) follows a
     preview/inspect can reference them by id instead of sending the whole file over
     the wire a second time — see the frontend's ImportConfirmModal/ImportReviewPage/
     useImportFilePicker, which hold onto this id and pass it back as
     `staged_upload_id` on confirm instead of re-attaching `file`."""
-    _sweep_stale_staged_uploads(db)
-    staged = StagedImportUpload(id=str(uuid.uuid4()), filename=filename, content=contents)
-    db.add(staged)
-    db.commit()
-    return staged.id
+    return staged_uploads.save(contents, filename)
 
 
 async def _resolve_upload(
-    db: Session,
     file: UploadFile | None,
     staged_upload_id: str | None,
     max_bytes: int = MAX_UPLOAD_BYTES,
 ) -> tuple[bytes, str | None]:
     """Read an upload's bytes either from a freshly-posted `file`, or — the "upload
-    once" path — from a row a preceding preview/inspect call staged via
+    once" path — from a file a preceding preview/inspect call staged via
     `_stage_upload`. A missing/expired id (server restarted since, or the 24h sweep
     already cleared it) surfaces as a 404 the frontend falls back to by resending
     the file directly rather than failing the confirm outright."""
     if staged_upload_id:
-        staged = db.get(StagedImportUpload, staged_upload_id)
+        staged = staged_uploads.load(staged_upload_id)
         if staged is None:
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND,
                 "That upload is no longer available on the server — please choose the file again.",
             )
-        return staged.content, staged.filename
+        return staged
     if file is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Choose a file to upload")
     contents = await _read_upload(file, max_bytes)
     return contents, file.filename
 
 
-def _consume_staged_upload(db: Session, staged_upload_id: str | None) -> None:
-    """Delete a staged upload once its confirm has succeeded — the row only needs to
+def _consume_staged_upload(staged_upload_id: str | None) -> None:
+    """Delete a staged upload once its confirm has succeeded — it only needs to
     outlive the gap between preview/inspect and confirm, not the imported data."""
-    if not staged_upload_id:
-        return
-    db.query(StagedImportUpload).filter(StagedImportUpload.id == staged_upload_id).delete()
-    db.commit()
+    staged_uploads.delete(staged_upload_id)
 
 
 @router.post("/general")
@@ -245,13 +234,12 @@ async def import_general_file(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Keep an arbitrary file unchanged without creating retail records."""
+    """Keep an arbitrary file unchanged and recognize supported operational logs."""
     if not file.filename:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Choose a file to upload")
 
     contents = await _read_upload(file)
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
-    content_type = file.content_type or "application/octet-stream"
     batch = ImportBatch(
         id=str(uuid.uuid4()),
         import_type=ImportType.GENERAL,
@@ -262,29 +250,75 @@ async def import_general_file(
             "message": "Daily operation cost file stored unchanged; no retail data was created.",
             "file_size": len(contents),
         },
-        preview_data={},
-        # Database storage is the reliable source of the original upload. R2 is an
-        # optional mirror consistent with the existing retail import flow.
-        original_file=contents,
-        original_file_size=len(contents),
-        original_file_content_type=content_type,
+        # Mirrored to R2 in the background below, same as sales/inventory/purchase —
+        # original_file/original_file_size/original_file_content_type are no longer
+        # written for new uploads, and only stay on the model to read pre-existing rows.
     )
     db.add(batch)
     db.commit()
     db.refresh(batch)
+    salary_rows = parse_salary_upload(contents, file.filename)
+    zero_selling_rows = parse_zero_selling_upload(contents, file.filename)
+    daily_cost_rows = parse_daily_cost_upload(contents, file.filename)
+    if salary_rows or zero_selling_rows or daily_cost_rows:
+        branches_by_name = {branch.name.casefold(): branch.id for branch in db.query(Branch).all()}
+        if salary_rows:
+            db.add_all(
+                [
+                    SalaryRecord(
+                        import_batch_id=batch.id,
+                        branch_id=branches_by_name.get(row["branch"].casefold()),
+                        **row,
+                    )
+                    for row in salary_rows
+                ]
+            )
+        if zero_selling_rows:
+            db.add_all(
+                [
+                    ZeroSellingRecord(
+                        import_batch_id=batch.id,
+                        branch_id=branches_by_name.get(row["branch"].casefold()),
+                        **row,
+                    )
+                    for row in zero_selling_rows
+                ]
+            )
+        if daily_cost_rows:
+            db.add_all(
+                [
+                    DailyCostRecord(
+                        import_batch_id=batch.id,
+                        branch_id=branches_by_name.get(row["branch"].casefold()),
+                        **row,
+                    )
+                    for row in daily_cost_rows
+                ]
+            )
+        batch.summary = {
+            "message": "Daily operation cost file stored unchanged; recognized operational records were added.",
+            "file_size": len(contents),
+            "salary_records_created": len(salary_rows),
+            "zero_selling_records_created": len(zero_selling_rows),
+            "daily_cost_records_created": len(daily_cost_rows),
+        }
+        db.commit()
     # Only upload to R2 once the batch is actually committed — uploading first (the old
     # order here) left an orphaned R2 object with no matching row whenever the commit
     # itself then failed; see _finalize_original_file_storage's docstring. Backgrounded
-    # so the response doesn't wait on R2 — the file is already durably saved in
-    # `original_file` above, so R2 here is only ever a mirror. FastAPI runs background
-    # tasks after the response is sent but before this request's `db` dependency is torn
-    # down, so reusing it here is safe.
+    # so the response doesn't wait on R2 — R2 is now the only durability path for this
+    # file, same as sales/inventory/purchase. FastAPI runs background tasks after the
+    # response is sent but before this request's `db` dependency is torn down, so
+    # reusing it here is safe.
     background_tasks.add_task(_finalize_original_file_storage, db, batch.id, contents, file.filename)
     return {
         "id": batch.id,
         "filename": batch.filename,
-        "file_size": batch.original_file_size,
+        "file_size": len(contents),
         "status": batch.status.value,
+        "salary_records_created": len(salary_rows),
+        "zero_selling_records_created": len(zero_selling_rows),
+        "daily_cost_records_created": len(daily_cost_rows),
     }
 
 
@@ -328,6 +362,20 @@ def _parse_or_400(
         ) from exc
     _check_report_type(origin_rows, expected_type)
     return origin_rows, clean_df
+
+
+def _parse_and_count_issues(
+    parser, contents: bytes, filename: str | None, expected_type: str,
+    rules: list[tuple[str, float | None]], *parser_args,
+) -> tuple[list[list[str]], pd.DataFrame, int]:
+    """Confirm's own front half: parse (see _parse_or_400) and count invalid rows in
+    the same threadpool hop, without building the full origin+clean preview snapshot
+    _build_preview produces — confirm only ever needed a count from that, and the rest
+    was thrown away after being persisted to `import_batches.preview_data`/R2, neither
+    of which exist anymore (see clean_rows.py's module docstring)."""
+    origin_rows, clean_df = _parse_or_400(parser, contents, filename, expected_type, *parser_args)
+    issue_count = sum(1 for issues in validate_rows(clean_df, rules) if issues)
+    return origin_rows, clean_df, issue_count
 
 
 def _resolve_branch_id(user: User, branch_id: str | None, db: Session) -> str | None:
@@ -423,39 +471,6 @@ def _build_preview(
     }
 
 
-DB_PREVIEW_ROW_CAP = 200
-
-
-def _capped_tab(tab: dict, cap: int) -> dict:
-    rows = tab.get("rows", [])
-    if len(rows) <= cap:
-        return tab
-    row_issues = tab.get("row_issues", [])
-    issue_indices = {i for i, issues in enumerate(row_issues) if issues}
-    keep = sorted(set(range(min(cap, len(rows)))) | issue_indices)
-    capped = dict(tab)
-    capped["rows"] = [rows[i] for i in keep]
-    capped["row_issues"] = [row_issues[i] for i in keep] if row_issues else []
-    capped["is_sampled"] = True
-    capped["sample_count"] = len(keep)
-    return capped
-
-
-def _preview_for_db(preview_data: dict, cap: int = DB_PREVIEW_ROW_CAP) -> dict:
-    """A capped copy of preview_data for the `import_batches.preview_data` column.
-
-    R2 always gets the full, unsampled preview (see _upload_preview_to_storage) — that's
-    what Import History actually pages through. The database copy only exists as a
-    fallback for when R2 isn't configured or a batch predates it, so it doesn't need
-    every row; capping it keeps this ~28 MB database from filling up with full import
-    snapshots that are already durably stored in R2. Rows with a validation issue are
-    always kept, so issue_count (computed from this same dict) stays accurate."""
-    capped = dict(preview_data)
-    capped["clean"] = _capped_tab(preview_data.get("clean", {}), cap)
-    capped["origin"] = _capped_tab(preview_data.get("origin", {}), cap)
-    return capped
-
-
 def _can_access_batch(user: User, batch: ImportBatch) -> bool:
     """An account with no branch can see/revert any batch;
     everyone else only their own branch's — same rule as import confirmation."""
@@ -501,7 +516,7 @@ async def import_sales_file(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    contents, filename = await _resolve_upload(db, file, staged_upload_id)
+    contents, filename = await _resolve_upload(file, staged_upload_id)
     _check_extension(filename)
     branch = _resolve_branch_for_preview(user, branch_id, db)
 
@@ -525,7 +540,7 @@ async def import_sales_file(
         SALES_OUTPUT_COLUMNS,
         SALES_VALIDATION_RULES,
     )
-    preview["staged_upload_id"] = staged_upload_id or _stage_upload(db, contents, filename)
+    preview["staged_upload_id"] = staged_upload_id or _stage_upload(contents, filename)
     return preview
 
 
@@ -542,30 +557,25 @@ async def confirm_sales_file(
     previous = _confirmed_import_for_key(db, user, idempotency_key)
     if previous is not None:
         return previous
-    contents, filename = await _resolve_upload(db, file, staged_upload_id)
+    contents, filename = await _resolve_upload(file, staged_upload_id)
     _check_extension(filename)
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
     branch = db.get(Branch, resolved_branch_id)
 
-    origin_rows, clean_df = await run_in_threadpool(
-        _parse_or_400,
+    _origin_rows, clean_df, issue_count = await run_in_threadpool(
+        _parse_and_count_issues,
         parse_pos_sale_upload,
         contents,
         filename,
         "sale",
+        SALES_VALIDATION_RULES,
         branch.sale_date_format if branch else "MDY",
     )
+    slip_subtotal_mismatches = clean_df.attrs.get("subtotal_mismatches", [])
 
-    preview_data = await run_in_threadpool(
-        _build_preview,
-        filename,
-        origin_rows,
-        clean_df,
-        SALES_OUTPUT_COLUMNS,
-        SALES_VALIDATION_RULES,
-    )
     try:
         summary = await run_in_threadpool(
+            _persist_one_at_a_time,
             persist_sales,
             db,
             clean_df,
@@ -573,21 +583,21 @@ async def confirm_sales_file(
             location_raw=_location_raw(clean_df),
             source_file=filename,
             uploaded_by=user.id,
-            preview_data=_preview_for_db(preview_data),
+            issue_count=issue_count,
+            slip_subtotal_mismatches=slip_subtotal_mismatches,
             request_key=idempotency_key,
         )
     except IntegrityError:
         summary = _replay_after_request_key_conflict(db, user, idempotency_key)
         if summary is None:
             raise
-    _consume_staged_upload(db, staged_upload_id)
+    _consume_staged_upload(staged_upload_id)
     # Backgrounded so the response doesn't wait on R2 — the data is already durably
-    # committed above, R2 is only ever a mirror of the original file/preview (see
+    # committed above, R2 is only ever a mirror of the original file (see
     # _finalize_original_file_storage's docstring and the note on the /general route).
     background_tasks.add_task(
         _finalize_original_file_storage, db, summary["batch_id"], contents, filename
     )
-    background_tasks.add_task(_upload_preview_to_storage, summary["batch_id"], preview_data)
     return summary
 
 
@@ -599,7 +609,7 @@ async def import_inventory_file(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    contents, filename = await _resolve_upload(db, file, staged_upload_id)
+    contents, filename = await _resolve_upload(file, staged_upload_id)
     _check_extension(filename)
     branch = _resolve_branch_for_preview(user, branch_id, db)
 
@@ -621,7 +631,7 @@ async def import_inventory_file(
         INVENTORY_OUTPUT_COLUMNS,
         INVENTORY_VALIDATION_RULES,
     )
-    preview["staged_upload_id"] = staged_upload_id or _stage_upload(db, contents, filename)
+    preview["staged_upload_id"] = staged_upload_id or _stage_upload(contents, filename)
     return preview
 
 
@@ -638,30 +648,24 @@ async def confirm_inventory_file(
     previous = _confirmed_import_for_key(db, user, idempotency_key)
     if previous is not None:
         return previous
-    contents, filename = await _resolve_upload(db, file, staged_upload_id)
+    contents, filename = await _resolve_upload(file, staged_upload_id)
     _check_extension(filename)
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
     branch = db.get(Branch, resolved_branch_id)
 
-    origin_rows, clean_df = await run_in_threadpool(
-        _parse_or_400,
+    _origin_rows, clean_df, issue_count = await run_in_threadpool(
+        _parse_and_count_issues,
         parse_inventory_upload,
         contents,
         filename,
         "inventory",
+        INVENTORY_VALIDATION_RULES,
         branch.inventory_date_format if branch else "MDY",
     )
 
-    preview_data = await run_in_threadpool(
-        _build_preview,
-        filename,
-        origin_rows,
-        clean_df,
-        INVENTORY_OUTPUT_COLUMNS,
-        INVENTORY_VALIDATION_RULES,
-    )
     try:
         summary = await run_in_threadpool(
+            _persist_one_at_a_time,
             persist_inventory,
             db,
             clean_df,
@@ -669,21 +673,20 @@ async def confirm_inventory_file(
             location_raw=_location_raw(clean_df),
             source_file=filename,
             uploaded_by=user.id,
-            preview_data=_preview_for_db(preview_data),
+            issue_count=issue_count,
             request_key=idempotency_key,
         )
     except IntegrityError:
         summary = _replay_after_request_key_conflict(db, user, idempotency_key)
         if summary is None:
             raise
-    _consume_staged_upload(db, staged_upload_id)
+    _consume_staged_upload(staged_upload_id)
     # Backgrounded so the response doesn't wait on R2 — the data is already durably
-    # committed above, R2 is only ever a mirror of the original file/preview (see
+    # committed above, R2 is only ever a mirror of the original file (see
     # _finalize_original_file_storage's docstring and the note on the /general route).
     background_tasks.add_task(
         _finalize_original_file_storage, db, summary["batch_id"], contents, filename
     )
-    background_tasks.add_task(_upload_preview_to_storage, summary["batch_id"], preview_data)
     return summary
 
 
@@ -694,7 +697,7 @@ async def import_purchase_file(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    contents, filename = await _resolve_upload(db, file, staged_upload_id)
+    contents, filename = await _resolve_upload(file, staged_upload_id)
     _check_extension(filename)
 
     # Off the event loop — see the matching comment on the /sales preview route.
@@ -710,7 +713,7 @@ async def import_purchase_file(
         PURCHASE_OUTPUT_COLUMNS,
         PURCHASE_VALIDATION_RULES,
     )
-    preview["staged_upload_id"] = staged_upload_id or _stage_upload(db, contents, filename)
+    preview["staged_upload_id"] = staged_upload_id or _stage_upload(contents, filename)
     return preview
 
 
@@ -729,7 +732,7 @@ async def confirm_purchase_file(
     previous = _confirmed_import_for_key(db, user, idempotency_key)
     if previous is not None:
         return previous
-    contents, filename = await _resolve_upload(db, file, staged_upload_id)
+    contents, filename = await _resolve_upload(file, staged_upload_id)
     _check_extension(filename)
     resolved_branch_id = _resolve_branch_id(user, branch_id, db)
 
@@ -747,20 +750,18 @@ async def confirm_purchase_file(
     elif extracted_date:
         resolved_purchase_date = extracted_date
 
-    origin_rows, clean_df = await run_in_threadpool(
-        _parse_or_400, parse_purchase_upload, contents, filename, "purchase"
-    )
-
-    preview_data = await run_in_threadpool(
-        _build_preview,
+    _origin_rows, clean_df, issue_count = await run_in_threadpool(
+        _parse_and_count_issues,
+        parse_purchase_upload,
+        contents,
         filename,
-        origin_rows,
-        clean_df,
-        PURCHASE_OUTPUT_COLUMNS,
+        "purchase",
         PURCHASE_VALIDATION_RULES,
     )
+
     try:
         summary = await run_in_threadpool(
+            _persist_one_at_a_time,
             persist_purchases,
             db,
             clean_df,
@@ -768,7 +769,7 @@ async def confirm_purchase_file(
             location_raw=_location_raw(clean_df),
             source_file=filename,
             uploaded_by=user.id,
-            preview_data=_preview_for_db(preview_data),
+            issue_count=issue_count,
             purchase_date=resolved_purchase_date,
             purchase_number=resolved_purchase_number,
             request_key=idempotency_key,
@@ -777,14 +778,13 @@ async def confirm_purchase_file(
         summary = _replay_after_request_key_conflict(db, user, idempotency_key)
         if summary is None:
             raise
-    _consume_staged_upload(db, staged_upload_id)
+    _consume_staged_upload(staged_upload_id)
     # Backgrounded so the response doesn't wait on R2 — the data is already durably
-    # committed above, R2 is only ever a mirror of the original file/preview (see
+    # committed above, R2 is only ever a mirror of the original file (see
     # _finalize_original_file_storage's docstring and the note on the /general route).
     background_tasks.add_task(
         _finalize_original_file_storage, db, summary["batch_id"], contents, filename
     )
-    background_tasks.add_task(_upload_preview_to_storage, summary["batch_id"], preview_data)
     return summary
 
 
@@ -838,11 +838,11 @@ async def inspect_import_file(
     # (and every other file's own inspect, despite the frontend firing them in
     # parallel) until it finished. run_in_threadpool moves it off the loop, same as
     # every confirm endpoint already does for its own parsing.
-    return await run_in_threadpool(_inspect_parsed_file, contents, file.filename, expected_type, db)
+    return await run_in_threadpool(_inspect_parsed_file, contents, file.filename, expected_type)
 
 
 def _inspect_parsed_file(
-    contents: bytes, filename: str | None, expected_type: str, db: Session
+    contents: bytes, filename: str | None, expected_type: str
 ) -> dict:
     try:
         rows = read_raw_grid(contents, filename or "")
@@ -908,7 +908,7 @@ def _inspect_parsed_file(
             "row_count": 0,
             "zero_count": None,
             "nonzero_count": None,
-            "staged_upload_id": _stage_upload(db, contents, filename),
+            "staged_upload_id": _stage_upload(contents, filename),
             "error_message": None,
         }
 
@@ -999,7 +999,7 @@ def _inspect_parsed_file(
         "row_count": row_count,
         "zero_count": zero_count,
         "nonzero_count": nonzero_count,
-        "staged_upload_id": _stage_upload(db, contents, filename),
+        "staged_upload_id": _stage_upload(contents, filename),
         "error_message": None,
     }
 
@@ -1112,16 +1112,15 @@ def list_import_history(
     user: User = Depends(get_current_app_user),
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    # preview_data holds the full origin/clean row grids from the original import (same
-    # shape as the preview endpoints) — often the single biggest column on this table.
-    # The list view never needs it (only GET /history/{batch_id} does), so it's deferred
-    # here to avoid transferring and JSON-parsing every batch's full grid on every load.
+    # original_file (raw bytes, only ever populated for pre-existing GENERAL uploads)
+    # is often the single biggest column on this table — the list view never needs it
+    # (only the download endpoints do), so it's deferred to avoid transferring it on
+    # every load.
     query = (
         db.query(ImportBatch)
         .options(
             joinedload(ImportBatch.branch),
             joinedload(ImportBatch.uploaded_by_user),
-            defer(ImportBatch.preview_data),
             defer(ImportBatch.original_file),
         )
         .order_by(ImportBatch.created_at.desc())
@@ -1149,57 +1148,172 @@ def list_import_history(
     ]
 
 
-def _legacy_preview_result(preview_data: dict, tab: str, page: int) -> dict:
-    data = preview_data.get("clean" if tab == "clean" else "origin", {})
-    rows = data.get("rows", []) if isinstance(data, dict) else []
-    row_issues = data.get("row_issues", []) if isinstance(data, dict) else []
-    declared_total = (
-        data.get("total_rows", len(rows)) if isinstance(data, dict) else len(rows)
-    )
-    is_sampled = (
-        bool(data.get("is_sampled", False)) if isinstance(data, dict) else False
-    )
-    total_rows = len(rows) if is_sampled else declared_total
-    start = (page - 1) * PREVIEW_PAGE_SIZE
-    end = start + PREVIEW_PAGE_SIZE
+HISTORY_PAGE_SIZE = 50
+
+
+def _empty_clean_placeholder(import_type: ImportType) -> dict:
+    spec = CLEAN_ROW_SPECS.get(import_type)
     return {
-        "columns": data.get("columns", [])
-        if tab == "clean" and isinstance(data, dict)
-        else [],
-        "rows": rows[start:end],
-        "row_issues": row_issues[start:end] if row_issues else [],
+        "columns": spec.columns if spec else [],
+        "rows": [],
+        "row_issues": [],
+        "page": 1,
+        "page_size": HISTORY_PAGE_SIZE,
+        "total_rows": 0,
+        "source_total_rows": 0,
+        "total_pages": 1,
+        "is_sampled": False,
+        "warning_count": 0,
+    }
+
+
+def _empty_origin_placeholder() -> dict:
+    return {
+        "rows": [],
+        "row_issues": [],
+        "page": 1,
+        "page_size": HISTORY_PAGE_SIZE,
+        "total_rows": 0,
+        "source_total_rows": 0,
+        "total_pages": 1,
+        "is_sampled": False,
+        "warning_count": 0,
+    }
+
+
+def _cached_clean_warning_scan(db: Session, batch: ImportBatch) -> tuple[int, list[int]]:
+    """The whole-batch scan reads every row of the batch, so without this it re-ran on
+    every page turn. A batch's rows only change through a revert, which changes the
+    batch's own status — so those fields are the cache key, and cost no extra query."""
+    key = ("import_clean_warnings", batch.id, batch.status, batch.reverted_at)
+    return response_cache.cached(
+        key, lambda: clean_warning_scan(db, batch.import_type, batch.id)
+    )
+
+
+def _clean_warning_count(db: Session, batch: ImportBatch) -> int:
+    """Rows with a bad value, for the tab's banner. Confirm already counted these
+    (`issue_count`), so a batch that had none — nearly every import — needs no scan of
+    its rows at all, and that scan was the slowest part of opening a batch."""
+    if batch.status != ImportBatchStatus.COMPLETED:
+        return 0
+    if (batch.summary or {}).get("issue_count") == 0:
+        return 0
+    return _cached_clean_warning_scan(db, batch)[0]
+
+
+_ROWS_CREATED_KEY = {
+    ImportType.SALES: "sale_lines_created",
+    ImportType.INVENTORY: "stock_levels_created",
+    ImportType.PURCHASE: "purchase_lines_created",
+}
+
+
+def _clean_total_rows(db: Session, batch: ImportBatch) -> int:
+    """Row count straight from the confirm summary — each database round trip costs
+    hundreds of milliseconds here, and a count over the joined tables is one of them.
+    A reverted batch has no rows left; a batch old enough to lack the summary key
+    falls back to counting."""
+    if batch.status != ImportBatchStatus.COMPLETED:
+        return 0
+    created = (batch.summary or {}).get(_ROWS_CREATED_KEY[batch.import_type])
+    if isinstance(created, int):
+        return created
+    return clean_row_count(db, batch.import_type, batch.id)
+
+
+def _clean_tab_result(db: Session, batch: ImportBatch, page: int) -> dict:
+    spec = CLEAN_ROW_SPECS.get(batch.import_type)
+    if spec is None:  # GENERAL batches have no Clean tab
+        return _empty_clean_placeholder(batch.import_type)
+    total_rows = _clean_total_rows(db, batch)
+    offset = (page - 1) * HISTORY_PAGE_SIZE
+    page_rows = clean_rows_page(db, batch.import_type, batch.id, offset, HISTORY_PAGE_SIZE)
+    page_issues = (
+        validate_rows(pd.DataFrame.from_records(page_rows, columns=spec.columns), spec.rules)
+        if page_rows
+        else []
+    )
+    warning_count = _clean_warning_count(db, batch)
+    return {
+        "columns": spec.columns,
+        "rows": page_rows,
+        "row_issues": page_issues,
         "page": page,
-        "page_size": PREVIEW_PAGE_SIZE,
+        "page_size": HISTORY_PAGE_SIZE,
         "total_rows": total_rows,
-        "source_total_rows": declared_total,
-        "total_pages": max(
-            1, (total_rows + PREVIEW_PAGE_SIZE - 1) // PREVIEW_PAGE_SIZE
-        ),
-        "is_sampled": is_sampled,
-        "warning_count": sum(1 for issues in row_issues if issues),
+        "source_total_rows": total_rows,
+        "total_pages": max(1, math.ceil(total_rows / HISTORY_PAGE_SIZE)),
+        "is_sampled": False,
+        "warning_count": warning_count,
     }
 
 
-def _r2_preview_result(
-    manifest: dict, tab: str, page_data: dict | None, page: int
-) -> dict:
-    metadata = manifest.get(tab, {})
+def _fetch_original_bytes(batch: ImportBatch) -> bytes | None:
+    """Original file bytes for the Original tab: the local copy kept at confirm time
+    (original_file_cache), else R2 — sales/inventory/
+    purchase batches never wrote to `original_file` (that column only ever held bytes
+    for GENERAL uploads, which don't reach this path — the frontend never opens
+    ImportDataView for a GENERAL batch)."""
+    cached = original_file_cache.load(batch.id)
+    if cached is not None:
+        return cached
+    storage = get_storage_service()
+    if batch.storage_key and storage.is_configured:
+        res = storage.download_file_bytes(batch.storage_key)
+        if res is not None:
+            original_file_cache.save(batch.id, res[0])
+            return res[0]
+    return None
+
+
+def _reparse_origin(batch: ImportBatch, contents: bytes) -> tuple[list[list[str]], list[list[dict]]]:
+    """Re-derive the Original tab's raw rows + mapped validation issues from the
+    original file on demand — the same parse the live preview endpoints already run,
+    just triggered by a rare "view an old import" read instead of on every confirm."""
+    branch = batch.branch
+    if batch.import_type == ImportType.SALES:
+        origin_rows, clean_df = parse_pos_sale_upload(
+            contents, batch.filename or "", branch.sale_date_format if branch else "MDY"
+        )
+        rules = SALES_VALIDATION_RULES
+    elif batch.import_type == ImportType.INVENTORY:
+        origin_rows, clean_df = parse_inventory_upload(
+            contents, batch.filename or "", branch.inventory_date_format if branch else "MDY"
+        )
+        rules = INVENTORY_VALIDATION_RULES
+    elif batch.import_type == ImportType.PURCHASE:
+        origin_rows, clean_df = parse_purchase_upload(contents, batch.filename or "")
+        rules = PURCHASE_VALIDATION_RULES
+    else:
+        return [], []
+    row_issues = validate_rows(clean_df, rules)
+    return origin_rows, _origin_row_issues(origin_rows, clean_df, row_issues)
+
+
+def _original_tab_result(batch: ImportBatch, page: int) -> dict:
+    contents = _fetch_original_bytes(batch)
+    if contents is None:
+        return _empty_origin_placeholder()
+    try:
+        origin_rows, mapped_issues = _reparse_origin(batch, contents)
+    except Exception:
+        logger.warning("Could not re-parse original file for import batch %s", batch.id)
+        return _empty_origin_placeholder()
+    total_rows = len(origin_rows)
+    start = (page - 1) * HISTORY_PAGE_SIZE
+    end = start + HISTORY_PAGE_SIZE
     return {
-        "columns": metadata.get("columns", []) if tab == "clean" else [],
-        "rows": page_data.get("rows", []) if page_data else [],
-        "row_issues": page_data.get("row_issues", []) if page_data else [],
+        "rows": origin_rows[start:end],
+        "row_issues": mapped_issues[start:end],
         "page": page,
-        "page_size": metadata.get("page_size", PREVIEW_PAGE_SIZE),
-        "total_rows": metadata.get("total_rows", 0),
-        "source_total_rows": metadata.get("source_total_rows", 0),
-        "total_pages": metadata.get("total_pages", 1),
-        "is_sampled": bool(metadata.get("is_sampled", False)),
-        "warning_count": metadata.get("warning_count", 0),
+        "page_size": HISTORY_PAGE_SIZE,
+        "total_rows": total_rows,
+        "source_total_rows": total_rows,
+        "total_pages": max(1, math.ceil(total_rows / HISTORY_PAGE_SIZE)) if total_rows else 1,
+        "is_sampled": False,
+        "warning_count": sum(1 for issues in mapped_issues if issues),
     }
-
-
-def _inactive_preview_result(manifest: dict, tab: str) -> dict:
-    return _r2_preview_result(manifest, tab, None, 1)
 
 
 def _format_history_summary_messages(batch: ImportBatch, total_rows: int = 0) -> list[str]:
@@ -1259,7 +1373,6 @@ def get_import_history_detail(
         ImportBatch,
         batch_id,
         options=[
-            defer(ImportBatch.preview_data),
             defer(ImportBatch.original_file),
             joinedload(ImportBatch.branch),
             joinedload(ImportBatch.uploaded_by_user),
@@ -1268,29 +1381,16 @@ def get_import_history_detail(
     if batch is None or not _can_access_batch(user, batch):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
 
-    storage = get_storage_service()
-    r2_preview = (
-        read_preview_page(storage, batch.id, tab, page)
-        if storage.is_configured
-        else None
-    )
-    if r2_preview is not None:
-        manifest, page_data = r2_preview
-        selected_result = _r2_preview_result(manifest, tab, page_data, page)
-        other_tab = "original" if tab == "clean" else "clean"
-        other_result = _inactive_preview_result(manifest, other_tab)
-        clean_result = selected_result if tab == "clean" else other_result
-        origin_result = selected_result if tab == "original" else other_result
+    # Only the requested tab is fully computed — the other tab returns a cheap
+    # placeholder. Safe because the frontend (ImportDataView.tsx) only reads the
+    # active tab, and overwrites both `clean`/`origin` from every page response
+    # anyway (see ImportHistoryDetailPage.tsx's handlePageChange).
+    if tab == "clean":
+        clean_result = _clean_tab_result(db, batch, page)
+        origin_result = _empty_origin_placeholder()
     else:
-        # Pre-R2 batches retain their database snapshot as a compatibility fallback.
-        preview_data = batch.preview_data or {}
-        selected_result = _legacy_preview_result(preview_data, tab, page)
-        other_tab = "original" if tab == "clean" else "clean"
-        other_result = _legacy_preview_result(preview_data, other_tab, 1)
-        other_result["rows"] = []
-        other_result["row_issues"] = []
-        clean_result = selected_result if tab == "clean" else other_result
-        origin_result = selected_result if tab == "original" else other_result
+        origin_result = _original_tab_result(batch, page)
+        clean_result = _empty_clean_placeholder(batch.import_type)
 
     has_origin_rows = bool(origin_result["total_rows"] > 0)
     total_file_rows = origin_result.get("total_rows") or clean_result.get("total_rows") or 0
@@ -1329,22 +1429,28 @@ def get_import_history_warnings(
     batch = db.get(
         ImportBatch,
         batch_id,
-        options=[defer(ImportBatch.preview_data), defer(ImportBatch.original_file)],
+        options=[defer(ImportBatch.original_file), joinedload(ImportBatch.branch)],
     )
     if batch is None or not _can_access_batch(user, batch):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Import batch not found")
 
-    storage = get_storage_service()
-    warning_indices = (
-        read_preview_warnings(storage, batch.id, tab) if storage.is_configured else None
-    )
-    if warning_indices is None:
-        data = (batch.preview_data or {}).get(
-            "clean" if tab == "clean" else "origin", {}
-        )
-        row_issues = data.get("row_issues", []) if isinstance(data, dict) else []
-        warning_indices = [index for index, issues in enumerate(row_issues) if issues]
-    return {"indices": warning_indices}
+    if tab == "clean":
+        spec = CLEAN_ROW_SPECS.get(batch.import_type)
+        indices = _cached_clean_warning_scan(db, batch)[1] if spec else []
+    else:
+        contents = _fetch_original_bytes(batch)
+        if contents is None:
+            indices = []
+        else:
+            try:
+                _, mapped_issues = _reparse_origin(batch, contents)
+            except Exception:
+                logger.warning(
+                    "Could not re-parse original file for import batch %s", batch.id
+                )
+                mapped_issues = []
+            indices = [i for i, issues in enumerate(mapped_issues) if issues]
+    return {"indices": indices}
 
 
 @router.get("/history/{batch_id}/download-clean")
@@ -1373,13 +1479,7 @@ def download_clean_import_file(
                 "Selling_Price",
             ]
         )
-        levels = (
-            db.query(StockLevel, Product)
-            .join(Product, StockLevel.product_id == Product.id)
-            .filter(StockLevel.import_batch_id == batch.id)
-            .order_by(Product.stock_code)
-            .all()
-        )
+        levels = CLEAN_ROW_SPECS[ImportType.INVENTORY].build_query(db, batch.id).all()
         for level, product in levels:
             writer.writerow(
                 [
@@ -1408,14 +1508,7 @@ def download_clean_import_file(
                 "Net_Amount",
             ]
         )
-        lines = (
-            db.query(SaleLine, Sale, Product)
-            .join(Sale, SaleLine.sale_id == Sale.id)
-            .join(Product, SaleLine.product_id == Product.id)
-            .filter(Sale.import_batch_id == batch.id)
-            .order_by(Sale.sale_date, Sale.slip_id, SaleLine.line_id)
-            .all()
-        )
+        lines = CLEAN_ROW_SPECS[ImportType.SALES].build_query(db, batch.id).all()
         for line, sale, product in lines:
             writer.writerow(
                 [
@@ -1433,25 +1526,20 @@ def download_clean_import_file(
                 ]
             )
     elif batch.import_type == ImportType.PURCHASE:
-        writer.writerow(
-            ["StockCode", "Description", "Qty", "Buying_Price", "Total_Amount"]
-        )
-        lines = (
-            db.query(PurchaseLine, Purchase, Product)
-            .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
-            .join(Product, PurchaseLine.product_id == Product.id)
-            .filter(Purchase.import_batch_id == batch.id)
-            .order_by(PurchaseLine.id)
-            .all()
-        )
+        # Fixed a live bug here: this used to reference line.qty/line.total_amount,
+        # neither of which exists on PurchaseLine (only quantity/uom/buying_price do)
+        # — this branch would 500 on any real purchase batch. No line-level total is
+        # stored to report, so that column is dropped rather than reintroduced wrong.
+        writer.writerow(["StockCode", "Description", "Quantity", "UOM", "Buying_Price"])
+        lines = CLEAN_ROW_SPECS[ImportType.PURCHASE].build_query(db, batch.id).all()
         for line, purchase, product in lines:
             writer.writerow(
                 [
                     product.stock_code,
                     product.description or "",
-                    float(line.qty) if line.qty is not None else "",
+                    float(line.quantity) if line.quantity is not None else "",
+                    line.uom or "",
                     float(line.buying_price) if line.buying_price is not None else "",
-                    float(line.total_amount) if line.total_amount is not None else "",
                 ]
             )
     else:
@@ -1504,24 +1592,6 @@ def download_import_batch_file(
         return Response(
             content=batch.original_file,
             media_type=batch.original_file_content_type or "application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
-
-    # Fallback: if no R2 file exists yet, check if preview_data has origin rows to reconstruct an Excel file
-    origin = (batch.preview_data or {}).get("origin", {})
-    origin_rows = origin.get("rows", [])
-    if origin_rows:
-        output = io.BytesIO()
-        df = pd.DataFrame(origin_rows)
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False)
-        output.seek(0)
-        filename = batch.filename or f"import_{batch.id}.xlsx"
-        if not filename.endswith((".xlsx", ".xls", ".csv")):
-            filename = f"{filename}.xlsx"
-        return Response(
-            content=output.getvalue(),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 

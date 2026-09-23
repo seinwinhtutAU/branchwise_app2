@@ -1,3 +1,5 @@
+import { apiBaseUrl } from "@renderer/lib/auth";
+
 /**
  * Import uploads (POS CSV/XLS exports) are printed-report text, so gzipping them
  * client-side before they go over the wire cuts a slow-connection upload down to a
@@ -10,8 +12,20 @@
  * Falls back to the original file untouched if `CompressionStream` isn't available
  * or compression fails for any reason — never blocks an upload over this.
  */
+function isLocalBackend(): boolean {
+  return (
+    apiBaseUrl === "" ||
+    apiBaseUrl.includes("127.0.0.1") ||
+    apiBaseUrl.includes("localhost")
+  );
+}
+
 export async function maybeCompressFile(file: File): Promise<File> {
-  if (typeof CompressionStream === "undefined") {
+  // The backend and renderer talk over loopback during dev (see apiBaseUrl in
+  // lib/auth.ts) — that transfer is already effectively instant regardless of file
+  // size, so compressing (and the backend then decompressing) only adds CPU time
+  // for zero network benefit. Only worth doing against a real, non-local backend.
+  if (isLocalBackend() || typeof CompressionStream === "undefined") {
     return file;
   }
   try {

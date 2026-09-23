@@ -1,5 +1,4 @@
 import io
-import json
 from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
@@ -9,6 +8,7 @@ from app.models.branch import Branch
 from app.core.timestamps import utc_now
 from app.retail.models.import_batch import ImportBatch, ImportBatchStatus
 from app.retail.models.sale import Sale, SaleLine
+from app.retail.services import original_file_cache
 from app.models.user import User, UserRole
 
 SALE_CSV = (
@@ -151,8 +151,11 @@ def test_general_file_is_stored_unchanged_and_retail_can_download_it(
     batch = db_session.get(ImportBatch, batch_id)
     assert batch is not None
     assert batch.import_type.value == "general"
-    assert batch.original_file == original_bytes
-    assert batch.original_file_size == len(original_bytes)
+    # New uploads no longer write original_file to the database — R2 (mirrored in the
+    # background right after confirm) is now the sole durability path, same as
+    # sales/inventory/purchase; original_file stays populated only for pre-existing rows.
+    assert batch.original_file is None
+    assert batch.storage_key is not None
 
     history = authed_client.get("/api/imports/history").json()
     assert history[0]["has_file"] is True
@@ -379,7 +382,6 @@ def test_data_version_is_scoped_to_the_branch_the_account_can_see(
             filename="someone-elses.csv",
             status=ImportBatchStatus.COMPLETED,
             summary={},
-            preview_data={},
             created_at=datetime.now(),
         )
     )
@@ -414,33 +416,20 @@ def test_download_file_retail_forbidden(authed_client: TestClient, db_session: S
     assert "Only administrators can download" in response.json()["detail"]
 
 
-def test_get_history_detail_reads_only_the_requested_r2_preview_page(
+def test_history_detail_clean_tab_ignores_storage_entirely(
     authed_client: TestClient, db_session: Session, monkeypatch
 ):
+    """The Clean tab is reconstructed live from the persisted SaleLine/Sale/Product
+    rows (see clean_rows.py) — it must show the real data even when storage returns
+    nothing at all, proving it never depends on R2."""
     _make_user(db_session, branch_name="Retail 1")
     summary = _confirm_sale(authed_client)
     batch_id = summary["batch_id"]
 
-    # Mock storage service to return custom R2 preview data
     class MockStorage:
         is_configured = True
 
         def download_file_bytes(self, key: str):
-            if key == f"imports/{batch_id}/preview/v1/manifest.json":
-                manifest = {
-                    "clean": {
-                        "columns": ["Source"],
-                        "total_rows": 1,
-                        "source_total_rows": 1,
-                        "total_pages": 1,
-                        "warning_count": 0,
-                    },
-                    "original": {"total_rows": 1, "source_total_rows": 1, "total_pages": 1, "warning_count": 0},
-                }
-                return json.dumps(manifest).encode("utf-8"), "application/json"
-            if key == f"imports/{batch_id}/preview/v1/clean/pages/1.json":
-                page = {"rows": [{"Source": "Cloudflare R2"}], "row_issues": []}
-                return json.dumps(page).encode("utf-8"), "application/json"
             return None
 
     monkeypatch.setattr("app.retail.routers.imports.get_storage_service", lambda: MockStorage())
@@ -448,18 +437,21 @@ def test_get_history_detail_reads_only_the_requested_r2_preview_page(
     response = authed_client.get(f"/api/imports/history/{batch_id}")
     assert response.status_code == 200
     data = response.json()
-    assert data["clean"]["rows"] == [{"Source": "Cloudflare R2"}]
+    assert data["clean"]["rows"][0]["StockCode"] == "U16085"
     assert data["origin"]["rows"] == []
 
 
-def test_get_history_detail_falls_back_to_db_when_r2_missing(
+def test_original_tab_returns_empty_when_r2_has_no_file_for_this_batch(
     authed_client: TestClient, db_session: Session, monkeypatch
 ):
+    """No DB fallback is left for the Original tab (preview_data is gone) — if R2 has
+    nothing under this batch's storage_key, the tab is simply empty rather than 404ing
+    or reconstructing anything."""
     _make_user(db_session, branch_name="Retail 1")
     summary = _confirm_sale(authed_client)
     batch_id = summary["batch_id"]
+    original_file_cache._path(batch_id).unlink(missing_ok=True)
 
-    # Mock storage where preview_data.json is missing
     class MockStorage:
         is_configured = True
 
@@ -471,6 +463,60 @@ def test_get_history_detail_falls_back_to_db_when_r2_missing(
     response = authed_client.get(f"/api/imports/history/{batch_id}?tab=original")
     assert response.status_code == 200
     data = response.json()
-    # Should fall back to DB origin data
-    assert len(data["origin"]["rows"]) > 0
-    assert data["origin"]["rows"][0][0].startswith("Printed :")
+    assert data["origin"]["rows"] == []
+
+    warnings = authed_client.get(
+        f"/api/imports/history/{batch_id}/warnings?tab=original"
+    )
+    assert warnings.status_code == 200
+    assert warnings.json()["indices"] == []
+
+
+PURCHASE_CSV = (
+    "Stock Code,Description,Location,Bin,Quantity,UOM,Unit Cost\r\n"
+    "Crocs,Crocs,Aung Thit Sar,,6,Each,20050\r\n"
+)
+
+
+def test_download_clean_purchase_returns_csv(
+    authed_client: TestClient, db_session: Session
+):
+    """download-clean's purchase branch used to reference PurchaseLine.qty/
+    total_amount, neither of which exists on that model (only quantity/uom/
+    buying_price do) — this 500'd on any real purchase batch and had no coverage.
+    clean_rows.py fixed it; this pins the corrected shape down."""
+    _make_user(db_session, branch_name="Retail 1")
+    response = authed_client.post(
+        "/api/imports/purchase/confirm",
+        files={"file": ("purchase.csv", io.BytesIO(PURCHASE_CSV.encode()), "text/csv")},
+    )
+    assert response.status_code == 200
+    batch_id = response.json()["batch_id"]
+
+    download = authed_client.get(f"/api/imports/history/{batch_id}/download-clean")
+    assert download.status_code == 200
+    csv_data = download.content.decode("utf-8-sig")
+    assert "StockCode,Description,Quantity,UOM,Buying_Price" in csv_data
+    assert "Crocs" in csv_data
+
+
+def test_original_tab_is_served_from_the_local_copy_kept_at_confirm(
+    authed_client: TestClient, db_session: Session, monkeypatch
+):
+    """Confirm keeps a local copy of the file, so the Original tab never has to pull
+    it back from R2 — even when R2 has nothing at all."""
+    _make_user(db_session, branch_name="Retail 1")
+    batch_id = _confirm_sale(authed_client)["batch_id"]
+    assert original_file_cache.load(batch_id) == SALE_CSV.encode()
+
+    class MockStorage:
+        is_configured = True
+
+        def download_file_bytes(self, key: str):
+            raise AssertionError("R2 should not be touched when the local copy exists")
+
+    monkeypatch.setattr("app.retail.routers.imports.get_storage_service", lambda: MockStorage())
+
+    response = authed_client.get(f"/api/imports/history/{batch_id}?tab=original")
+    assert response.status_code == 200
+    assert len(response.json()["origin"]["rows"]) > 0

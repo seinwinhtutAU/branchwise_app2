@@ -125,6 +125,7 @@ interface Props {
   period: PeriodKey;
   dateFrom: string;
   dateTo: string;
+  month: string;
   canLoad: boolean;
   onViewWarnings: () => void;
 }
@@ -135,6 +136,7 @@ export function RevenueTab({
   period,
   dateFrom,
   dateTo,
+  month,
   canLoad,
   onViewWarnings,
 }: Props): React.JSX.Element {
@@ -143,7 +145,7 @@ export function RevenueTab({
   // selection shows the numbers it showed last time instead of a skeleton. See
   // lib/queryClient.ts.
   const url = canLoad
-    ? dashboardUrl("revenue", branchId, { period, dateFrom, dateTo })
+    ? dashboardUrl("revenue", branchId, { period, dateFrom, dateTo, month })
     : null;
   const { data: fetched, isRefreshing, failed, reload } =
     useUrlQuery<RevenueDashboardData>(url, session, "Revenue dashboard");
@@ -187,19 +189,19 @@ export function RevenueTab({
           label="Net Revenue"
           value={formatMoney(data.net_revenue.value)}
           deltaPct={data.net_revenue.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
         />
         <StatTile
           label="Transactions"
           value={formatCount(data.transaction_count.value)}
           deltaPct={data.transaction_count.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
         />
         <StatTile
           label="Average Sale Value"
           value={formatMoney(data.avg_basket.value)}
           deltaPct={data.avg_basket.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo)}
+          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
         />
       </div>
 

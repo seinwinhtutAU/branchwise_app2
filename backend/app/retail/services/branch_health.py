@@ -1539,13 +1539,14 @@ def build_overview_dashboard(
     period: PeriodKey,
     date_from: date | None = None,
     date_to: date | None = None,
+    month: str | None = None,
 ) -> dict:
     # Imported here rather than at module scope because app/retail/services/early_warning.py
     # reads this module's BranchSnapshot and MIN_COST_COVERAGE_PCT — the dependency
     # runs scores -> alerts, and this one call is the only place it points back.
     from app.retail.services import early_warning
 
-    period_range = resolve_period(period, date_from=date_from, date_to=date_to)
+    period_range = resolve_period(period, date_from=date_from, date_to=date_to, month=month)
     snapshot = build_snapshot(db, branch_id, period_range)
     scored = score_branch(snapshot, get_branch_health_weights(db))
     return {

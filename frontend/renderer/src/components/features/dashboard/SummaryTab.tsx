@@ -22,6 +22,7 @@ interface Props {
   period: PeriodKey;
   dateFrom: string;
   dateTo: string;
+  month: string;
   canLoad: boolean;
   onOpenDashboard?: (tab: "revenue" | "cost" | "inventory" | "customer") => void;
 }
@@ -272,11 +273,12 @@ export function SummaryTab({
   period,
   dateFrom,
   dateTo,
+  month,
   canLoad,
   onOpenDashboard,
 }: Props): React.JSX.Element {
   const url = canLoad
-    ? dashboardUrl("summary", branchId, { period, dateFrom, dateTo })
+    ? dashboardUrl("summary", branchId, { period, dateFrom, dateTo, month })
     : null;
 
   const { data: fetched, isRefreshing, failed, reload } =
