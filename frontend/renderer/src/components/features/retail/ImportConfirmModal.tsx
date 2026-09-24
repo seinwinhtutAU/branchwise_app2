@@ -335,7 +335,7 @@ export default function ImportConfirmModal({
     if (isBranchMissing) {
       showToast(
         "error",
-        "Please select a branch at the top right before confirming.",
+        "Please select a branch in the sidebar before confirming.",
       );
       return;
     }
@@ -589,7 +589,7 @@ export default function ImportConfirmModal({
             <div className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/25 flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
               <WarningIcon className="w-3.5 h-3.5 shrink-0" />
               <span className="text-[11px]">
-                Select target branch from the top right of the page before
+                Select target branch from the sidebar before
                 confirming.
               </span>
             </div>

@@ -66,8 +66,9 @@ function renderDimensionIcon(
 
 function statusForScore(score: number | null): HealthStatus | null {
   if (score === null) return null;
-  if (score >= 80) return "healthy";
-  if (score >= 60) return "needs_attention";
+  const rounded = Math.round(score);
+  if (rounded >= 80) return "healthy";
+  if (rounded >= 60) return "needs_attention";
   return "critical";
 }
 
@@ -236,7 +237,8 @@ function BranchHealthCard({
   rank: number;
   onOpen: (branchId: string) => void;
 }): React.JSX.Element {
-  const meta = branch.status ? STATUS_META[branch.status] : null;
+  const status = statusForScore(branch.overall_score) ?? branch.status;
+  const meta = status ? STATUS_META[status] : null;
   const actionableAlerts = branch.alerts.filter(
     (a) =>
       a.dimension !== "data_quality" &&
@@ -299,7 +301,7 @@ function BranchHealthCard({
           </div>
           <ScoreBar
             score={branch.overall_score}
-            status={branch.status}
+            status={status}
             className="h-2 w-full"
           />
         </div>
@@ -389,7 +391,8 @@ function DimensionMatrixCard({
   onOpenEvidence: (target: EvidenceTarget) => void;
 }): React.JSX.Element {
   const evidence = DIMENSION_EVIDENCE[dimension.key];
-  const meta = dimension.status ? STATUS_META[dimension.status] : null;
+  const status = statusForScore(dimension.score) ?? dimension.status;
+  const meta = status ? STATUS_META[status] : null;
   const weight = dimension.effective_weight ?? dimension.weight;
   const actionableAlerts = alerts.filter(
     (a) =>

@@ -83,6 +83,7 @@ interface Props {
   session: Session;
   onViewBatch: (batchId: string) => void;
   branchOptions: string[];
+  branchFilter?: string;
   profile: Profile | null;
   // Set when arriving here from a Warning row's "Source Import" link — scrolls that
   // exact row into view and rings it so it's obvious which one to revert.
@@ -122,7 +123,7 @@ function statusBadgeVariant(status: string): "success" | "info" | "default" {
 }
 
 function importTypeLabel(importType: string): string {
-  if (importType === "general") return "Daily operation cost";
+  if (importType === "general") return "General File";
   return importType.charAt(0).toUpperCase() + importType.slice(1);
 }
 
@@ -245,7 +246,8 @@ function ImportHistoryActions({
 function ImportHistoryTable({
   session,
   onViewBatch,
-  branchOptions,
+  branchOptions: _branchOptions,
+  branchFilter: branchFilterProp = "",
   profile,
   highlightBatchId,
   onFileReady,
@@ -288,7 +290,6 @@ function ImportHistoryTable({
   // Defaults to hiding Removed/Reimported rows — they're kept as an audit trail, not
   // something worth seeing on every visit. Still reachable via the Status filter itself.
   const [statusFilter, setStatusFilter] = useState(DEFAULT_STATUS_FILTER);
-  const [branchFilter, setBranchFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -307,7 +308,6 @@ function ImportHistoryTable({
   const hasActiveFilters =
     typeFilter !== "" ||
     statusFilter !== DEFAULT_STATUS_FILTER ||
-    branchFilter !== "" ||
     dateFrom !== "" ||
     dateTo !== "";
 
@@ -318,7 +318,6 @@ function ImportHistoryTable({
   function clearFilters(): void {
     setTypeFilter("");
     setStatusFilter("");
-    setBranchFilter("");
     setDateFrom("");
     setDateTo("");
   }
@@ -405,10 +404,10 @@ function ImportHistoryTable({
       (row) =>
         (!typeFilter || row.import_type === typeFilter) &&
         (!statusFilter || row.status === statusFilter) &&
-        (!branchFilter || row.branch_name === branchFilter) &&
+        (!branchFilterProp || row.branch_name === branchFilterProp) &&
         inDateRange(row.created_at, { from: dateFrom, to: dateTo }),
     );
-  }, [rows, typeFilter, statusFilter, branchFilter, dateFrom, dateTo]);
+  }, [rows, typeFilter, statusFilter, branchFilterProp, dateFrom, dateTo]);
 
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
@@ -564,12 +563,6 @@ function ImportHistoryTable({
       ),
     ];
   }, [rows]);
-  const branchOptionsList = useMemo(() => {
-    if (!rows) return [];
-    return branchOptions.length > 0
-      ? branchOptions
-      : distinctValues(rows, "branch_name");
-  }, [rows, branchOptions]);
 
   return (
     <div className="flex flex-col" style={containerStyle}>
@@ -586,7 +579,7 @@ function ImportHistoryTable({
                 Import History
               </h2>
               <span className="text-xs text-text-muted hidden sm:inline">
-                Includes daily operation cost files stored unchanged, alongside
+                Includes general files stored unchanged, alongside
                 your confirmed retail imports.
               </span>
             </div>
@@ -630,23 +623,6 @@ function ImportHistoryTable({
                   ))}
                 </Select>
               </div>
-
-              {branchOptionsList.length > 1 && (
-                <div className="w-36 max-w-full">
-                  <Select
-                    size="sm"
-                    value={branchFilter}
-                    onChange={(e) => setBranchFilter(e.target.value)}
-                  >
-                    <option value="">All branches</option>
-                    {branchOptionsList.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              )}
 
               <div className="flex items-center gap-1.5 text-xs text-text-muted">
                 <span className="font-medium select-none">From</span>

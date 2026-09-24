@@ -240,7 +240,7 @@ function ImportHistoryDetailPage({
             <h2 className="text-lg font-semibold text-text-primary tracking-tight capitalize">
               {detail
                 ? isGeneralFile
-                  ? "Daily operation cost"
+                  ? "General File"
                   : `${detail.import_type} import`
                 : "Import details"}
             </h2>
@@ -389,7 +389,7 @@ function ImportHistoryDetailPage({
 
           {isGeneralFile ? (
             <div className="rounded-lg border border-border bg-bg-subtle px-4 py-3 text-sm text-text-secondary">
-              This daily operation cost file is stored exactly as uploaded.
+              This general file is stored exactly as uploaded.
               Download it to view or use it; no retail records were created.
             </div>
           ) : (

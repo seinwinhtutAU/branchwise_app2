@@ -19,14 +19,30 @@ each `{count, rows}` except `recent_activity` (a flat list):
 - **`recent_activity`** — the 15 most recent receivings/deliveries/payments, merged from all
   three sources and sorted by `created_at desc`.
 
-## Currently hidden
+## Navigation
 
-`HIDDEN_WHOLESALE_NAV_IDS` in `frontend/renderer/src/App.tsx` is `{"monitoring", "reports"}` —
-both routes remain fully reachable in code (`WHOLESALE_NAV_ITEMS` still lists `monitoring`,
-labelled "Dashboard," first in the array, and `reports` near the end, before Master Data), but
-that set filters both out of the rendered sidebar for the wholesale workspace specifically. The
-comment there: *"Keep the wholesale Dashboard and Reports routes available, but hide their tabs
-from the left navigation until those screens are ready to be part of the daily workflow."*
+`HIDDEN_WHOLESALE_NAV_IDS` in `frontend/renderer/src/App.tsx` is now `{"reports"}`: the
+Dashboard tab is shown in the wholesale sidebar (it carries the data export below), while
+Reports stays hidden but reachable in code until it is ready for the daily workflow.
+
+## Export all wholesale data
+
+The Dashboard header has **Export to Excel** and **CSV files** buttons
+(`monitoring/ExportDataButtons.tsx`), which call `GET /api/wholesale/export?format=xlsx|csv`
+(`backend/app/wholesale/routers/export.py`, tables defined in `services/export.py`).
+
+- One workbook (or a zip of CSVs) with a "Read Me" sheet plus one flat table per topic:
+  Vouchers, Voucher Lines, Supplier Payments, Shipments, Shipment Legs, Receivings,
+  Receiving Items, Receiving Costs, Orders, Order Lines, Customer Payments, Stock Movements,
+  Stock Now, Stock By Gate, Colour Detail (one row per colour), Customer Balances,
+  Write-offs and the master lists.
+- The router calls the same list endpoints the screens use (unpaged), so every status,
+  total and balance matches the screens. Only two things are computed in the export: a
+  line's amount (quantity × price in the unit it was quoted in) and the per-colour split.
+- Money totals appear only on the header tables (Vouchers, Orders), never repeated per
+  line, so summing a column cannot double-count. Quantities are in pairs with sets shown
+  beside them; money is Ks.
+- Wholesale-only (`require_wholesale`); an account tied to a branch exports that branch.
 
 ## Frontend
 

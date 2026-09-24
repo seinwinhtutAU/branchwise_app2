@@ -85,11 +85,13 @@ def allocated_movements(db: Session, branch_id: str | None) -> list[dict]:
     if not orders:
         return []
     rows: list[dict] = []
+    # One query for every order's deliveries, not one per order line.
+    delivered_by_order = delivered_color_pairs_by_orders(db, [order.id for order in orders], branch_id)
     for order in orders:
         for line in order.lines:
             effective_colors = effective_allocated_color_pairs(
                 line,
-                delivered_color_pairs_by_order(db, order.id, line.stock_code, branch_id),
+                delivered_by_order.get(order.id, {}).get(line.stock_code, {}),
             )
             allocated_pairs = sum(effective_colors.values())
             if allocated_pairs <= 0:

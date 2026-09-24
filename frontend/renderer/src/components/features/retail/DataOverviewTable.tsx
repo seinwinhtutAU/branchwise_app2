@@ -146,6 +146,7 @@ interface OverviewResponse {
 export interface DataOverviewTableProps {
   session: Session;
   branchOptions: string[];
+  branchFilter?: string;
   showBuyingPriceSource: boolean;
   saleColumns?: DataTableColumn<SaleRow>[];
   saleFilters?: DataTableFilter<SaleRow>[];
@@ -405,19 +406,20 @@ function formatCell(col: OverviewColumn, value: unknown): string {
 interface MergedTableProps {
   session: Session;
   branchOptions: string[];
+  branchFilter?: string;
   showBuyingPriceSource: boolean;
 }
 
 function MergedDataOverviewTable({
   session,
   branchOptions,
+  branchFilter = "",
   showBuyingPriceSource,
 }: MergedTableProps): React.JSX.Element {
   const showToast = useToast();
   const { aboveRef, containerStyle } = useStickyAbove();
 
   const [search, setSearch] = useState("");
-  const [branchFilter, setBranchFilter] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -451,14 +453,12 @@ function MergedDataOverviewTable({
 
   const hasActiveFilters =
     search !== "" ||
-    branchFilter !== "" ||
     groupFilter !== "" ||
     dateFrom !== "" ||
     dateTo !== "";
 
   function clearFilters(): void {
     setSearch("");
-    setBranchFilter("");
     setGroupFilter("");
     setDateFrom("");
     setDateTo("");
@@ -719,30 +719,6 @@ function MergedDataOverviewTable({
               </div>
 
               {(() => {
-                const options =
-                  branchOptions.length > 0
-                    ? branchOptions
-                    : (data?.branches ?? []);
-                return options.length > 1 ? (
-                  <div className="w-36 max-w-full">
-                    <Select
-                      size="sm"
-                      value={branchFilter}
-                      onChange={(e) => setBranchFilter(e.target.value)}
-                      className="h-8 text-xs"
-                    >
-                      <option value="">All Branches</option>
-                      {options.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                ) : null;
-              })()}
-
-              {(() => {
                 const groupOptions = data?.groups ?? [];
                 return groupOptions.length > 1 ? (
                   <div className="w-36 max-w-full">
@@ -915,6 +891,7 @@ function MergedDataOverviewTable({
 export default function DataOverviewTable({
   session,
   branchOptions,
+  branchFilter = "",
   showBuyingPriceSource,
   saleColumns,
   saleFilters,
@@ -960,20 +937,13 @@ export default function DataOverviewTable({
           serverParam: "search",
         },
         {
-          type: "select",
-          key: "Branch",
-          label: "Branch",
-          options: branchOptions,
-          serverParam: "branch",
-        },
-        {
           type: "dateRange",
           key: "Date",
           label: "Date",
           serverParam: { from: "date_from", to: "date_to" },
         },
       ],
-    [saleFilters, branchOptions],
+    [saleFilters],
   );
 
   const resolvedPurchaseColumns = purchaseColumns ?? DEFAULT_PURCHASE_COLUMNS;
@@ -988,20 +958,13 @@ export default function DataOverviewTable({
           serverParam: "search",
         },
         {
-          type: "select",
-          key: "Branch",
-          label: "Branch",
-          options: branchOptions,
-          serverParam: "branch",
-        },
-        {
           type: "dateRange",
           key: "Date",
           label: "Date",
           serverParam: { from: "date_from", to: "date_to" },
         },
       ],
-    [purchaseFilters, branchOptions],
+    [purchaseFilters],
   );
 
   const salaryFilters: DataTableFilter<SalaryRow>[] = useMemo(
@@ -1012,15 +975,8 @@ export default function DataOverviewTable({
         placeholder: "Employee name",
         serverParam: "search",
       },
-      {
-        type: "select",
-        key: "Branch",
-        label: "Branch",
-        options: branchOptions,
-        serverParam: "branch",
-      },
     ],
-    [branchOptions],
+    [],
   );
 
   return (
@@ -1037,6 +993,7 @@ export default function DataOverviewTable({
         <MergedDataOverviewTable
           session={session}
           branchOptions={branchOptions}
+          branchFilter={branchFilter}
           showBuyingPriceSource={showBuyingPriceSource}
         />
       )}
@@ -1052,6 +1009,8 @@ export default function DataOverviewTable({
           }
           columns={resolvedSaleColumns}
           filters={resolvedSaleFilters}
+          branchFilter={branchFilter}
+          branchOptions={branchOptions}
           rowKey={(row, i) => `${row.SlipNumber}-${i}`}
           emptyTitle="No sales yet"
           emptyDescription="Import a sales file to see it here."
@@ -1064,6 +1023,7 @@ export default function DataOverviewTable({
         <InventoryPage
           session={session}
           branchOptions={branchOptions}
+          branchFilter={branchFilter}
           initialTab={inventoryTarget ?? undefined}
         />
       )}
@@ -1077,6 +1037,8 @@ export default function DataOverviewTable({
           icon={<div className="h-3.5 w-5 rounded-sm bg-pink-400 shrink-0" />}
           columns={resolvedPurchaseColumns}
           filters={resolvedPurchaseFilters}
+          branchFilter={branchFilter}
+          branchOptions={branchOptions}
           rowKey={(row, i) => `${row.StockCode}-${row.Date}-${i}`}
           emptyTitle="No purchases yet"
           emptyDescription="Import a purchase file to see it here."
@@ -1090,23 +1052,33 @@ export default function DataOverviewTable({
           session={session}
           endpoint="/api/salaries"
           title="Salary"
-          description="Employee salary and bonus records from daily operation cost uploads."
+          description="Employee salary and bonus records from General File uploads."
           icon={<div className="h-3.5 w-5 rounded-sm bg-amber-400 shrink-0" />}
           columns={SALARY_COLUMNS}
           filters={salaryFilters}
+          branchFilter={branchFilter}
+          branchOptions={branchOptions}
           rowKey={(row, i) => `${row.Name}-${row.Branch}-${i}`}
           emptyTitle="No salary records yet"
-          emptyDescription="Upload a salary workbook in Daily Operation Cost to populate this table."
+          emptyDescription="Upload a salary workbook in General File to populate this table."
           serverPaged
         />
       )}
 
       {activeTab === "zeroSelling" && (
-        <ZeroSellingPage session={session} branchOptions={branchOptions} />
+        <ZeroSellingPage
+          session={session}
+          branchOptions={branchOptions}
+          branchFilter={branchFilter}
+        />
       )}
 
       {activeTab === "dailyCost" && (
-        <DailyCostPage session={session} branchOptions={branchOptions} />
+        <DailyCostPage
+          session={session}
+          branchOptions={branchOptions}
+          branchFilter={branchFilter}
+        />
       )}
     </div>
   );

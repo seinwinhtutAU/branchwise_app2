@@ -1,4 +1,4 @@
-"""Recognize the simple salary tables that arrive as daily operation cost files."""
+"""Recognize the simple salary tables that arrive as General File uploads."""
 
 import io
 import pandas as pd

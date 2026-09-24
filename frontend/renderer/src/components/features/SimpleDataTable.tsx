@@ -133,9 +133,15 @@ interface Props<T extends object> {
    */
   showTitle?: boolean;
   /**
-   * Optional custom content (e.g. sub-tab pill buttons or status switches)
-   * rendered right below the title row.
+   * Optional active branch filter passed from the left navigation.
+   * When provided, server-paged and non-server-paged requests filter by this branch,
+   * without rendering an in-page branch filter dropdown.
    */
+  branchFilter?: string;
+  /**
+   * Optional full list of branch names for the download/export dialog picker.
+   */
+  branchOptions?: string[];
   headerAddon?: ReactNode;
 }
 
@@ -190,6 +196,8 @@ export function SimpleDataTable<T extends object>({
   serverPaged,
   showHeading = true,
   showTitle = true,
+  branchFilter: branchFilterProp,
+  branchOptions: branchOptionsProp,
   headerAddon,
 }: Props<T>): React.JSX.Element {
   const showToast = useToast();
@@ -249,6 +257,9 @@ export function SimpleDataTable<T extends object>({
     }
     if (searchServerParam && settledSearch)
       params.set(searchServerParam, settledSearch);
+    if (branchFilterProp) {
+      params.set("branch", branchFilterProp);
+    }
     if (filters) {
       for (const filter of filters) {
         if (filter.type !== "select" || !filter.serverParam) continue;
@@ -272,10 +283,15 @@ export function SimpleDataTable<T extends object>({
       page_size: String(PAGE_SIZE),
     });
     url += `?${params.toString()}`;
-  } else if (dateServerParam) {
+  } else {
     const params = new URLSearchParams();
-    if (dateFrom) params.set(dateServerParam.from, dateFrom);
-    if (dateTo) params.set(dateServerParam.to, dateTo);
+    if (dateServerParam) {
+      if (dateFrom) params.set(dateServerParam.from, dateFrom);
+      if (dateTo) params.set(dateServerParam.to, dateTo);
+    }
+    if (branchFilterProp) {
+      params.set("branch", branchFilterProp);
+    }
     const query = params.toString();
     if (query) url += `?${query}`;
   }
@@ -294,30 +310,43 @@ export function SimpleDataTable<T extends object>({
     : null;
 
   const branchOptions = useMemo(() => {
+    if (branchOptionsProp && branchOptionsProp.length > 0) {
+      return branchOptionsProp;
+    }
     if (!branchFilter) return undefined;
     return (
       branchFilter.options ??
       (rows ? distinctValues(rows, branchFilter.key) : [])
     );
-  }, [branchFilter, rows]);
+  }, [branchOptionsProp, branchFilter, rows]);
 
-  const activeBranch = branchFilter
-    ? selectValues[String(branchFilter.key)] ?? ""
-    : "";
+  const activeBranch =
+    branchFilterProp !== undefined
+      ? branchFilterProp
+      : branchFilter
+        ? selectValues[String(branchFilter.key)] ?? ""
+        : "";
 
-  const hasExportDialog = Boolean(dateServerParam || branchFilter);
+  const hasExportDialog = Boolean(
+    dateServerParam ||
+      (branchOptions && branchOptions.length > 0) ||
+      branchFilterProp !== undefined ||
+      branchFilter,
+  );
 
   // Resets to page 1 whenever a settled filter changes — otherwise narrowing the result
   // set can strand the user on a now-empty page.
   const serializedSelectValues = JSON.stringify(selectValues);
   useEffect(() => {
     if (serverPaged) setPage(1);
+    else setClientPageIndex(0);
   }, [
     serverPaged,
     settledSearch,
     settledDateFrom,
     settledDateTo,
     serializedSelectValues,
+    branchFilterProp,
   ]);
 
   const hasActiveFilters =
@@ -338,8 +367,20 @@ export function SimpleDataTable<T extends object>({
   const filteredRows = useMemo(() => {
     if (serverPaged) return rows;
     if (!rows) return null;
-    if (!filters || filters.length === 0) return rows;
-    return rows.filter((row) =>
+    let result = rows;
+    if (branchFilterProp && !serverPaged) {
+      result = result.filter((row) => {
+        const rowVal = String(
+          (row as Record<string, unknown>)["Branch"] ??
+            (row as Record<string, unknown>)["branch"] ??
+            (row as Record<string, unknown>)["branch_name"] ??
+            "",
+        );
+        return !branchFilterProp || rowVal === branchFilterProp;
+      });
+    }
+    if (!filters || filters.length === 0) return result;
+    return result.filter((row) =>
       filters.every((filter) => {
         if (filter.type === "search") {
           return (
@@ -354,7 +395,7 @@ export function SimpleDataTable<T extends object>({
         return inDateRange(row[filter.key], { from: dateFrom, to: dateTo });
       }),
     );
-  }, [rows, filters, search, selectValues, dateFrom, dateTo, serverPaged]);
+  }, [rows, filters, search, selectValues, dateFrom, dateTo, serverPaged, branchFilterProp]);
 
   // Column defs, built once from the caller's plain DataTableColumn list — `meta.align`
   // is what the header/cell renderers below read instead of re-deriving it from `col`.
@@ -453,10 +494,17 @@ export function SimpleDataTable<T extends object>({
     exportOptions?: ExportOptions,
   ): T[] {
     let result = allRows;
-    if (exportOptions?.branch && branchFilter) {
-      result = result.filter(
-        (r) => String(r[branchFilter.key]) === exportOptions.branch,
-      );
+    if (exportOptions?.branch) {
+      result = result.filter((r) => {
+        if (branchFilter) return String(r[branchFilter.key]) === exportOptions.branch;
+        const rowVal = String(
+          (r as Record<string, unknown>)["Branch"] ??
+            (r as Record<string, unknown>)["branch"] ??
+            (r as Record<string, unknown>)["branch_name"] ??
+            "",
+        );
+        return rowVal === exportOptions.branch;
+      });
     }
     if (dateRangeFilter && exportOptions?.from && exportOptions?.to) {
       result = result.filter((r) =>
@@ -474,8 +522,8 @@ export function SimpleDataTable<T extends object>({
   ): Promise<T[] | null> {
     const params = new URLSearchParams({ export: "true" });
     if (exportOptions) {
-      if (exportOptions.branch && branchFilter?.serverParam) {
-        params.set(branchFilter.serverParam, exportOptions.branch);
+      if (exportOptions.branch) {
+        params.set(branchFilter?.serverParam ?? "branch", exportOptions.branch);
       }
       if (dateServerParam && exportOptions.from && exportOptions.to) {
         params.set(dateServerParam.from, exportOptions.from);

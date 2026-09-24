@@ -70,17 +70,8 @@ const ZERO_SELLING_COLUMNS: DataTableColumn<ZeroSellingRow>[] = [
   { key: "Reason", label: "Reason" },
 ];
 
-function filters<T extends { Date: string; Branch: string }>(
-  branchOptions: string[],
-): DataTableFilter<T>[] {
+function dateRangeFilter<T extends { Date: string }>(): DataTableFilter<T>[] {
   return [
-    {
-      type: "select",
-      key: "Branch",
-      label: "Branch",
-      options: branchOptions,
-      serverParam: "branch",
-    },
     {
       type: "dateRange",
       key: "Date",
@@ -93,9 +84,11 @@ function filters<T extends { Date: string; Branch: string }>(
 export default function ZeroSellingPage({
   session,
   branchOptions,
+  branchFilter = "",
 }: {
   session: Session;
   branchOptions: string[];
+  branchFilter?: string;
 }): React.JSX.Element {
   const [activeTab, setActiveTab] = useState<ZeroSellingTab>("conversion");
 
@@ -112,7 +105,9 @@ export default function ZeroSellingPage({
           description="Sales slips ÷ (sales slips + zero-selling records), grouped by date and branch."
           icon={<div className="h-3.5 w-5 rounded-sm bg-violet-400 shrink-0" />}
           columns={CONVERSION_COLUMNS}
-          filters={filters<ConversionRow>(branchOptions)}
+          filters={dateRangeFilter<ConversionRow>()}
+          branchFilter={branchFilter}
+          branchOptions={branchOptions}
           rowKey={(row) => `${row.Date}-${row.Branch}`}
           emptyTitle="No conversion data yet"
           emptyDescription="Upload a zero-selling workbook to calculate conversion rates."
@@ -134,8 +129,10 @@ export default function ZeroSellingPage({
               placeholder: "Category or reason",
               serverParam: "search",
             },
-            ...filters<ZeroSellingRow>(branchOptions),
+            ...dateRangeFilter<ZeroSellingRow>(),
           ]}
+          branchFilter={branchFilter}
+          branchOptions={branchOptions}
           rowKey={(row, index) =>
             `${row.Date}-${row.Time}-${row.Branch}-${index}`
           }

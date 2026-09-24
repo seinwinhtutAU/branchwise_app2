@@ -13,6 +13,7 @@ export type InventorySubTab = "imported" | "lowStock" | "deadStock";
 interface Props {
   session: Session;
   branchOptions: string[];
+  branchFilter?: string;
   // Set only when another section (the dashboard's Inventory tab) sends the user here
   // for a specific list — App.tsx reads this once, on mount, the same way DashboardPage
   // reads its own initialTab; a plain nav click leaves it unset and lands on Imported Data.
@@ -104,6 +105,7 @@ const DEAD_STOCK_COLUMNS: DataTableColumn<DeadStockRow>[] = [
 export function InventoryPage({
   session,
   branchOptions,
+  branchFilter = "",
   initialTab,
 }: Props): React.JSX.Element {
   const [tab, setTab] = useState<InventorySubTab>(initialTab ?? "imported");
@@ -115,16 +117,10 @@ export function InventoryPage({
         keys: ["StockCode", "Description"],
         placeholder: "Stock code or description",
       },
-      {
-        type: "select",
-        key: "Branch",
-        label: "Branch",
-        options: branchOptions,
-      },
       { type: "select", key: "Group", label: "Group" },
       { type: "dateRange", key: "Snapshot_At", label: "Last Updated" },
     ],
-    [branchOptions],
+    [],
   );
 
   const lowStockFilters: DataTableFilter<LowStockRow>[] = useMemo(
@@ -135,15 +131,8 @@ export function InventoryPage({
         placeholder: "Stock code or description",
         serverParam: "search",
       },
-      {
-        type: "select",
-        key: "Branch",
-        label: "Branch",
-        options: branchOptions,
-        serverParam: "branch",
-      },
     ],
-    [branchOptions],
+    [],
   );
 
   const deadStockFilters: DataTableFilter<DeadStockRow>[] = useMemo(
@@ -154,15 +143,8 @@ export function InventoryPage({
         placeholder: "Stock code or description",
         serverParam: "search",
       },
-      {
-        type: "select",
-        key: "Branch",
-        label: "Branch",
-        options: branchOptions,
-        serverParam: "branch",
-      },
     ],
-    [branchOptions],
+    [],
   );
 
   const subTabSwitcher = (
@@ -199,6 +181,8 @@ export function InventoryPage({
           icon={<div className="h-3 w-5 rounded-sm bg-sky-400 shrink-0" />}
           columns={INVENTORY_COLUMNS}
           filters={inventoryFilters}
+          branchFilter={branchFilter}
+          branchOptions={branchOptions}
           rowKey={(row, i) => `${row.StockCode}-${row.Branch}-${i}`}
           emptyTitle="No inventory yet"
           emptyDescription="Import an inventory file to see it here."
@@ -215,6 +199,8 @@ export function InventoryPage({
           icon={<div className="h-3 w-5 rounded-sm bg-sky-400 shrink-0" />}
           columns={LOW_STOCK_COLUMNS}
           filters={lowStockFilters}
+          branchFilter={branchFilter}
+          branchOptions={branchOptions}
           rowKey={(row, i) => `${row.StockCode}-${row.Branch}-${i}`}
           emptyTitle="Nothing running low"
           emptyDescription="No product is estimated to run out soon based on recent sales velocity."
@@ -232,6 +218,8 @@ export function InventoryPage({
           icon={<div className="h-3 w-5 rounded-sm bg-sky-400 shrink-0" />}
           columns={DEAD_STOCK_COLUMNS}
           filters={deadStockFilters}
+          branchFilter={branchFilter}
+          branchOptions={branchOptions}
           rowKey={(row, i) => `${row.StockCode}-${row.Branch}-${i}`}
           emptyTitle="No dead stock"
           emptyDescription="Nothing on hand has gone 90 days without a sale."

@@ -116,7 +116,7 @@ function GeneralFileImportCard({
       invalidateEverything();
       showToast(
         "success",
-        `${files.length} daily operation cost ${files.length === 1 ? "file" : "files"} stored unchanged.${
+        `${files.length} general ${files.length === 1 ? "file" : "files"} stored unchanged.${
           salaryRecordsCreated > 0
             ? ` ${salaryRecordsCreated} salary ${salaryRecordsCreated === 1 ? "record" : "records"} added.`
             : ""
@@ -145,10 +145,10 @@ function GeneralFileImportCard({
             <span className="w-8 h-8 rounded-lg bg-brand-subtle text-brand flex items-center justify-center shrink-0">
               <UploadIcon />
             </span>
-            Daily Operation Cost
+            General File
           </span>
         }
-        description="Store daily cost records unchanged without adding them to retail data"
+        description="Store files unchanged; recognised records are added to the relevant data tables"
       />
 
       <input

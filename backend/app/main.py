@@ -22,6 +22,7 @@ from app.retail.routers import (
     warnings,
 )
 from app.wholesale.routers import (
+    export as wholesale_export,
     finance as wholesale_finance,
     inventory as wholesale_inventory,
     master_data as wholesale_master_data,
@@ -84,6 +85,7 @@ def create_app() -> FastAPI:
     app.include_router(wholesale_monitoring.router)
     app.include_router(wholesale_finance.router)
     app.include_router(wholesale_write_offs.router)
+    app.include_router(wholesale_export.router)
     app.include_router(wholesale_reports.router)
 
     return app

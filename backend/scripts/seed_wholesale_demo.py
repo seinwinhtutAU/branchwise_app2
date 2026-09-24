@@ -20,7 +20,7 @@ CLAUDE.md's note on backend/.env only being read that way).
 import argparse
 import json
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -147,6 +147,7 @@ def _seed_shipments(db, branch: Branch, shipments: list[dict], *, dry_run: bool)
             total_unit=entry["total_unit"],
             packages_sent_by_cargo=entry["packages_sent_by_cargo"],
             final_received_packages=entry["final_received_packages"],
+            lost_packages=entry.get("lost_packages", 0),
             split_from_shipment_id=by_no.get(split_from_no) if split_from_no else None,
             legs=[
                 ShipmentLeg(
@@ -407,6 +408,46 @@ def _seed_outgoing(db, branch: Branch, movements: list[dict], *, dry_run: bool, 
     return created
 
 
+def _seed_write_offs(db, branch: Branch, entries: list[dict], *, dry_run: bool, actor_id: str) -> int:
+    """The explanations for goods that never arrived. The shipment / voucher line already
+    carries its lost count (the demo file's shipments say so); this adds the log entry the
+    Write-offs screen lists, mirroring what app/wholesale/services/write_offs.py writes."""
+    shipments = {r.shipment_no: r for r in db.query(Shipment).filter(Shipment.branch_id == branch.id).all()}
+    lines = {
+        (v.voucher_no, line.stock_code): line
+        for v in db.query(SupplierVoucher).filter(SupplierVoucher.branch_id == branch.id).all()
+        for line in v.lines
+    }
+    created = 0
+    for entry in entries:
+        created += 1
+        if dry_run:
+            continue
+        when = datetime.fromisoformat(entry["date"] + "T09:00:00")
+        if entry["subject"] == "shipment":
+            shipment = shipments[entry["shipment_no"]]
+            row = dict(
+                subject_type="shipment", subject_id=shipment.id, reference=shipment.shipment_no,
+                description=shipment.final_destination, stock_code=shipment.voucher_no,
+                quantity=entry["packages"], unit="package",
+            )
+        else:
+            line = lines[(entry["voucher_no"], entry["stock_code"])]
+            pairs = to_pairs(entry["sets"], WholesaleUnit.SET)
+            line.lost_quantity_pairs += pairs
+            row = dict(
+                subject_type="voucher_line", subject_id=line.id, reference=entry["voucher_no"],
+                description=line.description, stock_code=line.stock_code, quantity=pairs,
+                unit=line.unit.value, unit_conversions=line.unit_conversions,
+            )
+        db.add(WholesaleWriteOff(
+            branch_id=branch.id, reason=entry["reason"], note=entry["note"],
+            recorded_by_user_id=actor_id, created_at=when, **row,
+        ))
+    print(f"  {'would create' if dry_run else 'create'} {created} write-off(s)")
+    return created
+
+
 def _seed_actor_id(db, branch: Branch) -> str:
     user = (
         db.query(User)
@@ -526,6 +567,7 @@ def main() -> None:
         )
 
         if not args.dry_run:
+            db.flush()
             db.commit()
             # What arrived is shared out to the waiting orders the same way opening a
             # package does in the app, so the demo's allocations are ones the app itself
@@ -533,6 +575,10 @@ def main() -> None:
             codes = {entry["stock_code"] for r in data.get("receivings", []) for p in r["packages"] for entry in p["items"]}
             touched = auto_allocate_arrivals(db, branch.id, codes)
             print(f"  allocated arrived stock to {touched} order line(s)")
+
+        _seed_write_offs(
+            db, branch, data.get("write_offs", []), dry_run=args.dry_run, actor_id=_seed_actor_id(db, branch)
+        )
 
         if args.dry_run:
             db.rollback()

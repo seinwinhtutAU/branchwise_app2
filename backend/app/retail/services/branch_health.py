@@ -95,9 +95,10 @@ def _ks(amount: float) -> str:
 def health_status(score: float | None) -> str | None:
     if score is None:
         return None
-    if score >= HEALTHY_SCORE:
+    rounded = round(score)
+    if rounded >= HEALTHY_SCORE:
         return "healthy"
-    if score >= NEEDS_ATTENTION_SCORE:
+    if rounded >= NEEDS_ATTENTION_SCORE:
         return "needs_attention"
     return "critical"
 

@@ -3,6 +3,7 @@ import { type Session } from "@renderer/lib/auth";
 import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
 import { Badge } from "@renderer/components/ui/Badge";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
+import { ExportDataButtons } from "@renderer/components/features/wholesale/monitoring/ExportDataButtons";
 import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Spinner } from "@renderer/components/ui/Spinner";
@@ -307,6 +308,7 @@ export default function MonitoringDashboardPage({
             />
             {isFetching ? "Refreshing…" : "Updates when wholesale data changes"}
           </div>
+          <ExportDataButtons session={session} />
           <RefreshButton
             onClick={() => void query.refetch()}
             refreshing={isFetching}

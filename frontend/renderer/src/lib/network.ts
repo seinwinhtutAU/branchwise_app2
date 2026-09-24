@@ -46,6 +46,12 @@ function isImportConfirm(url: string): boolean {
   return /\/api\/imports\/(sales|inventory|purchase)\/confirm(?:\?|$)/.test(url);
 }
 
+// The wholesale export gathers every table before it answers, which takes longer than a
+// normal page read but is still only a read, so it is safe to retry.
+function isWholesaleExport(url: string): boolean {
+  return /\/api\/wholesale\/export(?:\?|$)/.test(url);
+}
+
 function addIdempotencyKey(
   input: RequestInfo | URL,
   init: RequestInit | undefined,
@@ -202,7 +208,7 @@ export function installNetworkResilience(): () => void {
     // It is safe to retry because it carries an Idempotency-Key, but it is not a
     // lightweight read: give it the write timeout so a large inventory is not marked
     // as a network failure after only 15 seconds.
-    const timeoutMs = isImportConfirm(url)
+    const timeoutMs = isImportConfirm(url) || isWholesaleExport(url)
       ? WRITE_TIMEOUT_MS
       : isRead
         ? READ_TIMEOUT_MS

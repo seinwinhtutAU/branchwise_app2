@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { Session } from "@renderer/lib/auth";
 import { apiBaseUrl } from "@renderer/lib/auth";
 import { useUrlQuery } from "@renderer/lib/queryClient";
@@ -20,7 +20,6 @@ import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { Input } from "@renderer/components/ui/Input";
-import { Select } from "@renderer/components/ui/Select";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { TableSkeleton } from "@renderer/components/ui/Skeleton";
 import { Panel } from "@renderer/components/ui/Panel";
@@ -377,6 +376,7 @@ interface Props {
   session: Session;
   profile: Profile | null;
   branchOptions: BranchOption[];
+  selectedBranchId?: string;
 }
 
 type RecommendationFilter =
@@ -392,12 +392,15 @@ export function PurchasingPage({
   session,
   profile,
   branchOptions,
+  selectedBranchId = "",
 }: Props): React.JSX.Element {
   const isAdmin = profile !== null && profile.branch_id === null;
 
-  const [selectedBranch, setSelectedBranch] = useState<string>(
-    isAdmin && branchOptions.length > 0 ? branchOptions[0].id : "",
-  );
+  // Follows the left-nav branch switcher choice
+  const activeBranchId =
+    (isAdmin ? selectedBranchId : "") ||
+    (isAdmin && branchOptions.length > 0 ? branchOptions[0].id : "");
+
   const [activeRecFilter, setActiveRecFilter] =
     useState<RecommendationFilter>("all");
   const [activeAbcFilter, setActiveAbcFilter] = useState<AbcFilter>("all");
@@ -407,10 +410,14 @@ export function PurchasingPage({
 
   const pageSize = 20;
 
+  useEffect(() => {
+    setPage(1);
+  }, [selectedBranchId]);
+
   // Construct URL query for data fetching
   const queryUrl = useMemo(() => {
     const params = new URLSearchParams();
-    if (selectedBranch) params.set("branch_id", selectedBranch);
+    if (activeBranchId) params.set("branch_id", activeBranchId);
     if (search.trim()) params.set("search", search.trim());
     if (activeRecFilter !== "all") params.set("recommendation", activeRecFilter);
     if (activeAbcFilter !== "all") params.set("abc_class", activeAbcFilter);
@@ -419,7 +426,7 @@ export function PurchasingPage({
 
     return `${apiBaseUrl}/api/purchasing/recommendations?${params.toString()}`;
   }, [
-    selectedBranch,
+    activeBranchId,
     search,
     activeRecFilter,
     activeAbcFilter,
@@ -493,7 +500,7 @@ export function PurchasingPage({
       setIsExporting(true);
       const params = new URLSearchParams();
       params.set("reorder_only", String(reorderOnly));
-      if (selectedBranch) params.set("branch_id", selectedBranch);
+      if (activeBranchId) params.set("branch_id", activeBranchId);
 
       const exportUrl = `${apiBaseUrl}/api/purchasing/export?${params.toString()}`;
       const res = await fetch(exportUrl, {
@@ -657,27 +664,6 @@ export function PurchasingPage({
             </div>
 
             <div className="flex items-center gap-2 flex-wrap shrink-0">
-              {/* Admin Branch Selector */}
-              {isAdmin && branchOptions.length > 0 && (
-                <div className="w-36 max-w-full">
-                  <Select
-                    size="sm"
-                    value={selectedBranch}
-                    onChange={(e) => {
-                      setSelectedBranch(e.target.value);
-                      setPage(1);
-                    }}
-                    className="h-8 text-xs"
-                  >
-                    {branchOptions.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              )}
-
               <Button
                 variant="secondary"
                 size="sm"

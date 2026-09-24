@@ -192,7 +192,7 @@ const RETAIL_NAV_ITEMS: NavItem[] = [
   },
   {
     id: "purchasing",
-    label: "Purchasing",
+    label: "Reorder Items",
     shortLabel: "Reorder",
     icon: <ClipboardIcon />,
   },
@@ -238,9 +238,10 @@ const WHOLESALE_NAV_ITEMS: NavItem[] = [
   },
 ];
 
-// Keep the wholesale Dashboard and Reports routes available, but hide their tabs from
-// the left navigation until those screens are ready to be part of the daily workflow.
-const HIDDEN_WHOLESALE_NAV_IDS = new Set(["monitoring", "reports"]);
+// Reports stays out of the left navigation (its route still works) until that screen is
+// ready to be part of the daily workflow. The Dashboard is shown: it carries the
+// "export all wholesale data" download.
+const HIDDEN_WHOLESALE_NAV_IDS = new Set(["reports"]);
 
 // Retail accounts are scoped strictly to data import & import history.
 const RETAIL_ROLE_NAV_ITEMS: NavItem[] = [
@@ -294,7 +295,7 @@ const SECTION_TITLES: Record<Section, string> = {
   overview: "Data overview",
   sales: "Sale",
   inventory: "Inventory",
-  purchasing: "Purchasing",
+  purchasing: "Reorder items",
   purchase: "Purchase",
   warnings: "Data Quality",
   orders: "Customer orders",
@@ -632,15 +633,15 @@ function App(): React.JSX.Element {
     );
   }, [canManageRetail, isWholesale, isRetailUser, profile?.branch_id, retailBranchOptions]);
 
-  const { data: branchHealth } = useUrlQueries<OverviewData>(
   // Alerts depend on the clock as well as on imports (a missing-file alert only appears
   // after the daily cutoff), and the long default cache never notices the clock — so the
   // badge re-asks every ten minutes, the same span the backend caches the answer for.
+  const { data: branchHealth } = useUrlQueries<OverviewData>(
     businessAlertUrls,
     session,
     "business alerts",
-  );
     { everyMs: 10 * 60 * 1000 },
+  );
   // Every alert the Business Alerts page lists — its headline count — so the badge and
   // that page always show the same number. It follows the left-nav branch switcher the
   // way that page does: one branch chosen counts only that branch, "All branches" counts
@@ -794,20 +795,13 @@ function App(): React.JSX.Element {
         serverParam: "search",
       },
       {
-        type: "select",
-        key: "Branch",
-        label: "Branch",
-        options: branchOptions,
-        serverParam: "branch",
-      },
-      {
         type: "dateRange",
         key: "Date",
         label: "Date",
         serverParam: { from: "date_from", to: "date_to" },
       },
     ],
-    [branchOptions],
+    [],
   );
 
   const purchaseFilters: DataTableFilter<PurchaseRow>[] = useMemo(
@@ -819,20 +813,13 @@ function App(): React.JSX.Element {
         serverParam: "search",
       },
       {
-        type: "select",
-        key: "Branch",
-        label: "Branch",
-        options: branchOptions,
-        serverParam: "branch",
-      },
-      {
         type: "dateRange",
         key: "Date",
         label: "Date",
         serverParam: { from: "date_from", to: "date_to" },
       },
     ],
-    [branchOptions],
+    [],
   );
 
   async function handleSubmit(e: React.FormEvent): Promise<void> {
@@ -1060,6 +1047,7 @@ function App(): React.JSX.Element {
               session={session}
               profile={profile}
               pending={pendingImport}
+              selectedBranchId={selectedBranchId}
               queuePosition={
                 pendingImportQueueTotal > 1
                   ? {
@@ -1143,6 +1131,8 @@ function App(): React.JSX.Element {
                   session={session}
                   profile={profile}
                   branchOptions={branchOptions}
+                  retailBranchOptions={retailBranchOptions}
+                  selectedBranchId={selectedBranchId}
                   onFilesReady={handleFilesReady}
                   onFileReady={handleFileReady}
                   onViewBatch={setViewingBatchId}
@@ -1164,6 +1154,7 @@ function App(): React.JSX.Element {
                 <DataOverviewTable
                   session={session}
                   branchOptions={branchOptions}
+                  branchFilter={selectedBranchName}
                   showBuyingPriceSource={showBuyingPriceSource}
                   saleColumns={saleColumns}
                   saleFilters={saleFilters}
@@ -1189,6 +1180,7 @@ function App(): React.JSX.Element {
                   session={session}
                   profile={profile}
                   branchOptions={retailBranchOptions}
+                  selectedBranchId={selectedBranchId}
                 />
               )}
               {section === "warnings" && (

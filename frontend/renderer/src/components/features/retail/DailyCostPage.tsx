@@ -43,18 +43,13 @@ const COLUMNS: DataTableColumn<DailyCostRow>[] = [
 export default function DailyCostPage({
   session,
   branchOptions,
+  branchFilter = "",
 }: {
   session: Session;
   branchOptions: string[];
+  branchFilter?: string;
 }): React.JSX.Element {
   const filters: DataTableFilter<DailyCostRow>[] = [
-    {
-      type: "select",
-      key: "Branch",
-      label: "Branch",
-      options: branchOptions,
-      serverParam: "branch",
-    },
     {
       type: "dateRange",
       key: "Date",
@@ -72,9 +67,11 @@ export default function DailyCostPage({
       icon={<div className="h-3.5 w-5 rounded-sm bg-orange-400 shrink-0" />}
       columns={COLUMNS}
       filters={filters}
+      branchFilter={branchFilter}
+      branchOptions={branchOptions}
       rowKey={(row) => `${row.Date}-${row.Branch}`}
       emptyTitle="No daily cost records yet"
-      emptyDescription="Upload a General Usage workbook in Daily Operation Cost to populate this table."
+      emptyDescription="Upload a General Usage workbook in General File to populate this table."
       serverPaged
     />
   );

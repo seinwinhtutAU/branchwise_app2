@@ -10,9 +10,9 @@ describe("retail date and time formatting", () => {
     expect(formatRetailDate("2026-09-02")).toBe("02 Sept 2026");
   });
 
-  it("uses AM/PM time without source seconds", () => {
-    expect(formatRetailTime("9:05 PM")).toBe("9:05 PM");
-    expect(formatRetailTime("09:05:22")).toBe("9:05 AM");
+  it("uses AM/PM time with seconds", () => {
+    expect(formatRetailTime("9:05 PM")).toBe("9:05:00 PM");
+    expect(formatRetailTime("09:05:22")).toBe("9:05:22 AM");
   });
 
   it("combines timestamp dates and times with the same convention", () => {
@@ -23,7 +23,7 @@ describe("retail date and time formatting", () => {
       year: "numeric",
     }).format(timestamp);
     const hours = timestamp.getHours();
-    const time = `${hours % 12 || 12}:${String(timestamp.getMinutes()).padStart(2, "0")} ${hours >= 12 ? "PM" : "AM"}`;
+    const time = `${hours % 12 || 12}:${String(timestamp.getMinutes()).padStart(2, "0")}:${String(timestamp.getSeconds()).padStart(2, "0")} ${hours >= 12 ? "PM" : "AM"}`;
 
     expect(formatRetailDateTime("2026-09-02T09:05:22Z")).toBe(
       `${date} · ${time}`,

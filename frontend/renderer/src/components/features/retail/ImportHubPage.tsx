@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@renderer/lib/auth";
-import { apiBaseUrl } from "@renderer/lib/auth";
 import type {
   Profile,
   PendingImport,
   SelectedImportFile,
 } from "@renderer/components/features/types";
+import type { BranchOption } from "@renderer/lib/useBranches";
 import { TabBar, type TabItem } from "@renderer/components/ui/Tabs";
 import FileImportCard from "@renderer/components/features/retail/FileImportCard";
 import GeneralFileImportCard from "@renderer/components/features/retail/GeneralFileImportCard";
@@ -27,6 +27,8 @@ interface ImportHubPageProps {
   session: Session;
   profile: Profile | null;
   branchOptions: string[];
+  retailBranchOptions?: BranchOption[];
+  selectedBranchId?: string;
   onFilesReady?: (files: PendingImport[]) => void;
   onFileReady?: (file: PendingImport) => void;
   onViewBatch: (batchId: string) => void;
@@ -40,6 +42,8 @@ export default function ImportHubPage({
   session,
   profile,
   branchOptions,
+  retailBranchOptions = [],
+  selectedBranchId = "",
   onFilesReady,
   onFileReady,
   onViewBatch,
@@ -50,29 +54,12 @@ export default function ImportHubPage({
   const [activeTab, setActiveTab] = useState<ImportSubTab>(initialTab);
   const [selectedFiles, setSelectedFiles] = useState<SelectedImportFile[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
-  const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+
+  const effectiveBranchId = profile?.branch_id ?? selectedBranchId;
   const importBranchName =
     profile?.branch_name ??
-    branches.find((branch) => branch.id === selectedBranchId)?.name ??
+    retailBranchOptions.find((branch) => branch.id === effectiveBranchId)?.name ??
     null;
-
-  useEffect(() => {
-    if (profile !== null && profile.branch_id !== null) return;
-    fetch(`${apiBaseUrl}/api/branches`, {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setBranches(data);
-          if (data.length > 0) {
-            setSelectedBranchId((prev) => prev || data[0].id);
-          }
-        }
-      })
-      .catch(() => setBranches([]));
-  }, [profile, session.access_token]);
 
   useEffect(() => {
     if (initialTab) {
@@ -129,7 +116,6 @@ export default function ImportHubPage({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* The branch selector is only needed when preparing a new import. */}
       <div className="border-b border-border flex items-center justify-between gap-4">
         <TabBar<ImportSubTab>
           className="border-b-0 w-auto"
@@ -137,27 +123,6 @@ export default function ImportHubPage({
           activeTab={activeTab}
           onSelect={handleTabChange}
         />
-        {activeTab === "import" &&
-          profile !== null &&
-          profile.branch_id === null && (
-            <div className="flex items-center gap-2 pb-1.5 shrink-0">
-              <span className="text-xs text-text-muted font-medium">
-                Branch:
-              </span>
-              <select
-                value={selectedBranchId}
-                onChange={(e) => setSelectedBranchId(e.target.value)}
-                className="text-xs bg-bg-surface border border-border rounded-md px-2.5 py-1 text-text-primary focus:outline-none focus:ring-1 focus:ring-brand font-medium cursor-pointer"
-              >
-                <option value="">Select a branch…</option>
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
       </div>
 
       <div>
@@ -194,7 +159,7 @@ export default function ImportHubPage({
               />
               <GeneralFileImportCard
                 session={session}
-                branchId={profile?.branch_id ?? selectedBranchId}
+                branchId={effectiveBranchId}
               />
             </div>
           </div>
@@ -207,6 +172,7 @@ export default function ImportHubPage({
               session={session}
               onViewBatch={onViewBatch}
               branchOptions={branchOptions}
+              branchFilter={importBranchName ?? ""}
               profile={profile}
               highlightBatchId={highlightBatchId}
               onFileReady={onFileReady}
@@ -226,7 +192,7 @@ export default function ImportHubPage({
         session={session}
         profile={profile}
         files={selectedFiles}
-        selectedBranchId={selectedBranchId}
+        selectedBranchId={effectiveBranchId}
         branchName={importBranchName}
         isOpen={isModalOpen}
         onClose={() => {

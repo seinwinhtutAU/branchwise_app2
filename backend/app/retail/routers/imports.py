@@ -247,7 +247,7 @@ async def import_general_file(
         uploaded_by=user.id,
         filename=file.filename,
         summary={
-            "message": "Daily operation cost file stored unchanged; no retail data was created.",
+            "message": "General file stored unchanged; no recognised records were created.",
             "file_size": len(contents),
         },
         # Mirrored to R2 in the background below, same as sales/inventory/purchase —
@@ -310,7 +310,7 @@ async def import_general_file(
                 ]
             )
         batch.summary = {
-            "message": "Daily operation cost file stored unchanged; recognized operational records were added.",
+            "message": "General file stored unchanged; recognised operational records were added.",
             "file_size": len(contents),
             "salary_records_created": len(salary_rows),
             "zero_selling_records_created": len(zero_selling_rows),
@@ -1663,7 +1663,7 @@ def revert_import_batch(
     if batch.import_type == ImportType.GENERAL:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "Daily operation cost files are stored only and cannot be reverted or reimported",
+            "General files are stored only and cannot be reverted or reimported",
         )
     if (
         user.role == UserRole.RETAIL

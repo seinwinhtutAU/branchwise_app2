@@ -9,19 +9,14 @@ import { maybeCompressFile } from "@renderer/lib/uploadCompression";
 import { Button } from "@renderer/components/ui/Button";
 import { Input } from "@renderer/components/ui/Input";
 import { ProgressBar } from "@renderer/components/ui/ProgressBar";
-import { Select } from "@renderer/components/ui/Select";
 import { ImportDataView } from "./ImportDataView";
 import type { ImportPreviewResult, PendingImport, Profile } from "../types";
-
-interface BranchOption {
-  id: string;
-  name: string;
-}
 
 interface Props {
   session: Session;
   profile: Profile | null;
   pending: PendingImport;
+  selectedBranchId?: string;
   // Set only when this file is one of several picked at once (see FileImportCard) — an
   // ad-hoc single-file reimport (Import History, Warning page) has no queue to show.
   queuePosition?: { index: number; total: number };
@@ -33,6 +28,7 @@ function ImportReviewPage({
   session,
   profile,
   pending,
+  selectedBranchId: selectedBranchIdProp,
   queuePosition,
   onBack,
   onConfirmed,
@@ -47,17 +43,15 @@ function ImportReviewPage({
   } = pending;
   const showToast = useToast();
 
-  const [branches, setBranches] = useState<BranchOption[]>([]);
-  const [selectedBranchId, setSelectedBranchId] = useState("");
-  const needsBranchSelection = profile !== null && profile.branch_id === null;
-  const [branchRequiredError, setBranchRequiredError] = useState(false);
+  const effectiveBranchId = profile?.branch_id ?? selectedBranchIdProp ?? "";
+  const isBranchMissing = profile !== null && profile.branch_id === null && !effectiveBranchId;
 
   // Sale and Inventory dates are cleaned using the branch's own date-format setting
-  // (see backend app.routers.imports) — for an admin account, that branch isn't known
-  // until picked above, so the very first preview (before any pick) can only guess.
-  // Once a branch is picked, re-run preview with it so what's shown here always
-  // matches what actually gets saved on Confirm, rather than only fixing itself
-  // silently after the fact. Purchase has no per-line date in the source file at all,
+  // (see backend app.routers.imports) — for an admin account, that branch is resolved
+  // from the sidebar picker. Once a branch is known, re-run preview with it so what's
+  // shown here always matches what actually gets saved on Confirm, rather than only
+  // fixing itself silently after the fact. Purchase has no per-line date in the source
+  // file at all, so it has nothing to re-preview.
   // so it has nothing to re-preview.
   const needsDateFormatRepreview =
     endpoint === "/api/imports/sales" || endpoint === "/api/imports/inventory";
@@ -86,17 +80,7 @@ function ImportReviewPage({
   const alreadyReverted = useRef(false);
 
   useEffect(() => {
-    if (!needsBranchSelection) return;
-    fetch(`${apiBaseUrl}/api/branches`, {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    })
-      .then((r) => r.json())
-      .then(setBranches)
-      .catch(() => setBranches([]));
-  }, [needsBranchSelection, session.access_token]);
-
-  useEffect(() => {
-    if (!needsBranchSelection || !needsDateFormatRepreview || !selectedBranchId)
+    if (!effectiveBranchId || !needsDateFormatRepreview)
       return;
     let cancelled = false;
     setRepreviewing(true);
@@ -108,13 +92,13 @@ function ImportReviewPage({
       ? Promise.resolve(result.staged_upload_id).then((stagedUploadId) => {
           const formData = new FormData();
           formData.append("staged_upload_id", stagedUploadId);
-          formData.append("branch_id", selectedBranchId);
+          formData.append("branch_id", effectiveBranchId);
           return formData;
         })
       : maybeCompressFile(file).then((uploadFile) => {
           const formData = new FormData();
           formData.append("file", uploadFile);
-          formData.append("branch_id", selectedBranchId);
+          formData.append("branch_id", effectiveBranchId);
           return formData;
         })
     )
@@ -144,14 +128,16 @@ function ImportReviewPage({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBranchId, needsBranchSelection, needsDateFormatRepreview]);
+  }, [effectiveBranchId, needsDateFormatRepreview]);
 
   async function handleConfirm(): Promise<void> {
-    if (needsBranchSelection && !selectedBranchId) {
-      setBranchRequiredError(true);
+    if (isBranchMissing) {
+      showToast(
+        "error",
+        "Please select a branch in the sidebar before confirming.",
+      );
       return;
     }
-    setBranchRequiredError(false);
 
     setConfirming(true);
     setWaitingForConnection(false);
@@ -184,7 +170,7 @@ function ImportReviewPage({
 
       function buildFormData(): FormData {
         const formData = new FormData();
-        if (needsBranchSelection) formData.append("branch_id", selectedBranchId);
+        if (effectiveBranchId) formData.append("branch_id", effectiveBranchId);
         if (isPurchaseImport && purchaseDate)
           formData.append("purchase_date", purchaseDate);
         return formData;
@@ -344,32 +330,15 @@ function ImportReviewPage({
                 />
               </div>
             )}
-            {needsBranchSelection && (
-              <div className="w-48">
-                <Select
-                  label="Branch"
-                  value={selectedBranchId}
-                  onChange={(e) => {
-                    setSelectedBranchId(e.target.value);
-                    setBranchRequiredError(false);
-                  }}
-                  error={
-                    branchRequiredError ? "Select a branch first" : undefined
-                  }
-                >
-                  <option value="">Select a branch…</option>
-                  {branches.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+            {isBranchMissing && (
+              <p className="text-sm text-warning self-center">
+                Please select a branch in the sidebar to proceed.
+              </p>
             )}
             <Button
               onClick={handleConfirm}
               loading={confirming}
-              disabled={repreviewing}
+              disabled={repreviewing || isBranchMissing}
             >
               {revertBatchId ? "Confirm & Replace" : "Confirm Import"}
             </Button>
