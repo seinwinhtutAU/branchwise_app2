@@ -42,7 +42,7 @@ measurable, and each dimension's `effective_weight` reports what it really contr
 
 ## What growth is compared with
 
-Every growth figure (revenue, average sale, products sold, transactions) is compared with **the same dates one year earlier**, not with the window right before. This business's sales follow the calendar (festivals, rainy season, school term), so last month is a noisy baseline, and it is the same comparison the Revenue, Cost and Customer tabs use, so the Overview and those pages agree. The Overview header says "vs the same month/dates last year".
+Every growth figure (revenue, average sale, quantity sold, transactions) is compared with **the same dates one year earlier**, not with the window right before. This business's sales follow the calendar (festivals, rainy season, school term), so last month is a noisy baseline, and it is the same comparison the Revenue, Cost and Customer tabs use, so the Overview and those pages agree. The Overview header says "vs the same month/dates last year".
 
 A branch with no sales on those days last year (AungThitSar has data only from December 2025) has no growth to score: those measures are unscored, and their dimension is dropped or re-weighted like any other unmeasured one. It is never quietly compared with the previous month instead, which would put two branches on different yardsticks. Level measures (gross margin, dead stock, aged stock, stockout risk, conversion rate, data quality) do not compare with anything and are unaffected.
 
@@ -64,7 +64,7 @@ Each dimension is a weighted average of its sub-metrics:
 | ------------ | ----------------------------- | -----: | ----------------------------------------------- |
 | Sales        | Revenue growth %              |    50% | -20→0, -10→40, 0→70, +10→100                    |
 | Sales        | Average sale value growth %   |    30% | -15→0, -5→50, 0→75, +5→100                      |
-| Sales        | Products sold growth %        |    20% | -15→0, -5→50, 0→75, +5→100                      |
+| Sales        | Quantity sold growth %        |    20% | -20→0, -10→40, 0→70, +10→100                    |
 | Profit       | Gross margin %                |   100% | 0→0, 10→40, 20→80, 30→100                       |
 | Inventory    | Dead stock %                  |    40% | 20→100, 35→85, 50→60, 65→30, 80→0               |
 | Inventory    | Stockout risk %               |    35% | 0→100, 2→85, 5→60, 10→20, 20→0                  |
@@ -530,9 +530,8 @@ The nav item carries a **count badge**, like Warning's. `App.tsx` fills it from 
 hook and the same URLs (every retail branch at the default 30-day window), so the badge
 and the page can never disagree, and the requests it makes are the ones both the Dashboard
 and this page were going to need anyway — a dedicated count endpoint would have done the
-same work and thrown the result away. Data-quality alerts are left out of the count for
-the same reason they are left out of the page: the Warning badge beside it already counts
-those.
+same work and thrown the result away. The badge counts every alert the page lists (critical, warning and normal, data-quality ones included) — the page's headline count — so the two always show the same number. Both follow the left-nav branch switcher: with one branch chosen only that branch's alerts are counted, with "All branches" every branch's are. The badge re-asks every ten minutes, since some alerts depend on the clock (a missing-file
+alert only appears after the daily cutoff) and the long page cache never notices that.
 
 Following an alert's evidence link crosses sections, so `App.tsx` holds the target and
 passes it to `DashboardPage` as `initialTab`/`initialBranchId`; the page reads them on

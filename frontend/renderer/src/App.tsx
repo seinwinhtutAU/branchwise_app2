@@ -6,7 +6,6 @@ import {
   useUrlQueries,
 } from "@renderer/lib/queryClient";
 import {
-  ACTIONABLE_SEVERITIES,
   dashboardUrl,
   type OverviewData,
 } from "@renderer/components/features/dashboard/helpers";
@@ -619,8 +618,7 @@ function App(): React.JSX.Element {
   // The Business Alerts badge, counted from the same per-branch overview payloads the
   // Dashboard and the Business Alerts page read — so this costs one set of requests that
   // then makes both of those pages open instantly, rather than a separate count endpoint
-  // whose work would be thrown away. Data-quality alerts are excluded here for the same
-  // reason they are excluded from that page: the Warning badge already counts them.
+  // whose work would be thrown away.
   const businessAlertUrls = useMemo(() => {
     if (isWholesale || isRetailUser) return [];
     const branchIds = canManageRetail
@@ -635,25 +633,26 @@ function App(): React.JSX.Element {
   }, [canManageRetail, isWholesale, isRetailUser, profile?.branch_id, retailBranchOptions]);
 
   const { data: branchHealth } = useUrlQueries<OverviewData>(
+  // Alerts depend on the clock as well as on imports (a missing-file alert only appears
+  // after the daily cutoff), and the long default cache never notices the clock — so the
+  // badge re-asks every ten minutes, the same span the backend caches the answer for.
     businessAlertUrls,
     session,
     "business alerts",
   );
-  // `normal` alerts are excluded as well as data-quality ones: they ask for nothing
-  // today, and a badge that counts them stops meaning "things to act on".
+    { everyMs: 10 * 60 * 1000 },
+  // Every alert the Business Alerts page lists — its headline count — so the badge and
+  // that page always show the same number. It follows the left-nav branch switcher the
+  // way that page does: one branch chosen counts only that branch, "All branches" counts
+  // them all.
   const businessAlertCount = useMemo(
     () =>
-      Object.values(branchHealth).reduce(
-        (total, branch) =>
-          total +
-          branch.alerts.filter(
-            (alert) =>
-              alert.dimension !== "data_quality" &&
-              ACTIONABLE_SEVERITIES.includes(alert.severity),
-          ).length,
-        0,
-      ),
-    [branchHealth],
+      Object.values(branchHealth)
+        .filter(
+          (branch) => !selectedBranchId || branch.branch_id === selectedBranchId,
+        )
+        .reduce((total, branch) => total + branch.alerts.length, 0),
+    [branchHealth, selectedBranchId],
   );
 
   const navItems = useMemo(

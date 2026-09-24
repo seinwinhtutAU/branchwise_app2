@@ -239,7 +239,7 @@ export function CustomerTab({
       <Card className="p-3.5 sm:p-4">
         <CardHeader
           title="Items per transaction"
-          description="Distribution of line-item counts per basket."
+          description="How many items were in each transaction."
         />
         <ItemsPerBasketHistogram buckets={data.items_per_basket_histogram} />
       </Card>

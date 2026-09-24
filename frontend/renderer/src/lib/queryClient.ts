@@ -169,6 +169,9 @@ export function useUrlQueries<T>(
   urls: string[],
   session: Session | null,
   label: string,
+  /** For figures that change with the clock rather than with an import — see App's
+   *  Business Alerts badge. Omitted, a query keeps the long default staleTime. */
+  refresh?: { everyMs: number },
 ): UrlQueriesResult<T> {
   const showToast = useToast();
   const results = useQueries({
@@ -176,6 +179,7 @@ export function useUrlQueries<T>(
       queryKey: urlQueryKey(url),
       queryFn: () => fetchJson<T>(url, session as Session),
       enabled: session !== null,
+      ...(refresh ? { staleTime: refresh.everyMs, refetchInterval: refresh.everyMs } : {}),
     })),
   });
 

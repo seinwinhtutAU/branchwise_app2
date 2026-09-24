@@ -1013,3 +1013,24 @@ def test_summary_names_no_peak_hour_when_nothing_sold(
     demand = _summary_demand(authed_client)
     assert demand["peak_period"] == "—"
     assert demand["peak_hour_desc"] == "No transactions in this period"
+
+
+def test_revenue_dashboard_reports_quantity_sold(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-1",
+        sale_date=today, sale_time="10:00", qty=2, net_amount=200,
+    )
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-2",
+        sale_date=today, sale_time="11:00", qty=3, net_amount=300,
+    )
+    db_session.commit()
+
+    body = authed_client.get("/api/dashboard/revenue?period=today").json()
+    assert body["quantity_sold"]["value"] == 5.0

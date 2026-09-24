@@ -57,6 +57,7 @@ from app.services.dashboard import (
     _conversion_stats,
     _cost_totals_and_products,
     _period_label,
+    _quantity_sold,
     _revenue_totals,
     _stock_summary,
     resolve_period,
@@ -182,18 +183,18 @@ DIMENSIONS: tuple[Dimension, ...] = (
                     f"{_ks(s.avg_basket)} per transaction this period, against {_ks(s.previous_avg_basket)} last year."
                 ),
             ),
-            # Revenue can hold up on a shrinking handful of products, which is a different
-            # situation from holding up across the shop; only this tells them apart.
+            # Revenue can hold up on higher prices while fewer pairs actually leave the
+            # shop; only counting the pairs tells those two apart.
             SubMetric(
-                "products_sold_growth_pct",
-                "Products sold",
+                "quantity_sold_growth_pct",
+                "Quantity sold",
                 "pct_change",
                 0.2,
-                _GENTLE_GROWTH_BANDS,
-                definition="How many different products actually sold, against the same days last year.",
+                _GROWTH_BANDS,
+                definition="How many pairs the branch sold, against the same days last year.",
                 calculation=lambda s: (
-                    f"{s.products_sold:,} different products sold this period, against "
-                    f"{s.previous_products_sold:,} last year."
+                    f"{s.quantity_sold:,.0f} pairs sold this period, against "
+                    f"{s.previous_quantity_sold:,.0f} last year."
                 ),
             ),
         ),
@@ -432,8 +433,8 @@ class BranchSnapshot:
     previous_trading_days: int
     # Distinct products that actually sold. A branch can hold its revenue while its
     # range quietly narrows to a few lines, and nothing else on the snapshot notices.
-    products_sold: int
-    previous_products_sold: int
+    quantity_sold: float
+    previous_quantity_sold: float
     # Data quality
     data_issue_count: int
     critical_data_issue_count: int
@@ -511,20 +512,6 @@ def _trading_days(db: Session, branch_id: str, start: date, end: date) -> int:
     day was never imported, should not look like a branch nobody visited."""
     return (
         db.query(func.count(func.distinct(Sale.sale_date)))
-        .filter(
-            Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end
-        )
-        .scalar()
-        or 0
-    )
-
-
-def _products_sold(db: Session, branch_id: str, start: date, end: date) -> int:
-    """Distinct products with at least one sale line in the window — the breadth of what
-    the branch actually sold, not how much of it."""
-    return (
-        db.query(func.count(func.distinct(SaleLine.product_id)))
-        .join(Sale, SaleLine.sale_id == Sale.id)
         .filter(
             Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end
         )
@@ -1260,10 +1247,10 @@ def build_snapshot(
         previous_trading_days=_trading_days(
             db, branch_id, period_range.previous_start, period_range.previous_end
         ),
-        products_sold=_products_sold(
+        quantity_sold=_quantity_sold(
             db, branch_id, period_range.start, period_range.end
         ),
-        previous_products_sold=_products_sold(
+        previous_quantity_sold=_quantity_sold(
             db, branch_id, period_range.previous_start, period_range.previous_end
         ),
         data_issue_count=data_issue_count,
@@ -1324,8 +1311,8 @@ def sub_metric_values(snapshot: BranchSnapshot) -> dict[str, float | None]:
             float(snapshot.transaction_count),
             float(snapshot.previous_transaction_count),
         ),
-        "products_sold_growth_pct": _growth_pct(
-            float(snapshot.products_sold), float(snapshot.previous_products_sold)
+        "quantity_sold_growth_pct": _growth_pct(
+            snapshot.quantity_sold, snapshot.previous_quantity_sold
         ),
         "avg_basket_growth_pct": _growth_pct(
             snapshot.avg_basket, snapshot.previous_avg_basket

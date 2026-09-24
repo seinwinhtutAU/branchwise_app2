@@ -175,6 +175,17 @@ def _revenue_totals(db: Session, branch_id: str, start: date, end: date) -> tupl
     return float(net_revenue), int(transaction_count)
 
 
+def _quantity_sold(db: Session, branch_id: str, start: date, end: date) -> float:
+    """Pairs sold in the window — the sum of every sale line's quantity."""
+    quantity = (
+        db.query(func.coalesce(func.sum(SaleLine.qty), 0))
+        .join(Sale, SaleLine.sale_id == Sale.id)
+        .filter(Sale.branch_id == branch_id, Sale.sale_date >= start, Sale.sale_date <= end)
+        .scalar()
+    )
+    return float(quantity or 0)
+
+
 _kpi = kpi_value
 
 
@@ -328,6 +339,10 @@ def build_revenue_dashboard(
     )
     avg_basket = net_revenue / transaction_count if transaction_count else 0.0
     prev_avg_basket = prev_net_revenue / prev_transaction_count if prev_transaction_count else 0.0
+    quantity_sold = _quantity_sold(db, branch_id, period_range.start, period_range.end)
+    prev_quantity_sold = _quantity_sold(
+        db, branch_id, period_range.previous_start, period_range.previous_end
+    )
 
     return {
         "branch_id": branch_id,
@@ -338,6 +353,7 @@ def build_revenue_dashboard(
         "net_revenue": _kpi(net_revenue, prev_net_revenue),
         "transaction_count": _kpi(float(transaction_count), float(prev_transaction_count)),
         "avg_basket": _kpi(avg_basket, prev_avg_basket),
+        "quantity_sold": _kpi(quantity_sold, prev_quantity_sold),
         "trend": _daily_trend(db, branch_id, period_range.start, period_range.end),
         "top_products": _top_products(db, branch_id, period_range.start, period_range.end),
         "heatmap": _revenue_heatmap(db, branch_id, period_range.start, period_range.end),

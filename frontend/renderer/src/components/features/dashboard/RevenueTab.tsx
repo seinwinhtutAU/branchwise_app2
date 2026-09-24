@@ -56,6 +56,7 @@ interface RevenueDashboardData {
   net_revenue: KpiValue;
   transaction_count: KpiValue;
   avg_basket: KpiValue;
+  quantity_sold: KpiValue;
   trend: TrendPoint[];
   top_products: TopProduct[];
   heatmap: HeatmapCell[];
@@ -165,7 +166,8 @@ export function RevenueTab({
     }
     return (
       <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Skeleton className="h-18" />
           <Skeleton className="h-18" />
           <Skeleton className="h-18" />
           <Skeleton className="h-18" />
@@ -179,7 +181,7 @@ export function RevenueTab({
   return (
     <div className="flex flex-col gap-3">
       <RefreshingHint show={isRefreshing} />
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
         <StatTile
           label="Net Revenue"
           value={formatMoney(data.net_revenue.value)}
@@ -196,6 +198,12 @@ export function RevenueTab({
           label="Average Sale Value"
           value={formatMoney(data.avg_basket.value)}
           deltaPct={data.avg_basket.delta_pct}
+          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
+        />
+        <StatTile
+          label="Quantity Sold"
+          value={formatCount(data.quantity_sold.value)}
+          deltaPct={data.quantity_sold.delta_pct}
           previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
         />
       </div>

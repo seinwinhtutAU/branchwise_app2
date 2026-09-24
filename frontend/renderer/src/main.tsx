@@ -40,7 +40,11 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         // so a cached v2 response crashed the tab reading `.value` of the new fields.
         // v4: the Inventory dashboard gained potential_sale_value, which a cached v3
         // response does not have.
-        buster: "v4",
+        // v5: Business Alerts changed which alerts fall under Data quality, so the cached
+        // Overview responses behind the sidebar badge held the old counts.
+        // v6: the Revenue dashboard gained quantity_sold, which a cached v5 response
+        // does not have.
+        buster: "v6",
       }}
     >
       <ToastProvider>

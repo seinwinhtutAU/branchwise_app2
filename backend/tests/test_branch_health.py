@@ -173,8 +173,8 @@ def _snapshot(**overrides) -> branch_health.BranchSnapshot:
         previous_single_item_basket_share_pct=20.0,
         trading_days=30,
         previous_trading_days=30,
-        products_sold=120,
-        previous_products_sold=120,
+        quantity_sold=250.0,
+        previous_quantity_sold=250.0,
         data_issue_count=0,
         critical_data_issue_count=0,
         data_issue_sections=(),
@@ -278,7 +278,7 @@ def test_no_previous_period_leaves_sales_unscored_rather_than_zero():
             previous_net_revenue=0.0,
             previous_transaction_count=0,
             previous_avg_basket=0.0,
-            previous_products_sold=0,
+            previous_quantity_sold=0.0,
         )
     )
     sales = _dimension(scored, "sales")
@@ -782,3 +782,22 @@ def test_aged_stock_ignores_products_with_no_purchase_on_file(db_session):
     aged, judged = branch_health._aged_stock(db_session, branch.id, today=today)
     assert [item["stock_code"] for item in aged] == ["OLD"]
     assert judged == 3  # UNKNOWN has no purchase, so it is neither aged nor counted
+
+
+def test_sales_health_scores_quantity_sold_not_product_variety():
+    sales_dim = next(d for d in branch_health.DIMENSIONS if d.key == "sales")
+    assert [s.key for s in sales_dim.sub_metrics] == [
+        "revenue_growth_pct",
+        "avg_basket_growth_pct",
+        "quantity_sold_growth_pct",
+    ]
+    assert [s.weight for s in sales_dim.sub_metrics] == [0.5, 0.3, 0.2]
+
+    # 90 pairs against 100 last year: down 10%, which scores like a 10% fall in revenue.
+    scored = branch_health.score_branch(_snapshot(quantity_sold=90.0, previous_quantity_sold=100.0))
+    quantity = next(
+        m for m in _dimension(scored, "sales")["sub_metrics"] if m["key"] == "quantity_sold_growth_pct"
+    )
+    assert round(quantity["value"], 1) == -10.0
+    assert quantity["score"] == 40.0
+    assert quantity["calculation"] == "90 pairs sold this period, against 100 last year."
