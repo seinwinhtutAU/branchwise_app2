@@ -75,6 +75,10 @@ NEEDS_ATTENTION_SCORE = 60.0
 # the reason surfaced, rather than quietly scoring a guess.
 MIN_COST_COVERAGE_PCT = 50.0
 
+# Stock last bought more than this many days ago counts as aged (the Inventory alert and the
+# Inventory score's "Aged stock share" both use it).
+AGED_STOCK_DAYS = 180
+
 # How many at-risk products an alert names outright. Five is what fits in the alert panel
 # without turning it into the Inventory tab's low-stock table, which is where the rest of
 # them live and where the alert's own button goes.
@@ -164,8 +168,8 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct_change",
                 0.5,
                 _GROWTH_BANDS,
-                definition="How much money the branch took in, against the period before it.",
-                calculation=lambda s: f"{_ks(s.net_revenue)} this period, against {_ks(s.previous_net_revenue)} before.",
+                definition="How much money the branch took in, against the same days last year.",
+                calculation=lambda s: f"{_ks(s.net_revenue)} this period, against {_ks(s.previous_net_revenue)} last year.",
             ),
             SubMetric(
                 "transaction_growth_pct",
@@ -173,10 +177,10 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct_change",
                 0.3,
                 _GROWTH_BANDS,
-                definition="How many transactions the branch made, against the period before it.",
+                definition="How many transactions the branch made, against the same days last year.",
                 calculation=lambda s: (
                     f"{s.transaction_count:,} transactions this period, against "
-                    f"{s.previous_transaction_count:,} before."
+                    f"{s.previous_transaction_count:,} last year."
                 ),
             ),
             # Related to the transaction count above but not the same question, and the
@@ -192,10 +196,10 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct_change",
                 0.2,
                 _GENTLE_GROWTH_BANDS,
-                definition="How many different products actually sold, against the period before it.",
+                definition="How many different products actually sold, against the same days last year.",
                 calculation=lambda s: (
                     f"{s.products_sold:,} different products sold this period, against "
-                    f"{s.previous_products_sold:,} before."
+                    f"{s.previous_products_sold:,} last year."
                 ),
             ),
         ),
@@ -226,9 +230,9 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct_points",
                 0.4,
                 ((-10.0, 0.0), (-3.0, 50.0), (0.0, 75.0), (3.0, 100.0)),
-                definition="Whether the branch is keeping more or less of each sale than it was before.",
+                definition="Whether the branch is keeping more or less of each sale than it did on the same days last year.",
                 calculation=lambda s: (
-                    f"{s.gross_margin_pct:.1f}% this period, against {s.previous_gross_margin_pct:.1f}% before."
+                    f"{s.gross_margin_pct:.1f}% this period, against {s.previous_gross_margin_pct:.1f}% last year."
                     if s.gross_margin_pct is not None
                     and s.previous_gross_margin_pct is not None
                     else None
@@ -246,7 +250,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "dead_stock_share_pct",
                 "Dead stock share",
                 "pct",
-                0.5,
+                0.4,
                 ((20.0, 100.0), (35.0, 85.0), (50.0, 60.0), (65.0, 30.0), (80.0, 0.0)),
                 definition=(
                     f"How much of the shop is products that are still on the shelf but have not sold "
@@ -262,7 +266,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "stockout_risk_share_pct",
                 "Stockout risk share",
                 "pct",
-                0.5,
+                0.35,
                 ((0.0, 100.0), (2.0, 85.0), (5.0, 60.0), (10.0, 20.0), (20.0, 0.0)),
                 definition=(
                     f"How much of the shop is about to run out — under {LOW_DAYS_OF_STOCK} days of stock "
@@ -272,6 +276,24 @@ DIMENSIONS: tuple[Dimension, ...] = (
                     f"{s.critical_count + s.low_count:,} of {s.sku_count:,} products "
                     f"({s.critical_count:,} critical, {s.low_count:,} low)."
                     if s.sku_count
+                    else None
+                ),
+            ),
+            SubMetric(
+                "aged_stock_share_pct",
+                "Aged stock share",
+                "pct",
+                0.25,
+                ((0.0, 100.0), (10.0, 80.0), (25.0, 50.0), (40.0, 20.0), (60.0, 0.0)),
+                definition=(
+                    f"How much of the shop has been on the shelf for more than {AGED_STOCK_DAYS} days "
+                    "since it was last bought. Products with no purchase on file are left out, "
+                    "since their age is unknown."
+                ),
+                calculation=lambda s: (
+                    f"{s.aged_stock_count:,} of {s.aged_stock_judged_count:,} products with stock "
+                    "and a purchase record."
+                    if s.aged_stock_judged_count
                     else None
                 ),
             ),
@@ -297,9 +319,9 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct_change",
                 0.3,
                 _GENTLE_GROWTH_BANDS,
-                definition="How much a customer spends in one transaction, against the period before.",
+                definition="How much a customer spends in one transaction, against the same days last year.",
                 calculation=lambda s: (
-                    f"{_ks(s.avg_basket)} per transaction this period, against {_ks(s.previous_avg_basket)} before."
+                    f"{_ks(s.avg_basket)} per transaction this period, against {_ks(s.previous_avg_basket)} last year."
                 ),
             ),
             SubMetric(
@@ -308,11 +330,11 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct_change",
                 0.3,
                 _GENTLE_GROWTH_BANDS,
-                definition="How many transactions the branch makes on a day it is open, against the period before.",
+                definition="How many transactions the branch makes on a day it is open, against the same days last year.",
                 calculation=lambda s: (
                     f"{s.transaction_count / s.trading_days:.1f} transactions a day this period "
                     f"({s.transaction_count:,} over {s.trading_days:,} open days), against "
-                    f"{s.previous_transaction_count / s.previous_trading_days:.1f} before."
+                    f"{s.previous_transaction_count / s.previous_trading_days:.1f} last year."
                     if s.trading_days and s.previous_trading_days
                     else None
                 ),
@@ -491,6 +513,11 @@ class BranchSnapshot:
     # How many days back from today the period reaches — so the Warning page can open on
     # the same stretch of days an alert's counts came from.
     warning_window_days: int | None = None
+    # Every product held past AGED_STOCK_DAYS — the count behind the Inventory score,
+    # where `aged_footwear` above is only the alert's shortlist.
+    aged_stock_count: int = 0
+    # Of the products with stock, how many have a purchase on file and so could be judged.
+    aged_stock_judged_count: int = 0
 
 
 def _growth_pct(current: float, previous: float) -> float | None:
@@ -813,8 +840,22 @@ def _find_urgent_reorders(low_stock_items: list[dict]) -> tuple[dict, ...]:
 
 
 def _find_aged_footwear(
-    db: Session, branch_id: str, aging_days: int = 180, today: date | None = None
+    db: Session, branch_id: str, aging_days: int = AGED_STOCK_DAYS, today: date | None = None
 ) -> tuple[dict, ...]:
+    """The oldest few aged products, for the alert's shortlist."""
+    return tuple(_aged_stock(db, branch_id, aging_days, today)[0][:15])
+
+
+def _aged_stock(
+    db: Session, branch_id: str, aging_days: int = AGED_STOCK_DAYS, today: date | None = None
+) -> tuple[list[dict], int]:
+    """`(aged products, products that could be judged)`.
+
+    Aged = on the shelf now and last bought more than `aging_days` ago, oldest first.
+    Only products with a purchase on file can be judged: a stock file says when this app
+    first saw a product, not when it was bought, so without a purchase record the age is
+    unknown and the product is left out of both numbers rather than guessed at. The
+    Inventory score wants both counts (aged ÷ judged); the alert only lists a shortlist."""
     today = today or date.today()
     cutoff_date = today - timedelta(days=aging_days)
 
@@ -824,7 +865,7 @@ def _find_aged_footwear(
         .scalar()
     )
     if not latest_snapshot_subq:
-        return ()
+        return [], 0
 
     current_stocks = (
         db.query(
@@ -842,15 +883,14 @@ def _find_aged_footwear(
         .all()
     )
     if not current_stocks:
-        return ()
+        return [], 0
 
     product_ids = [s[0] for s in current_stocks]
 
     purchases = (
         db.query(
             PurchaseLine.product_id,
-            func.min(Purchase.purchase_date).label("earliest_purchase"),
-            func.min(Purchase.import_batch_id).label("batch_id"),
+            func.max(Purchase.purchase_date).label("latest_purchase"),
         )
         .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
         .filter(
@@ -860,37 +900,20 @@ def _find_aged_footwear(
         .group_by(PurchaseLine.product_id)
         .all()
     )
-    purchase_map = {p[0]: (p[1], p[2]) for p in purchases}
-
-    earliest_snapshots = (
-        db.query(
-            StockLevel.product_id,
-            func.min(StockLevel.snapshot_at).label("earliest_snapshot"),
-            func.min(StockLevel.import_batch_id).label("batch_id"),
-        )
-        .filter(
-            StockLevel.branch_id == branch_id,
-            StockLevel.product_id.in_(product_ids),
-        )
-        .group_by(StockLevel.product_id)
-        .all()
-    )
-    snapshot_map = {s[0]: (s[1].date(), s[2]) for s in earliest_snapshots if s[1]}
+    purchase_map = {p[0]: p[1] for p in purchases}
 
     aged_items = []
+    judged = 0
     for pid, on_hand, code, desc in current_stocks:
-        p_date, batch_id = purchase_map.get(pid, (None, None))
-        is_purchase = True
+        p_date = purchase_map.get(pid)
         if not p_date:
-            p_date, batch_id = snapshot_map.get(pid, (None, None))
-            is_purchase = False
-        if not p_date or p_date > cutoff_date:
+            continue
+        judged += 1
+        if p_date > cutoff_date:
             continue
 
         age = (today - p_date).days
-        batch_prefix = f"Batch #{batch_id[:8]} · " if batch_id else ""
-        type_prefix = "Purchased" if is_purchase else "First recorded"
-        batch_label = f"{type_prefix}: {batch_prefix}{p_date.strftime('%d %b %Y')}"
+        batch_label = f"Last purchased: {p_date.strftime('%d %b %Y')}"
         aged_items.append(
             {
                 "stock_code": code,
@@ -903,7 +926,7 @@ def _find_aged_footwear(
         )
 
     aged_items.sort(key=lambda x: -x["age_days"])
-    return tuple(aged_items[:15])
+    return aged_items, judged
 
 
 def _find_seasonal_spikes(
@@ -1263,7 +1286,8 @@ def build_snapshot(
         db, branch_id, stock.get("dead_stock_items", [])
     )
     urgent_reorders = _find_urgent_reorders(stock.get("low_stock_items", []))
-    aged_footwear = _find_aged_footwear(db, branch_id)
+    aged_stock, aged_judged = _aged_stock(db, branch_id)
+    aged_footwear = tuple(aged_stock[:15])
     seasonal_spikes = _find_seasonal_spikes(db, branch_id)
     weekly_pattern = _find_weekly_patterns(
         db, branch_id, period_range.start, period_range.end
@@ -1348,6 +1372,8 @@ def build_snapshot(
         stock_allocations=stock_allocations,
         urgent_reorders=urgent_reorders,
         aged_footwear=aged_footwear,
+        aged_stock_count=len(aged_stock),
+        aged_stock_judged_count=aged_judged,
         seasonal_spikes=seasonal_spikes,
         weekly_pattern=weekly_pattern,
         sale_data_quality_issues=sale_data_quality_issues,
@@ -1424,6 +1450,11 @@ def sub_metric_values(snapshot: BranchSnapshot) -> dict[str, float | None]:
             if snapshot.sku_count
             else None
         ),
+        "aged_stock_share_pct": (
+            snapshot.aged_stock_count / snapshot.aged_stock_judged_count * 100
+            if snapshot.aged_stock_judged_count
+            else None
+        ),
         "data_issue_rate_per_100": (
             snapshot.data_issue_count / snapshot.records_checked * 100
             if snapshot.records_checked
@@ -1442,7 +1473,7 @@ def _unavailable_reason(dimension_key: str, snapshot: BranchSnapshot) -> str:
     of a number, so an unmeasured dimension reads as a gap to fix (usually: import the
     missing data) rather than as a mysterious blank."""
     if dimension_key == "sales":
-        return "No sales in the previous period to compare against."
+        return "No sales on the same days last year to compare against — this branch may not have that history yet."
     if dimension_key == "profit":
         if snapshot.cost_coverage_pct < MIN_COST_COVERAGE_PCT:
             return (
@@ -1454,7 +1485,7 @@ def _unavailable_reason(dimension_key: str, snapshot: BranchSnapshot) -> str:
     if dimension_key == "inventory":
         return "No inventory snapshot imported for this branch yet."
     if dimension_key == "customer":
-        return "No transactions in this period, or none in the previous one to compare against."
+        return "No transactions in this period, or none on the same days last year to compare against."
     if dimension_key == "data_quality":
         return "No sale, purchase, or inventory records in this period to check."
     return "Not enough data to score this dimension."
@@ -1590,7 +1621,13 @@ def build_overview_dashboard(
     # runs scores -> alerts, and this one call is the only place it points back.
     from app.retail.services import early_warning
 
-    period_range = resolve_period(period, date_from=date_from, date_to=date_to, month=month)
+    # Growth is judged against the same dates one year earlier, not the window right
+    # before: this business's sales follow the calendar (festivals, rainy season, school
+    # term), so last month is a noisy baseline. It is also the comparison the Revenue,
+    # Cost and Customer tabs use, so the Overview and those pages agree.
+    period_range = resolve_period(
+        period, date_from=date_from, date_to=date_to, month=month, comparison="year_ago"
+    )
     snapshot = build_snapshot(db, branch_id, period_range)
     scored = score_branch(snapshot, get_branch_health_weights(db))
     return {

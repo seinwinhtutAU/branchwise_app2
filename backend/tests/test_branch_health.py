@@ -13,6 +13,7 @@ from app.retail.models.stock_level import StockLevel
 from app.retail.models.zero_selling import ZeroSellingRecord
 from app.models.user import User, UserRole
 from app.retail.services import branch_health
+from app.services.dashboard import _year_ago
 
 
 # --- fixtures ------------------------------------------------------------------------
@@ -157,6 +158,8 @@ def _snapshot(**overrides) -> branch_health.BranchSnapshot:
         low_count=0,
         watch_count=0,
         dead_stock_count=0,
+        aged_stock_count=0,
+        aged_stock_judged_count=60,
         estimated_stock_value=77_000.0,
         days_of_inventory_on_hand=30.0,
         stock_as_of="2026-09-01T00:00:00",
@@ -213,8 +216,8 @@ def test_score_from_bands_interpolates_between_breakpoints_and_clamps_outside():
 def test_inventory_sub_metrics_and_dead_stock_bands():
     inventory_dim = next(d for d in branch_health.DIMENSIONS if d.key == "inventory")
     sub_keys = [s.key for s in inventory_dim.sub_metrics]
-    assert sub_keys == ["dead_stock_share_pct", "stockout_risk_share_pct"]
-    assert all(s.weight == 0.5 for s in inventory_dim.sub_metrics)
+    assert sub_keys == ["dead_stock_share_pct", "stockout_risk_share_pct", "aged_stock_share_pct"]
+    assert [s.weight for s in inventory_dim.sub_metrics] == [0.4, 0.35, 0.25]
 
     dead_bands = next(s.bands for s in inventory_dim.sub_metrics if s.key == "dead_stock_share_pct")
     assert branch_health.score_from_bands(15.0, dead_bands) == 100.0
@@ -223,6 +226,25 @@ def test_inventory_sub_metrics_and_dead_stock_bands():
     assert branch_health.score_from_bands(50.0, dead_bands) == 60.0
     assert branch_health.score_from_bands(80.0, dead_bands) == 0.0
     assert branch_health.score_from_bands(90.0, dead_bands) == 0.0
+
+
+def test_aged_stock_share_scores_from_bands_and_its_own_count():
+    inventory_dim = next(d for d in branch_health.DIMENSIONS if d.key == "inventory")
+    bands = next(s.bands for s in inventory_dim.sub_metrics if s.key == "aged_stock_share_pct")
+    assert branch_health.score_from_bands(0.0, bands) == 100.0
+    assert branch_health.score_from_bands(10.0, bands) == 80.0
+    assert branch_health.score_from_bands(25.0, bands) == 50.0
+    assert branch_health.score_from_bands(60.0, bands) == 0.0
+
+    scored = branch_health.score_branch(
+        _snapshot(aged_stock_count=25, aged_stock_judged_count=100, sku_count=400)
+    )
+    aged = next(
+        m for m in _dimension(scored, "inventory")["sub_metrics"] if m["key"] == "aged_stock_share_pct"
+    )
+    assert aged["value"] == 25.0
+    assert aged["score"] == 50.0
+    assert aged["calculation"] == "25 of 100 products with stock and a purchase record."
 
 
 def test_conversion_rate_scores_from_bands():
@@ -262,7 +284,7 @@ def test_no_previous_period_leaves_sales_unscored_rather_than_zero():
     sales = _dimension(scored, "sales")
     assert sales["score"] is None
     assert sales["status"] is None
-    assert "previous period" in sales["insufficient_data_reason"]
+    assert "last year" in sales["insufficient_data_reason"]
 
 
 def test_low_cost_coverage_drops_profit_instead_of_scoring_a_guess():
@@ -273,7 +295,7 @@ def test_low_cost_coverage_drops_profit_instead_of_scoring_a_guess():
 
 
 def test_no_inventory_snapshot_leaves_inventory_unscored():
-    scored = branch_health.score_branch(_snapshot(sku_count=0, days_of_inventory_on_hand=None))
+    scored = branch_health.score_branch(_snapshot(sku_count=0, aged_stock_judged_count=0, days_of_inventory_on_hand=None))
     inventory = _dimension(scored, "inventory")
     assert inventory["score"] is None
     assert inventory["insufficient_data_reason"] == "No inventory snapshot imported for this branch yet."
@@ -282,7 +304,7 @@ def test_no_inventory_snapshot_leaves_inventory_unscored():
 def test_overall_score_renormalises_weights_over_scored_dimensions_only():
     """A dropped dimension must not drag the overall score down — it should leave the
     remaining ones sharing 100% of the weight between them."""
-    scored = branch_health.score_branch(_snapshot(sku_count=0, days_of_inventory_on_hand=None))
+    scored = branch_health.score_branch(_snapshot(sku_count=0, aged_stock_judged_count=0, days_of_inventory_on_hand=None))
     assert _dimension(scored, "inventory")["score"] is None
     assert _dimension(scored, "inventory")["effective_weight"] is None
     # Inventory's 25% is gone, so the other four share the whole score.
@@ -413,7 +435,8 @@ def test_overview_endpoint_scores_a_branch_and_returns_its_inputs(
         branch=branch,
         product=product,
         slip_id="before-1",
-        sale_date=today - datetime.timedelta(days=40),
+        # Growth is compared with the same days one year earlier, not the window before.
+        sale_date=_year_ago(today),
         qty=1,
         net_amount=1000,
     )
@@ -493,8 +516,9 @@ def test_overview_accepts_a_custom_range(authed_client: TestClient, db_session: 
     ).json()
     assert body["period"] == "custom"
     assert body["date_from"] == "2026-01-01"
-    assert body["previous_date_to"] == "2025-12-31"
-    assert body["previous_date_from"] == "2025-12-01"
+    # The same dates one year earlier, not the month before.
+    assert body["previous_date_to"] == "2025-01-31"
+    assert body["previous_date_from"] == "2025-01-01"
 
 
 def test_overview_of_a_branch_with_no_data_scores_nothing_rather_than_zero(
@@ -650,7 +674,7 @@ def test_every_measure_explains_itself():
     figures it came from, and the bands it was scored against."""
     scored = branch_health.score_branch(_snapshot())
     measures = [m for dimension in scored["dimensions"] for m in dimension["sub_metrics"]]
-    assert len(measures) == 12
+    assert len(measures) == 13
     for measure in measures:
         assert measure["definition"].strip(), measure["key"]
         assert measure["calculation"], measure["key"]
@@ -690,7 +714,7 @@ def test_a_calculation_names_the_figures_behind_the_number():
 def test_an_unmeasurable_measure_has_no_calculation_to_show():
     """No value means no figures behind it — better an empty field than a sentence
     describing a number the page isn't showing."""
-    scored = branch_health.score_branch(_snapshot(sku_count=0, days_of_inventory_on_hand=None))
+    scored = branch_health.score_branch(_snapshot(sku_count=0, aged_stock_judged_count=0, days_of_inventory_on_hand=None))
     for measure in _dimension(scored, "inventory")["sub_metrics"]:
         assert measure["value"] is None
         assert measure["calculation"] is None
@@ -721,3 +745,58 @@ def test_build_snapshot_computes_conversion_rate_for_tracked_days(db_session: Se
     assert snapshot.conversion_zero_count == 1
     assert snapshot.conversion_rate_pct == pytest.approx(66.67, rel=1e-2)
 
+
+
+def test_aged_stock_ignores_products_with_no_purchase_on_file(db_session):
+    """A stock file only says when the app first saw a product, not when it was bought, so
+    a product with no purchase record is left out of both the aged count and the count it
+    is measured against, rather than being judged on a date that means nothing."""
+    from datetime import date, timedelta
+
+    from app.models.branch import Branch
+    from app.retail.models.product import Product
+    from app.retail.models.purchase import Purchase, PurchaseLine
+    from app.retail.models.stock_level import StockLevel
+
+    branch = Branch(id="br_aged", name="Aged Branch", phone_number="1", address="x")
+    db_session.add(branch)
+    today = date(2026, 9, 24)
+    old, recent, unknown = (
+        Product(id="p_old", stock_code="OLD", description="Old"),
+        Product(id="p_recent", stock_code="RECENT", description="Recent"),
+        Product(id="p_unknown", stock_code="UNKNOWN", description="Unknown"),
+    )
+    db_session.add_all([old, recent, unknown])
+    db_session.flush()
+    snapshot_at = datetime.datetime(2026, 9, 23, 12, 0, 0)
+    for product in (old, recent, unknown):
+        db_session.add(
+            StockLevel(
+                branch_id=branch.id, product_id=product.id, on_hand_qty=5, snapshot_at=snapshot_at
+            )
+        )
+    # "restocked" was first bought long ago but topped up last week, so it is not aged.
+    restocked = Product(id="p_restocked", stock_code="RESTOCKED", description="Restocked")
+    db_session.add(restocked)
+    db_session.flush()
+    db_session.add(
+        StockLevel(branch_id=branch.id, product_id=restocked.id, on_hand_qty=5, snapshot_at=snapshot_at)
+    )
+    for purchase_id, product, days_ago in (
+        ("pu_old", old, 300),
+        ("pu_recent", recent, 10),
+        ("pu_restocked_first", restocked, 400),
+        ("pu_restocked_last", restocked, 7),
+    ):
+        db_session.add(
+            Purchase(id=purchase_id, branch_id=branch.id, purchase_date=today - timedelta(days=days_ago))
+        )
+        db_session.flush()
+        db_session.add(
+            PurchaseLine(purchase_id=purchase_id, product_id=product.id, quantity=5, buying_price=100)
+        )
+    db_session.commit()
+
+    aged, judged = branch_health._aged_stock(db_session, branch.id, today=today)
+    assert [item["stock_code"] for item in aged] == ["OLD"]
+    assert judged == 3  # UNKNOWN has no purchase, so it is neither aged nor counted

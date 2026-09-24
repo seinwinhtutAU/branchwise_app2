@@ -30,7 +30,7 @@ denominator), and `_stock_summary` was split out of `build_inventory_dashboard` 
 score can read the same stock figures without paying for a second warnings pass.
 
 **2. A number that can't be known is `null`, never `0`.** A branch with no
-previous-period sales has no computable growth. A branch whose products have no buying
+sales on the same days last year has no computable growth. A branch whose products have no buying
 price has no computable margin. Scoring either as 0 would tell a manager their branch is
 failing when the truth is that it hasn't been measured — the single most damaging thing
 a health score can do. Instead the sub-metric drops out, the remaining weights within
@@ -39,6 +39,12 @@ plain English what's missing (usually: import the missing records), and if a who
 dimension drops out, the remaining dimensions re-normalise to share 100% of the overall
 score between them. `scored_weight` reports how much of the weight table was actually
 measurable, and each dimension's `effective_weight` reports what it really contributed.
+
+## What growth is compared with
+
+Every growth figure (revenue, transactions, products sold, average sale, transactions per day, margin change) is compared with **the same dates one year earlier**, not with the window right before. This business's sales follow the calendar (festivals, rainy season, school term), so last month is a noisy baseline, and it is the same comparison the Revenue, Cost and Customer tabs use, so the Overview and those pages agree. The Overview header says "vs the same month/dates last year".
+
+A branch with no sales on those days last year (AungThitSar has data only from December 2025) has no growth to score: those measures are unscored, and their dimension is dropped or re-weighted like any other unmeasured one. It is never quietly compared with the previous month instead, which would put two branches on different yardsticks. Level measures (gross margin, dead stock, aged stock, stockout risk, conversion rate, data quality) do not compare with anything and are unaffected.
 
 ## The scoring table
 
@@ -61,8 +67,9 @@ Each dimension is a weighted average of its sub-metrics:
 | Sales        | Products sold growth %        |    20% | -15→0, -5→50, 0→75, +5→100                      |
 | Profit       | Gross margin %                |    60% | 0→0, 10→40, 20→80, 30→100                       |
 | Profit       | Margin change (pp)            |    40% | -10→0, -3→50, 0→75, +3→100                      |
-| Inventory    | Dead stock share %            |    50% | 20→100, 35→85, 50→60, 65→30, 80→0               |
-| Inventory    | Stockout risk share %         |    50% | 0→100, 2→85, 5→60, 10→20, 20→0                  |
+| Inventory    | Dead stock share %            |    40% | 20→100, 35→85, 50→60, 65→30, 80→0               |
+| Inventory    | Stockout risk share %         |    35% | 0→100, 2→85, 5→60, 10→20, 20→0                  |
+| Inventory    | Aged stock share %            |    25% | 0→100, 10→80, 25→50, 40→20, 60→0                |
 | Customer     | Average sale value growth %   |    30% | -15→0, -5→50, 0→75, +5→100                      |
 | Customer     | Transactions-per-day growth % |    30% | same as above                                   |
 | Customer     | Conversion rate %             |    40% | 30→0, 45→40, 60→70, 75→85, 85→100               |
@@ -107,6 +114,8 @@ Status bands, used identically by the gauge, the dimension bars and (later) the 
   business and is not worth a quarter of the score, so the dimension is dropped with a
   reason naming the actual coverage. `cost_coverage_pct` is always reported in
   `metrics` regardless.
+
+**Aged stock share** is the share of products on the shelf now that were last bought more than 180 days ago, out of the products that have a purchase record. Using the *last* purchase means a product that was restocked recently is not counted as aged. It is the same list the "Inventory aging" alert shows, so the alert and the score always agree. A product with no purchase on file is left out of both the count and the total: a stock file only says when this app first saw a product, not when it was bought, so its age is unknown and would only ever look young. With no purchase records at all the measure is unscored, and the Inventory score is worked out from the other two.
 
 ## The Early Warning engine
 
@@ -198,11 +207,11 @@ figures laid out and labelled, in the order a reader asks for them:
    is a claim, while sales, cost of goods, what was kept and the margin — each with its
    previous value — is that claim with its working attached, checkable against the shop's
    own books. Two shapes, because the two kinds of row do not share columns:
-   **movements** get a four-column table headed _Last period · This period · Change_, and
+   **movements** get a four-column table headed _Same days last year · This period · Change_, and
    **plain facts** ("Products affected · 3 of 908") a two-column key-value table with no
    header, since the left column already is the label. An alert producing both (fewer
    customers than before) shows the movements first, as that is what it is claiming. The headers stay
-   "Last period"/"This period" whatever period is selected — the exact days are named in
+   "Same days last year"/"This period" whatever period is selected — the exact days are named in
    the line above, and a header that changed with the period would restate them worse.
    Both tables are width-capped: the row this panel expands inside is as wide as the
    Business Alerts table, and a four-column figure table stretched across all of it puts a
@@ -578,7 +587,7 @@ and that a threshold set saved before a rule existed falls back to that rule's d
 score while leaving each dimension's own score untouched, the payload reporting the
 weight actually used, weights that don't sum to 1 still scoring, saved weights reaching
 the endpoint, the weight table summing to 1 at both levels, band interpolation and clamping, the non-monotonic days-of-inventory band,
-every "unmeasured is null not zero" path (no previous period, low cost coverage, no
+every "unmeasured is null not zero" path (no sales last year, low cost coverage, no
 stock snapshot, no records at all), sub-metric-level drop-out without losing the whole
 dimension, weight re-normalisation and the overall arithmetic, data quality scoring as a
 rate, and — at the endpoint level — the default 30d window, custom ranges, retail-only

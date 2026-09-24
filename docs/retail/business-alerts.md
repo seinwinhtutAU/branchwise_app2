@@ -17,7 +17,7 @@ operations and immediate purchasing decisions can be reviewed separately.
 | Urgent reorder | Critical | An active-selling product has three or fewer days of stock cover. | Place an urgent purchase order using the recommended quantity. |
 | Physical stock audit | Warning | Inventory discrepancies require a physical count. The checking sheet unlocks after the cutoff once today's Sale and Inventory imports are complete. | Open Checking, count stock, correct the external system, and re-import Inventory. |
 | Stock allocation | Warning | A branch has stock with no sales in 90 days while another branch sells the same product. | Transfer the recommended quantity to the selling branch. |
-| Inventory aging | Warning | Footwear stock has been held for more than 180 days. | Review the purchase batch and use clearance, promotion, or return actions. |
+| Inventory aging | Warning | Footwear stock has been held for more than 180 days since it was last bought. Products with no purchase record are not judged (a stock file does not say when something was bought). | Review the purchase batch and use clearance, promotion, or return actions. |
 | Seasonal demand | Normal | Products sold strongly in the equivalent calendar month last year. | Prepare stock and supplier orders for the expected demand. |
 | Weekly demand pattern | Normal | Saturday/Sunday demand is concentrated, or a day sells much more than the weekday average. | Replenish the sales floor before the peak day. |
 

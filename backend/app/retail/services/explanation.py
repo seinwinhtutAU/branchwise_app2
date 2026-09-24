@@ -256,7 +256,7 @@ def describe_margin_level(
     change = gross_margin_pct - previous_gross_margin_pct
     if abs(change) < MARGIN_DRIFT_PP:
         return (
-            f"Margin was {previous_gross_margin_pct:.1f}% in the previous period as well.",
+            f"Margin was {previous_gross_margin_pct:.1f}% on the same days last year as well.",
             "This is a standing level rather than a new drop — it points at pricing and product "
             "mix rather than at anything that happened this period.",
         )

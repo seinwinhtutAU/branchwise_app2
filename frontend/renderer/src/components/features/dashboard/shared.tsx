@@ -216,13 +216,13 @@ function ChangeCell({ fact }: { fact: AlertFact }): React.JSX.Element {
 }
 
 /**
- * The movements an alert is claiming, as a table: what each figure was last period, what
+ * The movements an alert is claiming, as a table: what each figure was on the same days last year, what
  * it is now, and how far it moved.
  *
  * Named columns rather than "was → is now" on one line. The arrow said the same thing in
  * less space, but a reader had to work out which figure was which, and the values did not
  * line up under each other — which is the whole reason to put four numbers next to each
- * other in the first place. The headers stay "Last period"/"This period" whatever period
+ * other in the first place. The headers stay "Same days last year"/"This period" whatever period
  * is selected: the exact days are already named above the table, and a header that
  * changed with the period ("Last 7 days") would restate them in a worse place.
  */
@@ -232,7 +232,7 @@ function AlertMovements({ facts }: { facts: AlertFact[] }): React.JSX.Element {
       <Thead className="top-0">
         <Tr>
           <Th />
-          <Th className="text-right">Last period</Th>
+          <Th className="text-right">Same days last year</Th>
           <Th className="text-right">This period</Th>
           <Th className="text-right">Change</Th>
         </Tr>

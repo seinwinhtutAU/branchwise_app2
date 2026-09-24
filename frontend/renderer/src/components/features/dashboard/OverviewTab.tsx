@@ -571,7 +571,7 @@ function BranchDetailView({
             </h2>
             <p className="text-xs text-text-muted">
               {dateRangeLabel(data.date_from, data.date_to)} ·{" "}
-              {previousPeriodLabel(period, dateFrom, dateTo)}
+              {previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
             </p>
           </div>
         </div>
