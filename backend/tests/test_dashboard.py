@@ -4,10 +4,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
+from app.retail.models.import_batch import ImportBatch, ImportType
 from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.models.sale import Sale, SaleLine
 from app.retail.models.stock_level import StockLevel
+from app.retail.models.zero_selling import ZeroSellingRecord
 from app.models.user import User, UserRole
 from app.services import dashboard as dashboard_service
 
@@ -356,30 +358,6 @@ def test_dashboard_heatmap_excludes_sales_outside_business_hours(
     assert response.json()["heatmap"] == []
 
 
-def test_dashboard_sale_warnings_scoped_to_selected_branch(
-    authed_client: TestClient, db_session: Session
-):
-    _make_development_user(db_session)
-    branch = _make_branch(db_session)
-    other_branch = _make_branch(db_session, "Other")
-    product = _make_product(db_session, "SKU-1")
-    today = datetime.date.today()
-    _make_sale(
-        db_session, branch=branch, product=product, slip_id="slip-1",
-        sale_date=today, sale_time="10:00", qty=0, net_amount=0,
-    )
-    _make_sale(
-        db_session, branch=other_branch, product=product, slip_id="slip-2",
-        sale_date=today, sale_time="10:00", qty=0, net_amount=0,
-    )
-    db_session.commit()
-
-    response = authed_client.get(f"/api/dashboard/revenue?period=today&branch_id={branch.id}")
-    assert response.status_code == 200
-    warnings = response.json()["sale_warnings"]
-    assert len(warnings) == 1
-
-
 def _make_sale_with_lines(
     db_session: Session,
     *,
@@ -430,6 +408,7 @@ def _make_stock_level(
     on_hand_qty: float,
     buying_price: float | None,
     snapshot_at: datetime.datetime,
+    selling_price: float | None = None,
 ) -> None:
     db_session.add(
         StockLevel(
@@ -437,7 +416,7 @@ def _make_stock_level(
             product_id=product.id,
             on_hand_qty=on_hand_qty,
             buying_price=buying_price,
-            selling_price=None,
+            selling_price=selling_price,
             snapshot_at=snapshot_at,
         )
     )
@@ -562,21 +541,6 @@ def test_cost_dashboard_trend_zero_fills_days_with_no_sales(
     assert trend[no_sales_day]["margin_pct"] is None
 
 
-def test_cost_dashboard_purchase_warnings_scoped_to_period(
-    authed_client: TestClient, db_session: Session
-):
-    branch = _make_branch(db_session)
-    _make_retail_user(db_session, branch)
-    product = _make_product(db_session, "SKU-1")
-    today = datetime.date.today()
-    _make_purchase(db_session, branch=branch, product=product, purchase_date=today, qty=0, buying_price=100)
-    db_session.commit()
-
-    response = authed_client.get("/api/dashboard/cost?period=today")
-    assert response.status_code == 200
-    assert len(response.json()["purchase_warnings"]) == 1
-
-
 def test_inventory_dashboard_stock_value_and_low_stock_status(
     authed_client: TestClient, db_session: Session
 ):
@@ -693,8 +657,11 @@ def test_customer_dashboard_basket_stats_and_histogram(
     response = authed_client.get("/api/dashboard/customer?period=today")
     assert response.status_code == 200
     body = response.json()
-    assert body["avg_items_per_basket"]["value"] == 1.5
-    assert body["single_item_basket_share_pct"]["value"] == 50.0
+    assert body["total_transactions"]["value"] == 2
+    # The single-item share and items-per-transaction tiles are gone: one pair per sale
+    # is how this business normally sells, so neither says anything useful.
+    assert "avg_items_per_basket" not in body
+    assert "single_item_basket_share_pct" not in body
     histogram = {row["items"]: row["count"] for row in body["items_per_basket_histogram"]}
     assert histogram == {1: 1, 2: 1}
     assert body["busiest_hour"]["transaction_count"] == 1
@@ -897,3 +864,94 @@ def test_summary_dashboard_endpoint(
     assert "customer_demand" in body
     assert len(body["top_products"]) >= 1
     assert len(body["recommendations"]) == 3
+
+
+def test_customer_dashboard_no_longer_carries_a_data_quality_box(
+    authed_client: TestClient, db_session: Session
+):
+    """Data quality has its own page and its own Health dimension; the dashboard tabs no
+    longer repeat it (and no longer spend time computing it)."""
+    _make_admin_user(db_session)
+    branch = _make_branch(db_session)
+    db_session.commit()
+    for endpoint, key in (
+        ("revenue", "sale_warnings"),
+        ("cost", "purchase_warnings"),
+        ("inventory", "warnings"),
+        ("customer", "sale_warnings"),
+    ):
+        response = authed_client.get(f"/api/dashboard/{endpoint}?period=today&branch_id={branch.id}")
+        assert response.status_code == 200
+        assert key not in response.json(), endpoint
+
+
+def test_customer_dashboard_conversion_rate_uses_zero_selling_records(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    for slip in ("slip-1", "slip-2", "slip-3"):
+        _make_sale(
+            db_session, branch=branch, product=product, slip_id=slip,
+            sale_date=today, sale_time="10:00", qty=1, net_amount=100,
+        )
+    batch = ImportBatch(
+        id="batch-zs", import_type=ImportType.SALES, branch_id=branch.id, filename="zs.xlsx", summary={}
+    )
+    db_session.add(batch)
+    db_session.flush()
+    db_session.add(
+        ZeroSellingRecord(
+            import_batch_id=batch.id, branch_id=branch.id, sale_date=today, sale_time="11:00",
+            branch=branch.name, source_sheet="s", source_row=1,
+        )
+    )
+    db_session.commit()
+
+    body = authed_client.get("/api/dashboard/customer?period=today").json()
+    # 3 sales slips and 1 visit that did not buy: 3 / 4.
+    assert body["conversion_rate"]["value"] == 75.0
+    assert body["total_transactions"]["value"] == 3
+
+
+def test_customer_dashboard_conversion_rate_is_empty_without_zero_selling_records(
+    authed_client: TestClient, db_session: Session
+):
+    """No records means nothing was measured — not a 0% (or 100%) conversion rate."""
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    _make_sale(
+        db_session, branch=branch, product=product, slip_id="slip-1",
+        sale_date=datetime.date.today(), sale_time="10:00", qty=1, net_amount=100,
+    )
+    db_session.commit()
+
+    body = authed_client.get("/api/dashboard/customer?period=today").json()
+    assert body["conversion_rate"]["value"] is None
+    assert body["conversion_rate"]["delta_pct"] is None
+
+
+def test_inventory_dashboard_potential_sale_value_is_quantity_times_selling_price(
+    authed_client: TestClient, db_session: Session
+):
+    """Only the latest snapshot counts, and a product with no selling price adds nothing."""
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    a = _make_product(db_session, "SKU-A")
+    b = _make_product(db_session, "SKU-B")
+    c = _make_product(db_session, "SKU-C")
+    now = datetime.datetime.now()
+    old = now - datetime.timedelta(days=5)
+
+    # An older count of A is superseded by today's, so it must not be added in twice.
+    _make_stock_level(db_session, branch=branch, product=a, on_hand_qty=99, buying_price=1, selling_price=1, snapshot_at=old)
+    _make_stock_level(db_session, branch=branch, product=a, on_hand_qty=10, buying_price=200, selling_price=300, snapshot_at=now)
+    _make_stock_level(db_session, branch=branch, product=b, on_hand_qty=5, buying_price=100, selling_price=200, snapshot_at=now)
+    _make_stock_level(db_session, branch=branch, product=c, on_hand_qty=7, buying_price=50, selling_price=None, snapshot_at=now)
+    db_session.commit()
+
+    body = authed_client.get("/api/dashboard/inventory").json()
+    assert body["potential_sale_value"] == 10 * 300 + 5 * 200

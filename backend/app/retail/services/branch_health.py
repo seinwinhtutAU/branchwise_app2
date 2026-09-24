@@ -37,7 +37,6 @@ from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.models.sale import Sale, SaleLine
 from app.retail.models.stock_level import StockLevel
-from app.retail.models.zero_selling import ZeroSellingRecord
 from app.retail.services import data_quality, explanation
 from app.retail.services.import_common import sql_rule_failure
 from app.retail.services.pos_import import VALIDATION_RULES as SALES_VALIDATION_RULES
@@ -55,6 +54,7 @@ from app.services.dashboard import (
     PeriodKey,
     PeriodRange,
     _basket_stats,
+    _conversion_stats,
     _cost_totals_and_products,
     _period_label,
     _revenue_totals,
@@ -76,7 +76,7 @@ NEEDS_ATTENTION_SCORE = 60.0
 MIN_COST_COVERAGE_PCT = 50.0
 
 # Stock last bought more than this many days ago counts as aged (the Inventory alert and the
-# Inventory score's "Aged stock share" both use it).
+# Inventory score's "Aged stock" both use it).
 AGED_STOCK_DAYS = 180
 
 # How many at-risk products an alert names outright. Five is what fits in the alert panel
@@ -149,7 +149,7 @@ class Dimension:
     sub_metrics: tuple[SubMetric, ...]
 
 
-# Growth bands are shared by the three sales sub-metrics on purpose: a 10% fall in
+# Growth bands are shared by the revenue and transaction measures on purpose: a 10% fall in
 # revenue and a 10% fall in transactions are equally bad news, so they should score
 # the same. 0% growth scores 70, not 100 — flat is acceptable, not excellent.
 _GROWTH_BANDS = ((-20.0, 0.0), (-10.0, 40.0), (0.0, 70.0), (10.0, 100.0))
@@ -172,24 +172,18 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 calculation=lambda s: f"{_ks(s.net_revenue)} this period, against {_ks(s.previous_net_revenue)} last year.",
             ),
             SubMetric(
-                "transaction_growth_pct",
-                "Transaction growth",
+                "avg_basket_growth_pct",
+                "Average sale value",
                 "pct_change",
                 0.3,
-                _GROWTH_BANDS,
-                definition="How many transactions the branch made, against the same days last year.",
+                _GENTLE_GROWTH_BANDS,
+                definition="How much a customer spends in one transaction, against the same days last year.",
                 calculation=lambda s: (
-                    f"{s.transaction_count:,} transactions this period, against "
-                    f"{s.previous_transaction_count:,} last year."
+                    f"{_ks(s.avg_basket)} per transaction this period, against {_ks(s.previous_avg_basket)} last year."
                 ),
             ),
-            # Related to the transaction count above but not the same question, and the
-            # Customer dimension's transactions-per-open-day is a third: that one asks
-            # how busy a normal day is, the one above asks whether the branch sold more
-            # in total, and this asks whether it is still selling across its range.
-            # Revenue holding up on a shrinking handful of products is a different
-            # situation from revenue holding up across the shop, and only this tells
-            # them apart.
+            # Revenue can hold up on a shrinking handful of products, which is a different
+            # situation from holding up across the shop; only this tells them apart.
             SubMetric(
                 "products_sold_growth_pct",
                 "Products sold",
@@ -208,33 +202,19 @@ DIMENSIONS: tuple[Dimension, ...] = (
         key="profit",
         label="Profit",
         weight=0.25,
-        description="Is what the branch sells actually making money, and is that improving?",
+        description="Is what the branch sells actually making money?",
         sub_metrics=(
             SubMetric(
                 "gross_margin_pct",
                 "Gross margin",
                 "pct",
-                0.6,
+                1.0,
                 ((0.0, 0.0), (10.0, 40.0), (20.0, 80.0), (30.0, 100.0)),
                 definition="The share of each sale the branch keeps after paying for the goods it sold.",
                 calculation=lambda s: (
                     f"{_ks(s.net_revenue - s.estimated_cogs)} kept out of {_ks(s.net_revenue)} sold "
                     f"(goods cost {_ks(s.estimated_cogs)})."
                     if s.net_revenue
-                    else None
-                ),
-            ),
-            SubMetric(
-                "margin_growth_pp",
-                "Margin change",
-                "pct_points",
-                0.4,
-                ((-10.0, 0.0), (-3.0, 50.0), (0.0, 75.0), (3.0, 100.0)),
-                definition="Whether the branch is keeping more or less of each sale than it did on the same days last year.",
-                calculation=lambda s: (
-                    f"{s.gross_margin_pct:.1f}% this period, against {s.previous_gross_margin_pct:.1f}% last year."
-                    if s.gross_margin_pct is not None
-                    and s.previous_gross_margin_pct is not None
                     else None
                 ),
             ),
@@ -248,7 +228,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
         sub_metrics=(
             SubMetric(
                 "dead_stock_share_pct",
-                "Dead stock share",
+                "Dead stock",
                 "pct",
                 0.4,
                 ((20.0, 100.0), (35.0, 85.0), (50.0, 60.0), (65.0, 30.0), (80.0, 0.0)),
@@ -264,7 +244,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
             ),
             SubMetric(
                 "stockout_risk_share_pct",
-                "Stockout risk share",
+                "Stockout risk",
                 "pct",
                 0.35,
                 ((0.0, 100.0), (2.0, 85.0), (5.0, 60.0), (10.0, 20.0), (20.0, 0.0)),
@@ -303,47 +283,31 @@ DIMENSIONS: tuple[Dimension, ...] = (
         key="customer",
         label="Customer",
         weight=0.15,
-        description="How busy is a normal trading day, and is a visit worth more than it was?",
+        description="Are customers still coming in, and do they buy when they do?",
         # Basket composition (items per transaction, single-item share) used to live here
         # and was dropped: this business sells shoes, and a customer buying one pair and
         # leaving is how the shop normally sells, not a problem to score.
         #
-        # Three sub-metrics balance customer behaviour:
-        # - Average sale value (30%): what a visit is worth
-        # - Transactions per day (30%): how busy an open day is
-        # - Conversion rate (40%): footfall conversion on tracked days
+        # Two sub-metrics: whether as many people are buying as a year ago (transaction
+        # growth), and how many of the people who came in bought something (conversion).
         sub_metrics=(
             SubMetric(
-                "avg_basket_growth_pct",
-                "Average sale value",
+                "transaction_growth_pct",
+                "Transaction growth",
                 "pct_change",
-                0.3,
-                _GENTLE_GROWTH_BANDS,
-                definition="How much a customer spends in one transaction, against the same days last year.",
+                0.5,
+                _GROWTH_BANDS,
+                definition="How many transactions the branch made, against the same days last year.",
                 calculation=lambda s: (
-                    f"{_ks(s.avg_basket)} per transaction this period, against {_ks(s.previous_avg_basket)} last year."
-                ),
-            ),
-            SubMetric(
-                "avg_daily_sales_growth_pct",
-                "Transactions per day",
-                "pct_change",
-                0.3,
-                _GENTLE_GROWTH_BANDS,
-                definition="How many transactions the branch makes on a day it is open, against the same days last year.",
-                calculation=lambda s: (
-                    f"{s.transaction_count / s.trading_days:.1f} transactions a day this period "
-                    f"({s.transaction_count:,} over {s.trading_days:,} open days), against "
-                    f"{s.previous_transaction_count / s.previous_trading_days:.1f} last year."
-                    if s.trading_days and s.previous_trading_days
-                    else None
+                    f"{s.transaction_count:,} transactions this period, against "
+                    f"{s.previous_transaction_count:,} last year."
                 ),
             ),
             SubMetric(
                 "conversion_rate_pct",
                 "Conversion rate",
                 "pct",
-                0.4,
+                0.5,
                 ((30.0, 0.0), (45.0, 40.0), (60.0, 70.0), (75.0, 85.0), (85.0, 100.0)),
                 definition="Share of store visits that resulted in a sale, on days zero-selling was tracked.",
                 calculation=lambda s: (
@@ -553,52 +517,6 @@ def _trading_days(db: Session, branch_id: str, start: date, end: date) -> int:
         .scalar()
         or 0
     )
-
-
-def _conversion_stats(
-    db: Session, branch_id: str, start: date, end: date
-) -> tuple[float | None, int, int, int]:
-    """Conversion rate across days with zero-selling records in this period:
-    sales_slips ÷ (sales_slips + zero_selling_records) * 100.
-
-    Only days with zero-selling records are counted. Returns (None, 0, 0, 0)
-    if no zero-selling records exist in the period.
-    """
-    zero_days = (
-        db.query(
-            ZeroSellingRecord.sale_date,
-            func.count(ZeroSellingRecord.id).label("zero_count"),
-        )
-        .filter(
-            ZeroSellingRecord.branch_id == branch_id,
-            ZeroSellingRecord.sale_date >= start,
-            ZeroSellingRecord.sale_date <= end,
-        )
-        .group_by(ZeroSellingRecord.sale_date)
-        .all()
-    )
-    if not zero_days:
-        return None, 0, 0, 0
-
-    dates_with_records = [d for d, _ in zero_days]
-    total_zero = sum(int(c) for _, c in zero_days)
-
-    sales_count = (
-        db.query(func.count(Sale.id))
-        .filter(
-            Sale.branch_id == branch_id,
-            Sale.sale_date.in_(dates_with_records),
-        )
-        .scalar()
-        or 0
-    )
-    sales_count = int(sales_count)
-    denominator = sales_count + total_zero
-    if denominator == 0:
-        return None, 0, 0, len(dates_with_records)
-
-    conversion_rate = (sales_count / denominator) * 100.0
-    return conversion_rate, sales_count, total_zero, len(dates_with_records)
 
 
 def _products_sold(db: Session, branch_id: str, start: date, end: date) -> int:
@@ -1397,20 +1315,6 @@ def sub_metric_values(snapshot: BranchSnapshot) -> dict[str, float | None]:
     entry here plus one to the table above.
     """
     profit_measurable = snapshot.cost_coverage_pct >= MIN_COST_COVERAGE_PCT
-    previous_profit_measurable = (
-        snapshot.previous_cost_coverage_pct >= MIN_COST_COVERAGE_PCT
-    )
-
-    margin_growth_pp = None
-    if (
-        profit_measurable
-        and previous_profit_measurable
-        and snapshot.gross_margin_pct is not None
-        and snapshot.previous_gross_margin_pct is not None
-    ):
-        margin_growth_pp = (
-            snapshot.gross_margin_pct - snapshot.previous_gross_margin_pct
-        )
 
     return {
         "revenue_growth_pct": _growth_pct(
@@ -1426,20 +1330,8 @@ def sub_metric_values(snapshot: BranchSnapshot) -> dict[str, float | None]:
         "avg_basket_growth_pct": _growth_pct(
             snapshot.avg_basket, snapshot.previous_avg_basket
         ),
-        # Sales per open day rather than raw sales: the Sales dimension already scores the
-        # raw movement, and dividing by the days the shop actually traded is what stops a
-        # short month, a holiday or a missing day's import from reading as lost customers.
-        "avg_daily_sales_growth_pct": (
-            _growth_pct(
-                snapshot.transaction_count / snapshot.trading_days,
-                snapshot.previous_transaction_count / snapshot.previous_trading_days,
-            )
-            if snapshot.trading_days and snapshot.previous_trading_days
-            else None
-        ),
         "conversion_rate_pct": snapshot.conversion_rate_pct,
         "gross_margin_pct": snapshot.gross_margin_pct if profit_measurable else None,
-        "margin_growth_pp": margin_growth_pp,
         "dead_stock_share_pct": (
             snapshot.dead_stock_count / snapshot.sku_count * 100
             if snapshot.sku_count

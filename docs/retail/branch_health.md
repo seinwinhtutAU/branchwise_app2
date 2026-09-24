@@ -42,7 +42,7 @@ measurable, and each dimension's `effective_weight` reports what it really contr
 
 ## What growth is compared with
 
-Every growth figure (revenue, transactions, products sold, average sale, transactions per day, margin change) is compared with **the same dates one year earlier**, not with the window right before. This business's sales follow the calendar (festivals, rainy season, school term), so last month is a noisy baseline, and it is the same comparison the Revenue, Cost and Customer tabs use, so the Overview and those pages agree. The Overview header says "vs the same month/dates last year".
+Every growth figure (revenue, average sale, products sold, transactions) is compared with **the same dates one year earlier**, not with the window right before. This business's sales follow the calendar (festivals, rainy season, school term), so last month is a noisy baseline, and it is the same comparison the Revenue, Cost and Customer tabs use, so the Overview and those pages agree. The Overview header says "vs the same month/dates last year".
 
 A branch with no sales on those days last year (AungThitSar has data only from December 2025) has no growth to score: those measures are unscored, and their dimension is dropped or re-weighted like any other unmeasured one. It is never quietly compared with the previous month instead, which would put two branches on different yardsticks. Level measures (gross margin, dead stock, aged stock, stockout risk, conversion rate, data quality) do not compare with anything and are unaffected.
 
@@ -53,9 +53,9 @@ Five dimensions, weighted:
 | Dimension    | Weight | Question it answers                                                         |
 | ------------ | -----: | --------------------------------------------------------------------------- |
 | Sales        |    25% | Is the branch selling more than it was, and still selling across its range? |
-| Profit       |    25% | Is what it sells actually making money, and is that improving?              |
+| Profit       |    25% | Is what it sells actually making money?                                     |
 | Inventory    |    25% | Is stock moving, and is it about to run out of anything that sells?         |
-| Customer     |    15% | How busy is a normal trading day, and is a visit worth more than it was?    |
+| Customer     |    15% | Are customers still coming in, and do they buy when they do?                |
 | Data Quality |    10% | Can the four scores above be trusted?                                       |
 
 Each dimension is a weighted average of its sub-metrics:
@@ -63,16 +63,14 @@ Each dimension is a weighted average of its sub-metrics:
 | Dimension    | Sub-metric                    | Weight | Score bands (value → score)                     |
 | ------------ | ----------------------------- | -----: | ----------------------------------------------- |
 | Sales        | Revenue growth %              |    50% | -20→0, -10→40, 0→70, +10→100                    |
-| Sales        | Transaction growth %          |    30% | same as above                                   |
+| Sales        | Average sale value growth %   |    30% | -15→0, -5→50, 0→75, +5→100                      |
 | Sales        | Products sold growth %        |    20% | -15→0, -5→50, 0→75, +5→100                      |
-| Profit       | Gross margin %                |    60% | 0→0, 10→40, 20→80, 30→100                       |
-| Profit       | Margin change (pp)            |    40% | -10→0, -3→50, 0→75, +3→100                      |
-| Inventory    | Dead stock share %            |    40% | 20→100, 35→85, 50→60, 65→30, 80→0               |
-| Inventory    | Stockout risk share %         |    35% | 0→100, 2→85, 5→60, 10→20, 20→0                  |
-| Inventory    | Aged stock share %            |    25% | 0→100, 10→80, 25→50, 40→20, 60→0                |
-| Customer     | Average sale value growth %   |    30% | -15→0, -5→50, 0→75, +5→100                      |
-| Customer     | Transactions-per-day growth % |    30% | same as above                                   |
-| Customer     | Conversion rate %             |    40% | 30→0, 45→40, 60→70, 75→85, 85→100               |
+| Profit       | Gross margin %                |   100% | 0→0, 10→40, 20→80, 30→100                       |
+| Inventory    | Dead stock %                  |    40% | 20→100, 35→85, 50→60, 65→30, 80→0               |
+| Inventory    | Stockout risk %               |    35% | 0→100, 2→85, 5→60, 10→20, 20→0                  |
+| Inventory    | Aged stock %                  |    25% | 0→100, 10→80, 25→50, 40→20, 60→0                |
+| Customer     | Transaction growth %          |    50% | -20→0, -10→40, 0→70, +10→100                    |
+| Customer     | Conversion rate %             |    50% | 30→0, 45→40, 60→70, 75→85, 85→100               |
 | Data Quality | Issues per 100 records        |    70% | 0→100, 1→80, 3→50, 10→10, 20→0                  |
 | Data Quality | Stock mismatches (count)      |    30% | 0→100, 1→70, 5→30, 20→0                         |
 
@@ -88,7 +86,7 @@ points" or `pp`, so it reads the same as every other percentage on the screen.
 A value between two breakpoints is linearly interpolated; a value past either end is
 clamped. Because the score is stated _per breakpoint_ rather than derived from the
 value's direction, one mechanism covers "higher is better" (revenue growth, conversion rate)
-and "lower is better" (dead stock, stockout risk). Dead stock share reflects realistic
+and "lower is better" (dead stock, stockout risk). Dead stock reflects realistic
 shoe-retail inventory carryover: up to 20% dead stock scores 100, with 80% scoring 0.
 Conversion rate evaluates footfall conversion on tracked zero-selling days: under 30% scores 0,
 50% scores ~53 (average), and 85%+ scores 100. If no zero-selling records exist for the period,
@@ -100,10 +98,11 @@ Status bands, used identically by the gauge, the dimension bars and (later) the 
 ### Choices worth defending
 
 - **0% growth scores 70, not 100.** Flat is acceptable, not excellent.
-- **Transactions appear in Sales but deliberately not in Customer**, even though
-  footfall is a customer-side idea. It is already 30% of the Sales dimension, and
-  counting the same movement twice would let one bad week hit the overall score through
-  two doors at once.
+- **Transactions count once, under Customer; average sale value counts once, under
+  Sales.** Transaction count is a footfall idea and Customer already holds conversion, so
+  the two sit side by side there; the average sale is what a sale is worth, so it sits
+  with revenue. Neither is scored twice, so one bad week cannot hit the overall score
+  through two doors at once.
 - **Data quality is a rate, not a count.** 40 warnings across 40,000 rows is a clean
   import; 40 across 200 is a broken one. The denominator (`records_checked`) is the
   period's sale lines + purchase lines + the branch's current SKU count.
@@ -115,7 +114,7 @@ Status bands, used identically by the gauge, the dimension bars and (later) the 
   reason naming the actual coverage. `cost_coverage_pct` is always reported in
   `metrics` regardless.
 
-**Aged stock share** is the share of products on the shelf now that were last bought more than 180 days ago, out of the products that have a purchase record. Using the *last* purchase means a product that was restocked recently is not counted as aged. It is the same list the "Inventory aging" alert shows, so the alert and the score always agree. A product with no purchase on file is left out of both the count and the total: a stock file only says when this app first saw a product, not when it was bought, so its age is unknown and would only ever look young. With no purchase records at all the measure is unscored, and the Inventory score is worked out from the other two.
+**Aged stock** is the share of products on the shelf now that were last bought more than 180 days ago, out of the products that have a purchase record. Using the *last* purchase means a product that was restocked recently is not counted as aged. It is the same list the "Inventory aging" alert shows, so the alert and the score always agree. A product with no purchase on file is left out of both the count and the total: a stock file only says when this app first saw a product, not when it was bought, so its age is unknown and would only ever look young. With no purchase records at all the measure is unscored, and the Inventory score is worked out from the other two.
 
 ## The Early Warning engine
 

@@ -21,7 +21,6 @@ import {
   StatTile,
   TrendChart,
   TwoLineTrendChart,
-  WarningsTile,
   type ChartView,
 } from "./shared";
 import {
@@ -31,7 +30,6 @@ import {
   previousPeriodLabel,
   type KpiValue,
   type PeriodKey,
-  type SaleWarningRow,
 } from "./helpers";
 
 interface CostTrendPoint {
@@ -60,7 +58,6 @@ interface CostDashboardData {
   estimated_margin_per_basket: KpiValue;
   trend: CostTrendPoint[];
   products: CostProduct[];
-  purchase_warnings: SaleWarningRow[];
 }
 
 function TopProfitProductsTable({
@@ -128,7 +125,6 @@ interface Props {
   dateTo: string;
   month: string;
   canLoad: boolean;
-  onViewWarnings: () => void;
 }
 
 export function CostTab({
@@ -139,7 +135,6 @@ export function CostTab({
   dateTo,
   month,
   canLoad,
-  onViewWarnings,
 }: Props): React.JSX.Element {
   const [marginTrendView, setMarginTrendView] = useState<ChartView>("line");
   // One cached request per (tab, branch, period) — returning to this tab with the same
@@ -243,26 +238,13 @@ export function CostTab({
         />
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-start">
-        <Card className="p-3.5 sm:p-4 lg:col-span-2">
-          <CardHeader
-            title="Top profit products"
-            description="Ranked by estimated Ks profit, not revenue — the products actually worth pushing more."
-          />
-          <TopProfitProductsTable products={data.products} />
-        </Card>
-        <Card className="p-3.5 sm:p-4 lg:col-span-1">
-          <CardHeader
-            title="Purchase data quality"
-            description="Bad values on purchase lines in the selected period."
-          />
-          <WarningsTile
-            warnings={data.purchase_warnings}
-            label="Purchase"
-            onViewWarnings={onViewWarnings}
-          />
-        </Card>
-      </div>
+      <Card className="p-3.5 sm:p-4">
+        <CardHeader
+          title="Top profit products"
+          description="Ranked by estimated Ks profit, not revenue — the products actually worth pushing more."
+        />
+        <TopProfitProductsTable products={data.products} />
+      </Card>
     </div>
   );
 }

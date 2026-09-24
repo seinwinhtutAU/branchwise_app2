@@ -13,7 +13,6 @@ Dead Stock list pages, which do need an "every branch" view — see its own docs
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from types import SimpleNamespace
 from typing import Literal
 
 from sqlalchemy import func
@@ -23,12 +22,8 @@ from app.models.branch import Branch
 from app.retail.models.product import Product
 from app.retail.models.sale import Sale, SaleLine
 from app.retail.models.stock_level import StockLevel
-from app.retail.services import data_quality
+from app.retail.models.zero_selling import ZeroSellingRecord
 from app.retail.services.pricing import sale_line_pricer
-from app.services.settings import (
-    get_purchase_warning_window_days,
-    get_sale_warning_window_days,
-)
 from app.retail.services.stock import latest_stock_query
 from app.retail.services.reporting import each_day, kpi_value
 
@@ -183,6 +178,15 @@ def _revenue_totals(db: Session, branch_id: str, start: date, end: date) -> tupl
 _kpi = kpi_value
 
 
+def _optional_kpi(value: float | None, previous_value: float | None) -> dict:
+    """A KPI that may have no figure — conversion rate has none where no zero-selling
+    records were imported. Nothing is measured then, which is not the same as 0%, so
+    the value stays None and there is no change to show."""
+    if value is None or previous_value is None:
+        return {"value": value, "previous_value": previous_value, "delta_pct": None}
+    return _kpi(value, previous_value)
+
+
 _each_day = each_day
 
 
@@ -325,15 +329,6 @@ def build_revenue_dashboard(
     avg_basket = net_revenue / transaction_count if transaction_count else 0.0
     prev_avg_basket = prev_net_revenue / prev_transaction_count if prev_transaction_count else 0.0
 
-    # sale_numeric_warnings only reads user.branch_id (see data_quality.py's
-    # _branch_filter) — a plain namespace stands in for the real caller so this
-    # reuses the exact same check the Warning page runs, scoped to the branch this
-    # dashboard is showing rather than the caller's own (an admin viewing a branch
-    # that isn't their own has no branch_id of their own to reuse here).
-    sale_warnings = data_quality.sale_numeric_warnings(
-        db, SimpleNamespace(branch_id=branch_id), since=period_range.start
-    )
-
     return {
         "branch_id": branch_id,
         "branch_name": branch_name,
@@ -346,7 +341,6 @@ def build_revenue_dashboard(
         "trend": _daily_trend(db, branch_id, period_range.start, period_range.end),
         "top_products": _top_products(db, branch_id, period_range.start, period_range.end),
         "heatmap": _revenue_heatmap(db, branch_id, period_range.start, period_range.end),
-        "sale_warnings": sale_warnings,
     }
 
 
@@ -515,17 +509,6 @@ def build_cost_dashboard(
         (prev_net_revenue - prev_cogs) / prev_transaction_count if prev_transaction_count else 0.0
     )
 
-    # Reuses the exact same Purchase-numeric check the Warning page runs, scoped to
-    # this dashboard's branch and period — see build_revenue_dashboard's sale_warnings
-    # for why a SimpleNamespace stands in for the real caller here.
-    day_count = (period_range.end - period_range.start).days + 1
-    warning_sections = data_quality.build_warning_sections(
-        db, SimpleNamespace(branch_id=branch_id), day_count, day_count, {"purchase_numeric"}
-    )
-    purchase_warnings = next(
-        (section["rows"] for section in warning_sections if section["id"] == "purchase_numeric"), []
-    )
-
     return {
         "branch_id": branch_id,
         "branch_name": branch_name,
@@ -537,7 +520,6 @@ def build_cost_dashboard(
         "estimated_margin_per_basket": _kpi(margin_per_basket, prev_margin_per_basket),
         "trend": trend,
         "products": products,
-        "purchase_warnings": purchase_warnings,
     }
 
 
@@ -728,6 +710,7 @@ def _stock_summary(db: Session, branch_id: str) -> dict:
     )
 
     estimated_stock_value = 0.0
+    potential_sale_value = 0.0
     qty_by_category: dict[str, float] = {}
     status_counts = {"Critical": 0, "Low": 0, "Watch": 0}
     latest_snapshot_at = None
@@ -737,6 +720,11 @@ def _stock_summary(db: Session, branch_id: str) -> dict:
         buying_price = float(stock_level.buying_price) if stock_level.buying_price is not None else None
         value = on_hand_qty * buying_price if buying_price is not None else 0.0
         estimated_stock_value += value
+        # What the shelf would bring in if all of it sold at its listed price. A product
+        # with no selling price on its latest snapshot adds nothing rather than a guess.
+        selling_price = float(stock_level.selling_price) if stock_level.selling_price is not None else None
+        if selling_price is not None:
+            potential_sale_value += on_hand_qty * selling_price
         category = product.group_name or "Uncategorized"
         # Quantity, not value, for the per-category breakdown — it comes straight from
         # the inventory import every time, unlike value, which silently reads as 0 for
@@ -770,6 +758,7 @@ def _stock_summary(db: Session, branch_id: str) -> dict:
         "low_count": status_counts["Low"],
         "watch_count": status_counts["Watch"],
         "estimated_stock_value": estimated_stock_value,
+        "potential_sale_value": potential_sale_value,
         "dead_stock_count": len(dead_stock_items),
         "stock_qty_by_category": stock_qty_by_category,
         "low_stock_items": [_drop_branch(item) for item in low_stock_items[:LOW_STOCK_ITEMS_LIMIT]],
@@ -780,25 +769,10 @@ def _stock_summary(db: Session, branch_id: str) -> dict:
 def build_inventory_dashboard(db: Session, branch_id: str, branch_name: str) -> dict:
     summary = _stock_summary(db, branch_id)
 
-    # Reuses the exact same Inventory/Daily-check checks the Warning page runs, using
-    # the business-wide check-window settings (there's no period control here to derive
-    # a window from) — scoped to this dashboard's branch, same SimpleNamespace approach
-    # as build_revenue_dashboard's sale_warnings.
-    relevant_section_ids = {"inventory_numeric", "missing_product", "reconciliation_uom", "reconciliation_mismatch"}
-    warning_sections = data_quality.build_warning_sections(
-        db,
-        SimpleNamespace(branch_id=branch_id),
-        get_sale_warning_window_days(db),
-        get_purchase_warning_window_days(db),
-        relevant_section_ids,
-    )
-    warnings = [row for section in warning_sections for row in section["rows"]]
-
     return {
         "branch_id": branch_id,
         "branch_name": branch_name,
         **summary,
-        "warnings": warnings,
     }
 
 
@@ -830,6 +804,52 @@ def _basket_stats(
         bucket = count if count < 6 else 6
         histogram[bucket] = histogram.get(bucket, 0) + 1
     return avg_items_per_basket, single_item_share_pct, transaction_count, histogram
+
+
+def _conversion_stats(
+    db: Session, branch_id: str, start: date, end: date
+) -> tuple[float | None, int, int, int]:
+    """Conversion rate across days with zero-selling records in this period:
+    sales_slips ÷ (sales_slips + zero_selling_records) * 100.
+
+    Only days with zero-selling records are counted. Returns (None, 0, 0, 0)
+    if no zero-selling records exist in the period.
+    """
+    zero_days = (
+        db.query(
+            ZeroSellingRecord.sale_date,
+            func.count(ZeroSellingRecord.id).label("zero_count"),
+        )
+        .filter(
+            ZeroSellingRecord.branch_id == branch_id,
+            ZeroSellingRecord.sale_date >= start,
+            ZeroSellingRecord.sale_date <= end,
+        )
+        .group_by(ZeroSellingRecord.sale_date)
+        .all()
+    )
+    if not zero_days:
+        return None, 0, 0, 0
+
+    dates_with_records = [d for d, _ in zero_days]
+    total_zero = sum(int(c) for _, c in zero_days)
+
+    sales_count = (
+        db.query(func.count(Sale.id))
+        .filter(
+            Sale.branch_id == branch_id,
+            Sale.sale_date.in_(dates_with_records),
+        )
+        .scalar()
+        or 0
+    )
+    sales_count = int(sales_count)
+    denominator = sales_count + total_zero
+    if denominator == 0:
+        return None, 0, 0, len(dates_with_records)
+
+    conversion_rate = (sales_count / denominator) * 100.0
+    return conversion_rate, sales_count, total_zero, len(dates_with_records)
 
 
 def _footfall_heatmap(db: Session, branch_id: str, start: date, end: date) -> list[dict]:
@@ -877,10 +897,10 @@ def build_customer_dashboard(
     period_range = resolve_period(
         period, date_from=date_from, date_to=date_to, month=month, comparison="year_ago"
     )
-    avg_items, single_share, _txn_count, histogram = _basket_stats(
+    _, _, transaction_count, histogram = _basket_stats(
         db, branch_id, period_range.start, period_range.end
     )
-    prev_avg_items, prev_single_share, _, _ = _basket_stats(
+    _, _, prev_transaction_count, _ = _basket_stats(
         db, branch_id, period_range.previous_start, period_range.previous_end
     )
 
@@ -889,9 +909,11 @@ def build_customer_dashboard(
     # number that moves, so "up/down vs last period" wouldn't mean anything.
     busiest_hour = max(footfall, key=lambda cell: cell["transaction_count"], default=None)
 
-    # Same sale_numeric check as Revenue's tile — the two tabs share one source of rows.
-    sale_warnings = data_quality.sale_numeric_warnings(
-        db, SimpleNamespace(branch_id=branch_id), since=period_range.start
+    conversion_rate, _, _, _ = _conversion_stats(
+        db, branch_id, period_range.start, period_range.end
+    )
+    prev_conversion_rate, _, _, _ = _conversion_stats(
+        db, branch_id, period_range.previous_start, period_range.previous_end
     )
 
     return {
@@ -900,15 +922,14 @@ def build_customer_dashboard(
         "period": _period_label(period, date_from, date_to),
         "date_from": period_range.start.isoformat(),
         "date_to": period_range.end.isoformat(),
-        "avg_items_per_basket": _kpi(avg_items, prev_avg_items),
-        "single_item_basket_share_pct": _kpi(single_share, prev_single_share),
+        "total_transactions": _kpi(float(transaction_count), float(prev_transaction_count)),
+        "conversion_rate": _optional_kpi(conversion_rate, prev_conversion_rate),
         "busiest_hour": busiest_hour,
         "footfall_heatmap": footfall,
         "transaction_count_trend": _transaction_count_trend(db, branch_id, period_range.start, period_range.end),
         "items_per_basket_histogram": [
             {"items": items, "count": count} for items, count in sorted(histogram.items())
         ],
-        "sale_warnings": sale_warnings,
     }
 
 

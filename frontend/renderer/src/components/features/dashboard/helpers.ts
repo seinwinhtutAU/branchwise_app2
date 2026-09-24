@@ -353,13 +353,6 @@ export interface KpiValue {
   delta_pct: number | null;
 }
 
-export interface SaleWarningRow {
-  note: string;
-  fields: { label: string; value: string }[];
-  highlight: string[];
-  source_import: { id: string; filename: string | null; date: string } | null;
-}
-
 export function formatMoney(value: number): string {
   return value.toLocaleString(undefined, {
     minimumFractionDigits: 2,

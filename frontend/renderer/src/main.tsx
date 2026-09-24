@@ -35,7 +35,12 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         // cached — a stale v1 cache was missing fields the current code reads
         // unconditionally (e.g. MonitoringDashboardPage's statusLabel crashing on
         // undefined). Bump this again the next time a cached page's API shape changes.
-        buster: "v2",
+        // v3: the Customer dashboard's KPIs changed (total_transactions and
+        // conversion_rate replaced avg_items_per_basket and single_item_basket_share_pct),
+        // so a cached v2 response crashed the tab reading `.value` of the new fields.
+        // v4: the Inventory dashboard gained potential_sale_value, which a cached v3
+        // response does not have.
+        buster: "v4",
       }}
     >
       <ToastProvider>

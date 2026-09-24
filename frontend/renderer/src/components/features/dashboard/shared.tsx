@@ -32,7 +32,6 @@ import {
   type AlertTable,
   type HealthAlert,
   type PeriodKey,
-  type SaleWarningRow,
   type SubMetric,
 } from "./helpers";
 import type { PeriodRange } from "./usePeriodRange";
@@ -1224,58 +1223,3 @@ export function WeekdayHourHeatmap<
   );
 }
 
-// A compact list for a data-quality check tile — same row shape every Warning-page
-// check returns, reused across every dashboard tab's tile (Sale on Revenue/Customer,
-// Purchase on Cost, the Inventory/Daily-check group on Inventory) with just a label.
-export function WarningsTile({
-  warnings,
-  label,
-  onViewWarnings,
-}: {
-  warnings: SaleWarningRow[];
-  label: string;
-  // Optional so this still renders fine standalone (e.g. in a future non-dashboard
-  // context) without a navigation target — every dashboard tab always passes one.
-  onViewWarnings?: () => void;
-}): React.JSX.Element {
-  const viewLink = onViewWarnings && (
-    <button
-      type="button"
-      onClick={onViewWarnings}
-      className="self-start text-xs text-brand hover:text-brand-hover underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded"
-    >
-      View in Warning page →
-    </button>
-  );
-
-  if (warnings.length === 0) {
-    return (
-      <div className="flex flex-col gap-2">
-        <p className="text-sm text-success">No {label} warnings right now.</p>
-        {viewLink}
-      </div>
-    );
-  }
-  const shown = warnings.slice(0, 5);
-  return (
-    <div className="flex flex-col gap-2.5">
-      <Badge variant="warning">
-        {warnings.length} {label}{" "}
-        {warnings.length === 1 ? "warning" : "warnings"}
-      </Badge>
-      <ul className="flex flex-col gap-1.5">
-        {shown.map((warning, i) => (
-          <li key={i} className="text-sm text-text-secondary">
-            • {warning.note}
-          </li>
-        ))}
-      </ul>
-      {warnings.length > shown.length && (
-        <p className="text-xs text-text-muted">
-          and {warnings.length - shown.length} more.
-        </p>
-      )}
-      {viewLink}
-    </div>
-  );
-}

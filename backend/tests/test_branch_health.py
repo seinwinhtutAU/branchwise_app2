@@ -250,7 +250,7 @@ def test_aged_stock_share_scores_from_bands_and_its_own_count():
 def test_conversion_rate_scores_from_bands():
     customer_dim = next(d for d in branch_health.DIMENSIONS if d.key == "customer")
     cr_metric = next(s for s in customer_dim.sub_metrics if s.key == "conversion_rate_pct")
-    assert cr_metric.weight == 0.4
+    assert cr_metric.weight == 0.5
     bands = cr_metric.bands
     assert branch_health.score_from_bands(20.0, bands) == 0.0
     assert branch_health.score_from_bands(30.0, bands) == 0.0
@@ -322,17 +322,23 @@ def test_overall_score_renormalises_weights_over_scored_dimensions_only():
     assert scored["overall_score"] == round(expected, 1)
 
 
-def test_a_sub_metric_can_drop_out_without_dropping_its_whole_dimension():
-    """Margin change needs both periods priced; gross margin only needs this one. The
-    dimension should still score off what it has, at that sub-metric's own weight."""
+def test_profit_is_scored_from_gross_margin_alone():
+    """Margin change was dropped, so a branch with no priced sales last year is no less
+    measurable on Profit than any other: only this period's coverage matters."""
     scored = branch_health.score_branch(_snapshot(previous_cost_coverage_pct=0.0))
     profit = _dimension(scored, "profit")
-    assert profit["score"] is not None
-    by_key = {s["key"]: s for s in profit["sub_metrics"]}
-    assert by_key["margin_growth_pp"]["score"] is None
-    assert by_key["gross_margin_pct"]["score"] == 100.0
-    # Re-normalised over the one available sub-metric, so the dimension is its score.
+    assert [s["key"] for s in profit["sub_metrics"]] == ["gross_margin_pct"]
     assert profit["score"] == 100.0
+
+
+def test_a_customer_measure_can_drop_out_without_dropping_the_dimension():
+    """Conversion rate needs zero-selling records; transaction growth does not."""
+    scored = branch_health.score_branch(_snapshot(conversion_rate_pct=None))
+    customer = _dimension(scored, "customer")
+    by_key = {s["key"]: s for s in customer["sub_metrics"]}
+    assert by_key["conversion_rate_pct"]["score"] is None
+    assert by_key["transaction_growth_pct"]["score"] is not None
+    assert customer["score"] == by_key["transaction_growth_pct"]["score"]
 
 
 # --- individual dimensions ------------------------------------------------------------
@@ -354,10 +360,8 @@ def test_falling_revenue_pushes_sales_into_critical():
     by_key = {s["key"]: s for s in sales["sub_metrics"]}
     assert by_key["revenue_growth_pct"]["value"] == -25.0
     # The average sale actually rose — the breakdown has to show that even though Sales
-    # as a whole is red, since that is the whole diagnostic value. It lives under
-    # Customer now ("what is a visit worth"), not under Sales.
-    customer = _dimension(scored, "customer")
-    assert {s["key"]: s for s in customer["sub_metrics"]}["avg_basket_growth_pct"]["value"] > 0
+    # as a whole is red, since that is the whole diagnostic value.
+    assert by_key["avg_basket_growth_pct"]["value"] > 0
 
 
 def test_dead_stock_share_drives_the_inventory_score_down():
@@ -373,7 +377,7 @@ def test_customer_dimension_renormalizes_when_conversion_rate_has_no_data():
     snapshot_with_cr = _snapshot(conversion_rate_pct=85.0)
     scored_with_cr = branch_health.score_branch(snapshot_with_cr)
     customer_with_cr = _dimension(scored_with_cr, "customer")
-    assert len(customer_with_cr["sub_metrics"]) == 3
+    assert len(customer_with_cr["sub_metrics"]) == 2
     assert all(s["score"] is not None for s in customer_with_cr["sub_metrics"])
 
     snapshot_no_cr = _snapshot(conversion_rate_pct=None)
@@ -383,7 +387,7 @@ def test_customer_dimension_renormalizes_when_conversion_rate_has_no_data():
     assert cr_metric["value"] is None
     assert cr_metric["score"] is None
     assert cr_metric["calculation"] is None
-    # Dimension still scores because avg_basket and daily_sales are present
+    # Dimension still scores because transaction growth is present
     assert customer_no_cr["score"] is not None
 
 
@@ -634,38 +638,16 @@ def test_saved_weights_reach_the_overview_endpoint(authed_client: TestClient, db
 # --- explaining the measures ------------------------------------------------------------
 
 
-def test_average_daily_sales_divides_by_the_days_the_shop_actually_traded():
-    """A shorter month, a public holiday or a day whose file never arrived must not read
-    as customers walking away — which is the whole reason the Customer dimension scores
-    sales per *open* day rather than the raw count the Sales dimension already has."""
-    # 400 sales over 25 open days against 450 over 30: fewer sales in total, but a
-    # busier day than before.
-    values = branch_health.sub_metric_values(
-        _snapshot(
-            transaction_count=400,
-            previous_transaction_count=450,
-            trading_days=25,
-            previous_trading_days=30,
-        )
-    )
-    assert round(values["avg_daily_sales_growth_pct"], 1) == 6.7
-
-    # And a branch with no trading days at all in either period is unmeasured, never 0.
-    quiet = branch_health.sub_metric_values(_snapshot(trading_days=0, previous_trading_days=0))
-    assert quiet["avg_daily_sales_growth_pct"] is None
-
-
 def test_neither_customer_measure_can_sink_the_dimension_alone():
-    """The pair exists because one figure at 100% swung the whole dimension; each is
-    half, so a bad one lands as half a dimension rather than all of it."""
-    only_average_sale_is_bad = _dimension(
+    """Each is half the dimension, so a bad one lands as half rather than all of it."""
+    only_transactions_are_bad = _dimension(
         branch_health.score_branch(
-            _snapshot(net_revenue=80_000.0, transaction_count=100, previous_transaction_count=100)
+            _snapshot(transaction_count=70, previous_transaction_count=100, conversion_rate_pct=85.0)
         ),
         "customer",
     )
-    assert only_average_sale_is_bad["score"] is not None
-    assert only_average_sale_is_bad["score"] > 35
+    assert only_transactions_are_bad["score"] is not None
+    assert only_transactions_are_bad["score"] >= 50
 
 
 def test_every_measure_explains_itself():
@@ -674,7 +656,7 @@ def test_every_measure_explains_itself():
     figures it came from, and the bands it was scored against."""
     scored = branch_health.score_branch(_snapshot())
     measures = [m for dimension in scored["dimensions"] for m in dimension["sub_metrics"]]
-    assert len(measures) == 13
+    assert len(measures) == 11
     for measure in measures:
         assert measure["definition"].strip(), measure["key"]
         assert measure["calculation"], measure["key"]

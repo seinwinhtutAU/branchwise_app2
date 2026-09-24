@@ -244,7 +244,6 @@ export function DashboardPage({
           dateTo={appliedRange.to}
           month={month}
           canLoad={canLoad}
-          onViewWarnings={onViewWarnings}
         />
       )}
       {!waitingOnBranch && activeTab === "cost" && (
@@ -256,7 +255,6 @@ export function DashboardPage({
           dateTo={appliedRange.to}
           month={month}
           canLoad={canLoad}
-          onViewWarnings={onViewWarnings}
         />
       )}
       {!waitingOnBranch && activeTab === "inventory" && (
@@ -264,7 +262,6 @@ export function DashboardPage({
           session={session}
           branchId={branchId}
           canLoad={canLoad}
-          onViewWarnings={onViewWarnings}
           onViewInventoryList={onViewInventoryList}
         />
       )}
@@ -277,7 +274,6 @@ export function DashboardPage({
           dateTo={appliedRange.to}
           month={month}
           canLoad={canLoad}
-          onViewWarnings={onViewWarnings}
         />
       )}
     </div>

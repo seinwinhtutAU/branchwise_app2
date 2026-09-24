@@ -15,13 +15,12 @@ import {
 } from "@renderer/components/ui/Table";
 import { DashboardIcon, InventoryIcon } from "@renderer/components/ui/icons";
 import { CopyButton } from "@renderer/components/ui/CopyButton";
-import { RefreshingHint, StatTile, WarningsTile } from "./shared";
+import { RefreshingHint, StatTile } from "./shared";
 import {
   dashboardUrl,
   formatCount,
   formatMoney,
   formatShortDate,
-  type SaleWarningRow,
 } from "./helpers";
 
 interface CategoryQty {
@@ -54,11 +53,11 @@ interface InventoryDashboardData {
   low_count: number;
   watch_count: number;
   estimated_stock_value: number;
+  potential_sale_value: number;
   dead_stock_count: number;
   stock_qty_by_category: CategoryQty[];
   low_stock_items: LowStockItem[];
   dead_stock_items: DeadStockItem[];
-  warnings: SaleWarningRow[];
 }
 
 const STATUS_BADGE_VARIANT: Record<
@@ -274,7 +273,6 @@ interface Props {
   session: Session;
   branchId: string;
   canLoad: boolean;
-  onViewWarnings: () => void;
   onViewInventoryList: (tab: "lowStock" | "deadStock") => void;
 }
 
@@ -282,7 +280,6 @@ export function InventoryTab({
   session,
   branchId,
   canLoad,
-  onViewWarnings,
   onViewInventoryList,
 }: Props): React.JSX.Element {
   // One cached request per (tab, branch, period) — returning to this tab with the same
@@ -312,8 +309,7 @@ export function InventoryTab({
     }
     return (
       <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-          <Skeleton className="h-18" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Skeleton className="h-18" />
           <Skeleton className="h-18" />
           <Skeleton className="h-18" />
@@ -335,47 +331,35 @@ export function InventoryTab({
           : "No inventory snapshot on record for this branch yet."}
       </p>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
         <StatTile
-          label="SKUs Tracked"
+          label="Total Products"
           value={data.sku_count.toLocaleString()}
-        />
-        <StatTile
-          label="Low / Critical Stock"
-          value={lowStockCount.toLocaleString()}
-          sub={`${data.critical_count} critical, ${data.low_count} low, ${data.watch_count} watch`}
-        />
-        <StatTile
-          label="Estimated Stock Value"
-          value={formatMoney(data.estimated_stock_value)}
         />
         <StatTile
           label="Dead Stock"
           value={data.dead_stock_count.toLocaleString()}
           sub="No sales in 90 days"
         />
+        <StatTile
+          label="Estimated Inventory Value"
+          value={formatMoney(data.estimated_stock_value)}
+          sub="Quantity on hand × buying price"
+        />
+        <StatTile
+          label="Potential Sale Value"
+          value={formatMoney(data.potential_sale_value)}
+          sub="If all of it sells at its selling price"
+        />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
-        <Card className="p-3.5 sm:p-4">
-          <CardHeader
-            title="Stock on hand by category"
-            description="On-hand quantity, grouped by product category."
-          />
-          <CategoryQtyList categories={data.stock_qty_by_category} />
-        </Card>
-        <Card className="p-3.5 sm:p-4">
-          <CardHeader
-            title="Inventory data quality"
-            description="Bad values, missing records, and reconciliation mismatches."
-          />
-          <WarningsTile
-            warnings={data.warnings}
-            label="Inventory"
-            onViewWarnings={onViewWarnings}
-          />
-        </Card>
-      </div>
+      <Card className="p-3.5 sm:p-4">
+        <CardHeader
+          title="Stock on hand by category"
+          description="On-hand quantity, grouped by product category."
+        />
+        <CategoryQtyList categories={data.stock_qty_by_category} />
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
         <Card className="p-3.5 sm:p-4">

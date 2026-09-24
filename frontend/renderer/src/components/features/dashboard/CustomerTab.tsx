@@ -11,7 +11,6 @@ import {
   ChartViewToggle,
   StatTile,
   TrendChart,
-  WarningsTile,
   WeekdayHourHeatmap,
   type ChartView,
 } from "./shared";
@@ -23,7 +22,6 @@ import {
   previousPeriodLabel,
   type KpiValue,
   type PeriodKey,
-  type SaleWarningRow,
 } from "./helpers";
 
 interface TransactionCountPoint {
@@ -44,13 +42,17 @@ interface HistogramBucket {
 
 interface CustomerDashboardData {
   branch_name: string;
-  avg_items_per_basket: KpiValue;
-  single_item_basket_share_pct: KpiValue;
+  total_transactions: KpiValue;
+  // No figure (null) where no zero-selling records were imported for the period.
+  conversion_rate: {
+    value: number | null;
+    previous_value: number | null;
+    delta_pct: number | null;
+  };
   busiest_hour: FootfallCell | null;
   footfall_heatmap: FootfallCell[];
   transaction_count_trend: TransactionCountPoint[];
   items_per_basket_histogram: HistogramBucket[];
-  sale_warnings: SaleWarningRow[];
 }
 
 function histogramLabel(items: number): string {
@@ -103,7 +105,6 @@ interface Props {
   dateTo: string;
   month: string;
   canLoad: boolean;
-  onViewWarnings: () => void;
 }
 
 export function CustomerTab({
@@ -114,7 +115,6 @@ export function CustomerTab({
   dateTo,
   month,
   canLoad,
-  onViewWarnings,
 }: Props): React.JSX.Element {
   const [trendView, setTrendView] = useState<ChartView>("bar");
   // One cached request per (tab, branch, period) — returning to this tab with the same
@@ -168,15 +168,24 @@ export function CustomerTab({
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
         <StatTile
-          label="Average Items per Transaction"
-          value={data.avg_items_per_basket.value.toFixed(1)}
-          deltaPct={data.avg_items_per_basket.delta_pct}
+          label="Total Transactions"
+          value={formatCount(data.total_transactions.value)}
+          deltaPct={data.total_transactions.delta_pct}
           previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
         />
         <StatTile
-          label="Single-Item Transaction Share"
-          value={formatPercent(data.single_item_basket_share_pct.value)}
-          deltaPct={data.single_item_basket_share_pct.delta_pct}
+          label="Conversion Rate"
+          value={
+            data.conversion_rate.value === null
+              ? "—"
+              : formatPercent(data.conversion_rate.value)
+          }
+          sub={
+            data.conversion_rate.value === null
+              ? "No zero-selling records in this period"
+              : "Sales ÷ (sales + visits that did not buy)"
+          }
+          deltaPct={data.conversion_rate.delta_pct}
           previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
         />
         <StatTile
@@ -221,26 +230,13 @@ export function CustomerTab({
         />
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
-        <Card className="p-3.5 sm:p-4">
-          <CardHeader
-            title="Items per transaction"
-            description="Distribution of line-item counts per basket."
-          />
-          <ItemsPerBasketHistogram buckets={data.items_per_basket_histogram} />
-        </Card>
-        <Card className="p-3.5 sm:p-4">
-          <CardHeader
-            title="Sale data quality"
-            description="Bad values on sale lines in the selected period."
-          />
-          <WarningsTile
-            warnings={data.sale_warnings}
-            label="Sale"
-            onViewWarnings={onViewWarnings}
-          />
-        </Card>
-      </div>
+      <Card className="p-3.5 sm:p-4">
+        <CardHeader
+          title="Items per transaction"
+          description="Distribution of line-item counts per basket."
+        />
+        <ItemsPerBasketHistogram buckets={data.items_per_basket_histogram} />
+      </Card>
     </div>
   );
 }

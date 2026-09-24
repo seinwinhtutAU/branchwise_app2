@@ -20,7 +20,6 @@ import {
   ChartViewToggle,
   StatTile,
   TrendChart,
-  WarningsTile,
   WeekdayHourHeatmap,
   type ChartView,
 } from "./shared";
@@ -31,7 +30,6 @@ import {
   previousPeriodLabel,
   type KpiValue,
   type PeriodKey,
-  type SaleWarningRow,
 } from "./helpers";
 
 interface TrendPoint {
@@ -61,7 +59,6 @@ interface RevenueDashboardData {
   trend: TrendPoint[];
   top_products: TopProduct[];
   heatmap: HeatmapCell[];
-  sale_warnings: SaleWarningRow[];
 }
 
 function TopProductsTable({
@@ -127,7 +124,6 @@ interface Props {
   dateTo: string;
   month: string;
   canLoad: boolean;
-  onViewWarnings: () => void;
 }
 
 export function RevenueTab({
@@ -138,7 +134,6 @@ export function RevenueTab({
   dateTo,
   month,
   canLoad,
-  onViewWarnings,
 }: Props): React.JSX.Element {
   const [trendView, setTrendView] = useState<ChartView>("bar");
   // One cached request per (tab, branch, period) — returning to this tab with the same
@@ -232,27 +227,13 @@ export function RevenueTab({
         />
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-start">
-        <Card className="p-3.5 sm:p-4 lg:col-span-2">
-          <CardHeader
-            title="Top products"
-            description="Ranked by net revenue in the selected period."
-          />
-          <TopProductsTable products={data.top_products} />
-        </Card>
-
-        <Card className="p-3.5 sm:p-4 lg:col-span-1">
-          <CardHeader
-            title="Sale data quality"
-            description="Bad values on sale lines in the selected period."
-          />
-          <WarningsTile
-            warnings={data.sale_warnings}
-            label="Sale"
-            onViewWarnings={onViewWarnings}
-          />
-        </Card>
-      </div>
+      <Card className="p-3.5 sm:p-4">
+        <CardHeader
+          title="Top products"
+          description="Ranked by net revenue in the selected period."
+        />
+        <TopProductsTable products={data.top_products} />
+      </Card>
     </div>
   );
 }
