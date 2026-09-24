@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import type { PeriodKey } from "./helpers";
+import { useEffect, useMemo, useState } from "react";
+import { addDays, mondayOf, toLocalIso, type PeriodKey } from "./helpers";
 
 // How long the custom date inputs must sit unchanged before anything fetches with them.
 const CUSTOM_RANGE_SETTLE_MS = 400;
@@ -22,6 +22,12 @@ export interface PeriodRange {
    *  no settle delay needed. */
   month: string;
   setMonth: (month: string) => void;
+  /** The day `period === "daily"` means (YYYY-MM-DD) — yesterday until changed. */
+  day: string;
+  setDay: (day: string) => void;
+  /** The Monday of the week `period === "weekly"` means — last week until changed. */
+  week: string;
+  setWeek: (mondayIso: string) => void;
 }
 
 function currentMonth(): string {
@@ -45,6 +51,9 @@ export function usePeriodRange(initialPeriod: PeriodKey = "30d"): PeriodRange {
   const [dateTo, setDateTo] = useState("");
   const [applied, setApplied] = useState({ from: "", to: "" });
   const [month, setMonth] = useState(currentMonth);
+  // Yesterday and last week: a finished day or week reads better than one still filling.
+  const [day, setDay] = useState(() => addDays(toLocalIso(new Date()), -1));
+  const [week, setWeek] = useState(() => addDays(mondayOf(toLocalIso(new Date())), -7));
 
   useEffect(() => {
     const next =
@@ -59,6 +68,20 @@ export function usePeriodRange(initialPeriod: PeriodKey = "30d"): PeriodRange {
     return () => clearTimeout(timer);
   }, [dateFrom, dateTo]);
 
+  // A chosen day or week becomes an ordinary from/to range, worked out on the spot (not in
+  // an effect) so a tab never fetches with "daily" and no dates. A typed custom range
+  // still wins over either. A week that is still running ends today.
+  const effective = useMemo(() => {
+    if (applied.from && applied.to) return applied;
+    if (period === "daily") return { from: day, to: day };
+    if (period === "weekly") {
+      const sunday = addDays(week, 6);
+      const today = toLocalIso(new Date());
+      return { from: week, to: sunday < today ? sunday : today };
+    }
+    return applied;
+  }, [applied, period, day, week]);
+
   return {
     period,
     setPeriod,
@@ -71,8 +94,12 @@ export function usePeriodRange(initialPeriod: PeriodKey = "30d"): PeriodRange {
       setDateFrom("");
       setDateTo("");
     },
-    applied,
+    applied: effective,
     month,
     setMonth,
+    day,
+    setDay,
+    week,
+    setWeek,
   };
 }

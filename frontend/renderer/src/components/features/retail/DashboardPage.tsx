@@ -109,10 +109,10 @@ export function DashboardPage({
   const [branchId, setBranchId] = useState(
     initialBranchId ?? selectedBranchId ?? "",
   );
-  // Yesterday, not today: a full completed day reads more sensibly than a still-filling
-  // one, on every tab this control drives — including Overview's vs-previous-period
-  // growth. The control is shared across tabs, so switching keeps whatever is selected.
-  const range = usePeriodRange("yesterday");
+  // Daily, opening on yesterday: a full completed day reads more sensibly than a
+  // still-filling one, on every tab this control drives. The control is shared across
+  // tabs, so switching keeps whatever is selected.
+  const range = usePeriodRange("daily");
   const { period, month } = range;
   const appliedRange = range.applied;
 

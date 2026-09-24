@@ -121,7 +121,9 @@ def test_resolve_period_monthly_defaults_to_current_month_when_omitted():
 def test_resolve_period_year_ago_comparison_today():
     r = dashboard_service.resolve_period("today", today=TODAY, comparison="year_ago")
     assert r.start == r.end == TODAY
-    assert r.previous_start == r.previous_end == datetime.date(2025, 8, 30)
+    # The same weekday 52 weeks back, not the same date.
+    assert r.previous_start == r.previous_end == TODAY - datetime.timedelta(days=364)
+    assert r.previous_start.weekday() == TODAY.weekday()
 
 
 def test_resolve_period_year_ago_comparison_monthly():
@@ -141,17 +143,24 @@ def test_resolve_period_year_ago_comparison_custom_range():
         date_to=datetime.date(2026, 8, 14),
         comparison="year_ago",
     )
-    assert r.previous_start == datetime.date(2025, 8, 10)
-    assert r.previous_end == datetime.date(2025, 8, 14)
+    # Five days is under a week, so it is lined up by weekday: 364 days back.
+    assert r.previous_start == datetime.date(2026, 8, 10) - datetime.timedelta(days=364)
+    assert r.previous_end == datetime.date(2026, 8, 14) - datetime.timedelta(days=364)
+    assert r.previous_start.weekday() == r.start.weekday()
 
 
 def test_resolve_period_year_ago_clamps_leap_day():
     # 2024 is a leap year; 2023 has no Feb 29, so it clamps to Feb 28 rather than
     # rolling over into March.
+    # (Only windows longer than a week compare by date; shorter ones go by weekday.)
     r = dashboard_service.resolve_period(
-        "today", today=datetime.date(2024, 2, 29), comparison="year_ago"
+        "today",
+        today=datetime.date(2024, 2, 29),
+        date_from=datetime.date(2024, 1, 1),
+        date_to=datetime.date(2024, 2, 29),
+        comparison="year_ago",
     )
-    assert r.previous_start == r.previous_end == datetime.date(2023, 2, 28)
+    assert r.previous_end == datetime.date(2023, 2, 28)
 
 
 def test_dashboard_endpoint_retail_account_uses_own_branch(
@@ -225,7 +234,8 @@ def test_dashboard_kpis_and_delta_vs_same_day_last_year(
     _make_retail_user(db_session, branch)
     product = _make_product(db_session, "SKU-1")
     today = datetime.date.today()
-    last_year = today.replace(year=today.year - 1)
+    # Same weekday, 52 weeks back — see resolve_period.
+    last_year = today - datetime.timedelta(days=364)
     _make_sale(
         db_session, branch=branch, product=product, slip_id="today-1",
         sale_date=today, sale_time="10:00", qty=2, net_amount=2000,
@@ -1034,3 +1044,40 @@ def test_revenue_dashboard_reports_quantity_sold(
 
     body = authed_client.get("/api/dashboard/revenue?period=today").json()
     assert body["quantity_sold"]["value"] == 5.0
+
+
+def test_a_day_or_a_week_is_compared_with_the_same_weekdays_last_year():
+    # Wed 23 Sep 2026: 52 weeks back is Wed 24 Sep 2025, not Tue 23 Sep 2025.
+    day = dashboard_service.resolve_period(
+        "today", today=datetime.date(2026, 9, 23), comparison="year_ago"
+    )
+    assert (day.previous_start, day.previous_end) == (
+        datetime.date(2025, 9, 24), datetime.date(2025, 9, 24)
+    )
+    assert day.previous_start.weekday() == day.start.weekday()
+
+    # A Monday-to-Sunday week lines up the same way.
+    week = dashboard_service.resolve_period(
+        "today",
+        today=datetime.date(2026, 9, 23),
+        date_from=datetime.date(2026, 9, 14),
+        date_to=datetime.date(2026, 9, 20),
+        comparison="year_ago",
+    )
+    assert (week.previous_start, week.previous_end) == (
+        datetime.date(2025, 9, 15), datetime.date(2025, 9, 21)
+    )
+    assert week.previous_start.weekday() == 0
+
+
+def test_a_longer_window_still_uses_the_same_dates_last_year():
+    month = dashboard_service.resolve_period(
+        "today",
+        today=datetime.date(2026, 9, 23),
+        date_from=datetime.date(2026, 9, 1),
+        date_to=datetime.date(2026, 9, 30),
+        comparison="year_ago",
+    )
+    assert (month.previous_start, month.previous_end) == (
+        datetime.date(2025, 9, 1), datetime.date(2025, 9, 30)
+    )

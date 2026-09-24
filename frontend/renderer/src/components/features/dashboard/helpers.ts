@@ -7,7 +7,18 @@ import { apiBaseUrl } from "@renderer/lib/auth";
 // "7d"/"30d" are kept for Business Alerts, which still fetches /api/dashboard/overview
 // with its own, separate period control (see BusinessAlertsPage) — the Dashboard's own
 // picker dropped them in favour of "monthly" (see DASHBOARD_PERIOD_OPTIONS below).
-export type PeriodKey = "today" | "yesterday" | "7d" | "30d" | "monthly";
+//
+// "daily" and "weekly" exist only in the Dashboard's picker: choosing one turns into a
+// plain from/to date range before anything is fetched (see usePeriodRange's `applied`),
+// so the backend never receives them as a `period`.
+export type PeriodKey =
+  | "today"
+  | "yesterday"
+  | "7d"
+  | "30d"
+  | "monthly"
+  | "daily"
+  | "weekly";
 
 export const PERIOD_OPTIONS: { value: PeriodKey; label: string }[] = [
   { value: "today", label: "Today" },
@@ -17,12 +28,42 @@ export const PERIOD_OPTIONS: { value: PeriodKey; label: string }[] = [
 ];
 
 // The Dashboard page's own period choices — Business Alerts keeps PERIOD_OPTIONS above
-// unchanged. Order matches how the business asked for them: Yesterday is the default.
+// unchanged. Daily (a chosen day, yesterday to start with), Weekly (a chosen Monday-to-
+// Sunday week, last week to start with) and Monthly.
 export const DASHBOARD_PERIOD_OPTIONS: { value: PeriodKey; label: string }[] = [
-  { value: "yesterday", label: "Yesterday" },
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
   { value: "monthly", label: "Monthly" },
-  { value: "today", label: "Today" },
 ];
+
+// --- days and weeks, as local dates ---------------------------------------------------
+// Local dates throughout, not toISOString(), which is UTC and lands a day off around
+// midnight in this business's timezone.
+
+export function toLocalIso(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function fromLocalIso(iso: string): Date {
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+export function addDays(iso: string, days: number): string {
+  const date = fromLocalIso(iso);
+  date.setDate(date.getDate() + days);
+  return toLocalIso(date);
+}
+
+/** The Monday of the week containing `iso`. */
+export function mondayOf(iso: string): string {
+  const date = fromLocalIso(iso);
+  const sinceMonday = (date.getDay() + 6) % 7;
+  return addDays(iso, -sinceMonday);
+}
+
 
 // `dateFrom`/`dateTo` (a custom range, both set) always wins over `period` — matches
 // the backend's own resolve_period rule (app/services/dashboard.py).
@@ -38,10 +79,20 @@ export function previousPeriodLabel(
   comparison: "previous_period" | "year_ago" = "previous_period",
 ): string {
   if (comparison === "year_ago") {
-    if (dateFrom && dateTo) return "vs the same dates last year";
+    if (dateFrom && dateTo) {
+      // A day or a week is lined up by weekday on the server (52 weeks back), a longer
+      // range by date — say which, so the reader knows what "last year" means.
+      const days =
+        Math.round(
+          (fromLocalIso(dateTo).getTime() - fromLocalIso(dateFrom).getTime()) / 86_400_000,
+        ) + 1;
+      if (days <= 1) return "vs the same weekday last year";
+      if (days <= 7) return "vs the same weekdays last year";
+      return "vs the same dates last year";
+    }
     return period === "monthly"
       ? "vs the same month last year"
-      : "vs the same day last year";
+      : "vs the same weekday last year";
   }
   if (dateFrom && dateTo) return "vs the same-length period right before it";
   switch (period) {
@@ -55,6 +106,10 @@ export function previousPeriodLabel(
       return "vs the previous 30 days";
     case "monthly":
       return "vs the previous month";
+    case "daily":
+      return "vs the day before";
+    case "weekly":
+      return "vs the week before";
   }
 }
 
@@ -75,15 +130,28 @@ export function formatMonth(year: number, monthIndex0: number): string {
 }
 
 // The Dashboard's Monthly picker label for one specific month (YYYY-MM) — the current,
-// in-progress month reads "1st to today" (e.g. "Sep 1-23"); any earlier one reads its
-// full span (e.g. "Aug 1-31"), matching the backend's own resolve_period (_resolve_month).
+// in-progress month reads "1st to today" (e.g. "Sep 1 - 24, 2026"); any earlier one reads
+// its full span (e.g. "Aug 1 - 31, 2026"), matching the backend's own resolve_period
+// (_resolve_month). The year is always there, so it reads the same in every month.
 export function monthLabel(month: string, today: Date = new Date()): string {
   const { year, monthIndex0 } = parseMonth(month);
   const isCurrentMonth =
     year === today.getFullYear() && monthIndex0 === today.getMonth();
   const endDay = isCurrentMonth ? today.getDate() : daysInMonth(year, monthIndex0);
-  const yearSuffix = year === today.getFullYear() ? "" : `, ${year}`;
-  return `${MONTH_SHORT_LABELS[monthIndex0]} 1–${endDay}${yearSuffix}`;
+  return `${MONTH_SHORT_LABELS[monthIndex0]} 1 - ${endDay}, ${year}`;
+}
+
+// The Weekly picker's label for the Monday-to-Sunday week starting on `mondayIso`, written
+// like the month one: "Sep 7 - Sep 13, 2026". A week that crosses New Year carries both
+// years ("Dec 29, 2025 - Jan 4, 2026").
+export function weekLabel(mondayIso: string): string {
+  const monday = fromLocalIso(mondayIso);
+  const sunday = fromLocalIso(addDays(mondayIso, 6));
+  const short = (date: Date): string =>
+    `${MONTH_SHORT_LABELS[date.getMonth()]} ${date.getDate()}`;
+  return monday.getFullYear() === sunday.getFullYear()
+    ? `${short(monday)} - ${short(sunday)}, ${sunday.getFullYear()}`
+    : `${short(monday)}, ${monday.getFullYear()} - ${short(sunday)}, ${sunday.getFullYear()}`;
 }
 
 // Whether `year`/`monthIndex0` names a month later than today's — the Monthly picker
@@ -114,7 +182,9 @@ export function periodQueryParams(
     params.set("date_from", dateFrom);
     params.set("date_to", dateTo);
   } else {
-    params.set("period", period);
+    // "daily"/"weekly" always arrive with their dates; if they somehow do not, fall back
+    // to a preset the backend knows rather than sending it something it would reject.
+    params.set("period", period === "daily" || period === "weekly" ? "yesterday" : period);
     if (period === "monthly" && month) params.set("month", month);
   }
   return params;

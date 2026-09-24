@@ -23,11 +23,16 @@ import {
   MONTH_SHORT_LABELS,
   PERIOD_OPTIONS,
   WEEKDAY_LABELS,
+  addDays,
+  dateRangeLabel,
   formatMonth,
   formatShortDate,
   isFutureMonth,
+  mondayOf,
   monthLabel,
   parseMonth,
+  toLocalIso,
+  weekLabel,
   type AlertFact,
   type AlertTable,
   type HealthAlert,
@@ -528,6 +533,147 @@ function MonthPickerGrid({
   );
 }
 
+// A calendar-style week picker in the same spirit as MonthPicker: a button showing the
+// selected week as its dates ("14 Sep – 20 Sep 2026"), opening a month calendar where
+// clicking any day picks that day's Monday-to-Sunday week. Weeks are named by their
+// dates, not by number — "week 38" means nothing to anyone in the shop.
+function WeekPicker({
+  week,
+  onChange,
+}: {
+  week: string;
+  onChange: (mondayIso: string) => void;
+}): React.JSX.Element {
+  const { open, setOpen, ref, toggle } = useDismissableMenu();
+  // Reset to the selected week's month each time the popup opens (see MonthPicker).
+  const [openKey, setOpenKey] = useState(0);
+
+  return (
+    <div className="relative" ref={ref}>
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => {
+          if (!open) setOpenKey((k) => k + 1);
+          toggle();
+        }}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        className="h-8 text-xs font-medium gap-1.5"
+      >
+        {weekLabel(week)}
+      </Button>
+      {open && (
+        <FloatingLayer
+          anchorRef={ref}
+          align="left"
+          className="w-64 bg-bg-base border border-border rounded-lg shadow-lg p-2 animate-fade-in"
+        >
+          <WeekPickerGrid
+            key={openKey}
+            selectedMonday={week}
+            onPick={(monday) => {
+              onChange(monday);
+              setOpen(false);
+            }}
+          />
+        </FloatingLayer>
+      )}
+    </div>
+  );
+}
+
+function WeekPickerGrid({
+  selectedMonday,
+  onPick,
+}: {
+  selectedMonday: string;
+  onPick: (mondayIso: string) => void;
+}): React.JSX.Element {
+  const todayIso = toLocalIso(new Date());
+  const thisMonday = mondayOf(todayIso);
+  // The first of the month being shown, as an ISO date.
+  const [viewMonth, setViewMonth] = useState(() => `${selectedMonday.slice(0, 7)}-01`);
+  const view = parseMonth(viewMonth.slice(0, 7));
+
+  // Whole Monday-to-Sunday rows covering the month, so every week can be clicked whole.
+  const rows: string[][] = [];
+  const lastOfMonth = addDays(
+    `${formatMonth(view.year + (view.monthIndex0 === 11 ? 1 : 0), (view.monthIndex0 + 1) % 12)}-01`,
+    -1,
+  );
+  for (let monday = mondayOf(viewMonth); monday <= lastOfMonth; monday = addDays(monday, 7)) {
+    rows.push(Array.from({ length: 7 }, (_, i) => addDays(monday, i)));
+  }
+
+  const canGoForward = formatMonth(view.year, view.monthIndex0) < todayIso.slice(0, 7);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between px-1 pb-2">
+        <button
+          type="button"
+          onClick={() => setViewMonth(addDays(viewMonth, -1).slice(0, 7) + "-01")}
+          aria-label="Previous month"
+          className="p-1 rounded text-text-secondary hover:bg-bg-subtle hover:text-text-primary"
+        >
+          <ChevronLeftIcon className="w-4 h-4" />
+        </button>
+        <span className="text-sm font-semibold text-text-primary">
+          {MONTH_SHORT_LABELS[view.monthIndex0]} {view.year}
+        </span>
+        <button
+          type="button"
+          onClick={() => setViewMonth(addDays(lastOfMonth, 1))}
+          disabled={!canGoForward}
+          aria-label="Next month"
+          className="p-1 rounded text-text-secondary hover:bg-bg-subtle hover:text-text-primary disabled:opacity-30 disabled:pointer-events-none"
+        >
+          <ChevronRightIcon className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="grid grid-cols-7 px-0.5 pb-1 text-center text-[10px] font-medium text-text-muted">
+        {WEEKDAY_LABELS.map((label) => (
+          <span key={label}>{label.slice(0, 2)}</span>
+        ))}
+      </div>
+      <div className="flex flex-col gap-0.5">
+        {rows.map((days) => {
+          const monday = days[0];
+          const disabled = monday > thisMonday;
+          const selected = monday === selectedMonday;
+          return (
+            <button
+              key={monday}
+              type="button"
+              disabled={disabled}
+              onClick={() => onPick(monday)}
+              aria-label={`Week of ${dateRangeLabel(monday, days[6])}`}
+              className={cn(
+                "grid grid-cols-7 rounded-md py-1.5 text-center text-xs transition-colors",
+                disabled
+                  ? "text-text-muted/40 cursor-not-allowed"
+                  : selected
+                    ? "bg-brand text-white font-semibold"
+                    : "text-text-secondary hover:bg-bg-subtle hover:text-text-primary",
+              )}
+            >
+              {days.map((day) => (
+                <span
+                  key={day}
+                  className={cn(day.slice(0, 7) !== viewMonth.slice(0, 7) && !selected && "opacity-40")}
+                >
+                  {Number(day.slice(8))}
+                </span>
+              ))}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // The period preset + custom range controls, shared by the Dashboard and the Business
 // Alerts page. Driven by usePeriodRange, which owns the state and the settle timing.
 export function PeriodControls({
@@ -559,6 +705,22 @@ export function PeriodControls({
       </div>
       {range.period === "monthly" && !range.hasCustomRange && (
         <MonthPicker month={range.month} onChange={range.setMonth} />
+      )}
+      {range.period === "daily" && !range.hasCustomRange && (
+        <div className="w-36">
+          <Input
+            type="date"
+            size="sm"
+            value={range.day}
+            max={toLocalIso(new Date())}
+            onChange={(e) => e.target.value && range.setDay(e.target.value)}
+            aria-label="Day"
+            title="Day"
+          />
+        </div>
+      )}
+      {range.period === "weekly" && !range.hasCustomRange && (
+        <WeekPicker week={range.week} onChange={range.setWeek} />
       )}
       <span className="text-text-muted text-xs font-medium select-none">From</span>
       <div className="w-32">

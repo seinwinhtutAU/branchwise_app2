@@ -100,6 +100,10 @@ def _year_ago(d: date) -> date:
         return d.replace(year=d.year - 1, day=28)
 
 
+# A window this short or shorter is compared with the same weekdays last year rather than
+# the same dates (see resolve_period).
+WEEKDAY_ALIGNED_MAX_DAYS = 7
+
 ComparisonMode = Literal["previous_period", "year_ago"]
 
 
@@ -146,8 +150,15 @@ def resolve_period(
         raise ValueError(f"Unknown period: {period!r}")
 
     if comparison == "year_ago":
-        previous_start = _year_ago(start)
-        previous_end = _year_ago(end)
+        if (end - start).days + 1 <= WEEKDAY_ALIGNED_MAX_DAYS:
+            # A day or a week: the same *weekdays* a year earlier (52 weeks back), not the
+            # same dates — this Wednesday against last year's Wednesday, since a Saturday
+            # and a Wednesday are not comparable in a shop whose sales swing by weekday.
+            previous_start = start - timedelta(days=364)
+            previous_end = end - timedelta(days=364)
+        else:
+            previous_start = _year_ago(start)
+            previous_end = _year_ago(end)
     else:
         window_days = (end - start).days + 1
         previous_end = start - timedelta(days=1)

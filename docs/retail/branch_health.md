@@ -42,7 +42,7 @@ measurable, and each dimension's `effective_weight` reports what it really contr
 
 ## What growth is compared with
 
-Every growth figure (revenue, average sale, quantity sold, transactions) is compared with **the same dates one year earlier**, not with the window right before. This business's sales follow the calendar (festivals, rainy season, school term), so last month is a noisy baseline, and it is the same comparison the Revenue, Cost and Customer tabs use, so the Overview and those pages agree. The Overview header says "vs the same month/dates last year".
+Every growth figure (revenue, average sale, quantity sold, transactions) is compared with **the same dates one year earlier**, not with the window right before. This business's sales follow the calendar (festivals, rainy season, school term), so last month is a noisy baseline, and it is the same comparison the Revenue, Cost and Customer tabs use, so the Overview and those pages agree. The Overview header says "vs the same month/dates last year". A window of a week or less (a chosen day or week) is lined up by weekday instead — 52 weeks back — so a Wednesday is not set against a Saturday; see `resolve_period` and `docs/retail/dashboard.md`.
 
 A branch with no sales on those days last year (AungThitSar has data only from December 2025) has no growth to score: those measures are unscored, and their dimension is dropped or re-weighted like any other unmeasured one. It is never quietly compared with the previous month instead, which would put two branches on different yardsticks. Level measures (gross margin, dead stock, aged stock, stockout risk, conversion rate, data quality) do not compare with anything and are unaffected.
 
