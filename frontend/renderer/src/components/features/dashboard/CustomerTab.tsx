@@ -55,6 +55,12 @@ interface CustomerDashboardData {
   items_per_basket_histogram: HistogramBucket[];
 }
 
+// The heatmap stores an hour as "18-19"; a person reads "18:00 - 19:00".
+function formatHourBand(band: string): string {
+  const [from, to] = band.split("-");
+  return `${from}:00 - ${to}:00`;
+}
+
 function histogramLabel(items: number): string {
   return items >= 6 ? "6+" : String(items);
 }
@@ -189,10 +195,10 @@ export function CustomerTab({
           previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
         />
         <StatTile
-          label="Busiest Hour"
+          label="Peak Hour"
           value={
             busiest
-              ? `${WEEKDAY_LABELS[busiest.weekday]} ${busiest.hour_band}`
+              ? `${WEEKDAY_LABELS[busiest.weekday]} ${formatHourBand(busiest.hour_band)}`
               : "—"
           }
           sub={
@@ -220,8 +226,8 @@ export function CustomerTab({
 
       <Card className="p-3.5 sm:p-4">
         <CardHeader
-          title="Busy hours by day & hour"
-          description="Transaction count by weekday and time of day — store footfall intensity."
+          title="Customer demand by day & hour"
+          description="Transaction count by weekday and time of day"
         />
         <WeekdayHourHeatmap
           cells={data.footfall_heatmap}

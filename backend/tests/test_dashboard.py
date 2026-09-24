@@ -863,7 +863,8 @@ def test_summary_dashboard_endpoint(
     assert "inventory_condition" in body
     assert "customer_demand" in body
     assert len(body["top_products"]) >= 1
-    assert len(body["recommendations"]) == 3
+    # The old fixed "recommendations" are gone; the Summary now shows real Business Alerts.
+    assert "recommendations" not in body
 
 
 def test_customer_dashboard_no_longer_carries_a_data_quality_box(
@@ -955,3 +956,60 @@ def test_inventory_dashboard_potential_sale_value_is_quantity_times_selling_pric
 
     body = authed_client.get("/api/dashboard/inventory").json()
     assert body["potential_sale_value"] == 10 * 300 + 5 * 200
+
+
+def _summary_demand(authed_client: TestClient) -> dict:
+    response = authed_client.get("/api/dashboard/summary?period=today")
+    assert response.status_code == 200
+    return response.json()["customer_demand"]
+
+
+def test_summary_peak_period_is_the_single_busiest_hour(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    for slip, sale_time in (("a", "17:10"), ("b", "17:40"), ("c", "18:05")):
+        _make_sale(
+            db_session, branch=branch, product=product, slip_id=slip,
+            sale_date=today, sale_time=sale_time, qty=1, net_amount=100,
+        )
+    db_session.commit()
+
+    demand = _summary_demand(authed_client)
+    assert demand["peak_period"] == "17:00 - 18:00"
+    assert demand["peak_hour_desc"] == "2 transactions"
+    assert demand["summary"] == "Strongest demand occurs in the evening"
+
+
+def test_summary_peak_hour_tie_goes_to_the_earlier_hour(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    product = _make_product(db_session, "SKU-1")
+    today = datetime.date.today()
+    for slip, sale_time in (("a", "10:15"), ("b", "15:30")):
+        _make_sale(
+            db_session, branch=branch, product=product, slip_id=slip,
+            sale_date=today, sale_time=sale_time, qty=1, net_amount=100,
+        )
+    db_session.commit()
+
+    demand = _summary_demand(authed_client)
+    assert demand["peak_period"] == "10:00 - 11:00"
+    assert demand["peak_hour_desc"] == "1 transaction"
+
+
+def test_summary_names_no_peak_hour_when_nothing_sold(
+    authed_client: TestClient, db_session: Session
+):
+    branch = _make_branch(db_session)
+    _make_retail_user(db_session, branch)
+    db_session.commit()
+
+    demand = _summary_demand(authed_client)
+    assert demand["peak_period"] == "—"
+    assert demand["peak_hour_desc"] == "No transactions in this period"

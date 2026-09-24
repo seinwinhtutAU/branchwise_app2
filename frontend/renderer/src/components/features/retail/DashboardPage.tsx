@@ -194,6 +194,7 @@ export function DashboardPage({
           month={month}
           canLoad={canLoad}
           onOpenDashboard={showAdvancedTabs ? setActiveTab : undefined}
+          onViewBusinessAlerts={onViewBusinessAlerts}
         />
       )}
 

@@ -106,7 +106,10 @@ def daily_import_missing_rule(snapshot: BranchSnapshot) -> list[Alert]:
         return Alert(
             id=f"daily_import_missing_{dimension}",
             severity=CRITICAL,
-            dimension=dimension,
+            # A missing file is a data problem (it sits under Data quality on the
+            # Business Alerts page and stays out of the Summary's decisions), even though
+            # the id still says which of sales/inventory it is.
+            dimension="data_quality",
             title=f"Today's {kind_lower} data is missing or out of date",
             summary=(
                 f"The latest {kind_lower} file on record isn't for today "

@@ -966,8 +966,8 @@ def _category_revenue(
 
 def _hourly_demand(
     db: Session, branch_id: str, start: date, end: date
-) -> tuple[list[dict], str, str, str, int]:
-    """Hourly sales demand distribution and peak window analysis."""
+) -> tuple[list[dict], str, str, str]:
+    """Hourly sales demand distribution and its single busiest hour."""
     sales = (
         db.query(Sale.sale_time, func.coalesce(func.sum(SaleLine.net_amount), 0))
         .join(SaleLine, SaleLine.sale_id == Sale.id)
@@ -1001,11 +1001,12 @@ def _hourly_demand(
     ]
 
     if hourly_counts:
-        peak_hr = max(hourly_counts.keys(), key=lambda h: hourly_counts[h])
-        peak_start = max(8, peak_hr - 2)
-        peak_end = min(22, peak_hr + 2)
-        peak_period = f"{peak_start:02d}:00-{peak_end:02d}:00"
-        peak_hour_desc = f"Highest activity occurs around {peak_hr:02d}:00."
+        # The one busiest hour — the same hour the bars above show tallest. Sorted first
+        # so two hours tied on transactions resolve to the earlier one.
+        peak_hr = max(sorted(hourly_counts), key=lambda h: hourly_counts[h])
+        peak_count = hourly_counts[peak_hr]
+        peak_period = f"{peak_hr:02d}:00 - {(peak_hr + 1) % 24:02d}:00"
+        peak_hour_desc = f"{peak_count:,} transaction{'' if peak_count == 1 else 's'}"
         if peak_hr >= 17:
             demand_summary = "Strongest demand occurs in the evening"
         elif peak_hr >= 12:
@@ -1013,12 +1014,12 @@ def _hourly_demand(
         else:
             demand_summary = "Strongest demand occurs in the morning"
     else:
-        peak_period = "16:00-20:00"
-        peak_hour_desc = "Highest activity occurs around 18:00."
-        demand_summary = "Strongest demand occurs in the evening"
-        peak_start = 16
+        # Nothing sold, so there is no peak to name — not an invented "16:00-20:00".
+        peak_period = "—"
+        peak_hour_desc = "No transactions in this period"
+        demand_summary = "No sales in this period"
 
-    return hourly_demand_list, peak_period, peak_hour_desc, demand_summary, peak_start
+    return hourly_demand_list, peak_period, peak_hour_desc, demand_summary
 
 
 def build_summary_dashboard(
@@ -1062,7 +1063,7 @@ def build_summary_dashboard(
     dead_stock_pct = (dead_stock_count / total_products * 100) if total_products > 0 else 0.0
 
     category_revenue, _ = _category_revenue(db, branch_id, period_range.start, period_range.end)
-    hourly_demand_list, peak_period, peak_hour_desc, demand_summary, peak_start = _hourly_demand(
+    hourly_demand_list, peak_period, peak_hour_desc, demand_summary = _hourly_demand(
         db, branch_id, period_range.start, period_range.end
     )
     footfall_heatmap = _footfall_heatmap(db, branch_id, period_range.start, period_range.end)
@@ -1078,24 +1079,6 @@ def build_summary_dashboard(
             else "Healthy inventory movement with low dead stock."
         )
     )
-
-    recommendations = [
-        {
-            "id": "dead_stock",
-            "title": "Clear dead stock",
-            "description": "Use markdowns and targeted promotions before new purchasing.",
-        },
-        {
-            "id": "peak_hours",
-            "title": "Protect peak hours",
-            "description": f"Prepare staff and popular products before {peak_start:02d}:00.",
-        },
-        {
-            "id": "purchasing",
-            "title": "Purchase selectively",
-            "description": "Reorder strong sellers with low stock and healthy profit.",
-        },
-    ]
 
     return {
         "branch_id": branch_id,
@@ -1134,7 +1117,6 @@ def build_summary_dashboard(
             "footfall_heatmap": footfall_heatmap,
         },
         "top_products": top_products,
-        "recommendations": recommendations,
     }
 
 

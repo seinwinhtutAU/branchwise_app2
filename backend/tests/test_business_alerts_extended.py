@@ -103,11 +103,11 @@ def test_daily_import_fires_critical_after_8pm_when_both_missing():
     sales_alert = next(a for a in alerts if a.id == "daily_import_missing_sales")
     inventory_alert = next(a for a in alerts if a.id == "daily_import_missing_inventory")
     assert sales_alert.severity == early_warning.CRITICAL
-    assert sales_alert.dimension == "sales"
+    assert sales_alert.dimension == "data_quality"
     assert sales_alert.title == "Today's sales data is missing or out of date"
     assert sales_alert.link == "import"
     assert inventory_alert.severity == early_warning.CRITICAL
-    assert inventory_alert.dimension == "inventory"
+    assert inventory_alert.dimension == "data_quality"
     assert inventory_alert.title == "Today's inventory data is missing or out of date"
     assert inventory_alert.link == "import"
 
@@ -122,7 +122,7 @@ def test_daily_import_fires_critical_after_8pm_when_only_sales_missing():
     assert not any(a.id == "daily_import_missing_inventory" for a in alerts)
     alert = next(a for a in alerts if a.id == "daily_import_missing_sales")
     assert alert.severity == early_warning.CRITICAL
-    assert alert.dimension == "sales"
+    assert alert.dimension == "data_quality"
     assert "sales" in alert.title.lower()
     assert "inventory" not in alert.title.lower()
 
@@ -137,7 +137,7 @@ def test_daily_import_fires_critical_after_8pm_when_only_inventory_missing():
     assert not any(a.id == "daily_import_missing_sales" for a in alerts)
     alert = next(a for a in alerts if a.id == "daily_import_missing_inventory")
     assert alert.severity == early_warning.CRITICAL
-    assert alert.dimension == "inventory"
+    assert alert.dimension == "data_quality"
     assert "inventory" in alert.title.lower()
     assert "sales" not in alert.title.lower()
 

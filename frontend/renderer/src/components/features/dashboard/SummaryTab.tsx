@@ -6,6 +6,7 @@ import { Skeleton } from "@renderer/components/ui/Skeleton";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { DashboardIcon } from "@renderer/components/ui/icons";
 import { cn } from "@renderer/lib/utils";
+import { DecisionsCard } from "./DecisionsCard";
 import { RefreshingHint } from "./shared";
 import {
   dashboardUrl,
@@ -25,6 +26,7 @@ interface Props {
   month: string;
   canLoad: boolean;
   onOpenDashboard?: (tab: "revenue" | "cost" | "inventory" | "customer") => void;
+  onViewBusinessAlerts?: () => void;
 }
 
 function DrilldownCard({
@@ -276,6 +278,7 @@ export function SummaryTab({
   month,
   canLoad,
   onOpenDashboard,
+  onViewBusinessAlerts,
 }: Props): React.JSX.Element {
   const url = canLoad
     ? dashboardUrl("summary", branchId, { period, dateFrom, dateTo, month })
@@ -333,7 +336,7 @@ export function SummaryTab({
     );
   }
 
-  const { kpis, category_revenue, inventory_condition, customer_demand, top_products, recommendations } = data;
+  const { kpis, category_revenue, inventory_condition, customer_demand, top_products } = data;
   const maxCategoryRevenue = Math.max(...category_revenue.map((c) => c.net_revenue), 1);
 
   // Derive Period description for Net Revenue card subtitle
@@ -588,7 +591,7 @@ export function SummaryTab({
             {/* Peak Period Callout */}
             <div className="bg-brand-subtle text-brand border border-brand/20 rounded-md p-2 text-xs space-y-0.5">
               <div className="font-semibold text-brand">
-                Peak period: {customer_demand.peak_period}
+                Peak hour: {customer_demand.peak_period}
               </div>
               <div className="text-[11px] text-text-secondary truncate">
                 {customer_demand.peak_hour_desc}
@@ -638,27 +641,7 @@ export function SummaryTab({
           </DrilldownCard>
 
           {/* Card 2: Recommended decisions */}
-          <div className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border">
-            <h2 className="text-sm font-semibold text-text-primary mb-2.5">
-              Recommended decisions
-            </h2>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {recommendations.map((rec) => (
-                <div
-                  key={rec.id}
-                  className="bg-bg-base p-3 rounded-lg border border-border flex flex-col justify-between hover:border-brand/30 transition-colors"
-                >
-                  <h3 className="text-xs font-bold text-text-primary mb-1">
-                    {rec.title}
-                  </h3>
-                  <p className="text-[11px] leading-relaxed text-text-secondary">
-                    {rec.description}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
+          <DecisionsCard session={session} branchId={branchId} onViewAlerts={onViewBusinessAlerts} />
         </div>
 
       </div>

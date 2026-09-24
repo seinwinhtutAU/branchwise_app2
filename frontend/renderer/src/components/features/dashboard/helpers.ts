@@ -445,12 +445,6 @@ export interface TopProductSummary {
   avg_selling_price: number | null;
 }
 
-export interface SummaryRecommendation {
-  id: string;
-  title: string;
-  description: string;
-}
-
 export interface SummaryDashboardData {
   branch_id: string;
   branch_name: string;
@@ -463,7 +457,6 @@ export interface SummaryDashboardData {
   inventory_condition: InventoryConditionData;
   customer_demand: CustomerDemandData;
   top_products: TopProductSummary[];
-  recommendations: SummaryRecommendation[];
 }
 
 export function formatCompactMmk(val: number): string {
