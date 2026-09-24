@@ -286,6 +286,9 @@ export interface HealthAlert {
   facts: AlertFact[];
   /** The products behind an alert about a list rather than a number. */
   table: AlertTable | null;
+  /** For an alert that points at the Warning page: how many days back from today its
+   * counts reach, so that page opens on the same stretch of days. */
+  evidence_days: number | null;
 }
 
 /**

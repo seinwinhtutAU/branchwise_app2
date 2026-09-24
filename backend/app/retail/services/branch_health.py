@@ -29,7 +29,7 @@ from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Callable
 
-from sqlalchemy import and_, case, func, or_
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
@@ -37,7 +37,11 @@ from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.models.sale import Sale, SaleLine
 from app.retail.models.stock_level import StockLevel
+from app.retail.models.zero_selling import ZeroSellingRecord
 from app.retail.services import data_quality, explanation
+from app.retail.services.import_common import sql_rule_failure
+from app.retail.services.pos_import import VALIDATION_RULES as SALES_VALIDATION_RULES
+from app.retail.services.purchase_import import VALIDATION_RULES as PURCHASE_VALIDATION_RULES
 from app.retail.services.import_integrity import (
     latest_daily_data_dates,
     purchase_number_integrity,
@@ -242,8 +246,8 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "dead_stock_share_pct",
                 "Dead stock share",
                 "pct",
-                0.4,
-                ((0.0, 100.0), (5.0, 80.0), (15.0, 40.0), (30.0, 0.0)),
+                0.5,
+                ((20.0, 100.0), (35.0, 85.0), (50.0, 60.0), (65.0, 30.0), (80.0, 0.0)),
                 definition=(
                     f"How much of the shop is products that are still on the shelf but have not sold "
                     f"once in {DEAD_STOCK_WINDOW_DAYS} days."
@@ -258,7 +262,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "stockout_risk_share_pct",
                 "Stockout risk share",
                 "pct",
-                0.3,
+                0.5,
                 ((0.0, 100.0), (2.0, 85.0), (5.0, 60.0), (10.0, 20.0), (20.0, 0.0)),
                 definition=(
                     f"How much of the shop is about to run out — under {LOW_DAYS_OF_STOCK} days of stock "
@@ -268,32 +272,6 @@ DIMENSIONS: tuple[Dimension, ...] = (
                     f"{s.critical_count + s.low_count:,} of {s.sku_count:,} products "
                     f"({s.critical_count:,} critical, {s.low_count:,} low)."
                     if s.sku_count
-                    else None
-                ),
-            ),
-            SubMetric(
-                "days_of_inventory_on_hand",
-                "Days of inventory on hand",
-                "days",
-                0.3,
-                # Both ends are bad: under two weeks of cover is a stockout waiting to
-                # happen, over two months is cash sitting on a shelf.
-                (
-                    (0.0, 50.0),
-                    (15.0, 90.0),
-                    (30.0, 100.0),
-                    (45.0, 85.0),
-                    (60.0, 60.0),
-                    (90.0, 30.0),
-                    (120.0, 0.0),
-                ),
-                definition="How long the stock now on the shelf would last at the rate the branch is selling.",
-                calculation=lambda s: (
-                    f"{_ks(s.estimated_stock_value)} of stock ÷ "
-                    f"{_ks(s.estimated_cogs / s.period_days)} of goods sold per day."
-                    if s.period_days
-                    and s.estimated_cogs > 0
-                    and s.estimated_stock_value > 0
                     else None
                 ),
             ),
@@ -308,21 +286,16 @@ DIMENSIONS: tuple[Dimension, ...] = (
         # and was dropped: this business sells shoes, and a customer buying one pair and
         # leaving is how the shop normally sells, not a problem to score.
         #
-        # The two that replaced it are deliberately a pair. On its own, what a visit is
-        # worth swung the whole dimension on one figure that moves with the mix of what
-        # happened to sell that fortnight. Half each means neither a quiet spell of
-        # cheaper pairs nor a slow week can take the dimension down alone.
-        #
-        # Still no raw transaction-count sub-metric: that is already 40% of the Sales
-        # dimension. Sales *per open day* is a different question — how busy a normal
-        # day is — and it is the half of it that survives a closed week or an import
-        # that never arrived.
+        # Three sub-metrics balance customer behaviour:
+        # - Average sale value (30%): what a visit is worth
+        # - Transactions per day (30%): how busy an open day is
+        # - Conversion rate (40%): footfall conversion on tracked days
         sub_metrics=(
             SubMetric(
                 "avg_basket_growth_pct",
                 "Average sale value",
                 "pct_change",
-                0.5,
+                0.3,
                 _GENTLE_GROWTH_BANDS,
                 definition="How much a customer spends in one transaction, against the period before.",
                 calculation=lambda s: (
@@ -333,7 +306,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "avg_daily_sales_growth_pct",
                 "Transactions per day",
                 "pct_change",
-                0.5,
+                0.3,
                 _GENTLE_GROWTH_BANDS,
                 definition="How many transactions the branch makes on a day it is open, against the period before.",
                 calculation=lambda s: (
@@ -341,6 +314,20 @@ DIMENSIONS: tuple[Dimension, ...] = (
                     f"({s.transaction_count:,} over {s.trading_days:,} open days), against "
                     f"{s.previous_transaction_count / s.previous_trading_days:.1f} before."
                     if s.trading_days and s.previous_trading_days
+                    else None
+                ),
+            ),
+            SubMetric(
+                "conversion_rate_pct",
+                "Conversion rate",
+                "pct",
+                0.4,
+                ((30.0, 0.0), (45.0, 40.0), (60.0, 70.0), (75.0, 85.0), (85.0, 100.0)),
+                definition="Share of store visits that resulted in a sale, on days zero-selling was tracked.",
+                calculation=lambda s: (
+                    f"{s.conversion_sales_slips:,} sales ÷ ({s.conversion_sales_slips:,} sales + "
+                    f"{s.conversion_zero_count:,} walkouts) over {s.conversion_days_recorded:,} tracked days."
+                    if s.conversion_rate_pct is not None
                     else None
                 ),
             ),
@@ -497,6 +484,13 @@ class BranchSnapshot:
     weekly_pattern: dict | None = None
     sale_data_quality_issues: dict = field(default_factory=dict)
     purchase_data_quality_issues: dict = field(default_factory=dict)
+    conversion_rate_pct: float | None = None
+    conversion_sales_slips: int = 0
+    conversion_zero_count: int = 0
+    conversion_days_recorded: int = 0
+    # How many days back from today the period reaches — so the Warning page can open on
+    # the same stretch of days an alert's counts came from.
+    warning_window_days: int | None = None
 
 
 def _growth_pct(current: float, previous: float) -> float | None:
@@ -532,6 +526,52 @@ def _trading_days(db: Session, branch_id: str, start: date, end: date) -> int:
         .scalar()
         or 0
     )
+
+
+def _conversion_stats(
+    db: Session, branch_id: str, start: date, end: date
+) -> tuple[float | None, int, int, int]:
+    """Conversion rate across days with zero-selling records in this period:
+    sales_slips ÷ (sales_slips + zero_selling_records) * 100.
+
+    Only days with zero-selling records are counted. Returns (None, 0, 0, 0)
+    if no zero-selling records exist in the period.
+    """
+    zero_days = (
+        db.query(
+            ZeroSellingRecord.sale_date,
+            func.count(ZeroSellingRecord.id).label("zero_count"),
+        )
+        .filter(
+            ZeroSellingRecord.branch_id == branch_id,
+            ZeroSellingRecord.sale_date >= start,
+            ZeroSellingRecord.sale_date <= end,
+        )
+        .group_by(ZeroSellingRecord.sale_date)
+        .all()
+    )
+    if not zero_days:
+        return None, 0, 0, 0
+
+    dates_with_records = [d for d, _ in zero_days]
+    total_zero = sum(int(c) for _, c in zero_days)
+
+    sales_count = (
+        db.query(func.count(Sale.id))
+        .filter(
+            Sale.branch_id == branch_id,
+            Sale.sale_date.in_(dates_with_records),
+        )
+        .scalar()
+        or 0
+    )
+    sales_count = int(sales_count)
+    denominator = sales_count + total_zero
+    if denominator == 0:
+        return None, 0, 0, len(dates_with_records)
+
+    conversion_rate = (sales_count / denominator) * 100.0
+    return conversion_rate, sales_count, total_zero, len(dates_with_records)
 
 
 def _products_sold(db: Session, branch_id: str, start: date, end: date) -> int:
@@ -980,26 +1020,21 @@ def _find_weekly_patterns(
 # placeholder strings ("—", "-", "?", "None", "NULL") either check has always treated as
 # "no real description", trimmed the same way Python's str.strip() would.
 def _blank_description_condition():
-    trimmed = func.trim(Product.description)
-    return or_(
-        Product.description.is_(None),
-        trimmed == "",
-        trimmed.in_(("—", "-", "?", "None", "NULL")),
-    )
+    return data_quality.blank_description_condition()
 
 
 def _sale_numeric_invalid_condition():
-    # Qty <= 0, Selling Price <= 0, Amount <= 0, Net Amount <= 0, Discount Amount < 0, or None.
-    return or_(
-        SaleLine.qty.is_(None),
-        SaleLine.qty <= 0,
-        SaleLine.selling_price.is_(None),
-        SaleLine.selling_price <= 0,
-        SaleLine.amount.is_(None),
-        SaleLine.amount <= 0,
-        SaleLine.net_amount.is_(None),
-        SaleLine.net_amount <= 0,
-        and_(SaleLine.discount_amount.is_not(None), SaleLine.discount_amount < 0),
+    # The Warning page's own sale rules (pos_import.VALIDATION_RULES), so this alert and
+    # that page always agree on which lines are bad.
+    return sql_rule_failure(
+        {
+            "Selling_Price": SaleLine.selling_price,
+            "Qty": SaleLine.qty,
+            "Discount_Amount": SaleLine.discount_amount,
+            "Amount": SaleLine.amount,
+            "Net_Amount": SaleLine.net_amount,
+        },
+        SALES_VALIDATION_RULES,
     )
 
 
@@ -1077,12 +1112,10 @@ def _check_sale_data_quality(
 
 
 def _purchase_numeric_invalid_condition():
-    # Quantity <= 0, Buying Price (unit cost) <= 0, or None.
-    return or_(
-        PurchaseLine.quantity.is_(None),
-        PurchaseLine.quantity <= 0,
-        PurchaseLine.buying_price.is_(None),
-        PurchaseLine.buying_price <= 0,
+    # Same idea as the sale one above, on purchase_import.VALIDATION_RULES.
+    return sql_rule_failure(
+        {"Quantity": PurchaseLine.quantity, "Buying_Price": PurchaseLine.buying_price},
+        PURCHASE_VALIDATION_RULES,
     )
 
 
@@ -1241,6 +1274,12 @@ def build_snapshot(
     purchase_data_quality_issues = _check_purchase_data_quality(
         db, branch_id, period_range.start, period_range.end
     )
+    (
+        conversion_rate,
+        conversion_sales,
+        conversion_zero,
+        conversion_days,
+    ) = _conversion_stats(db, branch_id, period_range.start, period_range.end)
 
     return BranchSnapshot(
         net_revenue=net_revenue,
@@ -1313,6 +1352,11 @@ def build_snapshot(
         weekly_pattern=weekly_pattern,
         sale_data_quality_issues=sale_data_quality_issues,
         purchase_data_quality_issues=purchase_data_quality_issues,
+        warning_window_days=max((date.today() - period_range.start).days + 1, 1),
+        conversion_rate_pct=conversion_rate,
+        conversion_sales_slips=conversion_sales,
+        conversion_zero_count=conversion_zero,
+        conversion_days_recorded=conversion_days,
     )
 
 
@@ -1367,6 +1411,7 @@ def sub_metric_values(snapshot: BranchSnapshot) -> dict[str, float | None]:
             if snapshot.trading_days and snapshot.previous_trading_days
             else None
         ),
+        "conversion_rate_pct": snapshot.conversion_rate_pct,
         "gross_margin_pct": snapshot.gross_margin_pct if profit_measurable else None,
         "margin_growth_pp": margin_growth_pp,
         "dead_stock_share_pct": (
@@ -1379,7 +1424,6 @@ def sub_metric_values(snapshot: BranchSnapshot) -> dict[str, float | None]:
             if snapshot.sku_count
             else None
         ),
-        "days_of_inventory_on_hand": snapshot.days_of_inventory_on_hand,
         "data_issue_rate_per_100": (
             snapshot.data_issue_count / snapshot.records_checked * 100
             if snapshot.records_checked

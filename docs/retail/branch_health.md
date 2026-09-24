@@ -61,11 +61,11 @@ Each dimension is a weighted average of its sub-metrics:
 | Sales        | Products sold growth %        |    20% | -15→0, -5→50, 0→75, +5→100                      |
 | Profit       | Gross margin %                |    60% | 0→0, 10→40, 20→80, 30→100                       |
 | Profit       | Margin change (pp)            |    40% | -10→0, -3→50, 0→75, +3→100                      |
-| Inventory    | Dead stock share %            |    40% | 0→100, 5→80, 15→40, 30→0                        |
-| Inventory    | Stockout risk share %         |    30% | 0→100, 2→85, 5→60, 10→20, 20→0                  |
-| Inventory    | Days of inventory on hand     |    30% | 0→50, 15→90, 30→100, 45→85, 60→60, 90→30, 120→0 |
-| Customer     | Average sale value growth %   |    50% | -15→0, -5→50, 0→75, +5→100                      |
-| Customer     | Transactions-per-day growth % |    50% | same as above                                   |
+| Inventory    | Dead stock share %            |    50% | 20→100, 35→85, 50→60, 65→30, 80→0               |
+| Inventory    | Stockout risk share %         |    50% | 0→100, 2→85, 5→60, 10→20, 20→0                  |
+| Customer     | Average sale value growth %   |    30% | -15→0, -5→50, 0→75, +5→100                      |
+| Customer     | Transactions-per-day growth % |    30% | same as above                                   |
+| Customer     | Conversion rate %             |    40% | 30→0, 45→40, 60→70, 75→85, 85→100               |
 | Data Quality | Issues per 100 records        |    70% | 0→100, 1→80, 3→50, 10→10, 20→0                  |
 | Data Quality | Stock mismatches (count)      |    30% | 0→100, 1→70, 5→30, 20→0                         |
 
@@ -80,10 +80,12 @@ points" or `pp`, so it reads the same as every other percentage on the screen.
 
 A value between two breakpoints is linearly interpolated; a value past either end is
 clamped. Because the score is stated _per breakpoint_ rather than derived from the
-value's direction, one mechanism covers "higher is better" (revenue growth), "lower is
-better" (dead stock), and "there is a healthy middle" — days of inventory on hand peaks
-at 30 days and falls off on _both_ sides, since under two weeks of cover is a stockout
-waiting to happen and over two months is cash sitting on a shelf.
+value's direction, one mechanism covers "higher is better" (revenue growth, conversion rate)
+and "lower is better" (dead stock, stockout risk). Dead stock share reflects realistic
+shoe-retail inventory carryover: up to 20% dead stock scores 100, with 80% scoring 0.
+Conversion rate evaluates footfall conversion on tracked zero-selling days: under 30% scores 0,
+50% scores ~53 (average), and 85%+ scores 100. If no zero-selling records exist for the period,
+conversion rate is dropped and the other two Customer metrics share the dimension equally.
 
 Status bands, used identically by the gauge, the dimension bars and (later) the alerts:
 **≥ 80 healthy**, **≥ 60 needs attention**, **below 60 critical**.

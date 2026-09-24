@@ -669,9 +669,11 @@ def test_db_check_sale_and_purchase_data_quality(db_session: Session):
         selling_price=50.0,
         net_amount=100.0,
         amount=100.0,
+        discount_amount=0.0,
     )
 
-    # Sale 2: invalid qty (-1) and invalid price (0)
+    # Sale 2: invalid qty (-1). Same rules as the Warning page: a zero price is allowed,
+    # a quantity below 1 is not.
     s2 = Sale(
         id="sale_2",
         branch_id="test_br_dq",
@@ -689,6 +691,7 @@ def test_db_check_sale_and_purchase_data_quality(db_session: Session):
         selling_price=0.0,
         net_amount=0.0,
         amount=0.0,
+        discount_amount=0.0,
     )
 
     # Sale 3: missing description on product
@@ -709,6 +712,7 @@ def test_db_check_sale_and_purchase_data_quality(db_session: Session):
         selling_price=30.0,
         net_amount=30.0,
         amount=30.0,
+        discount_amount=0.0,
     )
 
     # Purchase 1: valid
@@ -726,7 +730,7 @@ def test_db_check_sale_and_purchase_data_quality(db_session: Session):
         buying_price=25.0,
     )
 
-    # Purchase 2: invalid unit cost (0) and missing description
+    # Purchase 2: invalid unit cost (negative) and missing description
     pur2 = Purchase(
         id="pur_2",
         branch_id="test_br_dq",
@@ -738,7 +742,7 @@ def test_db_check_sale_and_purchase_data_quality(db_session: Session):
         purchase_id="pur_2",
         product_id="prod_nodesc",
         quantity=5.0,
-        buying_price=0.0,
+        buying_price=-1.0,
     )
 
     db_session.add_all([s1, l1, s2, l2, s3, l3, pur1, pl1, pur2, pl2])
@@ -752,6 +756,6 @@ def test_db_check_sale_and_purchase_data_quality(db_session: Session):
 
     # Check purchase data quality
     pur_dq = _check_purchase_data_quality(db_session, "test_br_dq", today, today)
-    assert pur_dq["invalid_numeric_count"] == 1  # pl_2 (unit cost = 0)
+    assert pur_dq["invalid_numeric_count"] == 1  # pl_2 (unit cost below 0)
     assert pur_dq["missing_description_count"] == 1  # pl_2 (prod_nodesc)
     assert pur_dq["total_issues"] == 2

@@ -45,4 +45,4 @@ def test_daily_cost_parser_separates_the_four_daily_sections():
 
 def test_daily_cost_parser_recognizes_bsh_filename_as_bhs1():
     rows = parse_daily_cost_upload(_daily_cost_file(), "GeneralUsageBSH1220926.xlsx")
-    assert rows[0]["branch"] == "BHS1"
+    assert rows[0]["branch"] == "BHS 1"

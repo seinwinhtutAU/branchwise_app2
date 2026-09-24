@@ -484,8 +484,17 @@ function App(): React.JSX.Element {
   // `settings` is null until the fetch resolves, so every read below falls back to the
   // backend's own DEFAULT_SETTINGS value for that key.
   const { settings, updateSettings } = useAppSettings(session);
-  const saleWindowDays = settings?.sale_warning_window_days ?? 1;
-  const purchaseWindowDays = settings?.purchase_warning_window_days ?? 1;
+  // An alert on the Business Alerts page counts a longer stretch of days than the Warning
+  // page's own setting, so its "see the records" link opens the Warning page on the
+  // alert's days instead — otherwise the alert says there is a problem the page can't
+  // show. Cleared again whenever the section changes.
+  const [warningWindowOverride, setWarningWindowOverride] = useState<
+    number | null
+  >(null);
+  const saleWindowDays =
+    warningWindowOverride ?? settings?.sale_warning_window_days ?? 1;
+  const purchaseWindowDays =
+    warningWindowOverride ?? settings?.purchase_warning_window_days ?? 1;
   const saleListWindowDays = settings?.sale_list_window_days ?? 90;
   const purchaseListWindowDays = settings?.purchase_list_window_days ?? 90;
   const showBuyingPriceSource = settings?.show_buying_price_source ?? true;
@@ -883,6 +892,7 @@ function App(): React.JSX.Element {
   }
 
   function handleSectionChange(id: string): void {
+    setWarningWindowOverride(null);
     setPendingImportQueue([]);
     setPendingImportQueueTotal(0);
     setViewingBatchId(null);
@@ -1104,9 +1114,11 @@ function App(): React.JSX.Element {
                   profile={profile}
                   branchOptions={retailBranchOptions}
                   branchFilter={selectedBranchId}
-                  onOpenEvidence={(target, branchId) => {
+                  onOpenEvidence={(target, branchId, evidenceDays) => {
                     if (target === "warnings") {
                       handleSectionChange("warnings");
+                      // After the change above, which clears it.
+                      setWarningWindowOverride(evidenceDays ?? null);
                       return;
                     }
                     if (target === "checking") {

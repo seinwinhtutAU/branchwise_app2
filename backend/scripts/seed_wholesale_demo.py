@@ -40,10 +40,22 @@ from app.wholesale.models.entities import (  # noqa: E402
     ShipmentLeg,
     SupplierVoucher,
     SupplierVoucherLine,
+    WholesaleAuditLog,
     WholesalePayment,
     WholesaleStockMovement,
     WholesaleUnit,
+    WholesaleWriteOff,
 )
+from app.wholesale.models.master_data import (  # noqa: E402
+    WholesaleCargoCompany,
+    WholesaleCarrier,
+    WholesaleCustomer,
+    WholesaleDestination,
+    WholesaleProduct,
+    WholesaleReceivingGate,
+    WholesaleSupplier,
+)
+from app.wholesale.services.inventory import auto_allocate_arrivals  # noqa: E402
 from app.wholesale.services.colors import colors_as_json  # noqa: E402
 from app.wholesale.services.units import to_pairs  # noqa: E402
 
@@ -55,6 +67,48 @@ def _resolve_branch(db, name_or_id: str) -> Branch:
     if branch is None:
         raise SystemExit(f"No branch found matching {name_or_id!r} — check the name or id and try again.")
     return branch
+
+
+_NAMED_LISTS = [
+    ("suppliers", WholesaleSupplier),
+    ("customers", WholesaleCustomer),
+    ("cargo_companies", WholesaleCargoCompany),
+    ("carriers", WholesaleCarrier),
+    ("destinations", WholesaleDestination),
+    ("gates", WholesaleReceivingGate),
+]
+_MASTER_MODELS = [model for _, model in _NAMED_LISTS] + [WholesaleProduct]
+
+
+def _seed_master_data(db, master: dict, *, dry_run: bool) -> int:
+    """The pick-lists the screens' dropdowns read from. Global (not per branch), added
+    by name / stock code so running it again never duplicates a row."""
+    created = 0
+    for key, model in _NAMED_LISTS:
+        have = {row[0] for row in db.query(model.name).all()}
+        for entry in master.get(key, []):
+            fields = entry if isinstance(entry, dict) else {"name": entry}
+            if fields["name"] in have:
+                continue
+            created += 1
+            if not dry_run:
+                db.add(model(**fields))
+    have = {row[0] for row in db.query(WholesaleProduct.stock_code).all()}
+    for entry in master.get("products", []):
+        if entry["stock_code"] in have:
+            continue
+        created += 1
+        if not dry_run:
+            db.add(
+                WholesaleProduct(
+                    stock_code=entry["stock_code"],
+                    description=entry["description"],
+                    product_group=ProductGroup(entry["group"]),
+                    default_unit=WholesaleUnit(entry["default_unit"]),
+                )
+            )
+    print(f"  {'would add' if dry_run else 'add'} {created} master-data row(s)")
+    return created
 
 
 def _seed_shipments(db, branch: Branch, shipments: list[dict], *, dry_run: bool) -> int:
@@ -328,6 +382,11 @@ def _seed_outgoing(db, branch: Branch, movements: list[dict], *, dry_run: bool, 
             print(f"  skip delivery {entry['seed_key']} — already seeded")
             continue
         order = orders.get(entry["order_no"])
+        if order is None and dry_run:
+            # Only happens with --wipe: the order it points at is still the old data.
+            print(f"  would create delivery {entry['seed_key']}")
+            created += 1
+            continue
         if order is None:
             raise SystemExit(f"Cannot seed delivery {entry['seed_key']}: order {entry['order_no']} is missing.")
         print(f"  {'would create' if dry_run else 'create'} delivery {entry['seed_key']}")
@@ -341,7 +400,7 @@ def _seed_outgoing(db, branch: Branch, movements: list[dict], *, dry_run: bool, 
             description=source.description, product_group=source.product_group,
             color_breakdown=color_qty, colors=colors_as_json(color_qty),
             quantity_pairs=to_pairs(entry["qty"], WholesaleUnit(entry["unit"])),
-            location=entry["location"], delivered_on=date.fromisoformat(entry["date"]),
+            location=entry["location"], delivery_address=order.customer_address, delivered_on=date.fromisoformat(entry["date"]),
             note=entry["seed_key"], recorded_by_user_id=actor_id,
         ))
         created += 1
@@ -385,6 +444,17 @@ def _wipe(db, branch: Branch, *, dry_run: bool) -> None:
             synchronize_session=False
         )
         db.query(Shipment).filter(Shipment.branch_id == branch.id).delete()
+        # Write-offs and the audit trail point at the rows above by id, so once those are
+        # gone they would only be orphans in the demo.
+        db.query(WholesaleWriteOff).filter(WholesaleWriteOff.branch_id == branch.id).delete(
+            synchronize_session=False
+        )
+        db.query(WholesaleAuditLog).filter(WholesaleAuditLog.branch_id == branch.id).delete(
+            synchronize_session=False
+        )
+        # The pick-lists are global, not per branch, and only wholesale uses them.
+        for model in _MASTER_MODELS:
+            db.query(model).delete(synchronize_session=False)
 
 
 def _has_wholesale_rows(db, branch: Branch) -> bool:
@@ -417,6 +487,7 @@ def main() -> None:
         if args.wipe:
             _wipe(db, branch, dry_run=args.dry_run)
 
+        _seed_master_data(db, data.get("master_data", {}), dry_run=args.dry_run)
         created_shipments = _seed_shipments(
             db, branch, data["shipments"], dry_run=args.dry_run
         )
@@ -453,6 +524,15 @@ def main() -> None:
             db, branch, data.get("outgoing", []), dry_run=args.dry_run,
             actor_id=_seed_actor_id(db, branch),
         )
+
+        if not args.dry_run:
+            db.commit()
+            # What arrived is shared out to the waiting orders the same way opening a
+            # package does in the app, so the demo's allocations are ones the app itself
+            # would have made.
+            codes = {entry["stock_code"] for r in data.get("receivings", []) for p in r["packages"] for entry in p["items"]}
+            touched = auto_allocate_arrivals(db, branch.id, codes)
+            print(f"  allocated arrived stock to {touched} order line(s)")
 
         if args.dry_run:
             db.rollback()

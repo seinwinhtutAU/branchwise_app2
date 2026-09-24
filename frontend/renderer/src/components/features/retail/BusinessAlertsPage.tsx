@@ -195,7 +195,11 @@ function AlertInspector({
 }: {
   alert: BranchAlert;
   showBranch: boolean;
-  onOpenEvidence: (target: EvidenceTarget, branchId: string) => void;
+  onOpenEvidence: (
+    target: EvidenceTarget,
+    branchId: string,
+    evidenceDays?: number | null,
+  ) => void;
 }): React.JSX.Element {
   const meta = SEVERITY_META[alert.severity];
   return (
@@ -240,7 +244,9 @@ function AlertInspector({
           variant="secondary"
           size="sm"
           className="self-start h-7 px-2.5 text-xs"
-          onClick={() => onOpenEvidence(alert.link, alert.branchId)}
+          onClick={() =>
+            onOpenEvidence(alert.link, alert.branchId, alert.evidence_days)
+          }
         >
           {EVIDENCE_LABEL[alert.link]} →
         </Button>
@@ -273,7 +279,11 @@ interface Props {
   // The left-nav branch switcher's current choice ("" = All branches) — this page's own
   // branch filter dropdown was removed in favour of that one control (see AppShell).
   branchFilter: string;
-  onOpenEvidence: (target: EvidenceTarget, branchId: string) => void;
+  onOpenEvidence: (
+    target: EvidenceTarget,
+    branchId: string,
+    evidenceDays?: number | null,
+  ) => void;
 }
 
 export function BusinessAlertsPage({

@@ -4,11 +4,13 @@ import datetime
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+import pytest
 from app.models.branch import Branch
 from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.models.sale import Sale, SaleLine
 from app.retail.models.stock_level import StockLevel
+from app.retail.models.zero_selling import ZeroSellingRecord
 from app.models.user import User, UserRole
 from app.retail.services import branch_health
 
@@ -109,6 +111,31 @@ def _make_stock_level(
     )
 
 
+def _make_zero_selling(
+    db_session: Session,
+    *,
+    branch: Branch,
+    sale_date: datetime.date,
+    category: str = "Size",
+    reason: str = "Out of stock",
+    import_batch_id: str = "batch-1",
+    source_sheet: str = "Sheet1",
+    source_row: int = 1,
+) -> None:
+    db_session.add(
+        ZeroSellingRecord(
+            import_batch_id=import_batch_id,
+            branch_id=branch.id,
+            sale_date=sale_date,
+            branch=branch.name,
+            category=category,
+            reason=reason,
+            source_sheet=source_sheet,
+            source_row=source_row,
+        )
+    )
+
+
 def _snapshot(**overrides) -> branch_health.BranchSnapshot:
     """A deliberately healthy baseline — every test below changes one thing and
     asserts on that one thing, so a failure names the rule that broke."""
@@ -150,6 +177,10 @@ def _snapshot(**overrides) -> branch_health.BranchSnapshot:
         data_issue_sections=(),
         records_checked=1000,
         period_days=30,
+        conversion_rate_pct=85.0,
+        conversion_sales_slips=85,
+        conversion_zero_count=15,
+        conversion_days_recorded=10,
     )
     base.update(overrides)
     return branch_health.BranchSnapshot(**base)
@@ -179,21 +210,33 @@ def test_score_from_bands_interpolates_between_breakpoints_and_clamps_outside():
     assert branch_health.score_from_bands(999.0, bands) == 100.0
 
 
-def test_days_of_inventory_scores_both_extremes_below_the_middle():
-    """Too little stock is a stockout risk and too much is dead capital, so this
-    sub-metric is the one non-monotonic band in the table — worth its own test, since
-    a naive "higher is better" rewrite would still pass every other assertion here."""
-    bands = next(
-        s.bands
-        for d in branch_health.DIMENSIONS
-        if d.key == "inventory"
-        for s in d.sub_metrics
-        if s.key == "days_of_inventory_on_hand"
-    )
-    peak = branch_health.score_from_bands(30.0, bands)
-    assert peak == 100.0
-    assert branch_health.score_from_bands(2.0, bands) < peak
-    assert branch_health.score_from_bands(110.0, bands) < peak
+def test_inventory_sub_metrics_and_dead_stock_bands():
+    inventory_dim = next(d for d in branch_health.DIMENSIONS if d.key == "inventory")
+    sub_keys = [s.key for s in inventory_dim.sub_metrics]
+    assert sub_keys == ["dead_stock_share_pct", "stockout_risk_share_pct"]
+    assert all(s.weight == 0.5 for s in inventory_dim.sub_metrics)
+
+    dead_bands = next(s.bands for s in inventory_dim.sub_metrics if s.key == "dead_stock_share_pct")
+    assert branch_health.score_from_bands(15.0, dead_bands) == 100.0
+    assert branch_health.score_from_bands(20.0, dead_bands) == 100.0
+    assert branch_health.score_from_bands(35.0, dead_bands) == 85.0
+    assert branch_health.score_from_bands(50.0, dead_bands) == 60.0
+    assert branch_health.score_from_bands(80.0, dead_bands) == 0.0
+    assert branch_health.score_from_bands(90.0, dead_bands) == 0.0
+
+
+def test_conversion_rate_scores_from_bands():
+    customer_dim = next(d for d in branch_health.DIMENSIONS if d.key == "customer")
+    cr_metric = next(s for s in customer_dim.sub_metrics if s.key == "conversion_rate_pct")
+    assert cr_metric.weight == 0.4
+    bands = cr_metric.bands
+    assert branch_health.score_from_bands(20.0, bands) == 0.0
+    assert branch_health.score_from_bands(30.0, bands) == 0.0
+    assert branch_health.score_from_bands(45.0, bands) == 40.0
+    assert branch_health.score_from_bands(60.0, bands) == 70.0
+    assert branch_health.score_from_bands(75.0, bands) == 85.0
+    assert branch_health.score_from_bands(85.0, bands) == 100.0
+    assert branch_health.score_from_bands(95.0, bands) == 100.0
 
 
 def test_healthy_branch_scores_well_across_every_dimension():
@@ -297,11 +340,42 @@ def test_falling_revenue_pushes_sales_into_critical():
 
 def test_dead_stock_share_drives_the_inventory_score_down():
     healthy = branch_health.score_branch(_snapshot())
-    dead = branch_health.score_branch(_snapshot(dead_stock_count=32))
+    dead = branch_health.score_branch(_snapshot(dead_stock_count=85))
     assert _dimension(dead, "inventory")["score"] < _dimension(healthy, "inventory")["score"]
     by_key = {s["key"]: s for s in _dimension(dead, "inventory")["sub_metrics"]}
-    assert by_key["dead_stock_share_pct"]["value"] == 32.0
+    assert by_key["dead_stock_share_pct"]["value"] == 85.0
     assert by_key["dead_stock_share_pct"]["score"] == 0.0
+
+
+def test_customer_dimension_renormalizes_when_conversion_rate_has_no_data():
+    snapshot_with_cr = _snapshot(conversion_rate_pct=85.0)
+    scored_with_cr = branch_health.score_branch(snapshot_with_cr)
+    customer_with_cr = _dimension(scored_with_cr, "customer")
+    assert len(customer_with_cr["sub_metrics"]) == 3
+    assert all(s["score"] is not None for s in customer_with_cr["sub_metrics"])
+
+    snapshot_no_cr = _snapshot(conversion_rate_pct=None)
+    scored_no_cr = branch_health.score_branch(snapshot_no_cr)
+    customer_no_cr = _dimension(scored_no_cr, "customer")
+    cr_metric = next(s for s in customer_no_cr["sub_metrics"] if s["key"] == "conversion_rate_pct")
+    assert cr_metric["value"] is None
+    assert cr_metric["score"] is None
+    assert cr_metric["calculation"] is None
+    # Dimension still scores because avg_basket and daily_sales are present
+    assert customer_no_cr["score"] is not None
+
+
+def test_conversion_rate_calculation_sentence():
+    snapshot = _snapshot(
+        conversion_rate_pct=60.0,
+        conversion_sales_slips=30,
+        conversion_zero_count=20,
+        conversion_days_recorded=5,
+    )
+    scored = branch_health.score_branch(snapshot)
+    customer = _dimension(scored, "customer")
+    cr_metric = next(s for s in customer["sub_metrics"] if s["key"] == "conversion_rate_pct")
+    assert "30 sales ÷ (30 sales + 20 walkouts) over 5 tracked days." in cr_metric["calculation"]
 
 
 def test_data_quality_is_scored_as_a_rate_not_a_raw_count():
@@ -622,3 +696,28 @@ def test_an_unmeasurable_measure_has_no_calculation_to_show():
         assert measure["calculation"] is None
         # The definition still shows: it says what the measure *would* be.
         assert measure["definition"].strip()
+
+
+def test_build_snapshot_computes_conversion_rate_for_tracked_days(db_session: Session):
+    branch = _make_branch(db_session, "Conversion Branch")
+    product = _make_product(db_session, "CONV-SKU-1")
+    today = datetime.date.today()
+    yesterday = today - datetime.timedelta(days=1)
+
+    # Yesterday: tracked day with 2 sales and 1 walkout -> 2 / (2 + 1) = 66.67%
+    _make_sale(db_session, branch=branch, product=product, slip_id="conv-1", sale_date=yesterday, qty=1, net_amount=1000)
+    _make_sale(db_session, branch=branch, product=product, slip_id="conv-2", sale_date=yesterday, qty=1, net_amount=1000)
+    _make_zero_selling(db_session, branch=branch, sale_date=yesterday)
+
+    # Today: untracked day with 1 sale, no zero-selling records
+    _make_sale(db_session, branch=branch, product=product, slip_id="conv-3", sale_date=today, qty=1, net_amount=1000)
+    db_session.commit()
+
+    period_range = branch_health.resolve_period("30d")
+    snapshot = branch_health.build_snapshot(db_session, branch.id, period_range)
+
+    assert snapshot.conversion_days_recorded == 1
+    assert snapshot.conversion_sales_slips == 2
+    assert snapshot.conversion_zero_count == 1
+    assert snapshot.conversion_rate_pct == pytest.approx(66.67, rel=1e-2)
+

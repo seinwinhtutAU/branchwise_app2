@@ -33,6 +33,9 @@ class Alert:
     context: str | None = None
     facts: tuple[dict, ...] = ()
     table: dict | None = None
+    # For an alert that points at the Warning page: how many days back from today its
+    # counts reach, so that page can open on the same stretch of days.
+    evidence_days: int | None = None
 
 
 def _count_products(count: int) -> str:
@@ -538,6 +541,7 @@ def sale_data_quality_rule(snapshot: BranchSnapshot) -> list[Alert]:
             ),
             link="warnings",
             measure="critical_data_issue_count",
+            evidence_days=snapshot.warning_window_days,
             facts=_facts(
                 _fact("Invalid Numeric Lines", str(numeric_count)),
                 _fact("Missing Descriptions", str(description_count)),
@@ -585,6 +589,7 @@ def purchase_data_quality_rule(snapshot: BranchSnapshot) -> list[Alert]:
             ),
             link="warnings",
             measure="critical_data_issue_count",
+            evidence_days=snapshot.warning_window_days,
             facts=_facts(
                 _fact("Invalid Qty / Cost Lines", str(numeric_count)),
                 _fact("Missing Descriptions", str(description_count)),

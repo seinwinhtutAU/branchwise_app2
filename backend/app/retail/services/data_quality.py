@@ -20,7 +20,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pandas as pd
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
@@ -443,6 +443,99 @@ def _occurrence_phrase(verb: str, occurrence: MissingProductOccurrence) -> str:
     return f"{verb} {occurrences} times (last on {last_date.isoformat()})"
 
 
+def blank_description_condition():
+    """A product with no usable description — empty, whitespace, or a placeholder. Shared
+    with the Branch Health alerts so they count exactly what the Warning page lists."""
+    trimmed = func.trim(Product.description)
+    return or_(
+        Product.description.is_(None),
+        trimmed == "",
+        trimmed.in_(("—", "-", "?", "None", "NULL")),
+    )
+
+
+_MISSING_DESCRIPTION_NOTE = "Product description is missing"
+
+
+def sale_description_warnings(
+    db: Session, user: User, since: date | None = None
+) -> list[dict]:
+    query = (
+        db.query(SaleLine, Sale, Product, Branch)
+        .join(Sale, SaleLine.sale_id == Sale.id)
+        .join(Product, SaleLine.product_id == Product.id)
+        .outerjoin(Branch, Sale.branch_id == Branch.id)
+        .filter(blank_description_condition())
+    )
+    query = _branch_filter(query, user, Sale.branch_id)
+    if since is not None:
+        query = query.filter(Sale.sale_date >= since)
+    rows = query.order_by(Sale.sale_date.desc(), Sale.slip_id, SaleLine.line_no).all()
+    import_batches = _fetch_import_batches(db, {sale.import_batch_id for _, sale, _, _ in rows})
+    return [
+        {
+            "note": _MISSING_DESCRIPTION_NOTE,
+            "fields": [
+                _field("Branch", branch.name if branch else None),
+                _field("Date", sale.sale_date.isoformat()),
+                _field("Slip ID", sale.slip_id),
+                _field("Slip Number", sale.slip_number),
+                _field("Line No", sale_line.line_no),
+                _field("Stock Code", product.stock_code),
+                _field("Description", product.description),
+                _field("Selling Price", sale_line.selling_price),
+                _field("Qty", sale_line.qty),
+                _field("Net Amount", sale_line.net_amount),
+            ],
+            "highlight": ["Description"],
+            "source_import": _batch_source(import_batches.get(sale.import_batch_id)),
+        }
+        for sale_line, sale, product, branch in rows
+    ]
+
+
+def purchase_description_warnings(
+    db: Session, user: User, since: date | None = None
+) -> list[dict]:
+    query = (
+        db.query(PurchaseLine, Purchase, Product, Branch)
+        .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
+        .join(Product, PurchaseLine.product_id == Product.id)
+        .outerjoin(Branch, Purchase.branch_id == Branch.id)
+        .filter(blank_description_condition())
+    )
+    query = _branch_filter(query, user, Purchase.branch_id)
+    if since is not None:
+        query = query.filter(Purchase.purchase_date >= since)
+    rows = query.order_by(Purchase.purchase_date.desc(), PurchaseLine.id).all()
+    import_batches = _fetch_import_batches(
+        db, {purchase.import_batch_id for _, purchase, _, _ in rows}
+    )
+    return [
+        {
+            "note": _MISSING_DESCRIPTION_NOTE,
+            "fields": [
+                _field("Branch", branch.name if branch else None),
+                _field("Date", purchase.purchase_date.isoformat()),
+                _field("Stock Code", product.stock_code),
+                _field("Description", product.description),
+                _field("Quantity", purchase_line.quantity),
+                _field("Buying Price", purchase_line.buying_price),
+            ],
+            "highlight": ["Description"],
+            "source_import": _batch_source(import_batches.get(purchase.import_batch_id)),
+        }
+        for purchase_line, purchase, product, branch in rows
+    ]
+
+
+def _batch_source(import_batch: ImportBatch | None) -> dict | None:
+    meta = _import_batch_meta(import_batch)
+    return _source_import(
+        meta["_ImportBatchId"], meta["_ImportBatchFilename"], meta["_ImportBatchDate"]
+    )
+
+
 def missing_product_warnings(
     db: Session,
     user: User,
@@ -816,6 +909,13 @@ def build_warning_sections(
             "rows": sale_numeric_warnings(db, user, since=sale_since) if wanted("sale_numeric") else [],
         },
         {
+            "id": "sale_description",
+            "title": "Sale — add missing descriptions",
+            "description": "These sale lines are for a product that has no name — fix it in the sales file and re-import so reports show what was sold.",
+            "severity": "warning",
+            "rows": sale_description_warnings(db, user, since=sale_since) if wanted("sale_description") else [],
+        },
+        {
             "id": "inventory_numeric",
             "title": "Inventory — fix these numbers",
             "description": (
@@ -832,6 +932,17 @@ def build_warning_sections(
             "rows": (
                 purchase_numeric_warnings(db, user, since=purchase_since)
                 if wanted("purchase_numeric")
+                else []
+            ),
+        },
+        {
+            "id": "purchase_description",
+            "title": "Purchase — add missing descriptions",
+            "description": "These purchase lines are for a product that has no name — fix it in the purchase file and re-import.",
+            "severity": "warning",
+            "rows": (
+                purchase_description_warnings(db, user, since=purchase_since)
+                if wanted("purchase_description")
                 else []
             ),
         },

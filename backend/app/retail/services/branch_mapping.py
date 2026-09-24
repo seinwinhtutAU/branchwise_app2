@@ -2,9 +2,9 @@ import re
 
 ATS_BRANCHES = {
     "1": "Bogyoke",
-    "2": "BHS1",
+    "2": "BHS 1",
     "3": "Ashley",
-    "4": "Aung Thit Sar",
+    "4": "AungThitSar",
 }
 _SHOP_NUMBER = re.compile(r"au(?:ng|nt)\s*thit\s*sar\s*-\s*([1-4])", re.IGNORECASE)
 

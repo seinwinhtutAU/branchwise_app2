@@ -261,13 +261,27 @@ async def import_general_file(
     zero_selling_rows = parse_zero_selling_upload(contents, file.filename)
     daily_cost_rows = parse_daily_cost_upload(contents, file.filename)
     if salary_rows or zero_selling_rows or daily_cost_rows:
-        branches_by_name = {branch.name.casefold(): branch.id for branch in db.query(Branch).all()}
+        branches = db.query(Branch).all()
+        branches_by_name: dict[str, str] = {}
+        for branch in branches:
+            branches_by_name[branch.name.casefold()] = branch.id
+            branches_by_name[branch.name.casefold().replace(" ", "")] = branch.id
+            branches_by_name[branch.name.casefold().replace("-", "")] = branch.id
+
+        def _lookup_branch_id(name: str | None) -> str | None:
+            if not name:
+                return None
+            key = name.strip().casefold()
+            if key in branches_by_name:
+                return branches_by_name[key]
+            return branches_by_name.get(key.replace(" ", "").replace("-", ""))
+
         if salary_rows:
             db.add_all(
                 [
                     SalaryRecord(
                         import_batch_id=batch.id,
-                        branch_id=branches_by_name.get(row["branch"].casefold()),
+                        branch_id=_lookup_branch_id(row.get("branch")),
                         **row,
                     )
                     for row in salary_rows
@@ -278,7 +292,7 @@ async def import_general_file(
                 [
                     ZeroSellingRecord(
                         import_batch_id=batch.id,
-                        branch_id=branches_by_name.get(row["branch"].casefold()),
+                        branch_id=_lookup_branch_id(row.get("branch")),
                         **row,
                     )
                     for row in zero_selling_rows
@@ -289,7 +303,7 @@ async def import_general_file(
                 [
                     DailyCostRecord(
                         import_batch_id=batch.id,
-                        branch_id=branches_by_name.get(row["branch"].casefold()),
+                        branch_id=_lookup_branch_id(row.get("branch")),
                         **row,
                     )
                     for row in daily_cost_rows

@@ -516,8 +516,10 @@ def test_warnings_endpoint_returns_all_sections(authed_client: TestClient, db_se
     section_ids = {s["id"] for s in body["sections"]}
     assert section_ids == {
         "sale_numeric",
+        "sale_description",
         "inventory_numeric",
         "purchase_numeric",
+        "purchase_description",
         "missing_product",
         "reconciliation_uom",
         "reconciliation_mismatch",
@@ -606,3 +608,48 @@ def test_warnings_endpoint_defaults_to_business_wide_sale_window(
     assert response.status_code == 200
     sale_section = next(s for s in response.json()["sections"] if s["id"] == "sale_numeric")
     assert len(sale_section["rows"]) == 1
+
+
+def test_sale_description_warning_lists_lines_with_a_blank_product_name(db_session: Session):
+    branch, user = _make_branch_and_user(db_session)
+    named = _make_product(db_session, "SKU-NAMED", "Golden Duck")
+    blank = _make_product(db_session, "SKU-BLANK", "   ")
+    for slip, product in (("slip-a", named), ("slip-b", blank)):
+        _make_sale_line(
+            db_session, branch=branch, product=product, slip_id=slip, qty=1, sale_date=datetime.date(2026, 8, 20)
+        )
+    db_session.commit()
+
+    rows = data_quality.sale_description_warnings(db_session, user)
+    assert len(rows) == 1
+    assert rows[0]["highlight"] == ["Description"]
+    assert {f["label"]: f["value"] for f in rows[0]["fields"]}["Stock Code"] == "SKU-BLANK"
+
+
+def test_purchase_description_warning_respects_since_window(db_session: Session):
+    branch, user = _make_branch_and_user(db_session)
+    blank = _make_product(db_session, "SKU-BLANK", "")
+    _make_purchase_line(db_session, branch=branch, product=blank, qty=5, purchase_date=datetime.date(2026, 8, 1))
+    db_session.commit()
+
+    assert len(data_quality.purchase_description_warnings(db_session, user)) == 1
+    assert data_quality.purchase_description_warnings(db_session, user, since=datetime.date(2026, 8, 20)) == []
+
+
+def test_branch_health_alert_counts_match_the_warning_page(db_session: Session):
+    """The Sales-data alert and the Warning page must agree on which lines are bad."""
+    from app.retail.services.branch_health import _check_sale_data_quality
+
+    branch, user = _make_branch_and_user(db_session)
+    blank = _make_product(db_session, "SKU-BLANK", "")
+    good = _make_product(db_session, "SKU-GOOD", "Golden Duck")
+    day = datetime.date(2026, 8, 20)
+    _make_sale_line(db_session, branch=branch, product=good, slip_id="s1", qty=0, sale_date=day)
+    _make_sale_line(db_session, branch=branch, product=blank, slip_id="s2", qty=1, sale_date=day)
+    db_session.commit()
+
+    counts = _check_sale_data_quality(db_session, branch.id, day, day)
+    assert counts["invalid_numeric_count"] == len(data_quality.sale_numeric_warnings(db_session, user, since=day))
+    assert counts["missing_description_count"] == len(
+        data_quality.sale_description_warnings(db_session, user, since=day)
+    )

@@ -32,8 +32,8 @@ def test_daily_operation_cost_parses_salary_rows_and_preserves_original(
 ):
     branches = [
         Branch(id="ashley", name="Ashley", phone_number="", address=""),
-        Branch(id="bhs1", name="BHS1", phone_number="", address=""),
-        Branch(id="ats", name="Aung Thit Sar", phone_number="", address=""),
+        Branch(id="bhs1", name="BHS 1", phone_number="", address=""),
+        Branch(id="ats", name="AungThitSar", phone_number="", address=""),
         Branch(id="bogyoke", name="Bogyoke", phone_number="", address=""),
     ]
     db_session.add_all(branches)
@@ -52,10 +52,16 @@ def test_daily_operation_cost_parses_salary_rows_and_preserves_original(
         rows = db_session.query(SalaryRecord).order_by(SalaryRecord.branch).all()
         assert [(row.name, row.branch, float(row.salary), row.bonus) for row in rows] == [
             ("Ma Phyo", "Ashley", 300000.0, None),
-            ("Ma Pan Pan", "Aung Thit Sar", 250000.0, 0),
-            ("Ma Mie", "BHS1", 280000.0, 18000),
+            ("Ma Pan Pan", "AungThitSar", 250000.0, 0),
+            ("Ma Mie", "BHS 1", 280000.0, 18000),
             ("Ma Hla", "Bogyoke", 230000.0, None),
         ]
+        assert {row.branch: row.branch_id for row in rows} == {
+            "Ashley": "ashley",
+            "AungThitSar": "ats",
+            "BHS 1": "bhs1",
+            "Bogyoke": "bogyoke",
+        }
         assert response.content != payload
 
         downloaded = client.get(f"/api/imports/history/{response.json()['id']}/download")

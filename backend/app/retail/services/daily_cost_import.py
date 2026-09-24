@@ -9,10 +9,10 @@ import pandas as pd
 
 BRANCH_BY_FILENAME = {
     "bogyoke": "Bogyoke",
-    "bhs": "BHS1",
-    "bsh": "BHS1",
+    "bhs": "BHS 1",
+    "bsh": "BHS 1",
     "ashley": "Ashley",
-    "thukitha": "Aung Thit Sar",
+    "thukitha": "AungThitSar",
 }
 
 _DIGITAL_NAMES = {"kpay", "ukpay", "ukapy", "ntkpay", "wave", "auntywave", "kbzpay"}

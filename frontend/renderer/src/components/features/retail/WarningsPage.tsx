@@ -116,6 +116,8 @@ const TAB_ORDER: Tab[] = ["All", "Inventory", "Sale", "Purchase"];
 // Code/Description: an identity, plus a short action.
 const SECTION_CATEGORY: Record<string, Category> = {
   sale_numeric: "Sale",
+  sale_description: "Sale",
+  purchase_description: "Purchase",
   missing_product: "Inventory",
   inventory_numeric: "Inventory",
   purchase_numeric: "Purchase",

@@ -4,10 +4,11 @@ import io
 import re
 import uuid
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pyidaungsu as pds
-from sqlalchemy import case, update
+from sqlalchemy import case, or_, update
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 
@@ -220,6 +221,21 @@ def validate_rows(df: pd.DataFrame, rules: list[NumericRule]) -> list[list[dict]
                 )
         issues.append(failed)
     return issues
+
+
+def sql_rule_failure(columns: dict[str, Any], rules: list[NumericRule]):
+    """The SQL twin of `validate_rows`: true when any rule's column is NULL or below its
+    minimum. Lets a count-only check (the Branch Health alerts) apply exactly the same
+    rules as the Warning page's row-level check, so the two can never disagree about
+    which lines are bad. `columns` maps each rule's column name to its model column."""
+    return or_(
+        *(
+            or_(columns[name].is_(None), columns[name] < minimum)
+            if minimum is not None
+            else columns[name].is_(None)
+            for name, minimum in rules
+        )
+    )
 
 
 def pluralize(count: int, noun: str) -> str:
