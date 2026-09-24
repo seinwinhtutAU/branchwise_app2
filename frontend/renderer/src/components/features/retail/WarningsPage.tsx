@@ -86,6 +86,8 @@ interface Props {
   // Hands off a picked-and-parsed file to the app-level confirm flow — used by every
   // "Reimport to fix" button below.
   onFileReady?: (pending: PendingImport) => void;
+  // Lets another page (Business Alerts' "Open Checking") land straight on the Checking tab.
+  initialTab?: "Checking";
 }
 
 type ImportType = "sales" | "inventory" | "purchase";
@@ -107,8 +109,17 @@ type Category = "Inventory" | "Sale" | "Purchase";
 // Order used by the "All" tab — inventory surfaces first ahead of transaction checks.
 const ALL_TAB_ORDER: Category[] = ["Inventory", "Sale", "Purchase"];
 
-type Tab = "All" | Category;
-const TAB_ORDER: Tab[] = ["All", "Inventory", "Sale", "Purchase"];
+type Tab = "All" | Category | "Checking";
+const TAB_ORDER: Tab[] = ["All", "Inventory", "Sale", "Purchase", "Checking"];
+
+// The checks someone resolves by physically finding and counting the product — the same
+// three the backend's CHECKING_SECTION_IDS uses. A bad number in a sale or purchase row
+// needs a corrected file instead, so those never appear on the Checking list.
+const CHECKING_SECTION_IDS = new Set([
+  "missing_product",
+  "reconciliation_uom",
+  "reconciliation_mismatch",
+]);
 
 // Which broad area each backend check belongs under — purely a display grouping. The
 // backend still returns one row per check (each has its own detail fields), but every
@@ -872,6 +883,7 @@ function WarningsPage({
   branchFilter,
   onViewImportBatch,
   onFileReady,
+  initialTab,
 }: Props): React.JSX.Element {
   const { aboveRef, containerStyle } = useStickyAbove();
   // Cached like the dashboard tabs — coming back to the Warning page from somewhere
@@ -886,7 +898,7 @@ function WarningsPage({
     "Warning page",
   );
   const sections = data?.sections ?? null;
-  const [activeTab, setActiveTab] = useState<Tab>("All");
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? "All");
   const [search, setSearch] = useState("");
   const [severityFilter, setSeverityFilter] = useState("");
   const {
@@ -951,6 +963,7 @@ function WarningsPage({
     Inventory: categoryCount("Inventory"),
     Sale: categoryCount("Sale"),
     Purchase: categoryCount("Purchase"),
+    Checking: 0,
   };
 
   const recountRows = useMemo(() => {
@@ -960,6 +973,7 @@ function WarningsPage({
     const seen = new Set<string>();
 
     for (const section of displaySections) {
+      if (!CHECKING_SECTION_IDS.has(section.id)) continue;
       for (const r of section.rows) {
         const branch = fieldValue(r.fields, "Branch") || "";
         const stockCode = fieldValue(r.fields, "Stock Code") || "";
@@ -974,6 +988,8 @@ function WarningsPage({
     }
     return result;
   }, [displaySections]);
+
+  tabCounts.Checking = recountRows.length;
 
   function handleExportRecountCsv(): void {
     if (recountRows.length === 0) return;
@@ -1128,43 +1144,98 @@ function WarningsPage({
               onSelect={setActiveTab}
               counts={tabCounts}
             />
-            <div className="flex flex-col gap-6">
-              {(activeTab === "All" ? ALL_TAB_ORDER : [activeTab]).map(
-                (category) => {
-                  const categorySections = (displaySections ?? []).filter(
-                    (s) =>
-                      SECTION_CATEGORY[s.id] === category && s.rows.length > 0,
-                  );
-                  if (categorySections.length === 0) {
-                    if (activeTab === "All") return null;
+            {activeTab === "Checking" ? (
+              <CheckingList rows={recountRows} showBranch={!branchFilter} />
+            ) : (
+              <div className="flex flex-col gap-6">
+                {(activeTab === "All" ? ALL_TAB_ORDER : [activeTab]).map(
+                  (category) => {
+                    const categorySections = (displaySections ?? []).filter(
+                      (s) =>
+                        SECTION_CATEGORY[s.id] === category &&
+                        s.rows.length > 0,
+                    );
+                    if (categorySections.length === 0) {
+                      if (activeTab === "All") return null;
+                      return (
+                        <EmptyState
+                          key={category}
+                          icon={<WarningIcon />}
+                          title="All clear"
+                          description={`No ${category.toLowerCase()} warnings right now.`}
+                        />
+                      );
+                    }
                     return (
-                      <EmptyState
+                      <WarningCategoryCard
                         key={category}
-                        icon={<WarningIcon />}
-                        title="All clear"
-                        description={`No ${category.toLowerCase()} warnings right now.`}
+                        category={category}
+                        sections={categorySections}
+                        showTitle={activeTab === "All"}
+                        profile={profile}
+                        disabled={picking}
+                        onViewImportBatch={onViewImportBatch}
+                        onImportToFix={handleImportToFix}
                       />
                     );
-                  }
-                  return (
-                    <WarningCategoryCard
-                      key={category}
-                      category={category}
-                      sections={categorySections}
-                      showTitle={activeTab === "All"}
-                      profile={profile}
-                      disabled={picking}
-                      onViewImportBatch={onViewImportBatch}
-                      onImportToFix={handleImportToFix}
-                    />
-                  );
-                },
-              )}
-            </div>
+                  },
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+// A plain list of what to go and count — no system quantity on purpose, so the person
+// counting isn't nudged toward the figure the system already believes.
+function CheckingList({
+  rows,
+  showBranch,
+}: {
+  rows: { branch: string; stockCode: string; description: string }[];
+  showBranch: boolean;
+}): React.JSX.Element {
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={<WarningIcon />}
+        title="Nothing to check"
+        description="No products need a physical recount right now."
+      />
+    );
+  }
+  return (
+    <TableContainer>
+      <Thead>
+        <Tr>
+          <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
+            #
+          </Th>
+          {showBranch && <Th>Branch</Th>}
+          <Th>Stock Code</Th>
+          <Th>Description</Th>
+          <Th className="text-right">Physical Count</Th>
+        </Tr>
+      </Thead>
+      <Tbody>
+        {rows.map((r, i) => (
+          <Tr key={`${r.branch}__${r.stockCode}__${i}`}>
+            <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+              {i + 1}
+            </Td>
+            {showBranch && <Td>{r.branch || "—"}</Td>}
+            <Td className="font-mono font-medium">{r.stockCode || "—"}</Td>
+            <Td>{r.description || "—"}</Td>
+            <Td className="text-right text-text-muted text-xs italic">
+              Count on shelf
+            </Td>
+          </Tr>
+        ))}
+      </Tbody>
+    </TableContainer>
   );
 }
 

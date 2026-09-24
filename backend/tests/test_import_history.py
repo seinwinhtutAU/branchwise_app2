@@ -1,5 +1,5 @@
 import io
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -8,6 +8,8 @@ from app.models.branch import Branch
 from app.core.timestamps import utc_now
 from app.retail.models.import_batch import ImportBatch, ImportBatchStatus
 from app.retail.models.sale import Sale, SaleLine
+from app.retail.models.salary import SalaryRecord
+from app.retail.models.zero_selling import ZeroSellingRecord
 from app.retail.services import original_file_cache
 from app.models.user import User, UserRole
 
@@ -165,6 +167,70 @@ def test_general_file_is_stored_unchanged_and_retail_can_download_it(
     assert download.status_code == 200
     assert download.content == original_bytes
     assert download.headers["content-type"].startswith("application/octet-stream")
+
+
+def test_history_detail_shows_general_file_original_rows(
+    authed_client: TestClient, db_session: Session
+):
+    _make_user(db_session, branch_name="Retail 1")
+    csv_bytes = b"Item,Note\nBox,Kept\nBag,Kept too\n"
+    batch_id = authed_client.post(
+        "/api/imports/general",
+        files={"file": ("notes.csv", io.BytesIO(csv_bytes), "text/csv")},
+    ).json()["id"]
+
+    detail = authed_client.get(f"/api/imports/history/{batch_id}?tab=original").json()
+    assert detail["origin"]["rows"] == [
+        ["Item", "Note"],
+        ["Box", "Kept"],
+        ["Bag", "Kept too"],
+    ]
+    assert detail["origin"]["total_rows"] == 3
+    assert detail["summary"]["messages"][0] == "3 rows in file"
+
+
+def test_history_detail_general_clean_tab_lists_recognised_records(
+    authed_client: TestClient, db_session: Session
+):
+    _make_user(db_session, branch_name="Retail 1")
+    batch_id = authed_client.post(
+        "/api/imports/general",
+        files={"file": ("notes.csv", io.BytesIO(b"a,b\n"), "text/csv")},
+    ).json()["id"]
+
+    # Nothing recognised: the Clean tab is simply empty.
+    empty = authed_client.get(f"/api/imports/history/{batch_id}").json()["clean"]
+    assert empty["rows"] == [] and empty["total_rows"] == 0
+
+    db_session.add(
+        SalaryRecord(
+            import_batch_id=batch_id, name="Ma Phyo", branch="Ashley", salary=300000,
+            bonus=None, source_sheet="June", source_row=2,
+        )
+    )
+    db_session.commit()
+    clean = authed_client.get(f"/api/imports/history/{batch_id}").json()["clean"]
+    assert clean["columns"] == ["Name", "Branch", "Salary", "Bonus"]
+    assert clean["rows"] == [
+        {"Name": "Ma Phyo", "Branch": "Ashley", "Salary": 300000.0, "Bonus": None}
+    ]
+
+    # A second kind of record in the same file: one table with a "Record type" column.
+    db_session.add(
+        ZeroSellingRecord(
+            import_batch_id=batch_id, sale_date=date(2026, 6, 1), branch="Ashley",
+            category="Shoes", reason="Old stock", source_sheet="June", source_row=3,
+        )
+    )
+    db_session.commit()
+    clean = authed_client.get(f"/api/imports/history/{batch_id}").json()["clean"]
+    assert clean["total_rows"] == 2
+    assert clean["columns"][0] == "Record type"
+    assert [r["Record type"] for r in clean["rows"]] == ["Salary", "Zero selling"]
+
+    download = authed_client.get(f"/api/imports/history/{batch_id}/download-clean")
+    assert download.status_code == 200
+    assert "Record type" in download.text and "Ma Phyo" in download.text
 
 
 def test_history_detail_unknown_batch_404(authed_client: TestClient, db_session: Session):

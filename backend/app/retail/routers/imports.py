@@ -91,6 +91,7 @@ from app.retail.services.clean_rows import (
     clean_warning_scan,
 )
 from app.retail.services import original_file_cache, staged_uploads
+from app.retail.services.general_clean_rows import general_clean_table
 from app.services import response_cache
 from app.retail.services.sales_persist import persist_sales
 from app.retail.services.salary_import import parse_salary_upload
@@ -1258,9 +1259,23 @@ def _clean_total_rows(db: Session, batch: ImportBatch) -> int:
 
 
 def _clean_tab_result(db: Session, batch: ImportBatch, page: int) -> dict:
-    spec = CLEAN_ROW_SPECS.get(batch.import_type)
-    if spec is None:  # GENERAL batches have no Clean tab
-        return _empty_clean_placeholder(batch.import_type)
+    if batch.import_type == ImportType.GENERAL:
+        columns, page_rows, total_rows = general_clean_table(
+            db, batch.id, (page - 1) * HISTORY_PAGE_SIZE, HISTORY_PAGE_SIZE
+        )
+        return {
+            "columns": columns,
+            "rows": page_rows,
+            "row_issues": [[] for _ in page_rows],
+            "page": page,
+            "page_size": HISTORY_PAGE_SIZE,
+            "total_rows": total_rows,
+            "source_total_rows": total_rows,
+            "total_pages": max(1, math.ceil(total_rows / HISTORY_PAGE_SIZE)),
+            "is_sampled": False,
+            "warning_count": 0,
+        }
+    spec = CLEAN_ROW_SPECS[batch.import_type]
     total_rows = _clean_total_rows(db, batch)
     offset = (page - 1) * HISTORY_PAGE_SIZE
     page_rows = clean_rows_page(db, batch.import_type, batch.id, offset, HISTORY_PAGE_SIZE)
@@ -1288,11 +1303,12 @@ def _fetch_original_bytes(batch: ImportBatch) -> bytes | None:
     """Original file bytes for the Original tab: the local copy kept at confirm time
     (original_file_cache), else R2 — sales/inventory/
     purchase batches never wrote to `original_file` (that column only ever held bytes
-    for GENERAL uploads, which don't reach this path — the frontend never opens
-    ImportDataView for a GENERAL batch)."""
+    for old GENERAL uploads, which is why it is checked before R2)."""
     cached = original_file_cache.load(batch.id)
     if cached is not None:
         return cached
+    if batch.original_file is not None:
+        return bytes(batch.original_file)
     storage = get_storage_service()
     if batch.storage_key and storage.is_configured:
         res = storage.download_file_bytes(batch.storage_key)
@@ -1320,6 +1336,10 @@ def _reparse_origin(batch: ImportBatch, contents: bytes) -> tuple[list[list[str]
     elif batch.import_type == ImportType.PURCHASE:
         origin_rows, clean_df = parse_purchase_upload(contents, batch.filename or "")
         rules = PURCHASE_VALIDATION_RULES
+    elif batch.import_type == ImportType.GENERAL:
+        # Nothing to validate — a general file is shown exactly as it was uploaded.
+        rows = read_raw_grid(contents, batch.filename or "")
+        return rows, [[] for _ in rows]
     else:
         return [], []
     row_issues = validate_rows(clean_df, rules)
@@ -1354,6 +1374,21 @@ def _original_tab_result(batch: ImportBatch, page: int) -> dict:
 def _format_history_summary_messages(batch: ImportBatch, total_rows: int = 0) -> list[str]:
     summary = batch.summary or {}
     messages = []
+
+    if batch.import_type == ImportType.GENERAL:
+        if total_rows:
+            messages.append(f"{total_rows:,} rows in file")
+        recognised = [
+            (summary.get("salary_records_created", 0), "salary record"),
+            (summary.get("zero_selling_records_created", 0), "zero-selling record"),
+            (summary.get("daily_cost_records_created", 0), "daily cost record"),
+        ]
+        recorded = [pluralize(count, noun) for count, noun in recognised if count]
+        if recorded:
+            messages.append(f"{', '.join(recorded)} recorded")
+        else:
+            messages.append("Stored as uploaded — no records were created from it")
+        return messages
 
     if batch.import_type == ImportType.INVENTORY:
         created = summary.get("stock_levels_created", 0)
@@ -1582,6 +1617,16 @@ def download_clean_import_file(
                     float(line.buying_price) if line.buying_price is not None else "",
                 ]
             )
+    elif batch.import_type == ImportType.GENERAL:
+        columns, rows, _ = general_clean_table(db, batch.id, 0, None)
+        if not rows:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "No records were created from this file, so there is no cleaned data",
+            )
+        writer.writerow(columns)
+        for row in rows:
+            writer.writerow(["" if row.get(c) is None else row[c] for c in columns])
     else:
         return download_import_batch_file(batch_id, user, db)
 

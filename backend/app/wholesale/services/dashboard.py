@@ -225,12 +225,12 @@ def _order_state(order: CustomerOrder, delivered_pairs: int) -> tuple[int, str]:
     return max(0, wanted - delivered_pairs - lost), status
 
 
-def _customer_receivables_as_of(db: Session, branch_id: str | None, as_of: date) -> float:
-    """What customers still owed on unfinished orders at a date, counting only payments
-    known by then."""
+def _customer_receivables_summary(db: Session, branch_id: str | None, as_of: date) -> tuple[float, list[dict]]:
+    """Total customer receivables and breakdown by debtor customer."""
     orders = [order for order in _orders(db, branch_id, date.min, as_of) if not order.cancelled]
     delivered = delivered_pairs_by_order(db, [order.id for order in orders], branch_id)
     total = 0.0
+    by_customer: dict[str, dict] = {}
     for order in orders:
         _, status = _order_state(order, _delivered_total(delivered, order.id))
         if status != "fulfilled":
@@ -239,8 +239,20 @@ def _customer_receivables_as_of(db: Session, branch_id: str | None, as_of: date)
                 for line in order.lines
             )
             paid = sum(float(payment.amount) for payment in order.payments if payment.paid_on <= as_of)
-            total += order_total - paid
-    return total
+            due = order_total - paid
+            if due > 0:
+                total += due
+                norm = _normal_customer(order.customer_name)
+                if norm not in by_customer:
+                    by_customer[norm] = {
+                        "customer_name": order.customer_name.strip(),
+                        "balance_due": 0.0,
+                        "order_count": 0,
+                    }
+                by_customer[norm]["balance_due"] += due
+                by_customer[norm]["order_count"] += 1
+    top_debtors = sorted(by_customer.values(), key=lambda x: x["balance_due"], reverse=True)
+    return total, top_debtors[:8]
 
 
 # --- Revenue ---------------------------------------------------------------------------
@@ -278,11 +290,25 @@ def revenue_dashboard(db: Session, branch_id: str | None, window) -> dict:
     previous_revenue = sum(_delivered_amount(row)[1] for row in previous_rows)
     by_day: dict[date, float] = defaultdict(float)
     by_factory: dict[str, float] = defaultdict(float)
+    by_product: dict[str, dict] = {}
     for row in rows:
-        _, amount = _delivered_amount(row)
+        qty, amount = _delivered_amount(row)
         revenue += amount
         day = row["movement"].delivered_on
         by_day[day] += amount
+        code = row["movement"].stock_code.strip()
+        if code:
+            norm = code.lower()
+            if norm not in by_product:
+                by_product[norm] = {
+                    "stock_code": code,
+                    "quantity_pairs": 0,
+                    "quantity_sets": 0,
+                    "delivered_revenue": 0.0,
+                }
+            by_product[norm]["quantity_pairs"] += qty
+            by_product[norm]["quantity_sets"] = by_product[norm]["quantity_pairs"] // 6
+            by_product[norm]["delivered_revenue"] += amount
         by_factory[_factory(history, row["movement"].stock_code, day)] += amount
 
     collected_rows = _payments(db, branch_id, window.start, window.end)
@@ -301,11 +327,16 @@ def revenue_dashboard(db: Session, branch_id: str | None, window) -> dict:
         key=lambda row: row["delivered_revenue"],
         reverse=True,
     )
+    receivables_total, customer_receivables = _customer_receivables_summary(db, branch_id, window.end)
+    top_products = sorted(by_product.values(), key=lambda r: r["delivered_revenue"], reverse=True)[:8]
+
     return {
         **_window_payload(window),
         "delivered_revenue": kpi_value(revenue, previous_revenue),
         "collected": kpi_value(collected, previous_collected),
-        "receivables": _customer_receivables_as_of(db, branch_id, window.end),
+        "receivables": receivables_total,
+        "customer_receivables": customer_receivables,
+        "top_products": top_products,
         "potential_stock_sales_value": potential_sales,
         "inventory_cost_value": stock_cost,
         "potential_gross_profit": potential_sales - stock_cost,

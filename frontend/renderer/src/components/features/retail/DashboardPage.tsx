@@ -44,7 +44,7 @@ interface Props {
   onViewBusinessAlerts: () => void;
   // The Inventory tab's Low Stock / Dead Stock tables show only their top few rows — this
   // opens the matching full, paginated list on the Inventory nav page for the rest.
-  onViewInventoryList: (tab: "lowStock" | "deadStock") => void;
+  onViewInventoryList: (tab: "lowStock" | "deadStock" | "agedStock") => void;
   // Which branch the Overview tab has open. Owned by App so it survives this page
   // unmounting the tab on every tab switch — see App.tsx.
   overviewBranchId: string | null;
@@ -230,6 +230,8 @@ export function DashboardPage({
               onViewChecking?.();
             } else if (target === "import") {
               onViewImport?.();
+            } else if (target === "agedStock") {
+              onViewInventoryList("agedStock");
             } else if (showAdvancedTabs) {
               setActiveTab(target);
             }

@@ -10,7 +10,7 @@ tabs and interpreting them by hand.
 
 Backed by `GET /api/dashboard/overview` (`app/retail/routers/dashboard.py`), computed in
 `app/retail/services/branch_health.py` (the score), `app/retail/services/early_warning.py` (the
-alerts) and `app/retail/services/explanation.py` (why each alert happened), rendered by
+alerts), rendered by
 `frontend/renderer/src/components/features/dashboard/OverviewTab.tsx`.
 
 ## Two rules the whole design rests on
@@ -140,57 +140,12 @@ from the snapshot. Nothing in this engine asks a model what it thinks.
 
 ## Why it happened
 
-`app/retail/services/explanation.py`. An alert saying "revenue is down 11.3%" tells a manager
-something they could read off a chart. The next sentence is the one that changes what
-they do: _fewer people came in, and the ones who did spent more_ calls for marketing,
-opening hours or staffing; _the same people bought less each_ calls for pricing,
-placement or stock. Two different decisions behind one identical headline.
-
-Every explanation here is **arithmetic**, never a model's opinion. Revenue decomposes
-exactly:
-
-```
-revenue = transactions × average basket
-
-Δrevenue = (ΔT × B₀)   +   (ΔB × T₀)   +   (ΔT × ΔB)
-           transactions     basket          interaction
-           effect           effect
-```
-
-The three terms sum to the actual change with **no residual** — there is a test
-asserting exactly that across four different shapes of movement — so whichever of the
-first two is larger _is_ the driver. It is measured, not inferred. That is the whole
-reason this is a module rather than a prompt: a decomposition can be checked by hand,
-and it cannot be confidently wrong.
-
-A term is called "the" driver only above `DOMINANCE_SHARE` (65%) of the combined
-movement; between 35% and 65% the honest answer is that both are contributing, and the
-text says so rather than picking a winner by a nose. The interpretation also branches on
-the **signs** of the two effects, not only on which is larger: when they pull in
-opposite directions, naming the bigger one as "the cause" while ignoring that the other
-partly cancelled it would misdescribe what happened, and a branch whose revenue held up
-purely because bigger baskets covered for lost footfall is in a genuinely different
-position from one whose revenue fell.
-
-Margin gets its own treatment, because a ratio's movement is really a race between two
-growth rates — what the branch sold for, against what it paid for what it sold. Three
-named causes come out of that comparison: `costs_outpaced_sales` (selling more without
-keeping more of it — buying prices or mix), `sales_fell_faster_than_costs` (selling
-prices or mix, not suppliers), and `costs_rose_while_sales_fell` (both sides moved
-against the margin). A low margin _level_ is a different question again, and
-`describe_margin_level` answers the one that changes the decision: whether it is new. A
-margin thin for months is a pricing decision to revisit; one that was healthy last
-period is an event to investigate.
-
-**Stock risk can be decomposed the same way** — days left = on hand ÷ recent selling
-rate, so a product hits the threshold either because its stock fell or because its sales
-rose — and `classify_stock_risk` still does it, comparing each at-risk product's recent
-daily rate against its own rate over the 60 days before that. **No alert uses it any
-more.** At this business's volumes the comparison rests on a handful of sales (one
-product's "0.6× its earlier rate" came from 5 sales against 18 in the previous two
-months), and the business asked for it to go rather than have a sentence claim more than
-the data supports. The stock alert's "why" is now how long the stock lasts, and nothing
-about why.
+Alerts do not carry an automatic "why" any more. An earlier version broke a revenue drop into
+visits versus average sale, and a margin drop into selling prices versus buying prices, in
+`app/retail/services/explanation.py`. No alert ended up using it — the stock version was
+removed at the business's request, because at this shop's volumes it rested on a handful of
+sales — so the module and its tests were deleted. The figures rows below carry the evidence
+instead, and the `driver`/`interpretation` fields on `Alert` were removed with it.
 
 In the UI (`AlertExplanation` in `dashboard/shared.tsx`) an opened alert shows its
 figures laid out and labelled, in the order a reader asks for them:
@@ -230,8 +185,8 @@ figures laid out and labelled, in the order a reader asks for them:
    30 days, and how long that lasts, plus "78 more on the Inventory tab" when the list was
    capped (`AT_RISK_SHORTLIST_LIMIT`). A branch with eighty low products gets one true,
    unactionable sentence otherwise; nobody reorders eighty lines off a count.
-4. **Why**, then **What to do** — the latter tinted and holding the evidence button, since
-   it is the thing the whole alert exists to produce.
+4. **What to do** — tinted and holding the evidence button, since it is the thing the
+   whole alert exists to produce.
 
 **Values are formatted on the server, not the client.** Every fact arrives as a finished
 string ("Ks 19,016,273", "-5.6 points"), built beside the sentences from the same figures.
@@ -247,29 +202,14 @@ above it now show, and the two together read as the panel saying everything twic
 on the payload for the collapsed row, the branch cards, and the data-quality alerts, which
 carry no figures of their own and fall back to it.
 
-**Why is one block, not two.** Driver and interpretation are different kinds of claim —
-the driver is measured ("transactions −17.8%, average sale +7.9%"), the interpretation is
-the reading of it ("this is a footfall problem, not an average-sale one") — but a reader
-asks them as a single question, and two stacked headings for one thought is what made this
-panel read like a report. The measured half still leads the paragraph, so the reading never
-borrows its authority silently.
-
 **The chip row is gone**, along with the revenue split and the stock alert's
-demand/drawdown evidence block. The
-chips showed two or three of the same figures the fact rows now carry in full, and keeping
-both would have been the duplication this engine avoids everywhere else. The
-The revenue split — the "Where the Ks 1,312,950 went" bars, `Alert.evidence` with
-`kind: revenue_split` — went the same way: the money it split up is already in the fact
-rows and named again in Why, so the bars were the panel's third telling of one movement.
-It had been dropped from the customer alert earlier, for a different reason — that alert is
-about people, and a bar chart of where the Kyat came from answers a question its reader is
-not asking. `explanation.decompose_revenue_change` still runs, because Why is built from
-it; only the drawn bars are gone. The demand/drawdown split — "selling faster than before →
-order more" against "simply run down → order sooner" — was removed at the business's
-request: at this shop's volumes it rests on
-a handful of sales, and a sentence like "selling 0.6× its earlier rate" reads far firmer
-than the evidence under it. `explanation.classify_stock_risk` still exists and is still
-tested, but no alert uses it.
+demand/drawdown evidence block. The chips showed two or three of the same figures the fact
+rows now carry in full, and keeping both would have been the duplication this engine avoids
+everywhere else. The revenue split — the "Where the Ks 1,312,950 went" bars, `Alert.evidence`
+with `kind: revenue_split` — went the same way: the money it split up is already in the fact
+rows, so the bars were the panel's second telling of one movement. It had been dropped from
+the customer alert earlier, for a different reason — that alert is about people, and a bar
+chart of where the Kyat came from answers a question its reader is not asking.
 
 The layout above was reviewed by the business as a text mock before any of it was built,
 after two earlier attempts (a disclosure holding the arithmetic, then a numbered
@@ -279,24 +219,8 @@ owner's summary.
 Percentages, money and counts inside those sentences are bolded, so a reader can take the
 number off the row at a glance and read the sentence only if they want the rest.
 
-Explanations are attached by the rules that raise the alert, and a rule with nothing to
-decompose leaves `driver`/`interpretation` empty rather than inventing a cause — a
-dead-stock count has no two components to split it into, and the "why" behind a
-data-quality alert is the individual flagged rows, which already exist on the Warning
-page and would be worse as a generated summary. `no_sales_recorded` also stays empty:
-everything is down 100%, so decomposing it yields only noise, and its recommended
-action already carries the real explanation.
-
 Alert text is written to read as a sentence rather than a spreadsheet row: "1 product
-has … at its recent selling rate", never "1 product(s) have … at their"; and with a
-single product at risk the driver names it directly instead of reporting "0 of the 1
-at-risk products", which is the right count and the wrong sentence.
-
-Money figures never appear in these sentences, only percentages and directions. The
-effects are computed in Kyat internally to decide which term dominates, but a manager
-reading "transactions are down 18.0%" does not need the Ks figure behind it, and
-printing one would invite comparing it against a revenue total it is not directly
-comparable to.
+has … at its recent selling rate", never "1 product(s) have … at their".
 
 ## Tuning
 
@@ -347,7 +271,7 @@ dimensions[]         # key, label, description, weight, effective_weight, score,
                      # status, insufficient_data_reason, sub_metrics[]
 sub_metrics[]        # key, label, unit, weight, value (raw), score
 alerts[]             # id, severity, dimension, title, summary, what_happened,
-                     # recommended_action, link, driver, interpretation
+                     # recommended_action, link
                      # `summary` is the few-word version for a collapsed row
 metrics{}            # every raw number the scores and alerts were derived from
 ```
@@ -488,8 +412,8 @@ matches what clicking it produces.
 **An alert carries its figures as data, not only inside its sentences.** `Alert.facts`
 is the labelled rows the detail panel shows — a single value (`{label, value}`) or a
 movement (`{label, before, after, change, tone}`) — and `Alert.table` is the products
-behind a list-shaped alert. Both are filled by the rules from the same `explanation.py` results the sentences
-were built from, so the UI renders one set of numbers rather than recomputing a second —
+behind a list-shaped alert. Both are filled by the rules from the same figures the sentences
+are built from, so the UI renders one set of numbers rather than recomputing a second —
 the "nothing is measured twice" rule applied across the wire, extended to formatting: the
 values arrive as finished strings, because formatting them twice is how a row ends up
 disagreeing with the sentence beside it. A figure that could not be measured leaves its
@@ -559,16 +483,6 @@ Revenue opens on 30 days unless the user changes it.
   will delegate to `data_quality.py` rather than reimplement it.
 
 ## Tests
-
-`backend/tests/test_explanation.py` covers the decomposition's defining property — the
-three effects summing exactly to the actual change, across four shapes of movement —
-plus attribution to visits, to baskets, and to "both" when neither dominates; the
-sign-aware wording when revenue held up despite lost footfall; the three margin causes;
-whether a low margin level is reported as new or standing; the stock-risk split between
-demand speeding up and stock running down (including the no-earlier-sales case and the
-single-product wording); and that alerts with nothing to decompose leave the fields
-empty. It also asserts that no two alerts on one branch
-carry identical explanation text.
 
 `backend/tests/test_early_warning.py` covers the engine (a healthy branch raising
 nothing, criticals sorting ahead of warnings, injectable thresholds, and that _every_

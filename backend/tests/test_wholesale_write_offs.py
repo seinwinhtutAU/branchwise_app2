@@ -190,6 +190,3 @@ def test_voucher_and_order_exact_write_offs_close_their_statuses(
     reread = authed_client.get(f"/api/wholesale/orders/{order['order_id']}").json()
     assert reread["remaining_quantity_pairs"] == 0
     assert reread["order_status"] == "fulfilled"
-
-    monitoring = authed_client.get("/api/wholesale/monitoring").json()
-    assert monitoring["orders_pending"]["count"] == 0

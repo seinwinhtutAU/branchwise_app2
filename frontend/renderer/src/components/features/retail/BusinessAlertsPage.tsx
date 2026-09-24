@@ -98,6 +98,11 @@ interface BranchAlert extends HealthAlert {
   branchName: string;
 }
 
+/** An alert's id is only unique within a branch — every branch can raise the same rule —
+ * so selection has to be keyed by branch too, or two branches' rows select together. */
+const alertKey = (alert: BranchAlert): string =>
+  `${alert.branchId}:${alert.id}`;
+
 /** One alert in the master list — a single compact row, selectable. */
 function AlertListRow({
   alert,
@@ -424,12 +429,13 @@ export function BusinessAlertsPage({
       setSelectedId(null);
       return;
     }
-    if (!shown.some((alert) => alert.id === selectedId)) {
-      setSelectedId(shown[0].id);
+    if (!shown.some((alert) => alertKey(alert) === selectedId)) {
+      setSelectedId(alertKey(shown[0]));
     }
   }, [shown, selectedId]);
 
-  const selectedAlert = shown.find((alert) => alert.id === selectedId) ?? null;
+  const selectedAlert =
+    shown.find((alert) => alertKey(alert) === selectedId) ?? null;
 
   // The master-detail grid gets an explicit pixel height rather than a fixed
   // max-height guess: measured from wherever the filter bar actually ends (which
@@ -653,11 +659,11 @@ export function BusinessAlertsPage({
                       ) : (
                         group.alerts.map((alert) => (
                           <AlertListRow
-                            key={`${alert.branchId}:${alert.id}`}
+                            key={alertKey(alert)}
                             alert={alert}
-                            active={selectedId === alert.id}
+                            active={selectedId === alertKey(alert)}
                             showBranch={false}
-                            onSelect={() => setSelectedId(alert.id)}
+                            onSelect={() => setSelectedId(alertKey(alert))}
                           />
                         ))
                       )}

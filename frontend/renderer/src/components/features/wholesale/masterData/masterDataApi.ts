@@ -61,20 +61,6 @@ export function productsFromWire(wires: WholesaleProductWire[]): Product[] {
     );
 }
 
-export function customersFromWire(
-  wires: WholesaleCustomerWire[],
-): Array<{ name: string; phone: string; address: string }> {
-  return wires
-    .filter((wire) => wire.active)
-    .map(({ name, phone, address }) => ({ name, phone, address }));
-}
-
-export function namedEntitiesFromWire(
-  wires: WholesaleNamedEntityWire[],
-): string[] {
-  return wires.filter((wire) => wire.active).map((wire) => wire.name);
-}
-
 export interface NewWholesaleProductInput {
   stock_code: string;
   description: string;
@@ -103,15 +89,6 @@ export async function updateWholesaleProduct(
     `/api/wholesale/products/${id}`,
     { method: "PATCH", body: patch },
   );
-}
-
-export async function deleteWholesaleProduct(
-  session: Session,
-  id: string,
-): Promise<void> {
-  await request<void>(session, `/api/wholesale/products/${id}`, {
-    method: "DELETE",
-  });
 }
 
 export interface NewWholesaleSupplierInput {
@@ -149,14 +126,6 @@ export async function updateWholesaleSupplier(
     { method: "PATCH", body: patch },
   );
 }
-export async function deleteWholesaleSupplier(
-  session: Session,
-  id: string,
-): Promise<void> {
-  await request<void>(session, `/api/wholesale/suppliers/${id}`, {
-    method: "DELETE",
-  });
-}
 export async function createWholesaleCustomer(
   session: Session,
   input: NewWholesaleCustomerInput,
@@ -177,15 +146,6 @@ export async function updateWholesaleCustomer(
     { method: "PATCH", body: patch },
   );
 }
-export async function deleteWholesaleCustomer(
-  session: Session,
-  id: string,
-): Promise<void> {
-  await request<void>(session, `/api/wholesale/customers/${id}`, {
-    method: "DELETE",
-  });
-}
-
 export async function createWholesaleNamedEntity(
   session: Session,
   path: string,
@@ -208,13 +168,3 @@ export async function updateWholesaleNamedEntity(
     { method: "PATCH", body: patch },
   );
 }
-export async function deleteWholesaleNamedEntity(
-  session: Session,
-  path: string,
-  id: string,
-): Promise<void> {
-  await request<void>(session, `/api/wholesale/${path}/${id}`, {
-    method: "DELETE",
-  });
-}
-

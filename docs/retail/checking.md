@@ -1,5 +1,8 @@
 # Checking (physical stock audit)
 
+> **Update (2026-09-25):** the everyday checking list now lives on the **Data Quality page's "Checking" tab** (`WarningsPage.tsx`). It is a plain list — Branch, Stock Code, Description, Physical Count — with **no System Qty**, built from the same three checks listed below (`missing_product`, `reconciliation_uom`, `reconciliation_mismatch`) and with no after-cutoff lock. Business Alerts' and the Dashboard's "Open Checking" links open that tab. The standalone Physical Stock Audit page described below (`CheckingPage.tsx`) is no longer routed from `App.tsx`; the backend endpoints are unchanged. The Data Quality CSV/Excel "recount" export now contains only these checking rows too.
+
+
 **Status: built, but intentionally hidden from the nav.** `GET /api/checking`, `GET /api/checking/export`, `GET /api/checking/verify` (`app/retail/routers/checking.py`, `app/schemas/checking.py`) plus `frontend/renderer/src/components/features/retail/CheckingPage.tsx` are fully implemented and covered by `require_retail` the same as every other retail route. `App.tsx`'s `RETAIL_ROLE_NAV_ITEMS` leaves it out on purpose — the comment there says why: "Checking is implemented but intentionally hidden until the daily check workflow and its verified-inventory-import handoff are ready to be released." Today the only way to reach it is a "Checking" link the Dashboard page can call (`onViewChecking`); it has no entry in the left sidebar for any role. There is no dedicated backend test file for it yet (`backend/tests/test_checking.py` doesn't exist) — worth adding before this ships.
 
 ## Why this exists

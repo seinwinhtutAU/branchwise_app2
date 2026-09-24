@@ -1,5 +1,7 @@
 import { Fragment, useState } from "react";
 import { cn } from "@renderer/lib/utils";
+import { downloadExcel } from "@renderer/lib/excel";
+import { DownloadIcon } from "@renderer/components/ui/icons";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
 import { Card } from "@renderer/components/ui/Card";
@@ -65,43 +67,6 @@ export function RefreshingHint({
       <span className="w-1.5 h-1.5 rounded-full bg-brand animate-pulse motion-reduce:animate-none" />
       Refreshing…
     </p>
-  );
-}
-
-// Percentages, money and counts inside an alert sentence. Bolding them lets a reader
-// take the number off the row at a glance and read the sentence only if they want the
-// rest — which is how these actually get read.
-const NUMBER_PATTERN =
-  /(Ks\s[\d,]+(?:\.\d+)?|[\d,]+(?:\.\d+)?\s?(?:%|percentage points|points|days)|\b[\d,]*\d\b)/g;
-
-function withNumbersEmphasised(text: string): React.ReactNode[] {
-  return text.split(NUMBER_PATTERN).map((part, index) =>
-    index % 2 === 1 ? (
-      <strong key={index} className="font-semibold text-text-primary">
-        {part}
-      </strong>
-    ) : (
-      <Fragment key={index}>{part}</Fragment>
-    ),
-  );
-}
-
-function AlertSection({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}): React.JSX.Element {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-        {label}
-      </span>
-      {/* Capped for the same reason as the tables above: a line of prose running the full
-          width of the alerts table is hard to track back to the start of the next one. */}
-      <p className="text-sm text-text-secondary max-w-4xl">{children}</p>
-    </div>
   );
 }
 
@@ -179,7 +144,16 @@ function AlertTableShell({
 }: {
   children: React.ReactNode;
 }): React.JSX.Element {
-  return <TableContainer className="max-w-3xl">{children}</TableContainer>;
+  // A bounded height makes this a scrollport, so a long list (35 products to count) stays
+  // a fixed window with its header pinned instead of stretching the whole panel.
+  return (
+    <TableContainer
+      className="max-w-3xl overflow-y-auto"
+      style={{ maxHeight: "22rem" }}
+    >
+      {children}
+    </TableContainer>
+  );
 }
 
 /**
@@ -316,7 +290,14 @@ function AlertFacts({ facts }: { facts: AlertFact[] }): React.JSX.Element {
  * one it cannot (how long that lasts). The note says how many were left out, so five rows
  * under a count of eighty never read as the whole list.
  */
-function AlertTableBlock({ table }: { table: AlertTable }): React.JSX.Element {
+function AlertTableBlock({
+  table,
+  filename,
+}: {
+  table: AlertTable;
+  filename: string;
+}): React.JSX.Element {
+  const exportRows = table.export_rows;
   return (
     <div className="flex flex-col gap-1">
       <AlertTableShell>
@@ -351,15 +332,35 @@ function AlertTableBlock({ table }: { table: AlertTable }): React.JSX.Element {
           ))}
         </Tbody>
       </AlertTableShell>
-      {table.note && (
-        <span className="text-xs text-text-muted">{table.note}</span>
+      {(table.note || exportRows) && (
+        <div className="flex items-center justify-between gap-3 max-w-3xl">
+          <span className="text-xs text-text-muted">{table.note}</span>
+          {exportRows && (
+            <Button
+              variant="secondary"
+              size="sm"
+              title={`Download all ${exportRows.length} items to Excel`}
+              onClick={() =>
+                downloadExcel(
+                  `${filename}-${new Date().toISOString().slice(0, 10)}.xlsx`,
+                  "Alert",
+                  table.columns.map((column) => column.label),
+                  exportRows,
+                )
+              }
+            >
+              <DownloadIcon className="w-4 h-4" />
+              Excel
+            </Button>
+          )}
+        </div>
       )}
     </div>
   );
 }
 
 /**
- * The body of an alert: which days it covers, the figures, the products behind them, why,
+ * The body of an alert: which days it covers, the figures, the products behind them,
  * and the one thing to do about it.
  *
  * The order is the order the question is actually asked in. The figures lead, laid out as
@@ -371,15 +372,9 @@ function AlertTableBlock({ table }: { table: AlertTable }): React.JSX.Element {
  * fixed sales window) — this line is where a reader can see that rather than assume
  * otherwise.
  *
- * `driver` and `interpretation` are merged into one "Why". They are different kinds of
- * claim — one measured, one a reading of it — but a reader asks them as a single question,
- * and two headings for one thought is how this panel used to read like a report. The
- * measured half still leads the paragraph, so the reading never borrows its authority
- * silently.
- *
  * The revenue split ("Where the Ks 1,312,950 went", drawn as bars) is gone: the same
- * movement is already in the figures above and named in "Why", so the bars restated a
- * third time what the panel had said twice.
+ * movement is already in the figures above, so the bars restated what the panel had
+ * already said.
  *
  * `what_happened` is deliberately not shown here: it's a prose restatement of the same
  * figures sitting in the rows above (or, for alerts with no facts/table, the same claim
@@ -397,7 +392,6 @@ export function AlertExplanation({
 }: {
   alert: HealthAlert;
 }): React.JSX.Element {
-  const why = [alert.driver, alert.interpretation].filter(Boolean).join(" ");
   return (
     <div className="flex flex-col gap-4 py-1">
       {alert.context && (
@@ -406,10 +400,8 @@ export function AlertExplanation({
 
       {(alert.facts ?? []).length > 0 && <AlertFacts facts={alert.facts} />}
 
-      {alert.table && <AlertTableBlock table={alert.table} />}
-
-      {why && (
-        <AlertSection label="Why">{withNumbersEmphasised(why)}</AlertSection>
+      {alert.table && (
+        <AlertTableBlock table={alert.table} filename={alert.id} />
       )}
     </div>
   );

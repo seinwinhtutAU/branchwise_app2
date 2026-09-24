@@ -1,24 +1,16 @@
 # Monitoring — the wholesale Dashboard
 
-The wholesale Dashboard has five tabs: **Summary** and **Operations** (a live operational
-status board, below) and **Revenue**, **Cost**, **Customer** and **Inventory** (the analytical tabs,
-see "Revenue, Customer and Inventory tabs" further down). There is no separate Reports page any
-more; it was removed and its figures live on these tabs.
+The wholesale Dashboard has five tabs: **Summary**, **Revenue**, **Cost**, **Customer** and
+**Inventory** (the analytical tabs, see "Revenue, Customer and Inventory tabs" further down).
+There is no separate Reports page or live "Operations" board any more; both were removed and
+their figures live on these tabs.
 
-## Endpoint
+## Summary endpoint
 
-**`GET /api/wholesale/monitoring`** (`app/wholesale/services/monitoring.py`,
-`routers/monitoring.py`) returns one `monitoring_snapshot` combining six read-only aggregates,
-each `{count, rows}` except `recent_activity` (a flat list):
-
-- **`shipments_in_transit`** — every non-completed shipment, each with `days_in_transit`.
-- **`orders_pending`** — every non-cancelled, non-fulfilled order, each with `days_open`.
-- **`unpaid_vouchers`** — supplier vouchers with `balance_due > 0`.
-- **`unpaid_orders`** — customer orders with `balance_due > 0`.
-- **`zero_stock_products`** — active products with `net_pairs_by_stock_code <= 0`, tagged
-  `out_of_stock` (has receiving history) vs. `not_arrived` (never received at all).
-- **`recent_activity`** — the 15 most recent receivings/deliveries/payments, merged from all
-  three sources and sorted by `created_at desc`.
+**`GET /api/wholesale/monitoring/summary`** (`app/wholesale/services/monitoring.py`,
+`routers/monitoring.py`) feeds the Summary tab only. The earlier `GET /api/wholesale/monitoring`
+snapshot (shipments in transit, pending orders, unpaid vouchers/orders, zero-stock products,
+recent activity) was deleted along with the Operations tab.
 
 ## Revenue, Customer and Inventory tabs
 
@@ -59,8 +51,8 @@ exclude cancelled orders. Dates: orders use `order_date`, deliveries `delivered_
   backlog (pairs still owed), the pipeline flow, physical stock by location, and available /
   committed / incoming by product group. Quantities are shown in sets (1 set = 6 pairs).
 
-Numbers are shown without a currency prefix ("103.8M"); each tab's footer says values are in MMK. The Summary's revenue and factory bars are the Revenue tab's own figures for the chosen period (`GET /api/wholesale/monitoring/summary` accepts the same `period`/`month`/`date_from`/`date_to`). Operations is live and Inventory is a point in time, so neither has a period. Location is not a filter on these three tabs: revenue and customers have no per-location figures,
-and Inventory always shows every location. The Summary and Operations views keep their selector.
+Numbers are shown without a currency prefix ("103.8M"); each tab's footer says values are in MMK. The Summary's revenue and factory bars are the Revenue tab's own figures for the chosen period (`GET /api/wholesale/monitoring/summary` accepts the same `period`/`month`/`date_from`/`date_to`). Inventory is a point in time, so it has no period. Location is not a filter on these three tabs: revenue and customers have no per-location figures,
+and Inventory always shows every location. Only the Summary keeps a location selector.
 
 ## Export all wholesale data
 

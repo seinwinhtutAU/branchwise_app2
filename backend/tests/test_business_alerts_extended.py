@@ -201,40 +201,27 @@ def test_purchase_number_sequence_gap_fires_critical_alert():
 # ---------------------------------------------------------------------------
 
 
-def test_physical_stock_audit_quiet_when_no_data_issues():
-    snap = _base_snapshot(data_issue_count=0)
+def test_physical_stock_audit_quiet_when_nothing_to_count():
+    snap = _base_snapshot(checking_items=())
     alerts = early_warning.evaluate(snap)
     assert not any(a.id == "physical_stock_audit" for a in alerts)
 
 
-def test_physical_stock_audit_fires_when_data_issues_exist():
-    # Locked status when before 8pm
-    snap_locked = _base_snapshot(
-        data_issue_count=5,
-        critical_data_issue_count=2,
-        is_after_8pm=False,
-        has_today_sales=True,
-        has_today_inventory=True,
+def test_physical_stock_audit_lists_products_to_count():
+    items = tuple(
+        {"stock_code": f"SKU{i:03d}", "description": f"Shoe {i}", "on_hand_qty": float(i)}
+        for i in range(25)
     )
-    alerts = early_warning.evaluate(snap_locked)
+    alerts = early_warning.evaluate(_base_snapshot(checking_items=items))
     alert = next(a for a in alerts if a.id == "physical_stock_audit")
     assert alert.severity == early_warning.WARNING
-    assert alert.link == "checking"
-    status_facts = {fact["label"]: fact["value"] for fact in alert.facts}
-    assert "locked" in status_facts["Audit Sheet Status"].lower()
-
-    # Ready status when after 8pm and imports complete
-    snap_ready = _base_snapshot(
-        data_issue_count=5,
-        critical_data_issue_count=2,
-        is_after_8pm=True,
-        has_today_sales=True,
-        has_today_inventory=True,
-    )
-    alerts_ready = early_warning.evaluate(snap_ready)
-    alert_ready = next(a for a in alerts_ready if a.id == "physical_stock_audit")
-    ready_facts = {fact["label"]: fact["value"] for fact in alert_ready.facts}
-    assert "ready" in ready_facts["Audit Sheet Status"].lower()
+    assert alert.summary.startswith("25 products")
+    assert alert.table is not None
+    # Every product is on screen (the panel scrolls) and in the Excel download.
+    assert len(alert.table["rows"]) == 25
+    assert len(alert.table["export_rows"]) == 25
+    assert alert.table["rows"][0][:3] == ["SKU000", "Shoe 0", "0"]
+    assert alert.table["columns"][-1]["label"] == "Actual Count"
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +297,7 @@ def test_footwear_aging_alert_fires_with_purchase_labels():
     alerts = early_warning.evaluate(snap)
     alert = next(a for a in alerts if a.id == "footwear_aging")
     assert alert.severity == early_warning.WARNING
-    assert alert.link == "inventory"
+    assert alert.link == "agedStock"
     assert "BOOT-99" in alert.table["rows"][0][0]
     assert "PO-2026-001" in alert.table["rows"][0][3]
     assert "240 days" in alert.table["rows"][0][2]

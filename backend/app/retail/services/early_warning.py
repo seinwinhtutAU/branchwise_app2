@@ -28,8 +28,6 @@ class Alert:
     recommended_action: str
     link: str
     measure: str
-    driver: str | None = None
-    interpretation: str | None = None
     context: str | None = None
     facts: tuple[dict, ...] = ()
     table: dict | None = None
@@ -201,28 +199,26 @@ def purchase_number_sequence_rule(snapshot: BranchSnapshot) -> list[Alert]:
 
 
 def physical_stock_audit_rule(snapshot: BranchSnapshot) -> list[Alert]:
-    """Request a physical stock check when inventory discrepancies need verification."""
-    if snapshot.data_issue_count == 0:
+    """Ask staff to recount the products whose stock records don't add up.
+
+    The alert carries the list itself, not a pointer to another screen: the products to
+    count, and an Excel copy to take to the shelf with a blank column for the count.
+    """
+    items = snapshot.checking_items
+    if not items:
         return []
 
-    cutoff = _format_time(snapshot.daily_check_cutoff_time)
-    can_generate = (
-        snapshot.is_after_8pm
-        and snapshot.has_today_sales
-        and snapshot.has_today_inventory
-    )
-    # Locked until *both* conditions hold — the cutoff time has passed, and today's
-    # sales and inventory are confirmed — so the status text names both, not just
-    # the imports: being fully imported before the cutoff still reads as locked.
-    audit_status = (
-        "Ready: Stock checking sheet is ready. Today's sales and inventory have "
-        "been confirmed."
-        if can_generate
-        else (
-            f"Locked: Stock checking sheet will be available after {cutoff}, "
-            "once today's sales and inventory are confirmed."
-        )
-    )
+    count = len(items)
+    # The last column is left empty on purpose — it is where the count gets written.
+    rows = [
+        [
+            str(item["stock_code"]),
+            str(item["description"] or "—"),
+            "—" if item["on_hand_qty"] is None else f"{item['on_hand_qty']:,.0f}",
+            "",
+        ]
+        for item in items
+    ]
     return [
         Alert(
             id="physical_stock_audit",
@@ -230,8 +226,8 @@ def physical_stock_audit_rule(snapshot: BranchSnapshot) -> list[Alert]:
             dimension="inventory",
             title="Physical stock count is required",
             summary=(
-                f"{snapshot.data_issue_count} inventory issues need to be checked "
-                "in the shop."
+                f"{count} product{'s' if count != 1 else ''} "
+                f"{'need' if count != 1 else 'needs'} to be counted in the shop."
             ),
             what_happened=(
                 "The system found inventory records that don't match expected "
@@ -239,19 +235,23 @@ def physical_stock_audit_rule(snapshot: BranchSnapshot) -> list[Alert]:
                 "inventory."
             ),
             recommended_action=(
-                "Download the stock checking sheet, count stock in the shop, and "
-                "re-import the updated inventory file."
+                "Count these products in the shop, write the counts in the Excel "
+                "sheet, and re-import the updated inventory file."
             ),
             link="checking",
             measure="physical_stock_audit",
-            facts=_facts(
-                _fact("Discrepancy Count", str(snapshot.data_issue_count)),
-                _fact("Critical Issues", str(snapshot.critical_data_issue_count)),
-                _fact(
-                    "Audit Sheet Status",
-                    audit_status,
-                ),
-            ),
+            table={
+                "columns": [
+                    {"label": "Stock Code", "align": "left"},
+                    {"label": "Description", "align": "left"},
+                    {"label": "System Qty", "align": "right"},
+                    {"label": "Actual Count", "align": "right"},
+                ],
+                # Every product: the panel shows the list in a fixed, scrolling window.
+                "rows": rows,
+                "export_rows": rows,
+                "note": None,
+            },
         )
     ]
 
@@ -273,7 +273,7 @@ def stock_allocation_rule(snapshot: BranchSnapshot) -> list[Alert]:
             f"{item['target_sales_90d']:,.0f} sold",
             f"Transfer {item['recommended_transfer_qty']:,.0f}",
         ]
-        for item in snapshot.stock_allocations[:5]
+        for item in snapshot.stock_allocations
     ]
     return [
         Alert(
@@ -304,10 +304,11 @@ def stock_allocation_rule(snapshot: BranchSnapshot) -> list[Alert]:
                     {"label": "Sales (90d)", "align": "right"},
                     {"label": "Recommendation", "align": "right"},
                 ],
-                "rows": rows,
+                "rows": rows[:5],
+                "export_rows": rows,
                 "note": (
-                    f"Showing top {len(rows)} of {count} transfer opportunities."
-                    if count > len(rows)
+                    f"Showing top 5 of {count} transfer opportunities."
+                    if count > 5
                     else None
                 ),
             },
@@ -328,7 +329,7 @@ def urgent_reorder_rule(snapshot: BranchSnapshot) -> list[Alert]:
             f"{item['days_left']} days",
             f"Order {item['recommended_reorder_qty']:,.0f}",
         ]
-        for item in snapshot.urgent_reorders[:5]
+        for item in snapshot.urgent_reorders
     ]
     return [
         Alert(
@@ -354,10 +355,11 @@ def urgent_reorder_rule(snapshot: BranchSnapshot) -> list[Alert]:
                     {"label": "Cover left", "align": "right"},
                     {"label": "Recommended Order", "align": "right"},
                 ],
-                "rows": rows,
+                "rows": rows[:5],
+                "export_rows": rows,
                 "note": (
-                    f"Showing top {len(rows)} of {count} urgent reorder items."
-                    if count > len(rows)
+                    f"Showing top 5 of {count} urgent reorder items."
+                    if count > 5
                     else None
                 ),
             },
@@ -379,7 +381,7 @@ def footwear_aging_rule(snapshot: BranchSnapshot) -> list[Alert]:
             f"{item['age_days']} days",
             item["batch_label"],
         ]
-        for item in snapshot.aged_footwear[:5]
+        for item in snapshot.aged_footwear
     ]
     return [
         Alert(
@@ -398,7 +400,7 @@ def footwear_aging_rule(snapshot: BranchSnapshot) -> list[Alert]:
                 f"in stock for {oldest['age_days']} days."
             ),
             recommended_action="Review these products for clearance, promotion, or bundle sales.",
-            link="inventory",
+            link="agedStock",
             measure="aging_stock",
             table={
                 "columns": [
@@ -407,10 +409,11 @@ def footwear_aging_rule(snapshot: BranchSnapshot) -> list[Alert]:
                     {"label": "Age", "align": "right"},
                     {"label": "Purchase Origin", "align": "left"},
                 ],
-                "rows": rows,
+                "rows": rows[:5],
+                "export_rows": rows,
                 "note": (
-                    f"Showing top {len(rows)} of {count} aged items."
-                    if count > len(rows)
+                    f"Showing top 5 of {count} aged items."
+                    if count > 5
                     else None
                 ),
             },
@@ -431,7 +434,7 @@ def seasonal_demand_spike_rule(snapshot: BranchSnapshot) -> list[Alert]:
             f"{item['prior_year_qty']:,.0f} pairs sold",
             f"Surge in {item['month_name']}",
         ]
-        for item in snapshot.seasonal_spikes[:5]
+        for item in snapshot.seasonal_spikes
     ]
     return [
         Alert(
@@ -456,10 +459,11 @@ def seasonal_demand_spike_rule(snapshot: BranchSnapshot) -> list[Alert]:
                     {"label": "Prior-Year Sales", "align": "right"},
                     {"label": "Seasonality", "align": "left"},
                 ],
-                "rows": rows,
+                "rows": rows[:5],
+                "export_rows": rows,
                 "note": (
-                    f"Showing top {len(rows)} of {count} seasonal items."
-                    if count > len(rows)
+                    f"Showing top 5 of {count} seasonal items."
+                    if count > 5
                     else None
                 ),
             },

@@ -104,15 +104,6 @@ def get_branch_health_weights(db: Session) -> dict[str, float]:
     return {name: float(value) for name, value in _merged_over_default(db, "branch_health_weights").items()}
 
 
-def get_today_exchange_rates(db: Session) -> dict[str, str]:
-    """Today's MMK rate for each non-MMK currency, as saved (see DEFAULT_SETTINGS'
-    today_exchange_rates comment) — only used to prefill a new wholesale order/voucher
-    line or receiving cost; not merged over a fixed key set the way
-    _merged_over_default's callers are, since the set of currencies is open-ended."""
-    saved = get_setting(db, "today_exchange_rates")
-    return dict(saved) if isinstance(saved, dict) else {}
-
-
 def get_purchasing_buffer_months(db: Session) -> dict[str, float]:
     """The target inventory buffer months for each ABC classification tier."""
     return {
@@ -124,15 +115,6 @@ def get_daily_check_cutoff_time(db: Session) -> str:
     """The shop closing cutoff time ('HH:MM') after which daily checks run and audit sheets unlock."""
     val = get_setting(db, "daily_check_cutoff_time")
     return str(val) if val else "20:00"
-
-
-def get_daily_check_cutoff_hour_minute(db: Session) -> tuple[int, int]:
-    raw = get_daily_check_cutoff_time(db)
-    try:
-        parts = raw.split(":")
-        return int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
-    except Exception:
-        return 20, 0
 
 
 def format_cutoff_time(cutoff_time: str) -> str:

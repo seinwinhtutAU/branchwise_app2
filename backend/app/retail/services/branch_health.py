@@ -37,8 +37,9 @@ from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.models.sale import Sale, SaleLine
 from app.retail.models.stock_level import StockLevel
-from app.retail.services import data_quality, explanation
+from app.retail.services import data_quality
 from app.retail.services.import_common import sql_rule_failure
+from app.retail.services.stock import latest_stock_query
 from app.retail.services.pos_import import VALIDATION_RULES as SALES_VALIDATION_RULES
 from app.retail.services.purchase_import import VALIDATION_RULES as PURCHASE_VALIDATION_RULES
 from app.retail.services.import_integrity import (
@@ -84,6 +85,12 @@ AGED_STOCK_DAYS = 180
 # without turning it into the Inventory tab's low-stock table, which is where the rest of
 # them live and where the alert's own button goes.
 AT_RISK_SHORTLIST_LIMIT = 5
+
+# How much faster than its own earlier rate a product must be selling before the risk is
+# called demand-driven. Set above 1.0 with room to spare: retail sales are lumpy, and a
+# product 5% above its two-month average has not had a demand change worth a different
+# reorder decision.
+DEMAND_SPIKE_RATIO = 1.3
 
 
 def _ks(amount: float) -> str:
@@ -397,7 +404,7 @@ class BranchSnapshot:
     stock_as_of: str | None
     # Days left = on hand ÷ recent selling rate, so a product about to run out got there
     # either because its stock fell or because its sales rose. These three carry enough
-    # to tell those apart (see explanation.classify_stock_risk) without putting the
+    # to tell those apart without putting the
     # whole low-stock table on this payload — that table already belongs to the
     # Inventory tab, and the Overview only needs to explain it, not repeat it.
     at_risk_count: int
@@ -453,6 +460,9 @@ class BranchSnapshot:
     is_after_8pm: bool = False
     daily_check_cutoff_time: str = "20:00"
     stock_allocations: tuple[dict, ...] = ()
+    # The products staff must recount on the shelf (stock_code, description,
+    # on_hand_qty) — the missing-product and reconciliation warnings, one row per product.
+    checking_items: tuple[dict, ...] = ()
     urgent_reorders: tuple[dict, ...] = ()
     aged_footwear: tuple[dict, ...] = ()
     seasonal_spikes: tuple[dict, ...] = ()
@@ -466,8 +476,7 @@ class BranchSnapshot:
     # How many days back from today the period reaches — so the Warning page can open on
     # the same stretch of days an alert's counts came from.
     warning_window_days: int | None = None
-    # Every product held past AGED_STOCK_DAYS — the count behind the Inventory score,
-    # where `aged_footwear` above is only the alert's shortlist.
+    # Every product held past AGED_STOCK_DAYS — the count behind the Inventory score.
     aged_stock_count: int = 0
     # Of the products with stock, how many have a purchase on file and so could be judged.
     aged_stock_judged_count: int = 0
@@ -562,7 +571,7 @@ def _summarise_stock_risk(
         # that grew — a ratio would divide by zero, and "new" is the stronger signal of
         # the two anyway.
         ratio = item["daily_velocity"] / baseline if baseline > 0 else None
-        selling_faster = ratio is None or ratio >= explanation.DEMAND_SPIKE_RATIO
+        selling_faster = ratio is None or ratio >= DEMAND_SPIKE_RATIO
         if selling_faster:
             demand_driven += 1
         if leading is None:
@@ -685,24 +694,45 @@ def _find_stock_allocations(
     if not sales:
         return ()
 
+    # What each selling branch already holds of these products right now — a branch that
+    # sold 40 but still has 50 on its shelf needs nothing sent.
+    target_on_hand: dict[tuple[str, str], float] = {}
+    for other_id in other_branch_ids:
+        for stock_level, product, _ in latest_stock_query(db, other_id).filter(
+            Product.stock_code.in_(dead_codes)
+        ):
+            key = (product.stock_code, other_id)
+            target_on_hand[key] = target_on_hand.get(key, 0.0) + float(
+                stock_level.on_hand_qty or 0
+            )
+
     dead_lookup = {item["stock_code"]: item for item in dead_stock_items}
     best_per_code: dict[str, dict] = {}
+    # `sales` is ordered by quantity sold, so the first branch that still needs stock is
+    # the best-selling one that does.
     for stock_code, other_b_id, other_b_name, total_qty in sales:
-        if stock_code not in best_per_code:
-            dead_info = dead_lookup.get(stock_code, {})
-            on_hand = float(dead_info.get("on_hand_qty", 0))
-            sold = float(total_qty)
-            best_per_code[stock_code] = {
-                "stock_code": stock_code,
-                "description": dead_info.get("description", ""),
-                "on_hand_qty": on_hand,
-                "target_branch_id": other_b_id,
-                "target_branch_name": other_b_name,
-                "target_sales_90d": round(sold),
-                "recommended_transfer_qty": min(round(on_hand), round(sold)),
-            }
+        if stock_code in best_per_code:
+            continue
+        dead_info = dead_lookup.get(stock_code, {})
+        on_hand = float(dead_info.get("on_hand_qty", 0))
+        sold = float(total_qty)
+        there = target_on_hand.get((stock_code, other_b_id), 0.0)
+        transfer_qty = min(round(on_hand), round(sold - there))
+        if transfer_qty <= 0:
+            continue
+        best_per_code[stock_code] = {
+            "stock_code": stock_code,
+            "description": dead_info.get("description", ""),
+            "on_hand_qty": on_hand,
+            "target_branch_id": other_b_id,
+            "target_branch_name": other_b_name,
+            "target_sales_90d": round(sold),
+            "target_on_hand_qty": round(there),
+            "recommended_transfer_qty": transfer_qty,
+        }
 
-    return tuple(list(best_per_code.values())[:10])
+    # Not capped here: the alert says "top 5 of N", so N has to be the real total.
+    return tuple(best_per_code.values())
 
 
 def _find_urgent_reorders(low_stock_items: list[dict]) -> tuple[dict, ...]:
@@ -732,14 +762,7 @@ def _find_urgent_reorders(low_stock_items: list[dict]) -> tuple[dict, ...]:
     return tuple(result)
 
 
-def _find_aged_footwear(
-    db: Session, branch_id: str, aging_days: int = AGED_STOCK_DAYS, today: date | None = None
-) -> tuple[dict, ...]:
-    """The oldest few aged products, for the alert's shortlist."""
-    return tuple(_aged_stock(db, branch_id, aging_days, today)[0][:15])
-
-
-def _aged_stock(
+def aged_stock_for_branch(
     db: Session, branch_id: str, aging_days: int = AGED_STOCK_DAYS, today: date | None = None
 ) -> tuple[list[dict], int]:
     """`(aged products, products that could be judged)`.
@@ -826,7 +849,10 @@ def _find_seasonal_spikes(
     db: Session, branch_id: str, today: date | None = None
 ) -> tuple[dict, ...]:
     today = today or date.today()
-    target_month = today.month
+    # Look one month ahead: stock has to be ordered before the busy month starts,
+    # so in September we compare against last year's October, not September.
+    target_month = today.month % 12 + 1
+    target_year = today.year + (1 if today.month == 12 else 0)
     month_names = [
         "Jan",
         "Feb",
@@ -843,7 +869,7 @@ def _find_seasonal_spikes(
     ]
     month_name = month_names[target_month - 1]
 
-    prior_year = today.year - 1
+    prior_year = target_year - 1
     prior_sales = (
         db.query(
             Product.stock_code,
@@ -1179,8 +1205,8 @@ def build_snapshot(
         db, branch_id, stock.get("dead_stock_items", [])
     )
     urgent_reorders = _find_urgent_reorders(stock.get("low_stock_items", []))
-    aged_stock, aged_judged = _aged_stock(db, branch_id)
-    aged_footwear = tuple(aged_stock[:15])
+    aged_stock, aged_judged = aged_stock_for_branch(db, branch_id)
+    aged_footwear = tuple(aged_stock)
     seasonal_spikes = _find_seasonal_spikes(db, branch_id)
     weekly_pattern = _find_weekly_patterns(
         db, branch_id, period_range.start, period_range.end
@@ -1263,6 +1289,9 @@ def build_snapshot(
         is_after_8pm=is_after_8pm,
         daily_check_cutoff_time=cutoff_time,
         stock_allocations=stock_allocations,
+        checking_items=tuple(
+            data_quality.checking_items_from_sections(db, branch_id, warning_sections)
+        ),
         urgent_reorders=urgent_reorders,
         aged_footwear=aged_footwear,
         aged_stock_count=len(aged_stock),

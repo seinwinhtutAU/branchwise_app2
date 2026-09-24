@@ -779,7 +779,7 @@ def test_aged_stock_ignores_products_with_no_purchase_on_file(db_session):
         )
     db_session.commit()
 
-    aged, judged = branch_health._aged_stock(db_session, branch.id, today=today)
+    aged, judged = branch_health.aged_stock_for_branch(db_session, branch.id, today=today)
     assert [item["stock_code"] for item in aged] == ["OLD"]
     assert judged == 3  # UNKNOWN has no purchase, so it is neither aged nor counted
 
@@ -801,3 +801,60 @@ def test_sales_health_scores_quantity_sold_not_product_variety():
     assert round(quantity["value"], 1) == -10.0
     assert quantity["score"] == 40.0
     assert quantity["calculation"] == "90 pairs sold this period, against 100 last year."
+
+
+# --- stock allocation (move slow-moving stock to another branch) ---------------------
+
+
+def _allocation_setup(db_session: Session, *, sold: float, there_on_hand: float, here_on_hand: float = 30):
+    here = _make_branch(db_session, "Here")
+    there = _make_branch(db_session, "There")
+    product = _make_product(db_session, "SH-001", "Oxford")
+    today = datetime.date.today()
+    now = datetime.datetime.now()
+    db_session.add(StockLevel(branch_id=here.id, product_id=product.id, on_hand_qty=here_on_hand, snapshot_at=now))
+    db_session.add(StockLevel(branch_id=there.id, product_id=product.id, on_hand_qty=there_on_hand, snapshot_at=now))
+    _make_sale(
+        db_session, branch=there, product=product, slip_id="s1",
+        sale_date=today - datetime.timedelta(days=5), qty=sold, net_amount=sold * 10,
+    )
+    db_session.commit()
+    dead = [{"stock_code": "SH-001", "description": "Oxford", "on_hand_qty": here_on_hand}]
+    return here, there, dead
+
+
+def test_stock_allocation_nets_off_what_the_selling_branch_already_holds(db_session: Session):
+    here, there, dead = _allocation_setup(db_session, sold=40, there_on_hand=25)
+    (item,) = branch_health._find_stock_allocations(db_session, here.id, dead)
+    assert item["target_branch_id"] == there.id
+    assert item["target_on_hand_qty"] == 25
+    # It sold 40 and has 25 left, so it is short 15 — not the full 30 it could receive.
+    assert item["recommended_transfer_qty"] == 15
+
+
+def test_stock_allocation_skipped_when_selling_branch_already_has_enough(db_session: Session):
+    here, _, dead = _allocation_setup(db_session, sold=10, there_on_hand=50)
+    assert branch_health._find_stock_allocations(db_session, here.id, dead) == ()
+
+
+def test_stock_allocation_never_recommends_more_than_is_on_hand_here(db_session: Session):
+    here, _, dead = _allocation_setup(db_session, sold=100, there_on_hand=0, here_on_hand=30)
+    (item,) = branch_health._find_stock_allocations(db_session, here.id, dead)
+    assert item["recommended_transfer_qty"] == 30
+
+
+def test_stock_allocation_is_not_capped_at_ten_products(db_session: Session):
+    here = _make_branch(db_session, "Here")
+    there = _make_branch(db_session, "There")
+    now = datetime.datetime.now()
+    dead = []
+    for i in range(12):
+        product = _make_product(db_session, f"P{i:02d}", f"Item {i}")
+        db_session.add(StockLevel(branch_id=here.id, product_id=product.id, on_hand_qty=5, snapshot_at=now))
+        _make_sale(
+            db_session, branch=there, product=product, slip_id=f"s{i}",
+            sale_date=datetime.date.today() - datetime.timedelta(days=3), qty=10, net_amount=100,
+        )
+        dead.append({"stock_code": product.stock_code, "description": product.description, "on_hand_qty": 5})
+    db_session.commit()
+    assert len(branch_health._find_stock_allocations(db_session, here.id, dead)) == 12

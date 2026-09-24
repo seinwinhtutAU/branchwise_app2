@@ -989,6 +989,56 @@ CHECKING_SECTION_IDS = frozenset(
 )
 
 
+def checking_items_from_sections(
+    db: Session, branch_id: str | None, sections: list[dict]
+) -> list[dict[str, object]]:
+    """The unique products behind the checking-type warning sections, with each one's
+    latest on-hand count when the branch is known.
+
+    Split out of `build_checking_items` so a caller that has already run the warning
+    checks (the branch health snapshot) can reuse its sections instead of running the
+    same checks a second time.
+    """
+    items_by_code: dict[str, dict[str, object]] = {}
+    for section in sections:
+        if section["id"] not in CHECKING_SECTION_IDS:
+            continue
+        for row in section["rows"]:
+            fields = {field["label"]: field["value"] for field in row["fields"]}
+            stock_code = fields.get("Stock Code", "")
+            description = fields.get("Description", "")
+            if not stock_code or stock_code == "—":
+                continue
+            # A product can trigger more than one check; list it only once.
+            items_by_code.setdefault(
+                stock_code,
+                {"stock_code": stock_code, "description": description, "on_hand_qty": None},
+            )
+
+    if branch_id and items_by_code:
+        latest_subq = (
+            db.query(func.max(StockLevel.snapshot_at))
+            .filter(StockLevel.branch_id == branch_id)
+            .scalar()
+        )
+        if latest_subq:
+            stocks = (
+                db.query(Product.stock_code, StockLevel.on_hand_qty)
+                .join(StockLevel, StockLevel.product_id == Product.id)
+                .filter(
+                    StockLevel.branch_id == branch_id,
+                    StockLevel.snapshot_at == latest_subq,
+                    Product.stock_code.in_(list(items_by_code.keys())),
+                )
+                .all()
+            )
+            for code, qty in stocks:
+                if code in items_by_code:
+                    items_by_code[code]["on_hand_qty"] = float(qty) if qty is not None else None
+
+    return sorted(items_by_code.values(), key=lambda item: str(item["stock_code"]).casefold())
+
+
 def build_checking_items(
     db: Session, user: User, sale_days: int, purchase_days: int
 ) -> list[dict[str, object]]:
@@ -1005,39 +1055,4 @@ def build_checking_items(
         purchase_days,
         section_ids=set(CHECKING_SECTION_IDS),
     )
-    items_by_code: dict[str, dict[str, object]] = {}
-    for section in sections:
-        for row in section["rows"]:
-            fields = {field["label"]: field["value"] for field in row["fields"]}
-            stock_code = fields.get("Stock Code", "")
-            description = fields.get("Description", "")
-            if not stock_code or stock_code == "—":
-                continue
-            # A product can trigger more than one check; list it only once.
-            items_by_code.setdefault(
-                stock_code,
-                {"stock_code": stock_code, "description": description, "on_hand_qty": None},
-            )
-
-    if user.branch_id and items_by_code:
-        latest_subq = (
-            db.query(func.max(StockLevel.snapshot_at))
-            .filter(StockLevel.branch_id == user.branch_id)
-            .scalar()
-        )
-        if latest_subq:
-            stocks = (
-                db.query(Product.stock_code, StockLevel.on_hand_qty)
-                .join(StockLevel, StockLevel.product_id == Product.id)
-                .filter(
-                    StockLevel.branch_id == user.branch_id,
-                    StockLevel.snapshot_at == latest_subq,
-                    Product.stock_code.in_(list(items_by_code.keys())),
-                )
-                .all()
-            )
-            for code, qty in stocks:
-                if code in items_by_code:
-                    items_by_code[code]["on_hand_qty"] = float(qty) if qty is not None else None
-
-    return sorted(items_by_code.values(), key=lambda item: str(item["stock_code"]).casefold())
+    return checking_items_from_sections(db, user.branch_id, sections)

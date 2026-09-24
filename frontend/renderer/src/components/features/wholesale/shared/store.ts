@@ -27,11 +27,7 @@
 // screen-facing state shape.
 
 import { useSyncExternalStore } from "react";
-import {
-  SEED_ORDERS,
-  type CustomerOrder,
-  type Payment,
-} from "../orders/customerOrders";
+import { SEED_ORDERS, type CustomerOrder } from "../orders/customerOrders";
 import { SEED_VOUCHERS, type SupplierVoucher } from "../vouchers/supplierVouchers";
 import { SEED_SHIPMENTS, type Shipment } from "../delivery/shipments";
 import { SEED_RECEIVINGS, type Receiving } from "../receiving/receivings";
@@ -72,11 +68,6 @@ export function useWholesale(): WholesaleState {
   return useSyncExternalStore(subscribe, () => state);
 }
 
-/** The books as they stand, for anything that is not a component. */
-export function getState(): WholesaleState {
-  return state;
-}
-
 type Update<T> = T[] | ((current: T[]) => T[]);
 
 function resolve<T>(update: Update<T>, current: T[]): T[] {
@@ -101,10 +92,6 @@ export function hydrateVouchers(vouchers: SupplierVoucher[]): void {
   set({ vouchers });
 }
 
-export function saveShipments(update: Update<Shipment>): void {
-  set({ shipments: resolve(update, state.shipments) });
-}
-
 /** Pushes shipments fetched from the real backend into the shared store, so screens that
  *  have not moved off the store yet (Supplier Vouchers, Receiving) keep reading live data
  *  the moment Delivery has fetched it, without each of them having to fetch shipments a
@@ -120,110 +107,6 @@ export function saveReceivings(update: Update<Receiving>): void {
 /** Replaces the Receiving slice with the server's authoritative rows. */
 export function hydrateReceivings(receivings: Receiving[]): void {
   set({ receivings });
-}
-
-/** Hands goods to a customer: one movement off the shelf, and the customer's order
- *  follows from it. Nothing else records a delivery, so the two can never disagree. */
-export function deliverToCustomer(movement: StockMovement): void {
-  set({ outgoing: [...state.outgoing, movement] });
-}
-
-/** Corrects a delivery that was written down wrongly. The order it was made against
- *  re-reads itself from the corrected figure, so a fixed delivery is a fixed order. */
-export function saveMovement(
-  movementId: string,
-  patch: Partial<StockMovement>,
-): void {
-  set({
-    outgoing: state.outgoing.map((movement) =>
-      movement.movement_id === movementId
-        ? { ...movement, ...patch }
-        : movement,
-    ),
-  });
-}
-
-/** Takes back a delivery that never happened. What it credited to the order goes with
- *  it. */
-export function removeMovement(movementId: string): void {
-  set({
-    outgoing: state.outgoing.filter(
-      (movement) => movement.movement_id !== movementId,
-    ),
-  });
-}
-
-/** Money taken from a customer, against their order. */
-export function addOrderPayment(orderNo: string, payment: Payment): void {
-  set({
-    orders: state.orders.map((order) =>
-      order.order_no === orderNo
-        ? {
-            ...order,
-            payment: {
-              ...order.payment,
-              payments: [...order.payment.payments, payment],
-            },
-          }
-        : order,
-    ),
-  });
-}
-
-export function removeOrderPayment(orderNo: string, paymentId: string): void {
-  set({
-    orders: state.orders.map((order) =>
-      order.order_no === orderNo
-        ? {
-            ...order,
-            payment: {
-              ...order.payment,
-              payments: order.payment.payments.filter(
-                (payment) => payment.payment_id !== paymentId,
-              ),
-            },
-          }
-        : order,
-    ),
-  });
-}
-
-/** Money paid to a supplier, against their voucher. */
-export function addVoucherPayment(voucherNo: string, payment: Payment): void {
-  set({
-    vouchers: state.vouchers.map((voucher) =>
-      voucher.voucher_no === voucherNo
-        ? {
-            ...voucher,
-            payment: {
-              ...voucher.payment,
-              payments: [...voucher.payment.payments, payment],
-            },
-          }
-        : voucher,
-    ),
-  });
-}
-
-export function removeVoucherPayment(
-  voucherNo: string,
-  paymentId: string,
-): void {
-  set({
-    vouchers: state.vouchers.map((voucher) =>
-      voucher.voucher_no === voucherNo
-        ? {
-            ...voucher,
-            payment: {
-              ...voucher.payment,
-              payments: voucher.payment.payments.filter(
-                (payment) => payment.payment_id !== paymentId,
-              ),
-            },
-          }
-        : voucher,
-    ),
-  });
 }
 
 // ── Settling ─────────────────────────────────────────────────────────────────

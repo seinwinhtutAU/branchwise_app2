@@ -30,6 +30,8 @@ class RevenueDashboard(DashboardWindow):
     trend: list[dict[str, Any]]
     factories: list[dict[str, Any]]
     top_factory_share_pct: float
+    customer_receivables: list[dict[str, Any]] = []
+    top_products: list[dict[str, Any]] = []
 
 
 class CostDashboard(DashboardWindow):

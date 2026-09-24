@@ -302,6 +302,7 @@ export type EvidenceTarget =
   | "revenue"
   | "cost"
   | "inventory"
+  | "agedStock"
   | "customer"
   | "warnings"
   | "checking"
@@ -345,8 +346,6 @@ export interface HealthAlert {
   link: EvidenceTarget;
   /** The `SubMetric.key` this alert is about — see the Overview branch page. */
   measure: string;
-  driver: string | null;
-  interpretation: string | null;
   /** The days behind the alert: "9 Aug – 7 Sep 2026 vs 10 Jul – 8 Aug 2026", or, for the
    * stock rules, the count date and sales window — those deliberately ignore the period
    * control, and this is where the reader can see that. */
@@ -388,6 +387,8 @@ export interface AlertTable {
   columns: { label: string; align: "left" | "right" }[];
   /** Cells in column order, already formatted. */
   rows: string[][];
+  /** Every row, when `rows` is only the top few — what the table's Excel button saves. */
+  export_rows?: string[][];
   /** "78 more on the Inventory tab", when the list was capped. */
   note: string | null;
 }
@@ -411,6 +412,7 @@ export const EVIDENCE_LABEL: Record<EvidenceTarget, string> = {
   revenue: "View Revenue",
   cost: "View Cost",
   inventory: "View Inventory",
+  agedStock: "View Aged Stock",
   customer: "View Customer",
   warnings: "Open Data Quality",
   checking: "Open Checking",

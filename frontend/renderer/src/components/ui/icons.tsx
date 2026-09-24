@@ -4,9 +4,6 @@ const base = {
   "aria-hidden": true,
 } as const;
 
-// Re-exported from Logo.tsx so the one true mark lives in a single file.
-export { LogoMark as LogoIcon } from "@renderer/components/ui/Logo";
-
 export function FilterIcon({
   className = "w-4 h-4",
 }: {
@@ -96,24 +93,6 @@ export function CalendarIcon({
     <svg {...base} className={className}>
       <path
         d="M3 10h18M8 3v4M16 3v4M5 6h14a1 1 0 011 1v12a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-export function CalendarCheckIcon({
-  className = "w-5 h-5",
-}: {
-  className?: string;
-}): React.JSX.Element {
-  return (
-    <svg {...base} className={className}>
-      <path
-        d="M3 10h18M8 3v4M16 3v4M5 6h14a1 1 0 011 1v12a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1zM8.5 15l2 2 4-4"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -307,48 +286,6 @@ export function DownloadIcon({
   );
 }
 
-export function MenuIcon({
-  className = "w-5 h-5",
-}: {
-  className?: string;
-}): React.JSX.Element {
-  return (
-    <svg {...base} className={className}>
-      <path
-        d="M4 6h16M4 12h16M4 18h16"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-export function ConstructionIcon({
-  className = "w-5 h-5",
-}: {
-  className?: string;
-}): React.JSX.Element {
-  return (
-    <svg {...base} className={className}>
-      <path
-        d="M12 2l9 4.5v11L12 22l-9-4.5v-11L12 2z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M12 8v5M12 16h.01"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
 export function ChevronUpIcon({
   className = "w-4 h-4",
 }: {
@@ -495,24 +432,6 @@ export function TrashIcon({
     <svg {...base} className={className}>
       <path
         d="M4 7h16M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3m3 0l-.8 12.1a2 2 0 01-2 1.9H8.8a2 2 0 01-2-1.9L6 7h12zM10 11v6M14 11v6"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-export function BellIcon({
-  className = "w-5 h-5",
-}: {
-  className?: string;
-}): React.JSX.Element {
-  return (
-    <svg {...base} className={className}>
-      <path
-        d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -721,8 +640,6 @@ export function BranchIcon({
   );
 }
 
-export { BranchIcon as LocationPinIcon, BranchIcon as MapPinIcon };
-
 export function FactoryIcon({
   className = "w-5 h-5",
 }: {
@@ -753,31 +670,6 @@ export function FactoryIcon({
       />
       <path
         d="M15 17h3"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-export function HelpIcon({
-  className = "w-5 h-5",
-}: {
-  className?: string;
-}): React.JSX.Element {
-  return (
-    <svg {...base} className={className}>
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
-      <path
-        d="M9.5 9.3a2.5 2.5 0 114.2 1.9c-.6.5-1.7 1-1.7 2.3"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M12 17.5h.01"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -1111,35 +1003,6 @@ export function VoucherIcon({
   );
 }
 
-export function ReportsIcon({
-  className = "w-5 h-5",
-}: {
-  className?: string;
-}): React.JSX.Element {
-  return (
-    <svg {...base} className={className}>
-      <path
-        d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M14 2v6h6"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M8 17v-2M12 17v-5M16 17v-7"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
 export function MasterDataIcon({
   className = "w-5 h-5",
 }: {
@@ -1283,26 +1146,6 @@ export function RefreshIcon({
   );
 }
 
-export function HelpCircleIcon({
-  className = "w-3.5 h-3.5",
-}: {
-  className?: string;
-}): React.JSX.Element {
-  return (
-    <svg {...base} className={className}>
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
-      <path
-        d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="12" cy="17" r="0.8" fill="currentColor" />
-    </svg>
-  );
-}
-
 export function TrendingUpIcon({
   className = "w-4 h-4",
 }: {
@@ -1394,34 +1237,4 @@ export function ShieldCheckIcon({
   );
 }
 
-export function AuditIcon({
-  className = "w-5 h-5",
-}: {
-  className?: string;
-}): React.JSX.Element {
-  return (
-    <svg {...base} className={className}>
-      <path
-        d="M9 12.5l2 2 4-4"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9l-6-6z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M14 3v6h6"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-export { ShieldCheckIcon as DataQualityIcon, AuditIcon as CheckingDetailIcon };
+export { ShieldCheckIcon as DataQualityIcon };

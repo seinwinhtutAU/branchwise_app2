@@ -59,21 +59,25 @@ export function WholesaleCostDashboard({
       <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4 sm:gap-3">
         <StatTile
           label="Goods Purchased"
+          description="Cost paid for products."
           value={formatMmk(data.goods_purchased)}
           sub="cost of products from factories"
         />
         <StatTile
           label="Cost"
+          description="Cost to bring goods in."
           value={formatMmk(data.cost_to_bring_in)}
           sub="cost to bring goods in"
         />
         <StatTile
           label="Total Cost"
+          description="Goods purchased plus other costs."
           value={formatMmk(data.total_cost)}
           sub="goods purchased + cost"
         />
         <StatTile
           label="Supplier Balance Due"
+          description="Amount still owed to suppliers."
           value={formatMmk(data.supplier_balance_due)}
           sub="amount still unpaid"
         />
@@ -93,23 +97,42 @@ export function WholesaleCostDashboard({
           <div className="mb-4 flex h-3.5 overflow-hidden rounded-sm bg-bg-raised">
             <div
               title={`Goods purchased: ${formatShare(data.goods_share_pct)}`}
-              style={{ width: `${data.goods_share_pct}%`, background: SERIES_COLORS.primary }}
+              style={{
+                width: `${data.goods_share_pct}%`,
+                background: SERIES_COLORS.primary,
+              }}
             />
             <div
               title={`Cost to bring goods in: ${formatShare(data.cost_share_pct)}`}
-              style={{ width: `${data.cost_share_pct}%`, background: SERIES_COLORS.amber }}
+              style={{
+                width: `${data.cost_share_pct}%`,
+                background: SERIES_COLORS.amber,
+              }}
             />
           </div>
           {[
-            { label: "Goods purchased", value: data.goods_purchased, share: data.goods_share_pct, color: SERIES_COLORS.primary },
-            { label: "Cost to bring goods in", value: data.cost_to_bring_in, share: data.cost_share_pct, color: SERIES_COLORS.amber },
+            {
+              label: "Goods purchased",
+              value: data.goods_purchased,
+              share: data.goods_share_pct,
+              color: SERIES_COLORS.primary,
+            },
+            {
+              label: "Cost to bring goods in",
+              value: data.cost_to_bring_in,
+              share: data.cost_share_pct,
+              color: SERIES_COLORS.amber,
+            },
           ].map((row) => (
             <div
               key={row.label}
               className="flex items-center justify-between gap-3 border-t border-border py-3 text-sm"
             >
               <span className="flex items-center gap-2 text-text-secondary">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: row.color }} />
+                <span
+                  className="h-2.5 w-2.5 rounded-full"
+                  style={{ background: row.color }}
+                />
                 {row.label}
               </span>
               <span className="tabular-nums text-text-primary">
@@ -141,7 +164,8 @@ export function WholesaleCostDashboard({
           />
           {data.factory_count > data.factories.length && (
             <p className="mt-3 text-xs text-text-muted">
-              Showing the top {data.factories.length} of {formatCount(data.factory_count)} factories.
+              Showing the top {data.factories.length} of{" "}
+              {formatCount(data.factory_count)} factories.
             </p>
           )}
         </DashboardCard>
@@ -164,14 +188,19 @@ export function WholesaleCostDashboard({
           <Tbody>
             {data.payables.length === 0 ? (
               <Tr>
-                <Td colSpan={5} className="py-8 text-center text-sm text-text-muted">
+                <Td
+                  colSpan={5}
+                  className="py-8 text-center text-sm text-text-muted"
+                >
                   Nothing is owed to suppliers.
                 </Td>
               </Tr>
             ) : (
               data.payables.map((payable) => (
                 <Tr key={payable.voucher_id}>
-                  <Td className="font-medium text-text-primary">{payable.supplier_name}</Td>
+                  <Td className="font-medium text-text-primary">
+                    {payable.supplier_name}
+                  </Td>
                   <Td>
                     {onOpenVoucher ? (
                       <button
@@ -186,8 +215,12 @@ export function WholesaleCostDashboard({
                     )}
                   </Td>
                   <Td>{formatDate(payable.voucher_date)}</Td>
-                  <Td className="text-right tabular-nums">{formatMmk(payable.balance_due)}</Td>
-                  <Td className="text-right tabular-nums">{formatCount(payable.days_open)}</Td>
+                  <Td className="text-right tabular-nums">
+                    {formatMmk(payable.balance_due)}
+                  </Td>
+                  <Td className="text-right tabular-nums">
+                    {formatCount(payable.days_open)}
+                  </Td>
                 </Tr>
               ))
             )}
@@ -195,7 +228,8 @@ export function WholesaleCostDashboard({
         </TableContainer>
         {data.payable_count > data.payables.length && (
           <p className="mt-3 text-xs text-text-muted">
-            Showing the newest {data.payables.length} of {formatCount(data.payable_count)} unpaid vouchers.
+            Showing the newest {data.payables.length} of{" "}
+            {formatCount(data.payable_count)} unpaid vouchers.
           </p>
         )}
       </DashboardCard>

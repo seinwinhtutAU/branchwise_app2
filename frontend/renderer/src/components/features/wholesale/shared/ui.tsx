@@ -11,6 +11,7 @@ import {
 } from "@floating-ui/react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@renderer/lib/utils";
+import { InfoLabel } from "@renderer/components/ui/InfoTooltip";
 import { CheckIcon, CopyIcon } from "@renderer/components/ui/icons";
 import {
   GROUP_LABELS,
@@ -245,6 +246,7 @@ function toneBorder(tone: Tone): string {
  *  suggests an action it does not have. */
 export function FigureCard({
   label,
+  description,
   value,
   sub,
   tone = "brand",
@@ -252,6 +254,7 @@ export function FigureCard({
   className,
 }: {
   label: React.ReactNode;
+  description?: string;
   value: string;
   sub?: string;
   tone?: Tone;
@@ -273,7 +276,11 @@ export function FigureCard({
           compact ? "mb-0.5" : "mb-0.5",
         )}
       >
-        {label}
+        {description ? (
+          <InfoLabel description={description}>{label}</InfoLabel>
+        ) : (
+          label
+        )}
       </span>
       <span
         className={cn(

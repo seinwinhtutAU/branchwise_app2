@@ -253,7 +253,7 @@ function ImportHistoryDetailPage({
         </div>
 
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
-          {detail && !isGeneralFile && (
+          {detail && (
             <Button
               variant="secondary"
               size="sm"
@@ -387,22 +387,15 @@ function ImportHistoryDetailPage({
                 </div>
               )}
 
-          {isGeneralFile ? (
-            <div className="rounded-lg border border-border bg-bg-subtle px-4 py-3 text-sm text-text-secondary">
-              This general file is stored exactly as uploaded.
-              Download it to view or use it; no retail records were created.
-            </div>
-          ) : (
-            <ImportDataView
-              clean={detail.clean}
-              origin={detail.origin}
-              isServerPaginated={true}
-              onPageChange={handlePageChange}
-              loadingPage={loadingPage}
-              warningIndices={warningIndices}
-              onWarningIndicesNeeded={loadWarningIndices}
-            />
-          )}
+          <ImportDataView
+            clean={detail.clean}
+            origin={detail.origin}
+            isServerPaginated={true}
+            onPageChange={handlePageChange}
+            loadingPage={loadingPage}
+            warningIndices={warningIndices}
+            onWarningIndicesNeeded={loadWarningIndices}
+          />
         </>
       )}
     </div>

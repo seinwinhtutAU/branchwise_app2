@@ -32,7 +32,10 @@ import {
   type DashboardWindow,
 } from "./dashboardApi";
 
-const STATUS_LABEL: Record<AwaitingOrderStatus, { label: string; variant: BadgeVariant }> = {
+const STATUS_LABEL: Record<
+  AwaitingOrderStatus,
+  { label: string; variant: BadgeVariant }
+> = {
   partly_delivered: { label: "Partly delivered", variant: "warning" },
   ready_to_deliver: { label: "Ready to deliver", variant: "success" },
   waiting_for_stock: { label: "Waiting for stock", variant: "info" },
@@ -53,11 +56,12 @@ export function WholesaleCustomerDashboard({
   window: DashboardWindow;
   onOpenOrder?: (orderId: string) => void;
 }): React.JSX.Element {
-  const { data, isRefreshing, failed, reload } = useUrlQuery<CustomerDashboardData>(
-    dashboardTabUrl("customer", window),
-    session,
-    "Customer dashboard",
-  );
+  const { data, isRefreshing, failed, reload } =
+    useUrlQuery<CustomerDashboardData>(
+      dashboardTabUrl("customer", window),
+      session,
+      "Customer dashboard",
+    );
 
   if (data === undefined) {
     return failed ? (
@@ -68,7 +72,10 @@ export function WholesaleCustomerDashboard({
   }
 
   const active = data.active_customers;
-  const change = active.previous_value === null ? null : active.value - active.previous_value;
+  const change =
+    active.previous_value === null
+      ? null
+      : active.value - active.previous_value;
   const status = data.delivery_status;
 
   return (
@@ -77,21 +84,29 @@ export function WholesaleCustomerDashboard({
       <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4 sm:gap-3">
         <StatTile
           label="Active Customers"
+          description="Customers with an order this period."
           value={formatCount(active.value)}
-          sub={change === null ? "no earlier period to compare" : `${signed(change)} vs previous period`}
+          sub={
+            change === null
+              ? "no earlier period to compare"
+              : `${signed(change)} vs previous period`
+          }
         />
         <StatTile
           label="New Customers"
+          description="Customers with their first order."
           value={formatCount(data.new_customers.value)}
           sub="first recorded order"
         />
         <StatTile
           label="Repeat Customers"
+          description="Customers who ordered before."
           value={formatCount(data.repeat_customers.value)}
           sub={`${formatShare(data.repeat_customers.share_of_active_pct)} of active customers`}
         />
         <StatTile
           label="Open Orders"
+          description="Orders not fully delivered."
           value={formatCount(data.open_orders)}
           sub="awaiting full delivery"
         />
@@ -129,19 +144,46 @@ export function WholesaleCustomerDashboard({
               centerValue={formatCount(data.order_count)}
               centerLabel="orders"
               slices={[
-                { label: "Fulfilled", value: status.fulfilled, color: SERIES_COLORS.green },
-                { label: "Partly delivered", value: status.partly_delivered, color: SERIES_COLORS.purple },
-                { label: "Awaiting delivery", value: status.awaiting_delivery, color: SERIES_COLORS.amber },
+                {
+                  label: "Fulfilled",
+                  value: status.fulfilled,
+                  color: SERIES_COLORS.green,
+                },
+                {
+                  label: "Partly delivered",
+                  value: status.partly_delivered,
+                  color: SERIES_COLORS.purple,
+                },
+                {
+                  label: "Awaiting delivery",
+                  value: status.awaiting_delivery,
+                  color: SERIES_COLORS.amber,
+                },
               ]}
             />
             <ul className="flex flex-col gap-2.5 text-sm">
               {[
-                { label: "Fulfilled", value: status.fulfilled, color: SERIES_COLORS.green },
-                { label: "Partly delivered", value: status.partly_delivered, color: SERIES_COLORS.purple },
-                { label: "Awaiting delivery", value: status.awaiting_delivery, color: SERIES_COLORS.amber },
+                {
+                  label: "Fulfilled",
+                  value: status.fulfilled,
+                  color: SERIES_COLORS.green,
+                },
+                {
+                  label: "Partly delivered",
+                  value: status.partly_delivered,
+                  color: SERIES_COLORS.purple,
+                },
+                {
+                  label: "Awaiting delivery",
+                  value: status.awaiting_delivery,
+                  color: SERIES_COLORS.amber,
+                },
               ].map((item) => (
                 <li key={item.label} className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.color }} />
+                  <span
+                    className="h-2.5 w-2.5 rounded-full"
+                    style={{ background: item.color }}
+                  />
                   <span className="w-36 text-text-secondary">{item.label}</span>
                   <span className="font-semibold tabular-nums text-text-primary">
                     {formatCount(item.value)}
@@ -170,7 +212,10 @@ export function WholesaleCustomerDashboard({
           <Tbody>
             {data.awaiting_orders.length === 0 ? (
               <Tr>
-                <Td colSpan={5} className="py-8 text-center text-sm text-text-muted">
+                <Td
+                  colSpan={5}
+                  className="py-8 text-center text-sm text-text-muted"
+                >
                   Every order has been delivered.
                 </Td>
               </Tr>
@@ -179,7 +224,9 @@ export function WholesaleCustomerDashboard({
                 const meta = STATUS_LABEL[order.status];
                 return (
                   <Tr key={order.order_id}>
-                    <Td className="font-medium text-text-primary">{order.customer_name}</Td>
+                    <Td className="font-medium text-text-primary">
+                      {order.customer_name}
+                    </Td>
                     <Td>
                       {onOpenOrder ? (
                         <button
@@ -194,7 +241,9 @@ export function WholesaleCustomerDashboard({
                       )}
                     </Td>
                     <Td>{formatDate(order.order_date)}</Td>
-                    <Td className="text-right tabular-nums">{formatSets(order.remaining_pairs)}</Td>
+                    <Td className="text-right tabular-nums">
+                      {formatSets(order.remaining_pairs)}
+                    </Td>
                     <Td>
                       <Badge variant={meta.variant}>{meta.label}</Badge>
                     </Td>
@@ -206,7 +255,8 @@ export function WholesaleCustomerDashboard({
         </TableContainer>
         {data.open_orders > data.awaiting_orders.length && (
           <p className="mt-3 text-xs text-text-muted">
-            Showing the newest {data.awaiting_orders.length} of {formatCount(data.open_orders)} open orders.
+            Showing the newest {data.awaiting_orders.length} of{" "}
+            {formatCount(data.open_orders)} open orders.
           </p>
         )}
       </DashboardCard>

@@ -1,9 +1,6 @@
 import type { Session } from "@renderer/lib/auth";
 import { useUrlQuery } from "@renderer/lib/queryClient";
-import {
-  RefreshingHint,
-  StatTile,
-} from "@renderer/components/features/dashboard/shared";
+import { RefreshingHint } from "@renderer/components/features/dashboard/shared";
 import { formatCount } from "@renderer/components/features/dashboard/helpers";
 import { formatSets } from "@renderer/components/features/wholesale/shared/units";
 import {
@@ -67,61 +64,36 @@ export function WholesaleInventoryDashboard({
 }: {
   session: Session;
 }): React.JSX.Element {
-  const { data, isRefreshing, failed, reload } = useUrlQuery<InventoryDashboardData>(
-    dashboardTabUrl("inventory"),
-    session,
-    "Inventory dashboard",
-  );
+  const { data, isRefreshing, failed, reload } =
+    useUrlQuery<InventoryDashboardData>(
+      dashboardTabUrl("inventory"),
+      session,
+      "Inventory dashboard",
+    );
 
   if (data === undefined) {
     return failed ? (
       <DashboardError title="Inventory" reload={reload} />
     ) : (
-      <DashboardLoading tiles={6} />
+      <DashboardLoading tiles={0} />
     );
   }
 
   const groupTotals = data.groups.map(
-    (group) => group.available_pairs + group.committed_pairs + group.incoming_pairs,
+    (group) =>
+      group.available_pairs + group.committed_pairs + group.incoming_pairs,
   );
   const widest = Math.max(...groupTotals, 1);
-  const locationColors = [SERIES_COLORS.primary, SERIES_COLORS.green, SERIES_COLORS.amber, SERIES_COLORS.purple];
+  const locationColors = [
+    SERIES_COLORS.primary,
+    SERIES_COLORS.green,
+    SERIES_COLORS.amber,
+    SERIES_COLORS.purple,
+  ];
 
   return (
     <div className="flex flex-col gap-3">
       <RefreshingHint show={isRefreshing} />
-      <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6 sm:gap-3">
-        <StatTile
-          label="Total Inventory Items"
-          value={formatCount(data.total_products)}
-          sub="products being managed"
-        />
-        <StatTile
-          label="Physical Stock"
-          value={formatSets(data.on_hand_pairs)}
-          sub="received and on hand"
-        />
-        <StatTile
-          label="Available to Sell"
-          value={formatSets(data.available_pairs)}
-          sub="not committed"
-        />
-        <StatTile
-          label="Customer Committed"
-          value={formatSets(data.committed_pairs)}
-          sub="reserved for orders"
-        />
-        <StatTile
-          label="Incoming Stock"
-          value={formatSets(data.incoming_pairs)}
-          sub={`${formatCount(sets(data.at_supplier_pairs))} supplier · ${formatCount(sets(data.in_transit_pairs))} transit`}
-        />
-        <StatTile
-          label="Customer Backlog"
-          value={formatSets(data.backlog_pairs)}
-          sub="still owed to customers"
-        />
-      </div>
 
       <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-3">
         <DashboardCard
@@ -130,24 +102,46 @@ export function WholesaleInventoryDashboard({
           description="Current position across the wholesale pipeline (sets)"
         >
           <div className="flex items-stretch gap-1.5 sm:gap-2">
-            <FlowStep value={data.at_supplier_pairs} label="At supplier" tone="plain" />
+            <FlowStep
+              value={data.at_supplier_pairs}
+              label="At supplier"
+              tone="plain"
+            />
             <Arrow />
-            <FlowStep value={data.in_transit_pairs} label="In transit" tone="plain" />
+            <FlowStep
+              value={data.in_transit_pairs}
+              label="In transit"
+              tone="plain"
+            />
             <Arrow />
             <FlowStep value={data.on_hand_pairs} label="On hand" tone="brand" />
             <Arrow />
-            <FlowStep value={data.committed_pairs} label="Committed" tone="purple" />
+            <FlowStep
+              value={data.committed_pairs}
+              label="Committed"
+              tone="purple"
+            />
             <Arrow />
-            <FlowStep value={data.available_pairs} label="Available" tone="green" />
+            <FlowStep
+              value={data.available_pairs}
+              label="Available"
+              tone="green"
+            />
           </div>
           <div className="mt-3 flex flex-wrap justify-between gap-2 text-xs text-text-muted">
             <span>Incoming: {formatSets(data.incoming_pairs)}</span>
             <span>Physical: {formatSets(data.on_hand_pairs)}</span>
             <span>Sellable: {formatSets(data.available_pairs)}</span>
+            {data.backlog_pairs > 0 && (
+              <span>Customer backlog: {formatSets(data.backlog_pairs)}</span>
+            )}
           </div>
         </DashboardCard>
 
-        <DashboardCard title="Stock by Location" description="Physical stock distribution">
+        <DashboardCard
+          title="Stock by Location"
+          description="Physical stock distribution"
+        >
           {data.locations.length > 0 && (
             <div className="mb-4 flex items-baseline justify-between border-b border-border pb-3 text-sm">
               <span className="text-text-secondary">Total physical stock</span>
@@ -161,7 +155,9 @@ export function WholesaleInventoryDashboard({
               label: location.location,
               value: sets(location.on_hand_pairs),
             }))}
-            colors={data.locations.map((_, index) => locationColors[index % locationColors.length])}
+            colors={data.locations.map(
+              (_, index) => locationColors[index % locationColors.length],
+            )}
             formatValue={(value) => formatCount(value)}
             empty="No stock is on hand."
           />
@@ -170,20 +166,39 @@ export function WholesaleInventoryDashboard({
 
       <DashboardCard
         title="Stock Composition by Product Group"
-        description="Available, customer-committed, and incoming stock by product group (sets)"
+        description={`${data.total_products > 0 ? `${formatCount(data.total_products)} products managed · ` : ""}Available, customer-committed, and incoming stock by product group (sets)`}
       >
         {data.groups.length === 0 ? (
-          <p className="py-6 text-center text-sm text-text-muted">No products are being managed yet.</p>
+          <p className="py-6 text-center text-sm text-text-muted">
+            No products are being managed yet.
+          </p>
         ) : (
           <div className="flex flex-col gap-4">
             {data.groups.map((group, index) => (
-              <div key={group.product_group} className="flex items-center gap-3 text-sm">
-                <span className="w-16 shrink-0 text-text-secondary">{groupLabel(group.product_group)}</span>
+              <div
+                key={group.product_group}
+                className="flex items-center gap-3 text-sm"
+              >
+                <span className="w-16 shrink-0 text-text-secondary">
+                  {groupLabel(group.product_group)}
+                </span>
                 <div className="flex h-7 flex-1 overflow-hidden rounded-sm bg-bg-raised">
                   {[
-                    { pairs: group.available_pairs, color: SERIES_COLORS.primary, label: "Available" },
-                    { pairs: group.committed_pairs, color: SERIES_COLORS.purple, label: "Customer committed" },
-                    { pairs: group.incoming_pairs, color: SERIES_COLORS.amber, label: "Incoming" },
+                    {
+                      pairs: group.available_pairs,
+                      color: SERIES_COLORS.primary,
+                      label: "Available",
+                    },
+                    {
+                      pairs: group.committed_pairs,
+                      color: SERIES_COLORS.purple,
+                      label: "Customer committed",
+                    },
+                    {
+                      pairs: group.incoming_pairs,
+                      color: SERIES_COLORS.amber,
+                      label: "Incoming",
+                    },
                   ].map((segment) => (
                     <div
                       key={segment.label}
@@ -207,7 +222,10 @@ export function WholesaleInventoryDashboard({
                 { label: "Incoming", color: SERIES_COLORS.amber },
               ].map((item) => (
                 <span key={item.label} className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full" style={{ background: item.color }} />
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ background: item.color }}
+                  />
                   {item.label}
                 </span>
               ))}

@@ -22,7 +22,7 @@ from app.wholesale.models.entities import (
 from app.wholesale.models.master_data import WholesaleProduct
 
 
-def test_monitoring_surfaces_only_needs_attention_rows_and_admin_sees_all_branches(
+def test_wholesale_summary_reads_across_branches_for_admin(
     authed_client: TestClient, db_session: Session
 ) -> None:
     branch_one = Branch(name="Wholesale one", phone_number="0", address="Here")
@@ -123,25 +123,6 @@ def test_monitoring_surfaces_only_needs_attention_rows_and_admin_sees_all_branch
         WholesaleProduct(stock_code="DEPLETED", description="Depleted shoe", product_group=ProductGroup.MAN, active=True),
     ])
     db_session.commit()
-
-    response = authed_client.get("/api/wholesale/monitoring")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["shipments_in_transit"]["count"] == 2
-    assert {row["shipment_no"] for row in body["shipments_in_transit"]["rows"]} == {"SHP-IN", "SHP-OTHER"}
-    assert body["orders_pending"]["count"] == 1
-    assert body["orders_pending"]["rows"][0]["order_no"] == "ORD-PENDING"
-    assert body["unpaid_vouchers"]["count"] == 1
-    assert body["unpaid_vouchers"]["rows"][0]["voucher_no"] == "VCH-UNPAID"
-    assert body["unpaid_orders"]["count"] == 2
-    assert {row["order_no"] for row in body["unpaid_orders"]["rows"]} == {"ORD-PENDING", "ORD-DONE"}
-    assert body["zero_stock_products"]["count"] == 2
-    zero_stock_rows = {
-        row["stock_code"]: row["stock_status"]
-        for row in body["zero_stock_products"]["rows"]
-    }
-    assert zero_stock_rows == {"ZERO": "not_arrived", "DEPLETED": "out_of_stock"}
-    assert {row["type"] for row in body["recent_activity"]} >= {"receiving", "delivery", "payment"}
 
     summary_resp = authed_client.get("/api/wholesale/monitoring/summary")
     assert summary_resp.status_code == 200

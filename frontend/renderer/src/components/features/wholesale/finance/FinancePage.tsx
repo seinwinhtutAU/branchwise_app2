@@ -82,17 +82,20 @@ const FINANCE_TABS: FinanceTabItem[] = [
   {
     id: "customers",
     label: "Customer Receivables",
-    description: "Track customer orders, payments received, and outstanding balances",
+    description:
+      "Track customer orders, payments received, and outstanding balances",
   },
   {
     id: "suppliers",
     label: "Supplier Payables",
-    description: "Track supplier vouchers, settlement payments, and unpaid balances",
+    description:
+      "Track supplier vouchers, settlement payments, and unpaid balances",
   },
   {
     id: "shipment-costs",
     label: "Shipment Costs",
-    description: "Overview of freight, customs, gate, and transportation costs across shipments",
+    description:
+      "Overview of freight, customs, gate, and transportation costs across shipments",
   },
 ];
 
@@ -160,7 +163,9 @@ export default function FinancePage({
   const [page, setPage] = useState(1);
   const searchInputRef = useSearchShortcut();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [paymentTarget, setPaymentTarget] = useState<PaymentTarget | null>(null);
+  const [paymentTarget, setPaymentTarget] = useState<PaymentTarget | null>(
+    null,
+  );
 
   const customerQuery = useQuery({
     queryKey: ["wholesale", "finance", "customers"],
@@ -249,13 +254,17 @@ export default function FinancePage({
     (sum, row) => sum + row.balance,
     0,
   );
-  const unpaidCustomersCount = customers.filter((row) => row.balance > 0).length;
+  const unpaidCustomersCount = customers.filter(
+    (row) => row.balance > 0,
+  ).length;
 
   const totalSupplierPayable = suppliers.reduce(
     (sum, row) => sum + row.balance,
     0,
   );
-  const unpaidSuppliersCount = suppliers.filter((row) => row.balance > 0).length;
+  const unpaidSuppliersCount = suppliers.filter(
+    (row) => row.balance > 0,
+  ).length;
 
   const totalShipmentCost = shipmentCosts.reduce(
     (sum, row) => sum + row.amount,
@@ -310,7 +319,9 @@ export default function FinancePage({
     [queryText, shipmentCosts],
   );
 
-  const isFiltered = search.trim() !== "" || (tab !== "shipment-costs" && statusFilter !== "all");
+  const isFiltered =
+    search.trim() !== "" ||
+    (tab !== "shipment-costs" && statusFilter !== "all");
 
   function resetFilters(): void {
     setSearch("");
@@ -323,7 +334,8 @@ export default function FinancePage({
     setPage(1);
   }
 
-  const activeTab = FINANCE_TABS.find((item) => item.id === tab) ?? FINANCE_TABS[0];
+  const activeTab =
+    FINANCE_TABS.find((item) => item.id === tab) ?? FINANCE_TABS[0];
 
   const tabCounts: Record<Tab, number> = {
     customers: customers.length,
@@ -333,22 +345,28 @@ export default function FinancePage({
 
   return (
     <div className="flex flex-col gap-4">
-      <CollapsibleKpiSummary storageKey="wholesale_finance" title="Finance Summary">
+      <CollapsibleKpiSummary
+        storageKey="wholesale_finance"
+        title="Finance Summary"
+      >
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <FigureCard
             label="Customer Receivables"
+            description="Money customers still owe."
             value={formatKyat(totalCustomerReceivable)}
             sub={`${formatQty(unpaidCustomersCount)} order${unpaidCustomersCount === 1 ? "" : "s"} with balance`}
             tone={totalCustomerReceivable > 0 ? "error" : "success"}
           />
           <FigureCard
             label="Supplier Payables"
+            description="Money still owed to suppliers."
             value={formatKyat(totalSupplierPayable)}
             sub={`${formatQty(unpaidSuppliersCount)} voucher${unpaidSuppliersCount === 1 ? "" : "s"} with balance`}
             tone={totalSupplierPayable > 0 ? "error" : "success"}
           />
           <FigureCard
             label="Shipment Costs"
+            description="Costs recorded for shipments."
             value={formatKyat(totalShipmentCost)}
             sub={`${formatQty(shipmentCosts.length)} recorded entry${shipmentCosts.length === 1 ? "" : "ies"}`}
           />
@@ -403,17 +421,18 @@ export default function FinancePage({
                 className="h-8 text-xs"
               />
             </div>
-            <RefreshButton
-              onClick={refreshFinance}
-              refreshing={isRefreshing}
-            />
+            <RefreshButton onClick={refreshFinance} refreshing={isRefreshing} />
           </div>
         </div>
 
         {tab === "customers" ? (
           <FinanceTable
             loading={customerQuery.isLoading}
-            emptyTitle={isFiltered ? "No customer receivables match" : "No customer receivables yet"}
+            emptyTitle={
+              isFiltered
+                ? "No customer receivables match"
+                : "No customer receivables yet"
+            }
             emptyDescription={
               isFiltered
                 ? "Nothing here matches what you searched for. Try adjusting your search or status filter."
@@ -442,7 +461,11 @@ export default function FinancePage({
         ) : tab === "suppliers" ? (
           <SupplierTable
             loading={supplierQuery.isLoading}
-            emptyTitle={isFiltered ? "No supplier payables match" : "No supplier payables yet"}
+            emptyTitle={
+              isFiltered
+                ? "No supplier payables match"
+                : "No supplier payables yet"
+            }
             emptyDescription={
               isFiltered
                 ? "Nothing here matches what you searched for. Try adjusting your search or status filter."
@@ -471,7 +494,9 @@ export default function FinancePage({
         ) : (
           <ShipmentCostTable
             loading={receivingQuery.isLoading}
-            emptyTitle={isFiltered ? "No shipment costs match" : "No shipment costs yet"}
+            emptyTitle={
+              isFiltered ? "No shipment costs match" : "No shipment costs yet"
+            }
             emptyDescription={
               isFiltered
                 ? "Nothing here matches what you searched for."
@@ -559,10 +584,7 @@ function FinanceTable({
 
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
-  const visible = rows.slice(
-    (safePage - 1) * PAGE_SIZE,
-    safePage * PAGE_SIZE,
-  );
+  const visible = rows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   if (loading) {
     return <Loading />;
@@ -590,7 +612,9 @@ function FinanceTable({
       <TableContainer className="rounded-none border-0">
         <Thead>
           <Tr>
-            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
+              #
+            </Th>
             <Th className="whitespace-nowrap">Customer</Th>
             <Th className="whitespace-nowrap">Order no.</Th>
             <Th className="text-right whitespace-nowrap">Total Amount</Th>
@@ -625,27 +649,29 @@ function FinanceTable({
                           <CheckIcon className="w-3.5 h-3.5" />
                         )}
                       </button>
-                      {(["unpaid", "partial", "paid"] as const).map((option) => (
-                        <button
-                          key={option}
-                          type="button"
-                          onClick={() => {
-                            onStatusFilterChange(option);
-                            close();
-                          }}
-                          className={cn(
-                            "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
-                            statusFilter === option
-                              ? "bg-brand/10 font-bold text-brand"
-                              : "hover:bg-bg-subtle text-text-secondary",
-                          )}
-                        >
-                          <span>{STATUS_LABELS[option]}</span>
-                          {statusFilter === option && (
-                            <CheckIcon className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-                      ))}
+                      {(["unpaid", "partial", "paid"] as const).map(
+                        (option) => (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() => {
+                              onStatusFilterChange(option);
+                              close();
+                            }}
+                            className={cn(
+                              "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                              statusFilter === option
+                                ? "bg-brand/10 font-bold text-brand"
+                                : "hover:bg-bg-subtle text-text-secondary",
+                            )}
+                          >
+                            <span>{STATUS_LABELS[option]}</span>
+                            {statusFilter === option && (
+                              <CheckIcon className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        ),
+                      )}
                     </div>
                   </div>
                 )}
@@ -662,7 +688,9 @@ function FinanceTable({
                 <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
                   {rowNum}
                 </Td>
-                <Td className="font-medium whitespace-nowrap">{row.customer_name}</Td>
+                <Td className="font-medium whitespace-nowrap">
+                  {row.customer_name}
+                </Td>
                 <Td className="whitespace-nowrap">
                   <Reference
                     value={row.order_no}
@@ -776,10 +804,7 @@ function SupplierTable({
 
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
-  const visible = rows.slice(
-    (safePage - 1) * PAGE_SIZE,
-    safePage * PAGE_SIZE,
-  );
+  const visible = rows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   if (loading) {
     return <Loading />;
@@ -807,7 +832,9 @@ function SupplierTable({
       <TableContainer className="rounded-none border-0">
         <Thead>
           <Tr>
-            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
+              #
+            </Th>
             <Th className="whitespace-nowrap">Supplier</Th>
             <Th className="whitespace-nowrap">Voucher no.</Th>
             <Th className="text-right whitespace-nowrap">Total Amount</Th>
@@ -842,27 +869,29 @@ function SupplierTable({
                           <CheckIcon className="w-3.5 h-3.5" />
                         )}
                       </button>
-                      {(["unpaid", "partial", "paid"] as const).map((option) => (
-                        <button
-                          key={option}
-                          type="button"
-                          onClick={() => {
-                            onStatusFilterChange(option);
-                            close();
-                          }}
-                          className={cn(
-                            "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
-                            statusFilter === option
-                              ? "bg-brand/10 font-bold text-brand"
-                              : "hover:bg-bg-subtle text-text-secondary",
-                          )}
-                        >
-                          <span>{STATUS_LABELS[option]}</span>
-                          {statusFilter === option && (
-                            <CheckIcon className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-                      ))}
+                      {(["unpaid", "partial", "paid"] as const).map(
+                        (option) => (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() => {
+                              onStatusFilterChange(option);
+                              close();
+                            }}
+                            className={cn(
+                              "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                              statusFilter === option
+                                ? "bg-brand/10 font-bold text-brand"
+                                : "hover:bg-bg-subtle text-text-secondary",
+                            )}
+                          >
+                            <span>{STATUS_LABELS[option]}</span>
+                            {statusFilter === option && (
+                              <CheckIcon className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        ),
+                      )}
                     </div>
                   </div>
                 )}
@@ -879,7 +908,9 @@ function SupplierTable({
                 <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
                   {rowNum}
                 </Td>
-                <Td className="font-medium whitespace-nowrap">{row.voucher.supplier_name}</Td>
+                <Td className="font-medium whitespace-nowrap">
+                  {row.voucher.supplier_name}
+                </Td>
                 <Td className="whitespace-nowrap">
                   <Reference
                     value={row.voucher.voucher_no}
@@ -977,10 +1008,7 @@ function ShipmentCostTable({
 
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
-  const visible = rows.slice(
-    (safePage - 1) * PAGE_SIZE,
-    safePage * PAGE_SIZE,
-  );
+  const visible = rows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   if (loading) {
     return <Loading />;
@@ -1008,7 +1036,9 @@ function ShipmentCostTable({
       <TableContainer className="rounded-none border-0">
         <Thead>
           <Tr>
-            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
+              #
+            </Th>
             <Th className="whitespace-nowrap">Receiving</Th>
             <Th className="whitespace-nowrap">Date</Th>
             <Th className="whitespace-nowrap">Shipment</Th>
@@ -1029,26 +1059,38 @@ function ShipmentCostTable({
                   {rowNum}
                 </Td>
                 <Td className="whitespace-nowrap">
-                  <Reference value={row.receivingNo} what="receiving no." singleLine />
+                  <Reference
+                    value={row.receivingNo}
+                    what="receiving no."
+                    singleLine
+                  />
                 </Td>
                 <Td className="whitespace-nowrap text-text-muted">
                   {row.costDate ? formatDate(row.costDate) : "—"}
                 </Td>
                 <Td className="whitespace-nowrap">
                   {row.shipmentNo ? (
-                    <Reference value={row.shipmentNo} what="shipment no." singleLine />
+                    <Reference
+                      value={row.shipmentNo}
+                      what="shipment no."
+                      singleLine
+                    />
                   ) : (
                     "—"
                   )}
                 </Td>
-                <Td className="font-medium whitespace-nowrap">{row.supplierName}</Td>
+                <Td className="font-medium whitespace-nowrap">
+                  {row.supplierName}
+                </Td>
                 <Td className="whitespace-nowrap">{row.stage}</Td>
                 <Td className="whitespace-nowrap">{row.carrier}</Td>
                 <Td className="whitespace-nowrap">{row.kind}</Td>
                 <Td className="text-right font-semibold tabular-nums whitespace-nowrap text-text-primary">
                   {formatKyat(row.amount)}
                 </Td>
-                <Td className="max-w-xs truncate text-text-secondary">{row.note || "—"}</Td>
+                <Td className="max-w-xs truncate text-text-secondary">
+                  {row.note || "—"}
+                </Td>
               </Tr>
             );
           })}
@@ -1147,7 +1189,10 @@ function RecordPaymentModal({
       >
         <div className="flex items-start justify-between">
           <div>
-            <h3 id="record-payment-title" className="text-lg font-semibold text-text-primary">
+            <h3
+              id="record-payment-title"
+              className="text-lg font-semibold text-text-primary"
+            >
               Record Payment
             </h3>
             <p className="mt-1 text-sm text-text-muted">
@@ -1199,4 +1244,3 @@ function RecordPaymentModal({
     </div>
   );
 }
-

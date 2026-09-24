@@ -377,26 +377,3 @@ def received_pairs_by_voucher_stock(
         for voucher_no, stock_code, pairs in rows
     }
 
-
-def stock_codes_with_open_vouchers(
-    db: Session,
-    branch_id: str | None,
-    stock_codes: set[str],
-) -> set[str]:
-    """Which of these stock codes already have a supplier voucher naming them —
-    existence only, regardless of whether the goods it describes have arrived yet.
-    A customer order reads this as "we have started buying it," the same way its own
-    received_quantity_pairs says "we have started delivering it": the order itself never records
-    which voucher it came from, so this is worked out by stock code, not a stored link.
-    """
-    if not stock_codes:
-        return set()
-    query = (
-        db.query(SupplierVoucherLine.stock_code)
-        .join(SupplierVoucher, SupplierVoucherLine.voucher_id == SupplierVoucher.id)
-        .filter(SupplierVoucherLine.stock_code.in_(stock_codes))
-        .distinct()
-    )
-    if branch_id is not None:
-        query = query.filter(SupplierVoucher.branch_id == branch_id)
-    return {row[0] for row in query.all()}

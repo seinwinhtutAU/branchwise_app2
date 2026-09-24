@@ -42,10 +42,7 @@ import type {
 } from "@renderer/components/features/types";
 import type { InventorySubTab } from "@renderer/components/features/retail/InventoryPage";
 import type { DataOverviewSubTab } from "@renderer/components/features/retail/DataOverviewTable";
-import {
-  useBranches,
-  useRetailBranchOptions,
-} from "@renderer/lib/useBranches";
+import { useBranches, useRetailBranchOptions } from "@renderer/lib/useBranches";
 import { formatBuyingPriceSource } from "@renderer/lib/buyingPriceSource";
 import { useAppSettings } from "@renderer/lib/appSettings";
 import {
@@ -112,7 +109,8 @@ const FinancePage = lazy(
   () => import("@renderer/components/features/wholesale/finance/FinancePage"),
 );
 const WholesaleMasterDataPage = lazy(
-  () => import("@renderer/components/features/wholesale/masterData/MasterDataPage"),
+  () =>
+    import("@renderer/components/features/wholesale/masterData/MasterDataPage"),
 );
 const WarningsPage = lazy(
   () => import("@renderer/components/features/retail/WarningsPage"),
@@ -125,9 +123,6 @@ const BusinessAlertsPage = lazy(
 );
 const PurchasingPage = lazy(
   () => import("@renderer/components/features/retail/PurchasingPage"),
-);
-const CheckingPage = lazy(
-  () => import("@renderer/components/features/retail/CheckingPage"),
 );
 const SettingsPage = lazy(
   () => import("@renderer/components/features/settings/SettingsPage"),
@@ -475,6 +470,9 @@ function App(): React.JSX.Element {
   // page's own setting, so its "see the records" link opens the Warning page on the
   // alert's days instead — otherwise the alert says there is a problem the page can't
   // show. Cleared again whenever the section changes.
+  // "Open Checking" (Business Alerts, Dashboard) lands on the Data Quality page's Checking
+  // tab. Read once on mount by WarningsPage, so it is cleared on every section change.
+  const [warningsTab, setWarningsTab] = useState<"Checking" | null>(null);
   const [warningWindowOverride, setWarningWindowOverride] = useState<
     number | null
   >(null);
@@ -595,13 +593,14 @@ function App(): React.JSX.Element {
           ? rawSection
           : (WORKSPACE_NAV_ITEMS[effectiveWorkspace][0].id as Section);
   const branchOptions = useBranches(canManageRetail ? session : null);
-  const retailBranchOptions = useRetailBranchOptions(canManageRetail ? session : null);
+  const retailBranchOptions = useRetailBranchOptions(
+    canManageRetail ? session : null,
+  );
   // Warnings filters by branch name, not id (see WarningsPage) — resolved once here
   // rather than in that page so it stays a plain prop.
   const selectedBranchName =
     retailBranchOptions.find((branch) => branch.id === selectedBranchId)
       ?.name ?? "";
-
 
   // The Business Alerts badge, counted from the same per-branch overview payloads the
   // Dashboard and the Business Alerts page read — so this costs one set of requests that
@@ -618,7 +617,13 @@ function App(): React.JSX.Element {
     return branchIds.map((id) =>
       dashboardUrl("overview", id, { period: "30d", dateFrom: "", dateTo: "" }),
     );
-  }, [canManageRetail, isWholesale, isRetailUser, profile?.branch_id, retailBranchOptions]);
+  }, [
+    canManageRetail,
+    isWholesale,
+    isRetailUser,
+    profile?.branch_id,
+    retailBranchOptions,
+  ]);
 
   // Alerts depend on the clock as well as on imports (a missing-file alert only appears
   // after the daily cutoff), and the long default cache never notices the clock — so the
@@ -637,37 +642,39 @@ function App(): React.JSX.Element {
     () =>
       Object.values(branchHealth)
         .filter(
-          (branch) => !selectedBranchId || branch.branch_id === selectedBranchId,
+          (branch) =>
+            !selectedBranchId || branch.branch_id === selectedBranchId,
         )
         .reduce((total, branch) => total + branch.alerts.length, 0),
     [branchHealth, selectedBranchId],
   );
 
-  const navItems = useMemo(
-    () => {
-      if (isRetailUser) {
-        return RETAIL_ROLE_NAV_ITEMS;
-      }
-      const items = WORKSPACE_NAV_ITEMS[effectiveWorkspace]
-        .map((item) => {
-          if (item.id === "businessAlerts")
-            return { ...item, badgeCount: businessAlertCount };
-          return item;
-        });
-      return canAccessAllWorkspaces
-        ? [
-            ...items,
-            {
-              id: "userManagement",
-              label: "User Management",
-              shortLabel: "Users",
-              icon: <UsersIcon />,
-            },
-          ]
-        : items;
-    },
-    [canAccessAllWorkspaces, isRetailUser, effectiveWorkspace, businessAlertCount],
-  );
+  const navItems = useMemo(() => {
+    if (isRetailUser) {
+      return RETAIL_ROLE_NAV_ITEMS;
+    }
+    const items = WORKSPACE_NAV_ITEMS[effectiveWorkspace].map((item) => {
+      if (item.id === "businessAlerts")
+        return { ...item, badgeCount: businessAlertCount };
+      return item;
+    });
+    return canAccessAllWorkspaces
+      ? [
+          ...items,
+          {
+            id: "userManagement",
+            label: "User Management",
+            shortLabel: "Users",
+            icon: <UsersIcon />,
+          },
+        ]
+      : items;
+  }, [
+    canAccessAllWorkspaces,
+    isRetailUser,
+    effectiveWorkspace,
+    businessAlertCount,
+  ]);
 
   // Only development actually switches workspaces — a retail-only or wholesale-only account is
   // permanently in its one workspace, so showing a switcher with a single option would be
@@ -767,7 +774,6 @@ function App(): React.JSX.Element {
     });
   }, [settings?.theme]);
 
-
   const saleFilters: DataTableFilter<SaleRow>[] = useMemo(
     () => [
       {
@@ -861,6 +867,7 @@ function App(): React.JSX.Element {
 
   function handleSectionChange(id: string): void {
     setWarningWindowOverride(null);
+    setWarningsTab(null);
     setPendingImportQueue([]);
     setPendingImportQueueTotal(0);
     setViewingBatchId(null);
@@ -1073,7 +1080,10 @@ function App(): React.JSX.Element {
                   showAdvancedTabs
                   initialTab={dashboardTarget?.tab}
                   initialBranchId={dashboardTarget?.branchId}
-                  onViewChecking={() => handleSectionChange("checking")}
+                  onViewChecking={() => {
+                    handleSectionChange("warnings");
+                    setWarningsTab("Checking");
+                  }}
                   onViewImport={() => handleSectionChange("import")}
                 />
               )}
@@ -1091,11 +1101,18 @@ function App(): React.JSX.Element {
                       return;
                     }
                     if (target === "checking") {
-                      handleSectionChange("checking");
+                      handleSectionChange("warnings");
+                      setWarningsTab("Checking");
                       return;
                     }
                     if (target === "import") {
                       handleSectionChange("import");
+                      return;
+                    }
+                    if (target === "agedStock") {
+                      setSelectedBranchId(branchId);
+                      setInventoryTarget("agedStock");
+                      handleSectionChange("inventory");
                       return;
                     }
                     // DashboardPage reads these once, on mount — which is exactly what a
@@ -1121,12 +1138,6 @@ function App(): React.JSX.Element {
                   highlightBatchId={highlightBatchId}
                   initialTab={importInitialTab}
                   onTabChange={setImportInitialTab}
-                />
-              )}
-              {section === "checking" && (
-                <CheckingPage
-                  session={session}
-                  onImportInventory={() => handleSectionChange("import")}
                 />
               )}
               {(section === "overview" ||
@@ -1174,6 +1185,7 @@ function App(): React.JSX.Element {
                   branchFilter={selectedBranchName}
                   onViewImportBatch={handleViewImportBatch}
                   onFileReady={handleFileReady}
+                  initialTab={warningsTab ?? undefined}
                 />
               )}
               {section === "orders" && (

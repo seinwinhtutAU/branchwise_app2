@@ -8,7 +8,11 @@ import {
   type DataTableFilter,
 } from "../SimpleDataTable";
 
-export type InventorySubTab = "imported" | "lowStock" | "deadStock";
+export type InventorySubTab =
+  | "imported"
+  | "lowStock"
+  | "deadStock"
+  | "agedStock";
 
 interface Props {
   session: Session;
@@ -24,6 +28,7 @@ const SUB_TABS: { id: InventorySubTab; label: string }[] = [
   { id: "imported", label: "Imported Data" },
   { id: "lowStock", label: "Low Stock" },
   { id: "deadStock", label: "Dead Stock" },
+  { id: "agedStock", label: "Aged Stock" },
 ];
 
 interface InventoryRow {
@@ -102,6 +107,29 @@ const DEAD_STOCK_COLUMNS: DataTableColumn<DeadStockRow>[] = [
   },
 ];
 
+interface AgedStockRow {
+  Branch: string | null;
+  StockCode: string;
+  Description: string;
+  On_Hand_Qty: number;
+  Last_Purchased_At: string;
+  Days_In_Stock: number;
+}
+
+const AGED_STOCK_COLUMNS: DataTableColumn<AgedStockRow>[] = [
+  { key: "Branch", label: "Branch" },
+  { key: "StockCode", label: "Stock Code", copyable: true },
+  { key: "Description", label: "Description" },
+  { key: "On_Hand_Qty", label: "On Hand Qty", align: "right" },
+  { key: "Last_Purchased_At", label: "Last Purchased" },
+  {
+    key: "Days_In_Stock",
+    label: "Days in Stock",
+    align: "right",
+    format: (value) => `${value} days`,
+  },
+];
+
 export function InventoryPage({
   session,
   branchOptions,
@@ -136,6 +164,18 @@ export function InventoryPage({
   );
 
   const deadStockFilters: DataTableFilter<DeadStockRow>[] = useMemo(
+    () => [
+      {
+        type: "search",
+        keys: ["StockCode", "Description"],
+        placeholder: "Stock code or description",
+        serverParam: "search",
+      },
+    ],
+    [],
+  );
+
+  const agedStockFilters: DataTableFilter<AgedStockRow>[] = useMemo(
     () => [
       {
         type: "search",
@@ -223,6 +263,25 @@ export function InventoryPage({
           rowKey={(row, i) => `${row.StockCode}-${row.Branch}-${i}`}
           emptyTitle="No dead stock"
           emptyDescription="Nothing on hand has gone 90 days without a sale."
+          serverPaged
+          headerAddon={subTabSwitcher}
+        />
+      )}
+
+      {tab === "agedStock" && (
+        <SimpleDataTable<AgedStockRow>
+          session={session}
+          endpoint="/api/inventory/aged-stock"
+          title="Inventory (Aged Stock)"
+          description="Products on the shelf that were last bought more than 180 days ago."
+          icon={<div className="h-3 w-5 rounded-sm bg-sky-400 shrink-0" />}
+          columns={AGED_STOCK_COLUMNS}
+          filters={agedStockFilters}
+          branchFilter={branchFilter}
+          branchOptions={branchOptions}
+          rowKey={(row, i) => `${row.StockCode}-${row.Branch}-${i}`}
+          emptyTitle="No aged stock"
+          emptyDescription="Nothing on the shelf was last bought more than 180 days ago."
           serverPaged
           headerAddon={subTabSwitcher}
         />

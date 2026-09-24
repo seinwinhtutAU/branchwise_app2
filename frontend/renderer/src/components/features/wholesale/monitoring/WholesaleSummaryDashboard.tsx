@@ -1,9 +1,8 @@
 import type { Session } from "@renderer/lib/auth";
 import type { Profile } from "@renderer/components/features/types";
 import { ChevronRightIcon } from "@renderer/components/ui/icons";
-import {
-  type WholesaleSummaryData,
-} from "./monitoringApi";
+import { InfoLabel, InfoTooltip } from "@renderer/components/ui/InfoTooltip";
+import { type WholesaleSummaryData } from "./monitoringApi";
 
 function formatMmkShort(amount: number): string {
   if (amount >= 1_000_000) {
@@ -26,6 +25,7 @@ interface WholesaleSummaryDashboardProps {
   onOpenVoucher?: (voucherId: string) => void;
   onOpenShipment?: (shipmentId: string) => void;
   onOpenReceiving?: (receivingNo: string) => void;
+  onSelectTab?: (tab: "revenue" | "cost" | "inventory" | "customer") => void;
 }
 
 export function WholesaleSummaryDashboard({
@@ -33,82 +33,151 @@ export function WholesaleSummaryDashboard({
   onOpenStock,
   onOpenOrder,
   onOpenVoucher,
+  onSelectTab,
 }: WholesaleSummaryDashboardProps): React.JSX.Element {
   const data = summaryData;
 
   const totalPhysicalSets = data.physical_stock_sets;
-  // The period's real revenue — zero when nothing was delivered, never a sample figure.
   const totalWholesaleRevenue = data.revenue_this_period;
 
   return (
     <div className="flex flex-col gap-5 text-text-primary">
-      {/* Top 5 KPI Metric Cards */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
-        {/* PHYSICAL STOCK */}
-        <div className="bg-bg-card border border-border/80 rounded-xl p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted">
-            PHYSICAL STOCK
-          </p>
-          <div className="my-2">
-            <span className="text-3xl font-extrabold text-text-primary tracking-tight tabular-nums">
-              {data.physical_stock_sets.toLocaleString()}
+      {/* Top 4 Executive Financial & Asset KPI Cards */}
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* 1. Money Received */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() =>
+            onSelectTab ? onSelectTab("revenue") : onOpenVoucher?.("")
+          }
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onSelectTab ? onSelectTab("revenue") : onOpenVoucher?.("");
+            }
+          }}
+          className="bg-bg-card border border-border/80 hover:border-brand/40 hover:shadow-2xs rounded-xl p-3.5 sm:p-4.5 flex flex-col justify-between cursor-pointer transition-all text-left"
+        >
+          <InfoLabel
+            className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider"
+            description="Total actual cash and payments collected from customer sales in the selected period."
+          >
+            Money Received
+          </InfoLabel>
+          <div className="my-1 sm:my-1.5">
+            <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary tabular-nums">
+              {formatMmkShort(data.money_received ?? 0)}
             </span>
           </div>
-          <p className="text-xs text-text-muted">sets on hand</p>
+          <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
+            MMK · customer payments in
+          </span>
         </div>
 
-        {/* AVAILABLE TO SELL */}
-        <div className="bg-bg-card border border-border/80 rounded-xl p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted">
-            AVAILABLE TO SELL
-          </p>
-          <div className="my-2">
-            <span className="text-3xl font-extrabold text-text-primary tracking-tight tabular-nums">
-              {data.available_sets.toLocaleString()}
+        {/* 2. Unpaid by Customers */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() =>
+            onSelectTab ? onSelectTab("customer") : onOpenOrder?.("")
+          }
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onSelectTab ? onSelectTab("customer") : onOpenOrder?.("");
+            }
+          }}
+          className="bg-bg-card border border-border/80 hover:border-brand/40 hover:shadow-2xs rounded-xl p-3.5 sm:p-4.5 flex flex-col justify-between cursor-pointer transition-all text-left"
+        >
+          <InfoLabel
+            className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider"
+            description="Total unpaid balance due from customers on delivered orders. Goods have been shipped, awaiting payment."
+          >
+            Unpaid by Customers
+          </InfoLabel>
+          <div className="my-1 sm:my-1.5">
+            <span
+              className={`text-xl sm:text-2xl font-bold tracking-tight tabular-nums ${
+                (data.unpaid_by_customers ?? 0) > 0
+                  ? "text-[#E88B1A]"
+                  : "text-text-primary"
+              }`}
+            >
+              {formatMmkShort(data.unpaid_by_customers ?? 0)}
             </span>
           </div>
-          <p className="text-xs text-[#0D9488] font-medium">sets uncommitted</p>
+          <span
+            className={`text-[10px] sm:text-[11px] truncate ${
+              (data.unpaid_by_customers ?? 0) > 0
+                ? "text-[#E88B1A] font-medium"
+                : "text-text-muted"
+            }`}
+          >
+            MMK · customer balance due
+          </span>
         </div>
 
-        {/* CUSTOMER COMMITTED */}
-        <div className="bg-bg-card border border-border/80 rounded-xl p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted">
-            CUSTOMER COMMITTED
-          </p>
-          <div className="my-2">
-            <span className="text-3xl font-extrabold text-text-primary tracking-tight tabular-nums">
-              {data.committed_sets.toLocaleString()}
+        {/* 3. To Pay Suppliers */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() =>
+            onSelectTab ? onSelectTab("cost") : onOpenVoucher?.("")
+          }
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onSelectTab ? onSelectTab("cost") : onOpenVoucher?.("");
+            }
+          }}
+          className="bg-bg-card border border-border/80 hover:border-brand/40 hover:shadow-2xs rounded-xl p-3.5 sm:p-4.5 flex flex-col justify-between cursor-pointer transition-all text-left"
+        >
+          <InfoLabel
+            className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider"
+            description="Total unpaid balance owed to suppliers and factories on stock purchases."
+          >
+            To Pay Suppliers
+          </InfoLabel>
+          <div className="my-1 sm:my-1.5">
+            <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary tabular-nums">
+              {formatMmkShort(data.to_pay_suppliers ?? 0)}
             </span>
           </div>
-          <p className="text-xs text-text-muted">sets allocated</p>
+          <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
+            MMK · supplier balance due
+          </span>
         </div>
 
-        {/* INCOMING STOCK */}
-        <div className="bg-bg-card border border-border/80 rounded-xl p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted">
-            INCOMING STOCK
-          </p>
-          <div className="my-2">
-            <span className="text-3xl font-extrabold text-text-primary tracking-tight tabular-nums">
-              {data.incoming_stock_sets.toLocaleString()}
+        {/* 4. Inventory Value */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() =>
+            onSelectTab ? onSelectTab("inventory") : onOpenStock?.("")
+          }
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onSelectTab ? onSelectTab("inventory") : onOpenStock?.("");
+            }
+          }}
+          className="bg-bg-card border border-border/80 hover:border-brand/40 hover:shadow-2xs rounded-xl p-3.5 sm:p-4.5 flex flex-col justify-between cursor-pointer transition-all text-left"
+        >
+          <InfoLabel
+            className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider"
+            description="Total buying cost value of physical stock on hand across all warehouse locations."
+          >
+            Inventory Value
+          </InfoLabel>
+          <div className="my-1 sm:my-1.5">
+            <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary tabular-nums">
+              {formatMmkShort(data.inventory_value ?? 0)}
             </span>
           </div>
-          <p className="text-xs text-text-muted">
-            {data.supplier_sets} supplier · {data.transit_sets} transit
-          </p>
-        </div>
-
-        {/* CUSTOMER BACKLOG */}
-        <div className="bg-bg-card border border-border/80 rounded-xl p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted">
-            CUSTOMER BACKLOG
-          </p>
-          <div className="my-2">
-            <span className="text-3xl font-extrabold text-text-primary tracking-tight tabular-nums">
-              {data.backlog_sets.toLocaleString()}
-            </span>
-          </div>
-          <p className="text-xs text-[#E88B1A] font-medium">sets waiting for stock</p>
+          <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
+            MMK · {data.physical_stock_sets.toLocaleString()} sets on hand
+          </span>
         </div>
       </section>
 
@@ -118,12 +187,17 @@ export function WholesaleSummaryDashboard({
         <div className="bg-bg-card border border-border/80 rounded-xl p-5 shadow-2xs flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-base font-semibold tracking-tight text-text-primary">
-                Inventory Flow
-              </h2>
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-base font-semibold tracking-tight text-text-primary">
+                  Inventory Flow
+                </h2>
+                <InfoTooltip description="End-to-end stock pipeline from supplier production through cargo transit, warehouse storage, customer allocation, to free available stock." />
+              </div>
               <button
                 type="button"
-                onClick={() => onOpenStock?.("")}
+                onClick={() =>
+                  onSelectTab ? onSelectTab("inventory") : onOpenStock?.("")
+                }
                 className="text-xs font-medium text-brand hover:underline inline-flex items-center gap-1 group"
               >
                 <span>View inventory</span>
@@ -146,7 +220,9 @@ export function WholesaleSummaryDashboard({
                 </span>
               </div>
 
-              <span className="text-slate-300 font-semibold text-xs select-none">&gt;</span>
+              <span className="text-slate-300 font-semibold text-xs select-none">
+                &gt;
+              </span>
 
               {/* Step 2: In transit */}
               <div className="flex-1 bg-slate-50 border border-slate-100 rounded-xl py-4 sm:py-5 px-1.5 sm:px-2 text-center flex flex-col items-center justify-center">
@@ -158,7 +234,9 @@ export function WholesaleSummaryDashboard({
                 </span>
               </div>
 
-              <span className="text-slate-300 font-semibold text-xs select-none">&gt;</span>
+              <span className="text-slate-300 font-semibold text-xs select-none">
+                &gt;
+              </span>
 
               {/* Step 3: On hand */}
               <div className="flex-1 bg-[#EEF2FF] border border-[#E0E7FF] rounded-xl py-4 sm:py-5 px-1.5 sm:px-2 text-center flex flex-col items-center justify-center">
@@ -170,7 +248,9 @@ export function WholesaleSummaryDashboard({
                 </span>
               </div>
 
-              <span className="text-slate-300 font-semibold text-xs select-none">&gt;</span>
+              <span className="text-slate-300 font-semibold text-xs select-none">
+                &gt;
+              </span>
 
               {/* Step 4: Allocated */}
               <div className="flex-1 bg-[#F5F3FF] border border-[#EDE9FE] rounded-xl py-4 sm:py-5 px-1.5 sm:px-2 text-center flex flex-col items-center justify-center">
@@ -182,7 +262,9 @@ export function WholesaleSummaryDashboard({
                 </span>
               </div>
 
-              <span className="text-slate-300 font-semibold text-xs select-none">&gt;</span>
+              <span className="text-slate-300 font-semibold text-xs select-none">
+                &gt;
+              </span>
 
               {/* Step 5: Available */}
               <div className="flex-1 bg-[#ECFDF5] border border-[#D1FAE5] rounded-xl py-4 sm:py-5 px-1.5 sm:px-2 text-center flex flex-col items-center justify-center">
@@ -196,11 +278,12 @@ export function WholesaleSummaryDashboard({
             </div>
           </div>
 
-          {/* Under-step pipeline summary annotations */}
-          <div className="flex items-center justify-between text-[11px] sm:text-xs text-text-muted mt-5 pt-1 px-1">
-            <span>Incoming: {data.incoming_stock_sets} sets</span>
-            <span>Physical stock: {data.physical_stock_sets} sets</span>
-            <span>Available after commitments: {data.available_sets} sets</span>
+          {/* Clean Guidance Note (Replaced redundant repeated numbers with clean pipeline guide) */}
+          <div className="flex items-center justify-between text-[11px] sm:text-xs text-text-muted mt-5 pt-1 px-1 border-t border-border/40">
+            <span>Incoming: Supplier + Transit</span>
+            <span className="font-medium text-text-secondary">
+              On Hand = Allocated + Available
+            </span>
           </div>
         </div>
 
@@ -208,25 +291,32 @@ export function WholesaleSummaryDashboard({
         <div className="bg-bg-card border border-border/80 rounded-xl p-5 shadow-2xs flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-base font-semibold tracking-tight text-text-primary">
-                Stock by Location
-              </h2>
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-base font-semibold tracking-tight text-text-primary">
+                  Stock by Location
+                </h2>
+                <InfoTooltip description="Distribution of physical on-hand stock across your warehouse locations to help balance inventory." />
+              </div>
               <button
                 type="button"
-                onClick={() => onOpenStock?.("")}
+                onClick={() =>
+                  onSelectTab ? onSelectTab("inventory") : onOpenStock?.("")
+                }
                 className="text-xs font-medium text-brand hover:underline inline-flex items-center gap-1 group"
               >
                 <span>Locations</span>
                 <ChevronRightIcon className="w-3 h-3 transition-transform group-hover:translate-x-0.5" />
               </button>
             </div>
-            <p className="text-xs text-text-muted mt-0.5">Physical stock distribution</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              Physical stock distribution
+            </p>
 
             {/* Total physical stock header row */}
             <div className="flex items-center justify-between text-xs py-3 border-b border-border/50 mt-1">
               <span className="text-text-muted">Total physical stock</span>
               <span className="font-bold text-text-primary tabular-nums">
-                {totalPhysicalSets} sets
+                {totalPhysicalSets.toLocaleString()} sets
               </span>
             </div>
 
@@ -235,7 +325,10 @@ export function WholesaleSummaryDashboard({
               {data.locations.map((loc) => {
                 const pct =
                   totalPhysicalSets > 0
-                    ? Math.min(100, Math.round((loc.sets / totalPhysicalSets) * 100))
+                    ? Math.min(
+                        100,
+                        Math.round((loc.sets / totalPhysicalSets) * 100),
+                      )
                     : 0;
                 return (
                   <div key={loc.name} className="flex items-center gap-3">
@@ -251,8 +344,11 @@ export function WholesaleSummaryDashboard({
                         }}
                       />
                     </div>
-                    <span className="w-8 shrink-0 text-right text-xs font-bold text-text-primary tabular-nums">
-                      {loc.sets}
+                    <span className="w-16 shrink-0 text-right text-xs font-semibold text-text-primary tabular-nums">
+                      {loc.sets}{" "}
+                      <span className="text-[11px] font-normal text-text-muted">
+                        ({pct}%)
+                      </span>
                     </span>
                   </div>
                 );
@@ -265,12 +361,17 @@ export function WholesaleSummaryDashboard({
         <div className="bg-bg-card border border-border/80 rounded-xl p-5 shadow-2xs flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-base font-semibold tracking-tight text-text-primary">
-                Customer Order Fulfillment
-              </h2>
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-base font-semibold tracking-tight text-text-primary">
+                  Customer Order Fulfillment
+                </h2>
+                <InfoTooltip description="Progress of customer demand fulfillment: delivered goods, reserved stock in warehouse, and backlog waiting for restock." />
+              </div>
               <button
                 type="button"
-                onClick={() => onOpenOrder?.("")}
+                onClick={() =>
+                  onSelectTab ? onSelectTab("customer") : onOpenOrder?.("")
+                }
                 className="text-xs font-medium text-brand hover:underline inline-flex items-center gap-1 group"
               >
                 <span>Open orders</span>
@@ -349,7 +450,7 @@ export function WholesaleSummaryDashboard({
           </div>
 
           {/* Legend */}
-          <div className="flex flex-wrap items-center gap-4 text-xs text-text-muted mt-6 pt-1">
+          <div className="flex flex-wrap items-center gap-4 text-xs text-text-muted mt-6 pt-1 border-t border-border/40">
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-[#10B981]" />
               <span>Delivered</span>
@@ -369,12 +470,17 @@ export function WholesaleSummaryDashboard({
         <div className="bg-bg-card border border-border/80 rounded-xl p-5 shadow-2xs flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-base font-semibold tracking-tight text-text-primary">
-                Revenue by Factory
-              </h2>
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-base font-semibold tracking-tight text-text-primary">
+                  Revenue by Factory
+                </h2>
+                <InfoTooltip description="Net wholesale revenue attributed to each factory or brand during the selected period." />
+              </div>
               <button
                 type="button"
-                onClick={() => onOpenVoucher?.("")}
+                onClick={() =>
+                  onSelectTab ? onSelectTab("revenue") : onOpenVoucher?.("")
+                }
                 className="text-xs font-medium text-brand hover:underline inline-flex items-center gap-1 group"
               >
                 <span>Revenue details</span>
@@ -387,9 +493,11 @@ export function WholesaleSummaryDashboard({
 
             {/* Wholesale revenue this period header row */}
             <div className="flex items-center justify-between text-xs py-3 border-b border-border/50 mt-1">
-              <span className="text-text-muted">Wholesale revenue this period</span>
+              <span className="text-text-muted">
+                Wholesale revenue this period
+              </span>
               <span className="font-bold text-text-primary tabular-nums">
-                {formatMmkShort(totalWholesaleRevenue)}
+                {formatMmkShort(totalWholesaleRevenue)} MMK
               </span>
             </div>
 
@@ -400,7 +508,9 @@ export function WholesaleSummaryDashboard({
                   totalWholesaleRevenue > 0
                     ? Math.min(
                         100,
-                        Math.round((factory.revenue / totalWholesaleRevenue) * 100),
+                        Math.round(
+                          (factory.revenue / totalWholesaleRevenue) * 100,
+                        ),
                       )
                     : 0;
                 return (
@@ -417,8 +527,11 @@ export function WholesaleSummaryDashboard({
                         }}
                       />
                     </div>
-                    <span className="w-24 shrink-0 text-right text-xs font-bold text-text-primary tabular-nums">
-                      {formatMmkShort(factory.revenue)}
+                    <span className="w-28 shrink-0 text-right text-xs font-semibold text-text-primary tabular-nums">
+                      {formatMmkShort(factory.revenue)}{" "}
+                      <span className="text-[11px] font-normal text-text-muted">
+                        ({pct}%)
+                      </span>
                     </span>
                   </div>
                 );

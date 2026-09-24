@@ -128,31 +128,6 @@ def movements(db: Session, branch_id: str | None) -> list[dict]:
     ]
 
 
-def net_pairs_by_stock_code(db: Session, branch_id: str | None) -> dict[str, int]:
-    """Net opened receiving quantity less outgoing deliveries, grouped by stock code."""
-    incoming_query = (
-        db.query(ReceivingItem.stock_code, func.coalesce(func.sum(ReceivingItem.quantity_pairs), 0))
-        .join(ReceivingPackage, ReceivingItem.package_id == ReceivingPackage.id)
-        .join(Receiving, ReceivingPackage.receiving_id == Receiving.id)
-        .filter(ReceivingPackage.opened.is_(True))
-    )
-    if branch_id is not None:
-        incoming_query = incoming_query.filter(Receiving.branch_id == branch_id)
-    net: dict[str, int] = defaultdict(int)
-    for stock_code, quantity in incoming_query.group_by(ReceivingItem.stock_code).all():
-        net[stock_code] += int(quantity or 0)
-
-    outgoing_query = db.query(
-        WholesaleStockMovement.stock_code,
-        func.coalesce(func.sum(WholesaleStockMovement.quantity_pairs), 0),
-    )
-    if branch_id is not None:
-        outgoing_query = outgoing_query.filter(WholesaleStockMovement.branch_id == branch_id)
-    for stock_code, quantity in outgoing_query.group_by(WholesaleStockMovement.stock_code).all():
-        net[stock_code] -= int(quantity or 0)
-    return dict(net)
-
-
 def delivered_pairs_by_order(db: Session, order_ids: list[str], branch_id: str | None) -> dict[str, dict[str, int]]:
     if not order_ids:
         return {}

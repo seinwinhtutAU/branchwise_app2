@@ -65,11 +65,13 @@ export function DashboardFooter({ note }: { note: string }): React.JSX.Element {
 export function DashboardLoading({ tiles }: { tiles: number }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        {Array.from({ length: tiles }, (_, index) => (
-          <Skeleton key={index} className="h-24" />
-        ))}
-      </div>
+      {tiles > 0 && (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          {Array.from({ length: tiles }, (_, index) => (
+            <Skeleton key={index} className="h-24" />
+          ))}
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <Skeleton className="h-64" />
         <Skeleton className="h-64" />

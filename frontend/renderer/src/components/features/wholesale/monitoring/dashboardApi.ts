@@ -28,6 +28,17 @@ export interface RevenueDashboardData {
   trend: { date: string; delivered_revenue: number; collected: number }[];
   factories: { factory_name: string; delivered_revenue: number }[];
   top_factory_share_pct: number;
+  customer_receivables?: {
+    customer_name: string;
+    balance_due: number;
+    order_count: number;
+  }[];
+  top_products?: {
+    stock_code: string;
+    quantity_pairs: number;
+    quantity_sets: number;
+    delivered_revenue: number;
+  }[];
 }
 
 export interface CostDashboardData {

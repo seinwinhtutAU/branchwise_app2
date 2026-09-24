@@ -97,52 +97,6 @@ class R2StorageService:
             logger.error("Unexpected error downloading %s from R2: %s", key, e)
             return None
 
-    def generate_presigned_download_url(
-        self,
-        key: str,
-        expires_in: int = 3600,
-        filename: str | None = None,
-    ) -> str | None:
-        """Generates a presigned GET URL for direct download from Cloudflare R2."""
-        client = self._get_client()
-        if client is None:
-            return None
-
-        params: dict[str, str] = {
-            "Bucket": self.settings.r2_bucket,
-            "Key": key,
-        }
-        if filename:
-            params["ResponseContentDisposition"] = f'attachment; filename="{filename}"'
-
-        try:
-            url = client.generate_presigned_url(
-                "get_object",
-                Params=params,
-                ExpiresIn=expires_in,
-            )
-            return str(url)
-        except Exception as e:
-            logger.error("Failed to generate presigned download URL for %s: %s", key, e)
-            return None
-
-    def delete_file(self, key: str) -> bool:
-        """Deletes an object from Cloudflare R2 bucket."""
-        client = self._get_client()
-        if client is None:
-            return False
-
-        try:
-            client.delete_object(
-                Bucket=self.settings.r2_bucket,
-                Key=key,
-            )
-            return True
-        except Exception as e:
-            logger.error("Failed to delete %s from Cloudflare R2: %s", key, e)
-            return False
-
-
 @lru_cache
 def get_storage_service() -> R2StorageService:
     return R2StorageService()

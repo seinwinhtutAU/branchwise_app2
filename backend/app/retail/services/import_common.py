@@ -242,22 +242,6 @@ def pluralize(count: int, noun: str) -> str:
     return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
-def product_summary_messages(created: int, updated: int) -> list[str]:
-    """Plain-English lines describing product upsert counts for an import summary.
-
-    Shared across all three import types since they all upsert products the
-    same way (see get_or_create_products) — these lines are read by shop
-    staff, not developers, so they name what happened rather than exposing
-    raw "created"/"updated" counters.
-    """
-    messages = []
-    if created:
-        messages.append(f"{pluralize(created, 'new product')} added")
-    if updated:
-        messages.append(f"{pluralize(updated, 'existing product')} updated")
-    return messages
-
-
 def numeric_failures(
     validation_records: list[dict], rules: list[NumericRule]
 ) -> list[tuple[int, list[dict]]]:

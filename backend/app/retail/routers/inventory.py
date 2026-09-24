@@ -7,7 +7,9 @@ from app.models.branch import Branch
 from app.retail.models.product import Product
 from app.models.user import User
 from app.services.dashboard import compute_stock_health
+from app.retail.services.branch_health import aged_stock_for_branch
 from app.retail.services.stock import latest_stock_query
+from app.services.branches import list_retail_branches
 from app.retail.routers.common import require_retail_operations
 
 router = APIRouter(prefix="/api/inventory", tags=["inventory"], dependencies=[Depends(require_retail_operations)])
@@ -134,4 +136,41 @@ def list_dead_stock(
         }
         for item in dead_stock_items
     ]
+    return _filter_and_page(rows, search=search, branch=branch, page=page, page_size=page_size, export=export)
+
+
+@router.get("/aged-stock")
+def list_aged_stock(
+    search: str | None = Query(None, description="Matches stock code or description"),
+    branch: str | None = Query(None, description="Branch name"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(PAGE_SIZE, ge=1, le=500),
+    export: bool = Query(
+        False, description="Ignore paging and return every matching row, for CSV/Excel download"
+    ),
+    user: User = Depends(get_current_app_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Every product on the shelf whose last purchase was more than AGED_STOCK_DAYS ago,
+    oldest first — the complete list behind the Business Alerts "old stock" alert, which
+    shows only its top five. Same function the alert and the Inventory score use, so the
+    three can never disagree on which products are aged."""
+    branches = list_retail_branches(db).all()
+    if user.branch_id is not None:
+        branches = [b for b in branches if b.id == user.branch_id]
+    rows = []
+    for b in branches:
+        items, _ = aged_stock_for_branch(db, b.id)
+        rows.extend(
+            {
+                "Branch": b.name,
+                "StockCode": item["stock_code"],
+                "Description": item["description"],
+                "On_Hand_Qty": item["on_hand_qty"],
+                "Last_Purchased_At": item["purchase_date"],
+                "Days_In_Stock": item["age_days"],
+            }
+            for item in items
+        )
+    rows.sort(key=lambda row: -row["Days_In_Stock"])
     return _filter_and_page(rows, search=search, branch=branch, page=page, page_size=page_size, export=export)
