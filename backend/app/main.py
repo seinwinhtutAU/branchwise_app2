@@ -29,7 +29,7 @@ from app.wholesale.routers import (
     monitoring as wholesale_monitoring,
     orders as wholesale_orders,
     receivings as wholesale_receivings,
-    reports as wholesale_reports,
+    dashboard as wholesale_dashboard,
     shipments as wholesale_shipments,
     supplier_vouchers as wholesale_supplier_vouchers,
     write_offs as wholesale_write_offs,
@@ -86,7 +86,7 @@ def create_app() -> FastAPI:
     app.include_router(wholesale_finance.router)
     app.include_router(wholesale_write_offs.router)
     app.include_router(wholesale_export.router)
-    app.include_router(wholesale_reports.router)
+    app.include_router(wholesale_dashboard.router)
 
     return app
 

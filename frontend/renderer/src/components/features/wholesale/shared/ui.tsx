@@ -158,7 +158,12 @@ export function Reference({
   );
 
   return (
-    <span className={cn("inline-flex gap-1", singleLine ? "items-center" : "items-start")}>
+    <span
+      className={cn(
+        "inline-flex gap-1",
+        singleLine ? "items-center" : "items-start",
+      )}
+    >
       {onClick ? (
         <button
           type="button"
@@ -246,7 +251,7 @@ export function FigureCard({
   compact = false,
   className,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: string;
   sub?: string;
   tone?: Tone;
@@ -273,7 +278,9 @@ export function FigureCard({
       <span
         className={cn(
           "block font-bold tabular-nums tracking-tight font-mono leading-tight",
-          compact ? "text-base sm:text-lg mb-0.5" : "text-base sm:text-lg mb-0.5",
+          compact
+            ? "text-base sm:text-lg mb-0.5"
+            : "text-base sm:text-lg mb-0.5",
           toneText(tone),
         )}
       >
@@ -334,7 +341,9 @@ export function RowProgress({
   className?: string;
 }): React.JSX.Element {
   return (
-    <div className={cn("flex items-center gap-2 min-w-[7rem] w-full", className)}>
+    <div
+      className={cn("flex items-center gap-2 min-w-[7rem] w-full", className)}
+    >
       <div
         role="progressbar"
         aria-valuenow={pct}

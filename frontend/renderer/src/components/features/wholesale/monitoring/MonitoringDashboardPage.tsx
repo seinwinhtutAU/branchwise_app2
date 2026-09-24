@@ -1,9 +1,25 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { type Session } from "@renderer/lib/auth";
-import { fetchJson, useLoadErrorToast } from "@renderer/lib/queryClient";
+import type { Profile } from "@renderer/components/features/types";
+import { fetchJson, refreshEverything, useLoadErrorToast } from "@renderer/lib/queryClient";
 import { Badge } from "@renderer/components/ui/Badge";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
+import { TabBar } from "@renderer/components/ui/Tabs";
+import { Select } from "@renderer/components/ui/Select";
 import { ExportDataButtons } from "@renderer/components/features/wholesale/monitoring/ExportDataButtons";
+import { WholesaleSummaryDashboard } from "@renderer/components/features/wholesale/monitoring/WholesaleSummaryDashboard";
+import { PeriodControls } from "@renderer/components/features/dashboard/shared";
+import { usePeriodRange } from "@renderer/components/features/dashboard/usePeriodRange";
+import {
+  DASHBOARD_PERIOD_OPTIONS,
+  periodQueryParams,
+} from "@renderer/components/features/dashboard/helpers";
+import { DashboardError, DashboardLoading } from "./dashboardParts";
+import { WholesaleRevenueDashboard } from "@renderer/components/features/wholesale/monitoring/WholesaleRevenueDashboard";
+import { WholesaleCostDashboard } from "@renderer/components/features/wholesale/monitoring/WholesaleCostDashboard";
+import { WholesaleCustomerDashboard } from "@renderer/components/features/wholesale/monitoring/WholesaleCustomerDashboard";
+import { WholesaleInventoryDashboard } from "@renderer/components/features/wholesale/monitoring/WholesaleInventoryDashboard";
 import { CollapsibleKpiSummary } from "@renderer/components/ui/CollapsibleKpiSummary";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Spinner } from "@renderer/components/ui/Spinner";
@@ -21,13 +37,15 @@ import {
 import { FigureCard, Panel } from "@renderer/components/features/wholesale/shared/ui";
 import {
   WHOLESALE_MONITORING_URL,
+  WHOLESALE_SUMMARY_URL,
   type MonitoringActivityRow,
   type MonitoringOrderRow,
   type MonitoringProductRow,
   type MonitoringShipmentRow,
   type MonitoringSnapshot,
   type MonitoringVoucherRow,
-} from "@renderer/components/features/wholesale/shared/api";
+  type WholesaleSummaryData,
+} from "./monitoringApi";
 
 const MONITORING_QUERY_KEY = ["wholesale", "monitoring"] as const;
 const VISIBLE_ROWS = 3;
@@ -223,8 +241,27 @@ function ActivityItem({
   );
 }
 
+const DASHBOARD_TABS = [
+  { id: "summary", label: "Summary" },
+  { id: "operations", label: "Operations" },
+  { id: "revenue", label: "Revenue" },
+  { id: "cost", label: "Cost" },
+  { id: "customer", label: "Customer" },
+  { id: "inventory", label: "Inventory" },
+] as const;
+
+type DashboardView = (typeof DASHBOARD_TABS)[number]["id"];
+
+const LOCATION_OPTIONS = [
+  { id: "all", label: "All locations" },
+  { id: "zay_gyi", label: "Zay Gyi St." },
+  { id: "mawlamyine", label: "Mawlamyine" },
+  { id: "mandalay", label: "Mandalay" },
+];
+
 export default function MonitoringDashboardPage({
   session,
+  profile,
   onOpenShipment,
   onOpenOrder,
   onOpenVoucher,
@@ -232,51 +269,75 @@ export default function MonitoringDashboardPage({
   onOpenStock,
 }: {
   session: Session;
+  profile?: Profile | null;
   onOpenShipment: (id: string) => void;
   onOpenOrder: (id: string) => void;
   onOpenVoucher: (id: string) => void;
   onOpenReceiving: (receivingNo: string) => void;
   onOpenStock: (stockCode: string) => void;
 }): React.JSX.Element {
+  const [view, setView] = useState<DashboardView>("summary");
+  const [selectedLocation, setSelectedLocation] = useState("all");
+  // One period control for the Summary, Revenue and Customer views — the same one the
+  // retail Dashboard uses (Daily, Weekly, Monthly, or a custom range). Operations is live
+  // and Inventory is where the stock is now, so neither has a period.
+  const range = usePeriodRange("monthly");
+  const window = {
+    period: range.period,
+    dateFrom: range.applied.from,
+    dateTo: range.applied.to,
+    month: range.month,
+  };
+
+  const locationParam =
+    selectedLocation === "all"
+      ? ""
+      : LOCATION_OPTIONS.find((l) => l.id === selectedLocation)?.label ?? "";
+
+  const summaryQuery = useQuery({
+    queryKey: ["wholesale", "summary", selectedLocation, window] as const,
+    queryFn: async () => {
+      const params = periodQueryParams(window.period, window.dateFrom, window.dateTo, window.month);
+      if (locationParam) params.set("location", locationParam);
+      const url = `${WHOLESALE_SUMMARY_URL}${params.toString() ? `?${params.toString()}` : ""}`;
+      return await fetchJson<WholesaleSummaryData>(url, session);
+    },
+  });
+
   const query = useQuery({
     queryKey: MONITORING_QUERY_KEY,
     queryFn: () =>
       fetchJson<MonitoringSnapshot>(WHOLESALE_MONITORING_URL, session),
+    enabled: view === "operations",
   });
   const { data, isLoading, isFetching, isError } = query;
   useLoadErrorToast(isError, "wholesale dashboard");
 
-  if (isLoading && !data)
-    return (
-      <div className="flex justify-center py-24">
-        <Spinner className="w-6 h-6 text-text-muted" />
-      </div>
-    );
-  if (isError && !data)
-    return (
-      <EmptyState
-        icon={<DashboardIcon />}
-        title="Could not load dashboard"
-        description="Check the connection and try again."
-      />
-    );
-  if (!data)
-    return <EmptyState icon={<DashboardIcon />} title="No dashboard data" />;
+  const isRefreshing = isFetching || summaryQuery.isFetching;
+
+  const handleRefresh = (): void => {
+    void summaryQuery.refetch();
+    if (view === "operations") void query.refetch();
+    // The Revenue, Customer and Inventory tabs each own their request.
+    if (view === "revenue" || view === "cost" || view === "customer" || view === "inventory") {
+      refreshEverything();
+    }
+  };
 
   const fulfillmentTotal =
-    data.shipments_in_transit.count + data.orders_pending.count;
-  const customerReceivable = data.unpaid_orders.rows.reduce(
+    (data?.shipments_in_transit.count ?? 0) + (data?.orders_pending.count ?? 0);
+  const customerReceivable = (data?.unpaid_orders.rows ?? []).reduce(
     (sum, row) => sum + (row.balance_due ?? 0),
     0,
   );
-  const supplierPayable = data.unpaid_vouchers.rows.reduce(
+  const supplierPayable = (data?.unpaid_vouchers.rows ?? []).reduce(
     (sum, row) => sum + row.balance_due,
     0,
   );
-  const notArrivedCount = data.zero_stock_products.rows.filter(
+  const notArrivedCount = (data?.zero_stock_products.rows ?? []).filter(
     (row) => row.stock_status === "not_arrived",
   ).length;
-  const outOfStockCount = data.zero_stock_products.rows.filter(
+  const outOfStockCount = (data?.zero_stock_products.rows ?? []).filter(
     (row) => row.stock_status === "out_of_stock",
   ).length;
   const notArrivedLabel = `${notArrivedCount} product${notArrivedCount === 1 ? "" : "s"} not arrived yet`;
@@ -284,39 +345,122 @@ export default function MonitoringDashboardPage({
   const inventorySummary =
     outOfStockCount > 0
       ? `${outOfStockLabel}${notArrivedCount > 0 ? ` · ${notArrivedLabel}` : ""}`
-      : data.zero_stock_products.count > 0
+      : (data?.zero_stock_products.count ?? 0) > 0
         ? notArrivedLabel
         : "all active products stocked";
   const inventoryTone = outOfStockCount > 0 ? "error" : "success";
 
   return (
-    <div className="flex flex-col gap-6">
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-text-primary">
-            Dashboard
-          </h1>
-          <p className="mt-1 text-sm text-text-muted">
-            Monitor fulfillment, finance, and inventory at a glance.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          <div className="flex items-center gap-2 text-[11px] text-text-muted whitespace-nowrap">
-            <span
-              className="w-2 h-2 rounded-full bg-success"
-              aria-hidden="true"
+    <div className="flex flex-col gap-4">
+      {/* Streamlined Dashboard Navigation & Filters Toolbar (Matching Retail Summary Dashboard) */}
+      <div className="flex flex-col gap-2 pb-2 border-b border-border">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex items-center gap-3">
+            <h1 className="text-lg font-bold tracking-tight text-text-primary shrink-0 hidden sm:block">
+              Dashboard
+            </h1>
+            <TabBar<DashboardView>
+              tabs={DASHBOARD_TABS}
+              activeTab={view}
+              onSelect={setView}
+              className="border-b-0 w-auto"
             />
-            {isFetching ? "Refreshing…" : "Updates when wholesale data changes"}
           </div>
-          <ExportDataButtons session={session} />
-          <RefreshButton
-            onClick={() => void query.refetch()}
-            refreshing={isFetching}
-          />
-        </div>
-      </header>
 
-      <CollapsibleKpiSummary storageKey="wholesale_monitoring" title="Monitoring KPIs">
+          <div className="flex items-center gap-2">
+            <ExportDataButtons session={session} />
+            <RefreshButton onClick={handleRefresh} refreshing={isRefreshing} />
+          </div>
+        </div>
+
+        {/* Filters Toolbar Row */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-0.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Location filters the Summary and Operations views; the Revenue and Customer
+                tabs have no per-location figures, and Inventory shows every location. */}
+            {(view === "summary" || view === "operations") && (
+              <div className="w-36">
+                <Select
+                  size="sm"
+                  value={selectedLocation}
+                  onChange={(e) => setSelectedLocation(e.target.value)}
+                  aria-label="Location"
+                >
+                  {LOCATION_OPTIONS.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
+
+            {(view === "summary" || view === "revenue" || view === "cost" || view === "customer") && (
+              <PeriodControls range={range} options={DASHBOARD_PERIOD_OPTIONS} />
+            )}
+          </div>
+        </div>
+      </div>
+
+      {view === "revenue" && (
+        <WholesaleRevenueDashboard session={session} window={window} />
+      )}
+      {view === "cost" && (
+        <WholesaleCostDashboard
+          session={session}
+          window={window}
+          onOpenVoucher={onOpenVoucher}
+        />
+      )}
+      {view === "customer" && (
+        <WholesaleCustomerDashboard
+          session={session}
+          window={window}
+          onOpenOrder={onOpenOrder}
+        />
+      )}
+      {view === "inventory" && <WholesaleInventoryDashboard session={session} />}
+
+      {view === "summary" && summaryQuery.data === undefined && (
+        summaryQuery.isError ? (
+          <DashboardError title="Summary" reload={async () => { await summaryQuery.refetch(); }} />
+        ) : (
+          <DashboardLoading tiles={5} />
+        )
+      )}
+      {view === "summary" && summaryQuery.data !== undefined && (
+        <WholesaleSummaryDashboard
+          session={session}
+          profile={profile}
+          summaryData={summaryQuery.data}
+          onOpenShipment={onOpenShipment}
+          onOpenOrder={onOpenOrder}
+          onOpenVoucher={onOpenVoucher}
+          onOpenReceiving={onOpenReceiving}
+          onOpenStock={onOpenStock}
+        />
+      )}
+
+      {view === "operations" && (
+        <>
+          {isLoading && !data && (
+            <div className="flex justify-center py-24">
+              <Spinner className="w-6 h-6 text-text-muted" />
+            </div>
+          )}
+          {isError && !data && (
+            <EmptyState
+              icon={<DashboardIcon />}
+              title="Could not load dashboard"
+              description="Check the connection and try again."
+            />
+          )}
+          {!data && !isLoading && !isError && (
+            <EmptyState icon={<DashboardIcon />} title="No dashboard data" />
+          )}
+          {data && (
+            <div className="flex flex-col gap-6">
+              <CollapsibleKpiSummary storageKey="wholesale_monitoring" title="Monitoring KPIs">
         <section className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
           <FigureCard
             label="Fulfillment"
@@ -568,5 +712,9 @@ export default function MonitoringDashboardPage({
         </Panel>
       </div>
     </div>
-  );
+  )}
+</>
+)}
+</div>
+);
 }

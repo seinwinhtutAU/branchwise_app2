@@ -23,7 +23,6 @@ Customer Orders → Inventory) and what the old, deleted workflow looked like. T
 - [Inventory / Stock Records](./inventory.md) — the whole pipeline, including stock that hasn't arrived yet
 - [Finance](./finance.md) — receivables, payables, shipment costs
 - [Monitoring](./monitoring.md) — a live operational status board (hidden from the nav)
-- [Reports](./reports.md) — the four analytical pillars (hidden from the nav)
 - [Master Data](./master-data.md) — products, suppliers, customers, and the other reference lists
 - [Write-offs](./write-offs.md) — the shared "explain the mismatch" mechanism used by Shipments, Vouchers, and Orders
 

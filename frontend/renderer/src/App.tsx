@@ -69,7 +69,6 @@ import {
   WarehouseIcon,
   DataQualityIcon,
   DollarIcon,
-  ReportsIcon,
   MasterDataIcon,
   UsersIcon,
 } from "@renderer/components/ui/icons";
@@ -111,9 +110,6 @@ const WholesaleMonitoringPage = lazy(
 );
 const FinancePage = lazy(
   () => import("@renderer/components/features/wholesale/finance/FinancePage"),
-);
-const WholesaleReportsPage = lazy(
-  () => import("@renderer/components/features/wholesale/reports/ReportsPage"),
 );
 const WholesaleMasterDataPage = lazy(
   () => import("@renderer/components/features/wholesale/masterData/MasterDataPage"),
@@ -160,7 +156,6 @@ type Section =
   | "stock"
   | "monitoring"
   | "finance"
-  | "reports"
   | "masterData"
   | "wholesale"
   | "settings"
@@ -209,8 +204,7 @@ const RETAIL_NAV_ITEMS: NavItem[] = [
 // account still has somewhere to land and the tab doesn't disappear from development's view.
 // Ordered the way the work actually runs: an order comes in, a voucher goes to the
 // factory, the goods ship, arrive at the gate, land on the shelf, and are paid for.
-// Reports sits with Finance at the end because it is a screen you read, not one you
-// work in, and Master Data last because it is set up once and rarely touched.
+// Master Data goes last because it is set up once and rarely touched.
 const WHOLESALE_NAV_ITEMS: NavItem[] = [
   { id: "monitoring", label: "Dashboard", icon: <DashboardIcon /> },
   {
@@ -229,7 +223,6 @@ const WHOLESALE_NAV_ITEMS: NavItem[] = [
   { id: "receiving", label: "Receiving", icon: <ReceivingIcon /> },
   { id: "stock", label: "Inventory", icon: <InventoryIcon /> },
   { id: "finance", label: "Finance", icon: <DollarIcon /> },
-  { id: "reports", label: "Reports", icon: <ReportsIcon /> },
   {
     id: "masterData",
     label: "Master Data",
@@ -237,11 +230,6 @@ const WHOLESALE_NAV_ITEMS: NavItem[] = [
     icon: <MasterDataIcon />,
   },
 ];
-
-// Reports stays out of the left navigation (its route still works) until that screen is
-// ready to be part of the daily workflow. The Dashboard is shown: it carries the
-// "export all wholesale data" download.
-const HIDDEN_WHOLESALE_NAV_IDS = new Set(["reports"]);
 
 // Retail accounts are scoped strictly to data import & import history.
 const RETAIL_ROLE_NAV_ITEMS: NavItem[] = [
@@ -305,7 +293,6 @@ const SECTION_TITLES: Record<Section, string> = {
   stock: "Inventory",
   monitoring: "Dashboard",
   finance: "Finance",
-  reports: "Reports",
   masterData: "Master data",
   wholesale: "Wholesale",
   settings: "Settings",
@@ -662,11 +649,6 @@ function App(): React.JSX.Element {
         return RETAIL_ROLE_NAV_ITEMS;
       }
       const items = WORKSPACE_NAV_ITEMS[effectiveWorkspace]
-        .filter(
-          (item) =>
-            effectiveWorkspace !== "wholesale" ||
-            !HIDDEN_WHOLESALE_NAV_IDS.has(item.id),
-        )
         .map((item) => {
           if (item.id === "businessAlerts")
             return { ...item, badgeCount: businessAlertCount };
@@ -1239,6 +1221,7 @@ function App(): React.JSX.Element {
               {section === "monitoring" && (
                 <WholesaleMonitoringPage
                   session={session}
+                  profile={profile}
                   onOpenShipment={(shipmentId) => {
                     setShipmentTarget(shipmentId);
                     handleSectionChange("delivery");
@@ -1274,7 +1257,6 @@ function App(): React.JSX.Element {
                   }}
                 />
               )}
-              {section === "reports" && <WholesaleReportsPage session={session} />}
               {section === "masterData" && (
                 <WholesaleMasterDataPage session={session} />
               )}

@@ -15,6 +15,7 @@ import {
 } from "@renderer/components/ui/Table";
 import { DashboardIcon, ScaleIcon } from "@renderer/components/ui/icons";
 import { CopyButton } from "@renderer/components/ui/CopyButton";
+import { InfoLabel } from "@renderer/components/ui/InfoTooltip";
 import {
   RefreshingHint,
   ChartViewToggle,
@@ -79,12 +80,36 @@ function TopProfitProductsTable({
       <Thead>
         <Tr>
           <Th>#</Th>
-          <Th>Stock Code</Th>
-          <Th>Description</Th>
-          <Th className="text-right">Net Revenue</Th>
-          <Th className="text-right">Est. Cost</Th>
-          <Th className="text-right">Est. Margin</Th>
-          <Th className="text-right">Margin %</Th>
+          <Th>
+            <InfoLabel description="Unique code used to identify the product.">
+              Stock Code
+            </InfoLabel>
+          </Th>
+          <Th>
+            <InfoLabel description="Name of the product.">
+              Description
+            </InfoLabel>
+          </Th>
+          <Th className="text-right">
+            <InfoLabel description="Sales revenue after discounts and returns.">
+              Net Revenue
+            </InfoLabel>
+          </Th>
+          <Th className="text-right">
+            <InfoLabel description="Estimated cost of the units sold.">
+              Est. Cost
+            </InfoLabel>
+          </Th>
+          <Th className="text-right">
+            <InfoLabel description="Estimated revenue remaining after product cost.">
+              Est. Margin
+            </InfoLabel>
+          </Th>
+          <Th className="text-right">
+            <InfoLabel description="Estimated margin as a percentage of net revenue.">
+              Margin %
+            </InfoLabel>
+          </Th>
         </Tr>
       </Thead>
       <Tbody>
@@ -93,7 +118,9 @@ function TopProfitProductsTable({
             <Td className="text-text-muted">{i + 1}</Td>
             <Td>
               <div className="flex items-center gap-1 whitespace-nowrap">
-                <span className="font-mono text-xs font-semibold text-brand">{product.stock_code}</span>
+                <span className="font-mono text-xs font-semibold text-brand">
+                  {product.stock_code}
+                </span>
                 <CopyButton value={product.stock_code} what="stock code" />
               </div>
             </Td>
@@ -143,8 +170,12 @@ export function CostTab({
   const url = canLoad
     ? dashboardUrl("cost", branchId, { period, dateFrom, dateTo, month })
     : null;
-  const { data: fetched, isRefreshing, failed, reload } =
-    useUrlQuery<CostDashboardData>(url, session, "Cost dashboard");
+  const {
+    data: fetched,
+    isRefreshing,
+    failed,
+    reload,
+  } = useUrlQuery<CostDashboardData>(url, session, "Cost dashboard");
   const data = fetched ?? null;
 
   if (!canLoad) return <></>;
@@ -184,21 +215,39 @@ export function CostTab({
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
         <StatTile
           label="Estimated Cost of Goods Sold"
+          description="Estimated product cost for items sold in this period."
           value={formatMoney(data.estimated_cogs.value)}
           deltaPct={data.estimated_cogs.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
+          previousLabel={previousPeriodLabel(
+            period,
+            dateFrom,
+            dateTo,
+            "year_ago",
+          )}
         />
         <StatTile
           label="Estimated Gross Margin"
+          description="Estimated profit after product cost, as a share of net revenue."
           value={formatPercent(data.estimated_gross_margin_pct.value)}
           deltaPct={data.estimated_gross_margin_pct.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
+          previousLabel={previousPeriodLabel(
+            period,
+            dateFrom,
+            dateTo,
+            "year_ago",
+          )}
         />
         <StatTile
           label="Estimated Margin per Transaction"
+          description="Estimated gross margin divided by completed sales slips."
           value={formatMoney(data.estimated_margin_per_basket.value)}
           deltaPct={data.estimated_margin_per_basket.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
+          previousLabel={previousPeriodLabel(
+            period,
+            dateFrom,
+            dateTo,
+            "year_ago",
+          )}
         />
       </div>
 

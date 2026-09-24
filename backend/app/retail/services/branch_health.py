@@ -170,7 +170,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct_change",
                 0.5,
                 _GROWTH_BANDS,
-                definition="How much money the branch took in, against the same days last year.",
+                definition="Sales compared with the same days last year.",
                 calculation=lambda s: f"{_ks(s.net_revenue)} this period, against {_ks(s.previous_net_revenue)} last year.",
             ),
             SubMetric(
@@ -179,7 +179,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct_change",
                 0.3,
                 _GENTLE_GROWTH_BANDS,
-                definition="How much a customer spends in one transaction, against the same days last year.",
+                definition="Average spend per sale.",
                 calculation=lambda s: (
                     f"{_ks(s.avg_basket)} per transaction this period, against {_ks(s.previous_avg_basket)} last year."
                 ),
@@ -192,7 +192,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct_change",
                 0.2,
                 _GROWTH_BANDS,
-                definition="How many pairs the branch sold, against the same days last year.",
+                definition="Units sold compared with last year.",
                 calculation=lambda s: (
                     f"{s.quantity_sold:,.0f} pairs sold this period, against "
                     f"{s.previous_quantity_sold:,.0f} last year."
@@ -212,7 +212,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct",
                 1.0,
                 ((0.0, 0.0), (10.0, 40.0), (20.0, 80.0), (30.0, 100.0)),
-                definition="The share of each sale the branch keeps after paying for the goods it sold.",
+                definition="Revenue left after product cost.",
                 calculation=lambda s: (
                     f"{_ks(s.net_revenue - s.estimated_cogs)} kept out of {_ks(s.net_revenue)} sold "
                     f"(goods cost {_ks(s.estimated_cogs)})."
@@ -234,10 +234,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct",
                 0.4,
                 ((20.0, 100.0), (35.0, 85.0), (50.0, 60.0), (65.0, 30.0), (80.0, 0.0)),
-                definition=(
-                    f"How much of the shop is products that are still on the shelf but have not sold "
-                    f"once in {DEAD_STOCK_WINDOW_DAYS} days."
-                ),
+                definition=f"Stock with no sale in {DEAD_STOCK_WINDOW_DAYS} days.",
                 calculation=lambda s: (
                     f"{s.dead_stock_count:,} of {s.sku_count:,} products with stock."
                     if s.sku_count
@@ -250,10 +247,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct",
                 0.35,
                 ((0.0, 100.0), (2.0, 85.0), (5.0, 60.0), (10.0, 20.0), (20.0, 0.0)),
-                definition=(
-                    f"How much of the shop is about to run out — under {LOW_DAYS_OF_STOCK} days of stock "
-                    "left at how fast it has been selling."
-                ),
+                definition="Products likely to run out soon.",
                 calculation=lambda s: (
                     f"{s.critical_count + s.low_count:,} of {s.sku_count:,} products "
                     f"({s.critical_count:,} critical, {s.low_count:,} low)."
@@ -267,11 +261,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct",
                 0.25,
                 ((0.0, 100.0), (10.0, 80.0), (25.0, 50.0), (40.0, 20.0), (60.0, 0.0)),
-                definition=(
-                    f"How much of the shop has been on the shelf for more than {AGED_STOCK_DAYS} days "
-                    "since it was last bought. Products with no purchase on file are left out, "
-                    "since their age is unknown."
-                ),
+                definition=f"Stock held for more than {AGED_STOCK_DAYS} days.",
                 calculation=lambda s: (
                     f"{s.aged_stock_count:,} of {s.aged_stock_judged_count:,} products with stock "
                     "and a purchase record."
@@ -299,7 +289,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct_change",
                 0.5,
                 _GROWTH_BANDS,
-                definition="How many transactions the branch made, against the same days last year.",
+                definition="Sales slips compared with last year.",
                 calculation=lambda s: (
                     f"{s.transaction_count:,} transactions this period, against "
                     f"{s.previous_transaction_count:,} last year."
@@ -311,7 +301,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "pct",
                 0.5,
                 ((30.0, 0.0), (45.0, 40.0), (60.0, 70.0), (75.0, 85.0), (85.0, 100.0)),
-                definition="Share of store visits that resulted in a sale, on days zero-selling was tracked.",
+                definition="Visits that became a sale.",
                 calculation=lambda s: (
                     f"{s.conversion_sales_slips:,} sales ÷ ({s.conversion_sales_slips:,} sales + "
                     f"{s.conversion_zero_count:,} walkouts) over {s.conversion_days_recorded:,} tracked days."
@@ -333,7 +323,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "rate",
                 0.7,
                 ((0.0, 100.0), (1.0, 80.0), (3.0, 50.0), (10.0, 10.0), (20.0, 0.0)),
-                definition="How many of the imported records the Warning page found something wrong with.",
+                definition="Import issues per 100 records.",
                 calculation=lambda s: (
                     f"{s.data_issue_count:,} problems across {s.records_checked:,} sale, purchase and "
                     "stock records."
@@ -347,10 +337,7 @@ DIMENSIONS: tuple[Dimension, ...] = (
                 "count",
                 0.3,
                 ((0.0, 100.0), (1.0, 70.0), (5.0, 30.0), (20.0, 0.0)),
-                definition=(
-                    "Products whose counted stock doesn't match what it should be "
-                    "(last count + purchases − sales)."
-                ),
+                definition="Products where the stock count does not add up.",
                 calculation=lambda s: f"{s.critical_data_issue_count:,} products don't add up.",
             ),
         ),

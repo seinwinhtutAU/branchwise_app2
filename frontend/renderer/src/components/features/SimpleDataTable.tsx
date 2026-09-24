@@ -43,11 +43,15 @@ import {
   type ExportOptions,
 } from "@renderer/components/features/ExportDateRangeDialog";
 import { CopyButton } from "@renderer/components/ui/CopyButton";
+import { InfoLabel } from "@renderer/components/ui/InfoTooltip";
 import { useStickyAbove } from "@renderer/lib/useStickyAbove";
+import { getColumnDescription } from "@renderer/lib/columnDescriptions";
 
 export interface DataTableColumn<T> {
   key: keyof T;
   label: string;
+  /** Short plain-language explanation shown from the column's info icon. */
+  description?: string;
   align?: "right";
   format?: (value: T[keyof T]) => string;
   /** If true, renders the cell value in a monospace font with a copy-to-clipboard button. */
@@ -211,7 +215,9 @@ export function SimpleDataTable<T extends object>({
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState<"csv" | "excel" | null>(null);
-  const [exportFormat, setExportFormat] = useState<"csv" | "excel" | null>(null);
+  const [exportFormat, setExportFormat] = useState<"csv" | "excel" | null>(
+    null,
+  );
 
   const dateRangeFilter = filters?.find((f) => f.type === "dateRange");
   const dateServerParam =
@@ -239,8 +245,6 @@ export function SimpleDataTable<T extends object>({
       ),
     [selectFilters],
   );
-
-
 
   // Settled (debounced) versions of the free-typed filters — see useSettled. Only
   // matters for serverPaged, where these feed the fetch URL; harmless to compute either
@@ -295,9 +299,12 @@ export function SimpleDataTable<T extends object>({
     const query = params.toString();
     if (query) url += `?${query}`;
   }
-  const { data: fetched, isRefreshing, failed, reload } = useUrlQuery<
-    T[] | ServerPage<T>
-  >(url, session, title.toLowerCase());
+  const {
+    data: fetched,
+    isRefreshing,
+    failed,
+    reload,
+  } = useUrlQuery<T[] | ServerPage<T>>(url, session, title.toLowerCase());
   const data = fetched ?? null;
   const rows =
     data === null
@@ -324,14 +331,14 @@ export function SimpleDataTable<T extends object>({
     branchFilterProp !== undefined
       ? branchFilterProp
       : branchFilter
-        ? selectValues[String(branchFilter.key)] ?? ""
+        ? (selectValues[String(branchFilter.key)] ?? "")
         : "";
 
   const hasExportDialog = Boolean(
     dateServerParam ||
-      (branchOptions && branchOptions.length > 0) ||
-      branchFilterProp !== undefined ||
-      branchFilter,
+    (branchOptions && branchOptions.length > 0) ||
+    branchFilterProp !== undefined ||
+    branchFilter,
   );
 
   // Resets to page 1 whenever a settled filter changes — otherwise narrowing the result
@@ -395,7 +402,16 @@ export function SimpleDataTable<T extends object>({
         return inDateRange(row[filter.key], { from: dateFrom, to: dateTo });
       }),
     );
-  }, [rows, filters, search, selectValues, dateFrom, dateTo, serverPaged, branchFilterProp]);
+  }, [
+    rows,
+    filters,
+    search,
+    selectValues,
+    dateFrom,
+    dateTo,
+    serverPaged,
+    branchFilterProp,
+  ]);
 
   // Column defs, built once from the caller's plain DataTableColumn list — `meta.align`
   // is what the header/cell renderers below read instead of re-deriving it from `col`.
@@ -404,20 +420,34 @@ export function SimpleDataTable<T extends object>({
       columns.map((col) => ({
         id: String(col.key),
         accessorFn: (row: T) => row[col.key],
-        header: col.label,
+        header: () => (
+          <InfoLabel
+            description={
+              col.description ?? getColumnDescription(col.key, col.label)
+            }
+          >
+            {col.label}
+          </InfoLabel>
+        ),
         cell: col.copyable
           ? (info) => {
               const val = info.getValue();
-              const str = val === null || val === undefined || val === "" ? "" : String(val);
+              const str =
+                val === null || val === undefined || val === ""
+                  ? ""
+                  : String(val);
               if (!str) return <span className="text-text-muted">—</span>;
               return (
                 <div className="flex items-center gap-1 whitespace-nowrap">
-                  <span className="font-mono text-xs font-semibold text-brand">{str}</span>
+                  <span className="font-mono text-xs font-semibold text-brand">
+                    {str}
+                  </span>
                   <CopyButton value={str} what={col.label.toLowerCase()} />
                 </div>
               );
             }
-          : (info) => (col.format ?? defaultFormat)(info.getValue() as T[keyof T]),
+          : (info) =>
+              (col.format ?? defaultFormat)(info.getValue() as T[keyof T]),
         meta: { align: col.align },
       })),
     [columns],
@@ -496,7 +526,8 @@ export function SimpleDataTable<T extends object>({
     let result = allRows;
     if (exportOptions?.branch) {
       result = result.filter((r) => {
-        if (branchFilter) return String(r[branchFilter.key]) === exportOptions.branch;
+        if (branchFilter)
+          return String(r[branchFilter.key]) === exportOptions.branch;
         const rowVal = String(
           (r as Record<string, unknown>)["Branch"] ??
             (r as Record<string, unknown>)["branch"] ??
@@ -621,8 +652,8 @@ export function SimpleDataTable<T extends object>({
           hasExportDialog
             ? rows === null
             : serverPaged
-            ? totalItems === 0
-            : !filteredRows || filteredRows.length === 0
+              ? totalItems === 0
+              : !filteredRows || filteredRows.length === 0
         }
         loading={exporting === "csv"}
       >
@@ -633,29 +664,30 @@ export function SimpleDataTable<T extends object>({
         variant="secondary"
         size="sm"
         onClick={() =>
-          hasExportDialog ? setExportFormat("excel") : void handleDownloadExcel()
+          hasExportDialog
+            ? setExportFormat("excel")
+            : void handleDownloadExcel()
         }
         disabled={
           hasExportDialog
             ? rows === null
             : serverPaged
-            ? totalItems === 0
-            : !filteredRows || filteredRows.length === 0
+              ? totalItems === 0
+              : !filteredRows || filteredRows.length === 0
         }
         loading={exporting === "excel"}
       >
         <DownloadIcon className="w-4 h-4" />
         Excel
       </Button>
-      <RefreshButton
-        onClick={reload}
-        refreshing={isRefreshing}
-      />
+      <RefreshButton onClick={reload} refreshing={isRefreshing} />
     </div>
   );
 
   const hasTitle = Boolean(showHeading && showTitle && title);
-  const hasAnyFilter = Boolean(searchFilter || selectFilters.length > 0 || dateRangeFilter);
+  const hasAnyFilter = Boolean(
+    searchFilter || selectFilters.length > 0 || dateRangeFilter,
+  );
 
   const filterControls = (
     <>
@@ -674,8 +706,7 @@ export function SimpleDataTable<T extends object>({
 
       {selectFilters.map((filter) => {
         const options =
-          filter.options ??
-          (rows ? distinctValues(rows, filter.key) : []);
+          filter.options ?? (rows ? distinctValues(rows, filter.key) : []);
         if (options.length <= 1 && !filter.options) return null;
         const val = selectValues[String(filter.key)] ?? "";
         const pluralLabel =
@@ -749,7 +780,9 @@ export function SimpleDataTable<T extends object>({
       {exportFormat && hasExportDialog && (
         <ExportDateRangeDialog
           session={session}
-          boundsEndpoint={dateServerParam ? `${endpoint}/date-bounds` : undefined}
+          boundsEndpoint={
+            dateServerParam ? `${endpoint}/date-bounds` : undefined
+          }
           format={exportFormat}
           title={title}
           branchOptions={branchOptions}
@@ -904,7 +937,10 @@ export function SimpleDataTable<T extends object>({
                             "text-right tabular-nums",
                         )}
                       >
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext(),
+                        )}
                       </Td>
                     ))}
                   </Tr>

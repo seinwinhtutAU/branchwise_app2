@@ -134,6 +134,11 @@ for index, voucher_date in enumerate(voucher_days):
         left_yangon = at_yangon + timedelta(days=rnd.randint(0, 2))
         at_gate = left_yangon + timedelta(days=rnd.randint(2, 4))
         carrier = rnd.choice(CARRIERS)
+        if index == 4:
+            # One shipment sits at the Yangon carrier and never goes on, so the
+            # Dashboard has a stuck shipment to flag.
+            left_yangon = TODAY + timedelta(days=30)
+            at_gate = left_yangon + timedelta(days=3)
 
         legs = []
         if at_yangon <= TODAY:
@@ -239,7 +244,9 @@ order_days = sorted(rnd.choice(list(daterange(START + timedelta(days=2), TODAY -
 for order_date in order_days:
     customer = rnd.choice(list(CUSTOMERS))
     phone, address, gate = CUSTOMERS[customer]
-    codes = [c for c, p in PRODUCTS.items() if gate in p[5]]
+    # The beach slipper went out of fashion: nobody orders it after early August, so its
+    # leftover stock is what the Dashboard's "not selling" card is for.
+    codes = [c for c, p in PRODUCTS.items() if gate in p[5] and not (c == "D4002" and order_date > date(2026, 8, 5))]
     lines = []
     for code in rnd.sample(codes, k=rnd.choice([1, 1, 2])):
         description, group, supplier, colours, buying, _ = PRODUCTS[code]
@@ -259,7 +266,7 @@ for order_date in order_days:
         entry["cancelled"] = True
     orders.append(entry)
     sim_orders.append({"entry": entry, "gate": gate, "date": order_date, "cancelled": cancelled,
-                       "wait": rnd.randint(0, 2), "remaining": {(l["stock_code"], c): n for l in lines for c, n in l["_parts"].items()}})
+                       "wait": rnd.randint(0, 2), "hold": rnd.random() < 0.5, "remaining": {(l["stock_code"], c): n for l in lines for c, n in l["_parts"].items()}})
 
 stock: dict[tuple[str, str, str], int] = defaultdict(int)
 opens_by_day: dict[date, list] = defaultdict(list)
@@ -274,20 +281,30 @@ for today in daterange(START, TODAY):
     for order in sim_orders:
         if order["cancelled"] or today < order["date"] + timedelta(days=order["wait"]):
             continue
-        delivered_today: dict[str, dict[str, int]] = defaultdict(dict)
+        if order["hold"] and today > TODAY - timedelta(days=3):
+            continue  # stock is in, the truck just has not gone out yet
+        # The app shares stock out by product and colour across every gate, so a delivery
+        # takes from the customer's own gate first and then from any other that has it.
+        delivered_today: dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))
         for (code, colour), remaining in list(order["remaining"].items()):
-            available = stock[(order["gate"], code, colour)]
+            gates = [order["gate"]] + [g for g in (MAW, MAG, MDY) if g != order["gate"]]
+            available = sum(stock[(g, code, colour)] for g in gates)
             take = min(remaining, available)
             if take <= 0 or (take < remaining and rnd.random() > 0.3):
                 continue
-            stock[(order["gate"], code, colour)] -= take
             order["remaining"][(code, colour)] -= take
-            delivered_today[code][colour] = take
-        for code, parts in delivered_today.items():
+            for g in gates:
+                part = min(take, stock[(g, code, colour)])
+                if part <= 0:
+                    continue
+                stock[(g, code, colour)] -= part
+                delivered_today[(code, g)][colour] += part
+                take -= part
+        for (code, g), parts in delivered_today.items():
             outgoing.append({
-                "seed_key": f"seed:delivery:{order['entry']['order_no']}:{code}:{today.isoformat()}",
+                "seed_key": f"seed:delivery:{order['entry']['order_no']}:{code}:{g}:{today.isoformat()}",
                 "order_no": order["entry"]["order_no"], "stock_code": code, "color_qty": colour_string(parts),
-                "qty": sum(parts.values()), "unit": "set", "location": order["gate"], "date": today.isoformat(),
+                "qty": sum(parts.values()), "unit": "set", "location": g, "date": today.isoformat(),
             })
             last_delivery[order["entry"]["order_no"]] = today
 

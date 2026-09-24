@@ -4,6 +4,7 @@ import { useUrlQuery } from "@renderer/lib/queryClient";
 import { Button } from "@renderer/components/ui/Button";
 import { Skeleton } from "@renderer/components/ui/Skeleton";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
+import { InfoLabel } from "@renderer/components/ui/InfoTooltip";
 import { DashboardIcon } from "@renderer/components/ui/icons";
 import { cn } from "@renderer/lib/utils";
 import { DecisionsCard } from "./DecisionsCard";
@@ -25,7 +26,9 @@ interface Props {
   dateTo: string;
   month: string;
   canLoad: boolean;
-  onOpenDashboard?: (tab: "revenue" | "cost" | "inventory" | "customer") => void;
+  onOpenDashboard?: (
+    tab: "revenue" | "cost" | "inventory" | "customer",
+  ) => void;
   onViewBusinessAlerts?: () => void;
 }
 
@@ -185,11 +188,16 @@ function HourlyDemandBarChart({
       <div className="h-4 text-[11px] text-text-secondary">
         {hovered ? (
           <span>
-            <strong className="text-text-primary">{hovered.hour}:00</strong> — {hovered.count} {hovered.count === 1 ? "transaction" : "transactions"}
-            {hovered.net_revenue > 0 && ` (${formatCompactMmk(hovered.net_revenue)} MMK)`}
+            <strong className="text-text-primary">{hovered.hour}:00</strong> —{" "}
+            {hovered.count}{" "}
+            {hovered.count === 1 ? "transaction" : "transactions"}
+            {hovered.net_revenue > 0 &&
+              ` (${formatCompactMmk(hovered.net_revenue)} MMK)`}
           </span>
         ) : (
-          <span className="text-text-muted">Hover a bar to see transaction count.</span>
+          <span className="text-text-muted">
+            Hover a bar to see transaction count.
+          </span>
         )}
       </div>
 
@@ -210,9 +218,12 @@ function HourlyDemandBarChart({
         />
 
         {hourly.map((item, i) => {
-          const barHeight = maxCount > 0 && item.count > 0
-            ? Math.max(6, (item.count / maxCount) * (chartHeight - 8))
-            : (item.count > 0 ? 6 : 2);
+          const barHeight =
+            maxCount > 0 && item.count > 0
+              ? Math.max(6, (item.count / maxCount) * (chartHeight - 8))
+              : item.count > 0
+                ? 6
+                : 2;
           const x = i * slotWidth + (slotWidth - barWidth) / 2;
           const y = chartHeight - barHeight;
           const isHovered = hoverIndex === i;
@@ -246,7 +257,9 @@ function HourlyDemandBarChart({
                 fill="transparent"
                 className="cursor-pointer"
                 onMouseEnter={() => setHoverIndex(i)}
-                onMouseLeave={() => setHoverIndex((curr) => (curr === i ? null : curr))}
+                onMouseLeave={() =>
+                  setHoverIndex((curr) => (curr === i ? null : curr))
+                }
               />
 
               {/* X-axis hour label */}
@@ -256,7 +269,7 @@ function HourlyDemandBarChart({
                 textAnchor="middle"
                 className={cn(
                   "text-[10px] font-medium select-none pointer-events-none",
-                  isHovered ? "fill-brand font-bold" : "fill-text-muted"
+                  isHovered ? "fill-brand font-bold" : "fill-text-muted",
                 )}
               >
                 {item.hour}
@@ -284,8 +297,12 @@ export function SummaryTab({
     ? dashboardUrl("summary", branchId, { period, dateFrom, dateTo, month })
     : null;
 
-  const { data: fetched, isRefreshing, failed, reload } =
-    useUrlQuery<SummaryDashboardData>(url, session, "Summary dashboard");
+  const {
+    data: fetched,
+    isRefreshing,
+    failed,
+    reload,
+  } = useUrlQuery<SummaryDashboardData>(url, session, "Summary dashboard");
   const data = fetched ?? null;
 
   if (!canLoad) {
@@ -336,8 +353,17 @@ export function SummaryTab({
     );
   }
 
-  const { kpis, category_revenue, inventory_condition, customer_demand, top_products } = data;
-  const maxCategoryRevenue = Math.max(...category_revenue.map((c) => c.net_revenue), 1);
+  const {
+    kpis,
+    category_revenue,
+    inventory_condition,
+    customer_demand,
+    top_products,
+  } = data;
+  const maxCategoryRevenue = Math.max(
+    ...category_revenue.map((c) => c.net_revenue),
+    1,
+  );
 
   // Derive Period description for Net Revenue card subtitle
   let periodSubtitle = "sales";
@@ -353,7 +379,6 @@ export function SummaryTab({
 
       {/* Main Executive Container */}
       <div className="p-3.5 sm:p-4.5 rounded-xl bg-bg-base border border-border shadow-xs space-y-3">
-        
         {/* Header Row */}
         <div className="flex flex-wrap items-center justify-between gap-3 pb-2 border-b border-border">
           <div className="flex items-baseline gap-2">
@@ -385,12 +410,17 @@ export function SummaryTab({
           {/* 1. Net Revenue */}
           <DrilldownCard
             label="Revenue dashboard"
-            onClick={onOpenDashboard ? () => onOpenDashboard("revenue") : undefined}
+            onClick={
+              onOpenDashboard ? () => onOpenDashboard("revenue") : undefined
+            }
             className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between"
           >
-            <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+            <InfoLabel
+              className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider"
+              description="Total sales after discounts and returns."
+            >
               Net Revenue
-            </span>
+            </InfoLabel>
             <div className="my-0.5">
               <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
                 {formatCompactMmk(kpis.net_revenue)}
@@ -404,12 +434,17 @@ export function SummaryTab({
           {/* 2. Gross Profit */}
           <DrilldownCard
             label="Cost dashboard"
-            onClick={onOpenDashboard ? () => onOpenDashboard("cost") : undefined}
+            onClick={
+              onOpenDashboard ? () => onOpenDashboard("cost") : undefined
+            }
             className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between"
           >
-            <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+            <InfoLabel
+              className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider"
+              description="Net revenue less estimated product cost, before operating costs."
+            >
               Gross Profit
-            </span>
+            </InfoLabel>
             <div className="my-0.5">
               <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
                 {formatCompactMmk(kpis.gross_profit)}
@@ -423,12 +458,17 @@ export function SummaryTab({
           {/* 3. Profit Margin */}
           <DrilldownCard
             label="Cost dashboard"
-            onClick={onOpenDashboard ? () => onOpenDashboard("cost") : undefined}
+            onClick={
+              onOpenDashboard ? () => onOpenDashboard("cost") : undefined
+            }
             className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between"
           >
-            <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+            <InfoLabel
+              className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider"
+              description="Gross profit as a percentage of net revenue."
+            >
               Profit Margin
-            </span>
+            </InfoLabel>
             <div className="my-0.5">
               <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
                 {kpis.profit_margin_pct.toFixed(1)}%
@@ -442,12 +482,17 @@ export function SummaryTab({
           {/* 4. Transactions */}
           <DrilldownCard
             label="Customer dashboard"
-            onClick={onOpenDashboard ? () => onOpenDashboard("customer") : undefined}
+            onClick={
+              onOpenDashboard ? () => onOpenDashboard("customer") : undefined
+            }
             className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between"
           >
-            <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+            <InfoLabel
+              className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider"
+              description="Number of completed sales slips."
+            >
               Transactions
-            </span>
+            </InfoLabel>
             <div className="my-0.5">
               <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
                 {kpis.transaction_count.toLocaleString()}
@@ -461,12 +506,17 @@ export function SummaryTab({
           {/* 5. Quantity Sold */}
           <DrilldownCard
             label="Revenue dashboard"
-            onClick={onOpenDashboard ? () => onOpenDashboard("revenue") : undefined}
+            onClick={
+              onOpenDashboard ? () => onOpenDashboard("revenue") : undefined
+            }
             className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between"
           >
-            <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+            <InfoLabel
+              className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider"
+              description="Total units sold in the selected period."
+            >
               Quantity Sold
-            </span>
+            </InfoLabel>
             <div className="my-0.5">
               <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
                 {kpis.quantity_sold.toLocaleString()}
@@ -480,19 +530,25 @@ export function SummaryTab({
           {/* 6. Dead Stock */}
           <DrilldownCard
             label="Inventory dashboard"
-            onClick={onOpenDashboard ? () => onOpenDashboard("inventory") : undefined}
+            onClick={
+              onOpenDashboard ? () => onOpenDashboard("inventory") : undefined
+            }
             className="bg-bg-subtle p-3 rounded-lg border border-border flex flex-col justify-between"
           >
-            <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+            <InfoLabel
+              className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider"
+              description="Products with stock on hand but no sale in the last 90 days."
+            >
               Dead Stock
-            </span>
+            </InfoLabel>
             <div className="my-0.5">
               <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
                 {kpis.dead_stock_count.toLocaleString()}
               </span>
             </div>
             <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
-              {kpis.dead_stock_pct.toFixed(1)}% of {kpis.total_products_count.toLocaleString()} items
+              {kpis.dead_stock_pct.toFixed(1)}% of{" "}
+              {kpis.total_products_count.toLocaleString()} items
             </span>
           </DrilldownCard>
         </div>
@@ -502,7 +558,9 @@ export function SummaryTab({
           {/* Card 1: Revenue by product category */}
           <DrilldownCard
             label="Revenue dashboard"
-            onClick={onOpenDashboard ? () => onOpenDashboard("revenue") : undefined}
+            onClick={
+              onOpenDashboard ? () => onOpenDashboard("revenue") : undefined
+            }
             className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border flex flex-col justify-between"
           >
             <div>
@@ -520,9 +578,13 @@ export function SummaryTab({
               ) : (
                 <div className="flex flex-col gap-2 py-0.5">
                   {category_revenue.slice(0, 6).map((cat) => {
-                    const fillPct = (cat.net_revenue / maxCategoryRevenue) * 100;
+                    const fillPct =
+                      (cat.net_revenue / maxCategoryRevenue) * 100;
                     return (
-                      <div key={cat.category} className="flex items-center gap-2.5">
+                      <div
+                        key={cat.category}
+                        className="flex items-center gap-2.5"
+                      >
                         <span className="w-14 shrink-0 text-xs font-medium text-text-secondary truncate">
                           {cat.category}
                         </span>
@@ -546,7 +608,9 @@ export function SummaryTab({
           {/* Card 2: Inventory condition */}
           <DrilldownCard
             label="Inventory dashboard"
-            onClick={onOpenDashboard ? () => onOpenDashboard("inventory") : undefined}
+            onClick={
+              onOpenDashboard ? () => onOpenDashboard("inventory") : undefined
+            }
             className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border flex flex-col justify-between gap-2.5"
           >
             <div>
@@ -574,7 +638,9 @@ export function SummaryTab({
           {/* Card 3: Customer demand by hour */}
           <DrilldownCard
             label="Customer dashboard"
-            onClick={onOpenDashboard ? () => onOpenDashboard("customer") : undefined}
+            onClick={
+              onOpenDashboard ? () => onOpenDashboard("customer") : undefined
+            }
             className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border flex flex-col justify-between gap-2.5"
           >
             <div>
@@ -605,7 +671,9 @@ export function SummaryTab({
           {/* Card 1: Top products by revenue */}
           <DrilldownCard
             label="Revenue dashboard"
-            onClick={onOpenDashboard ? () => onOpenDashboard("revenue") : undefined}
+            onClick={
+              onOpenDashboard ? () => onOpenDashboard("revenue") : undefined
+            }
             className="bg-bg-subtle p-3.5 sm:p-4 rounded-lg border border-border"
           >
             <h2 className="text-sm font-semibold text-text-primary mb-2.5">
@@ -624,7 +692,9 @@ export function SummaryTab({
                     className="py-1.5 first:pt-0 last:pb-0 flex items-center justify-between gap-2.5 text-xs sm:text-sm"
                   >
                     <div className="truncate font-medium text-text-secondary">
-                      <span className="font-mono text-xs font-semibold text-brand mr-1.5">{product.stock_code}</span>
+                      <span className="font-mono text-xs font-semibold text-brand mr-1.5">
+                        {product.stock_code}
+                      </span>
                       {product.description && (
                         <span className="text-text-primary">
                           · {product.description}
@@ -641,9 +711,12 @@ export function SummaryTab({
           </DrilldownCard>
 
           {/* Card 2: Recommended decisions */}
-          <DecisionsCard session={session} branchId={branchId} onViewAlerts={onViewBusinessAlerts} />
+          <DecisionsCard
+            session={session}
+            branchId={branchId}
+            onViewAlerts={onViewBusinessAlerts}
+          />
         </div>
-
       </div>
     </div>
   );

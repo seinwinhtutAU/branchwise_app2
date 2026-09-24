@@ -11,4 +11,3 @@ export * from "../receiving/receivingsApi";
 export * from "../vouchers/supplierVouchersApi";
 export * from "../orders/customerOrdersApi";
 export * from "../inventory/inventoryApi";
-export * from "../reports/reportsApi";

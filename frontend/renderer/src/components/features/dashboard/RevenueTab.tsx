@@ -15,6 +15,7 @@ import {
 } from "@renderer/components/ui/Table";
 import { DashboardIcon, SalesIcon } from "@renderer/components/ui/icons";
 import { CopyButton } from "@renderer/components/ui/CopyButton";
+import { InfoLabel } from "@renderer/components/ui/InfoTooltip";
 import {
   RefreshingHint,
   ChartViewToggle,
@@ -81,11 +82,31 @@ function TopProductsTable({
       <Thead>
         <Tr>
           <Th>#</Th>
-          <Th>Stock Code</Th>
-          <Th>Description</Th>
-          <Th className="text-right">Qty</Th>
-          <Th className="text-right">Selling Price</Th>
-          <Th className="text-right">Net Revenue</Th>
+          <Th>
+            <InfoLabel description="Unique code used to identify the product.">
+              Stock Code
+            </InfoLabel>
+          </Th>
+          <Th>
+            <InfoLabel description="Name of the product.">
+              Description
+            </InfoLabel>
+          </Th>
+          <Th className="text-right">
+            <InfoLabel description="Total units sold in the selected period.">
+              Qty
+            </InfoLabel>
+          </Th>
+          <Th className="text-right">
+            <InfoLabel description="Average selling price per unit in the selected period.">
+              Selling Price
+            </InfoLabel>
+          </Th>
+          <Th className="text-right">
+            <InfoLabel description="Sales revenue after discounts and returns.">
+              Net Revenue
+            </InfoLabel>
+          </Th>
         </Tr>
       </Thead>
       <Tbody>
@@ -94,7 +115,9 @@ function TopProductsTable({
             <Td className="text-text-muted">{i + 1}</Td>
             <Td>
               <div className="flex items-center gap-1 whitespace-nowrap">
-                <span className="font-mono text-xs font-semibold text-brand">{product.stock_code}</span>
+                <span className="font-mono text-xs font-semibold text-brand">
+                  {product.stock_code}
+                </span>
                 <CopyButton value={product.stock_code} what="stock code" />
               </div>
             </Td>
@@ -143,8 +166,12 @@ export function RevenueTab({
   const url = canLoad
     ? dashboardUrl("revenue", branchId, { period, dateFrom, dateTo, month })
     : null;
-  const { data: fetched, isRefreshing, failed, reload } =
-    useUrlQuery<RevenueDashboardData>(url, session, "Revenue dashboard");
+  const {
+    data: fetched,
+    isRefreshing,
+    failed,
+    reload,
+  } = useUrlQuery<RevenueDashboardData>(url, session, "Revenue dashboard");
   const data = fetched ?? null;
 
   if (!canLoad) return <></>;
@@ -184,27 +211,51 @@ export function RevenueTab({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
         <StatTile
           label="Net Revenue"
+          description="Total sales after discounts and returns."
           value={formatMoney(data.net_revenue.value)}
           deltaPct={data.net_revenue.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
+          previousLabel={previousPeriodLabel(
+            period,
+            dateFrom,
+            dateTo,
+            "year_ago",
+          )}
         />
         <StatTile
           label="Transactions"
+          description="Number of completed sales slips."
           value={formatCount(data.transaction_count.value)}
           deltaPct={data.transaction_count.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
+          previousLabel={previousPeriodLabel(
+            period,
+            dateFrom,
+            dateTo,
+            "year_ago",
+          )}
         />
         <StatTile
           label="Average Sale Value"
+          description="Net revenue divided by completed sales slips."
           value={formatMoney(data.avg_basket.value)}
           deltaPct={data.avg_basket.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
+          previousLabel={previousPeriodLabel(
+            period,
+            dateFrom,
+            dateTo,
+            "year_ago",
+          )}
         />
         <StatTile
           label="Quantity Sold"
+          description="Total units sold in the selected period."
           value={formatCount(data.quantity_sold.value)}
           deltaPct={data.quantity_sold.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
+          previousLabel={previousPeriodLabel(
+            period,
+            dateFrom,
+            dateTo,
+            "year_ago",
+          )}
         />
       </div>
 

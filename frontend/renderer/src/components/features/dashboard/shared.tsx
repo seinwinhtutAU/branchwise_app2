@@ -3,9 +3,13 @@ import { cn } from "@renderer/lib/utils";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
 import { Card } from "@renderer/components/ui/Card";
+import { InfoLabel } from "@renderer/components/ui/InfoTooltip";
 import { Input } from "@renderer/components/ui/Input";
 import { Select } from "@renderer/components/ui/Select";
-import { ChevronLeftIcon, ChevronRightIcon } from "@renderer/components/ui/icons";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+} from "@renderer/components/ui/icons";
 import {
   TableContainer,
   Tbody,
@@ -400,9 +404,7 @@ export function AlertExplanation({
         <span className="text-xs text-text-muted">{alert.context}</span>
       )}
 
-      {(alert.facts ?? []).length > 0 && (
-        <AlertFacts facts={alert.facts} />
-      )}
+      {(alert.facts ?? []).length > 0 && <AlertFacts facts={alert.facts} />}
 
       {alert.table && <AlertTableBlock table={alert.table} />}
 
@@ -493,7 +495,9 @@ function MonthPickerGrid({
         >
           <ChevronLeftIcon className="w-4 h-4" />
         </button>
-        <span className="text-sm font-semibold text-text-primary">{viewYear}</span>
+        <span className="text-sm font-semibold text-text-primary">
+          {viewYear}
+        </span>
         <button
           type="button"
           onClick={() => setViewYear((y) => y + 1)}
@@ -593,7 +597,9 @@ function WeekPickerGrid({
   const todayIso = toLocalIso(new Date());
   const thisMonday = mondayOf(todayIso);
   // The first of the month being shown, as an ISO date.
-  const [viewMonth, setViewMonth] = useState(() => `${selectedMonday.slice(0, 7)}-01`);
+  const [viewMonth, setViewMonth] = useState(
+    () => `${selectedMonday.slice(0, 7)}-01`,
+  );
   const view = parseMonth(viewMonth.slice(0, 7));
 
   // Whole Monday-to-Sunday rows covering the month, so every week can be clicked whole.
@@ -602,18 +608,25 @@ function WeekPickerGrid({
     `${formatMonth(view.year + (view.monthIndex0 === 11 ? 1 : 0), (view.monthIndex0 + 1) % 12)}-01`,
     -1,
   );
-  for (let monday = mondayOf(viewMonth); monday <= lastOfMonth; monday = addDays(monday, 7)) {
+  for (
+    let monday = mondayOf(viewMonth);
+    monday <= lastOfMonth;
+    monday = addDays(monday, 7)
+  ) {
     rows.push(Array.from({ length: 7 }, (_, i) => addDays(monday, i)));
   }
 
-  const canGoForward = formatMonth(view.year, view.monthIndex0) < todayIso.slice(0, 7);
+  const canGoForward =
+    formatMonth(view.year, view.monthIndex0) < todayIso.slice(0, 7);
 
   return (
     <div>
       <div className="flex items-center justify-between px-1 pb-2">
         <button
           type="button"
-          onClick={() => setViewMonth(addDays(viewMonth, -1).slice(0, 7) + "-01")}
+          onClick={() =>
+            setViewMonth(addDays(viewMonth, -1).slice(0, 7) + "-01")
+          }
           aria-label="Previous month"
           className="p-1 rounded text-text-secondary hover:bg-bg-subtle hover:text-text-primary"
         >
@@ -661,7 +674,11 @@ function WeekPickerGrid({
               {days.map((day) => (
                 <span
                   key={day}
-                  className={cn(day.slice(0, 7) !== viewMonth.slice(0, 7) && !selected && "opacity-40")}
+                  className={cn(
+                    day.slice(0, 7) !== viewMonth.slice(0, 7) &&
+                      !selected &&
+                      "opacity-40",
+                  )}
                 >
                   {Number(day.slice(8))}
                 </span>
@@ -722,7 +739,9 @@ export function PeriodControls({
       {range.period === "weekly" && !range.hasCustomRange && (
         <WeekPicker week={range.week} onChange={range.setWeek} />
       )}
-      <span className="text-text-muted text-xs font-medium select-none">From</span>
+      <span className="text-text-muted text-xs font-medium select-none">
+        From
+      </span>
       <div className="w-32">
         <Input
           type="date"
@@ -778,12 +797,14 @@ export function DeltaBadge({
 
 export function StatTile({
   label,
+  description,
   value,
   deltaPct,
   previousLabel,
   sub,
 }: {
   label: string;
+  description?: string;
   value: string;
   // Omit deltaPct entirely for a fact that has no "previous period" to compare against.
   deltaPct?: number | null;
@@ -793,7 +814,11 @@ export function StatTile({
   return (
     <Card className="flex flex-col justify-between p-3 sm:p-3.5 bg-bg-subtle border-border">
       <span className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider">
-        {label}
+        {description ? (
+          <InfoLabel description={description}>{label}</InfoLabel>
+        ) : (
+          label
+        )}
       </span>
       <div className="my-0.5">
         <span className="text-xl sm:text-2xl font-bold text-text-primary tracking-tight tabular-nums">
@@ -804,11 +829,17 @@ export function StatTile({
         <div className="flex items-center gap-1.5 flex-wrap">
           <DeltaBadge deltaPct={deltaPct} />
           {previousLabel && (
-            <span className="text-[10px] sm:text-[11px] text-text-muted">{previousLabel}</span>
+            <span className="text-[10px] sm:text-[11px] text-text-muted">
+              {previousLabel}
+            </span>
           )}
         </div>
       ) : (
-        sub && <span className="text-[10px] sm:text-[11px] text-text-muted truncate">{sub}</span>
+        sub && (
+          <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
+            {sub}
+          </span>
+        )
       )}
     </Card>
   );
@@ -1384,4 +1415,3 @@ export function WeekdayHourHeatmap<
     </div>
   );
 }
-

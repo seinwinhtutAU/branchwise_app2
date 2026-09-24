@@ -15,6 +15,7 @@ import {
 } from "@renderer/components/ui/Table";
 import { DashboardIcon, InventoryIcon } from "@renderer/components/ui/icons";
 import { CopyButton } from "@renderer/components/ui/CopyButton";
+import { InfoLabel } from "@renderer/components/ui/InfoTooltip";
 import { RefreshingHint, StatTile } from "./shared";
 import {
   dashboardUrl,
@@ -75,7 +76,11 @@ function CategoryQtyList({
   categories: CategoryQty[];
 }): React.JSX.Element {
   if (categories.length === 0) {
-    return <p className="text-xs text-text-muted py-4 text-center">No categorized stock yet.</p>;
+    return (
+      <p className="text-xs text-text-muted py-4 text-center">
+        No categorized stock yet.
+      </p>
+    );
   }
   const maxQty = Math.max(...categories.map((c) => c.qty), 0);
   return (
@@ -92,7 +97,10 @@ function CategoryQtyList({
             <div
               className="h-full rounded-full bg-brand transition-all duration-500"
               style={{
-                width: maxQty > 0 ? `${Math.max((row.qty / maxQty) * 100, 1.5)}%` : "0%",
+                width:
+                  maxQty > 0
+                    ? `${Math.max((row.qty / maxQty) * 100, 1.5)}%`
+                    : "0%",
               }}
             />
           </div>
@@ -157,12 +165,34 @@ function LowStockTable({
       <TableContainer>
         <Thead>
           <Tr>
-            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
-            <Th>Status</Th>
-            <Th>Stock Code</Th>
-            <Th>Description</Th>
-            <Th className="text-right">On Hand Qty</Th>
-            <Th className="text-right">Est. Days Left</Th>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
+              #
+            </Th>
+            <Th>
+              <InfoLabel description="How urgently this product needs attention.">
+                Status
+              </InfoLabel>
+            </Th>
+            <Th>
+              <InfoLabel description="Unique code used to identify the product.">
+                Stock Code
+              </InfoLabel>
+            </Th>
+            <Th>
+              <InfoLabel description="Name of the product.">
+                Description
+              </InfoLabel>
+            </Th>
+            <Th className="text-right">
+              <InfoLabel description="Current quantity available in stock.">
+                On Hand Qty
+              </InfoLabel>
+            </Th>
+            <Th className="text-right">
+              <InfoLabel description="Estimated days before stock runs out at the recent sales rate.">
+                Est. Days Left
+              </InfoLabel>
+            </Th>
           </Tr>
         </Thead>
         <Tbody>
@@ -178,7 +208,9 @@ function LowStockTable({
               </Td>
               <Td>
                 <div className="flex items-center gap-1 whitespace-nowrap">
-                  <span className="font-mono text-xs font-semibold text-brand">{item.stock_code}</span>
+                  <span className="font-mono text-xs font-semibold text-brand">
+                    {item.stock_code}
+                  </span>
                   <CopyButton value={item.stock_code} what="stock code" />
                 </div>
               </Td>
@@ -225,12 +257,32 @@ function DeadStockTable({
       <TableContainer>
         <Thead>
           <Tr>
-            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">#</Th>
-            <Th>Stock Code</Th>
-            <Th>Description</Th>
-            <Th>Category</Th>
-            <Th className="text-right">On Hand Qty</Th>
-            <Th className="text-right">Days Unsold</Th>
+            <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
+              #
+            </Th>
+            <Th>
+              <InfoLabel description="Unique code used to identify the product.">
+                Stock Code
+              </InfoLabel>
+            </Th>
+            <Th>
+              <InfoLabel description="Name of the product.">
+                Description
+              </InfoLabel>
+            </Th>
+            <Th>
+              <InfoLabel description="Product category.">Category</InfoLabel>
+            </Th>
+            <Th className="text-right">
+              <InfoLabel description="Current quantity available in stock.">
+                On Hand Qty
+              </InfoLabel>
+            </Th>
+            <Th className="text-right">
+              <InfoLabel description="Days since this product was last sold.">
+                Days Unsold
+              </InfoLabel>
+            </Th>
           </Tr>
         </Thead>
         <Tbody>
@@ -241,7 +293,9 @@ function DeadStockTable({
               </Td>
               <Td>
                 <div className="flex items-center gap-1 whitespace-nowrap">
-                  <span className="font-mono text-xs font-semibold text-brand">{item.stock_code}</span>
+                  <span className="font-mono text-xs font-semibold text-brand">
+                    {item.stock_code}
+                  </span>
                   <CopyButton value={item.stock_code} what="stock code" />
                 </div>
               </Td>
@@ -286,8 +340,12 @@ export function InventoryTab({
   // selection shows the numbers it showed last time instead of a skeleton. See
   // lib/queryClient.ts.
   const url = canLoad ? dashboardUrl("inventory", branchId) : null;
-  const { data: fetched, isRefreshing, failed, reload } =
-    useUrlQuery<InventoryDashboardData>(url, session, "Inventory dashboard");
+  const {
+    data: fetched,
+    isRefreshing,
+    failed,
+    reload,
+  } = useUrlQuery<InventoryDashboardData>(url, session, "Inventory dashboard");
   const data = fetched ?? null;
 
   if (!canLoad) return <></>;
@@ -334,20 +392,24 @@ export function InventoryTab({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
         <StatTile
           label="Total Products"
+          description="Number of products in the latest inventory snapshot."
           value={data.sku_count.toLocaleString()}
         />
         <StatTile
           label="Dead Stock"
+          description="Products with stock on hand but no sale in the last 90 days."
           value={data.dead_stock_count.toLocaleString()}
           sub="No sales in 90 days"
         />
         <StatTile
           label="Estimated Inventory Value"
+          description="Quantity on hand multiplied by recorded buying price."
           value={formatMoney(data.estimated_stock_value)}
           sub="Quantity on hand × buying price"
         />
         <StatTile
           label="Potential Sale Value"
+          description="Expected sales value if all current stock sells at its selling price."
           value={formatMoney(data.potential_sale_value)}
           sub="If all of it sells at its selling price"
         />

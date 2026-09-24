@@ -8,6 +8,7 @@ import { Button } from "@renderer/components/ui/Button";
 import { Panel } from "@renderer/components/ui/Panel";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Skeleton } from "@renderer/components/ui/Skeleton";
+import { InfoLabel } from "@renderer/components/ui/InfoTooltip";
 import {
   CheckIcon,
   ChevronLeftIcon,
@@ -115,7 +116,9 @@ function BranchLoadingCard({ name }: { name: string }): React.JSX.Element {
   return (
     <Panel className="flex flex-col gap-3 p-4 sm:p-5 rounded-lg border border-border bg-bg-base shadow-xs">
       <div className="flex items-center justify-between gap-2 pb-3 border-b border-border/70">
-        <h3 className="font-bold text-base text-text-primary truncate">{name}</h3>
+        <h3 className="font-bold text-base text-text-primary truncate">
+          {name}
+        </h3>
       </div>
       <Skeleton className="h-40" />
     </Panel>
@@ -132,11 +135,15 @@ function BranchFailedCard({
   return (
     <Panel className="flex flex-col gap-3 p-4 sm:p-5 rounded-lg border border-border bg-bg-base shadow-xs">
       <div className="flex items-center justify-between gap-2 pb-3 border-b border-border/70">
-        <h3 className="font-bold text-base text-text-primary truncate">{name}</h3>
+        <h3 className="font-bold text-base text-text-primary truncate">
+          {name}
+        </h3>
       </div>
       <div className="flex flex-1 flex-col items-center justify-center gap-2 py-6 text-center">
         <WarningIcon className="w-5 h-5 text-warning" />
-        <p className="text-xs text-text-muted">Couldn't load this branch's health data.</p>
+        <p className="text-xs text-text-muted">
+          Couldn't load this branch's health data.
+        </p>
         <Button variant="secondary" size="sm" onClick={onRetry}>
           Retry
         </Button>
@@ -166,7 +173,12 @@ function MultiBranchComparisonView({
     () =>
       branchOptions.map((b) => ({
         branch: b,
-        url: dashboardUrl("overview", b.id, { period, dateFrom, dateTo, month }),
+        url: dashboardUrl("overview", b.id, {
+          period,
+          dateFrom,
+          dateTo,
+          month,
+        }),
       })),
     [branchOptions, period, dateFrom, dateTo, month],
   );
@@ -182,7 +194,8 @@ function MultiBranchComparisonView({
     .filter(({ url }) => data[url] !== undefined)
     .map(({ branch, url }) => ({ branch, overview: data[url] }))
     .sort(
-      (a, b) => (b.overview.overall_score ?? -1) - (a.overview.overall_score ?? -1),
+      (a, b) =>
+        (b.overview.overall_score ?? -1) - (a.overview.overall_score ?? -1),
     );
   const notLoaded = branchUrls.filter(({ url }) => data[url] === undefined);
 
@@ -196,7 +209,8 @@ function MultiBranchComparisonView({
               Branch Health
             </h2>
             <p className="text-xs text-text-muted mt-0.5">
-              Comprehensive health scores and operational pillar performance per branch.
+              Comprehensive health scores and operational pillar performance per
+              branch.
             </p>
           </div>
           <RefreshingHint show={isRefreshing} />
@@ -273,7 +287,10 @@ function BranchHealthCard({
             </h3>
           </div>
           {meta && (
-            <Badge variant={meta.badge} className="text-xs px-2 py-0.5 shrink-0">
+            <Badge
+              variant={meta.badge}
+              className="text-xs px-2 py-0.5 shrink-0"
+            >
               {meta.label}
             </Badge>
           )}
@@ -334,7 +351,11 @@ function BranchHealthCard({
                       {score === null ? "—" : `${Math.round(score)} / 100`}
                     </span>
                   </div>
-                  <ScoreBar score={score} status={status} className="h-1.5 w-full" />
+                  <ScoreBar
+                    score={score}
+                    status={status}
+                    className="h-1.5 w-full"
+                  />
                 </div>
               );
             })}
@@ -350,7 +371,9 @@ function BranchHealthCard({
               <WarningIcon className="w-3.5 h-3.5 shrink-0" />
               <span>
                 {actionableAlerts.length}{" "}
-                {actionableAlerts.length === 1 ? "active alert" : "active alerts"}
+                {actionableAlerts.length === 1
+                  ? "active alert"
+                  : "active alerts"}
               </span>
             </span>
           ) : (
@@ -396,7 +419,8 @@ function DimensionMatrixCard({
   const weight = dimension.effective_weight ?? dimension.weight;
   const actionableAlerts = alerts.filter(
     (a) =>
-      a.dimension === dimension.key && ACTIONABLE_SEVERITIES.includes(a.severity),
+      a.dimension === dimension.key &&
+      ACTIONABLE_SEVERITIES.includes(a.severity),
   );
 
   return (
@@ -439,7 +463,8 @@ function DimensionMatrixCard({
         {/* SubMetrics Grid */}
         {dimension.score === null ? (
           <p className="text-xs text-text-muted py-3">
-            {dimension.insufficient_data_reason ?? "Insufficient data for this dimension."}
+            {dimension.insufficient_data_reason ??
+              "Insufficient data for this dimension."}
           </p>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 py-3">
@@ -448,12 +473,19 @@ function DimensionMatrixCard({
                 key={m.key}
                 className="p-2 rounded-lg bg-bg-subtle/60 border border-border/50 flex flex-col justify-between"
               >
-                <div className="text-[11px] text-text-muted truncate" title={m.label}>
+                <InfoLabel
+                  className="text-[11px] text-text-muted truncate"
+                  description={m.definition}
+                >
                   {m.label}
-                </div>
+                </InfoLabel>
                 <div className="flex items-baseline justify-between gap-1 mt-1">
                   <span className="font-semibold text-xs text-text-primary truncate">
-                    {m.value === null ? "—" : <MeasureValue value={m.value} unit={m.unit} />}
+                    {m.value === null ? (
+                      "—"
+                    ) : (
+                      <MeasureValue value={m.value} unit={m.unit} />
+                    )}
                   </span>
                   <span
                     className={cn(
@@ -478,7 +510,9 @@ function DimensionMatrixCard({
             {actionableAlerts.length} alert(s) in this area
           </span>
         ) : (
-          <span className="text-[11px] text-text-muted">Operating smoothly</span>
+          <span className="text-[11px] text-text-muted">
+            Operating smoothly
+          </span>
         )}
 
         <button
@@ -514,7 +548,12 @@ function BranchDetailView({
   onOpenEvidence: (target: EvidenceTarget) => void;
   onViewBusinessAlerts: () => void;
 }): React.JSX.Element {
-  const { data: fetched, isRefreshing, failed, reload } = useUrlQuery<OverviewData>(
+  const {
+    data: fetched,
+    isRefreshing,
+    failed,
+    reload,
+  } = useUrlQuery<OverviewData>(
     dashboardUrl("overview", branchId, { period, dateFrom, dateTo, month }),
     session,
     "Branch health detail",
@@ -680,4 +719,3 @@ export function OverviewTab({
 }
 
 export default OverviewTab;
-

@@ -33,7 +33,6 @@ Docs are split the same way the codebase is: shared docs here at the top level, 
 - [Inventory / Stock Records](./wholesale/inventory.md) — the whole pipeline, including stock that hasn't arrived yet
 - [Finance](./wholesale/finance.md) — receivables, payables, shipment costs
 - [Monitoring](./wholesale/monitoring.md) — a live operational status board (built, hidden from the nav)
-- [Reports](./wholesale/reports.md) — the four analytical pillars and their endpoints (built, hidden from the nav)
 - [Master Data](./wholesale/master-data.md) — products, suppliers, customers, and the other reference lists
 - [Write-offs](./wholesale/write-offs.md) — the shared "explain the mismatch" mechanism used by Shipments, Vouchers, and Orders
 

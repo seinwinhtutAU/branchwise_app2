@@ -1,8 +1,9 @@
-# Monitoring
+# Monitoring — the wholesale Dashboard
 
-A live operational status board — distinct in purpose from [Reports](./reports.md)'s four
-analytical pillars. Built, but currently hidden from the wholesale nav (see "Currently hidden"
-below), the same as Reports.
+The wholesale Dashboard has five tabs: **Summary** and **Operations** (a live operational
+status board, below) and **Revenue**, **Cost**, **Customer** and **Inventory** (the analytical tabs,
+see "Revenue, Customer and Inventory tabs" further down). There is no separate Reports page any
+more; it was removed and its figures live on these tabs.
 
 ## Endpoint
 
@@ -19,11 +20,47 @@ each `{count, rows}` except `recent_activity` (a flat list):
 - **`recent_activity`** — the 15 most recent receivings/deliveries/payments, merged from all
   three sources and sorted by `created_at desc`.
 
-## Navigation
+## Revenue, Customer and Inventory tabs
 
-`HIDDEN_WHOLESALE_NAV_IDS` in `frontend/renderer/src/App.tsx` is now `{"reports"}`: the
-Dashboard tab is shown in the wholesale sidebar (it carries the data export below), while
-Reports stays hidden but reachable in code until it is ready for the daily workflow.
+Served by `GET /api/wholesale/dashboard/{revenue,cost,customer,inventory}`
+(`app/wholesale/services/dashboard.py`, `routers/dashboard.py`, `schemas/dashboard.py`; frontend
+in `monitoring/Wholesale{Revenue,Cost,Customer,Inventory}Dashboard.tsx`). Summary, Revenue, Cost and Customer share one period control, the same one the retail Dashboard uses (Daily, Weekly, Monthly or a custom From/To range, sent as `period`, `month` or `date_from`/`date_to`) and compare with the immediately preceding window of
+the same length; Inventory is a point in time and has no period. All of them are scoped by the
+signed-in user's branch, use the unpaged source rows (so nothing stops at a page limit), and
+exclude cancelled orders. Dates: orders use `order_date`, deliveries `delivered_on`, payments
+`paid_on`.
+
+- **Revenue** — delivered revenue is recognised on delivery, not on order. *Money collected* is
+  payments against orders in the window. *Outstanding receivables* is what customers owed on
+  unfinished orders **as of the end date** (payments after it do not reduce it). *Potential stock
+  sales value* is each product's on-hand pairs at the price it was last quoted to a customer, and
+  *inventory cost value* the same pairs at the estimated buying price (the quantity-weighted price
+  on the latest supplier-voucher date on or before today); a product with no known price on a side
+  adds nothing to that side. *Potential gross profit* is the difference. *Revenue by factory*
+  attributes each delivery to the factory that supplied most of that product on the latest voucher
+  date before the delivery (the same voucher the cost estimate reads); a delivery with no earlier
+  voucher counts under "Unknown factory". The trend is daily, folded into weeks in the browser once
+  the window is longer than 14 days.
+- **Cost** — *goods purchased* is the value of supplier vouchers dated in the window;
+  *cost* is everything spent getting goods in (`wholesale_receiving_costs`) on receivings that
+  arrived in the window, kept as one figure for the batch and never split across products;
+  *total cost* is the two added, with the split shown as a bar. The screen calls it "cost", not
+  freight or landed cost. *Supplier balance due* is what is still unpaid on vouchers at the end
+  of the window (payments after it do not count yet); "Supplier payables" lists the newest ten
+  unpaid vouchers, each opening the voucher. *Cost by factory* ranks purchases by supplier.
+- **Customer** — *active* customers ordered in the window; *new* ones had no order before it;
+  *repeat* ones did (share of active shown). *Open orders* is every non-cancelled order not yet
+  fulfilled, whenever it was placed. The ranking is by ordered (not delivered) value. The delivery
+  status donut counts the window's orders as fulfilled / partly delivered / awaiting delivery (ready
+  to deliver and waiting for stock both count as awaiting). "Orders awaiting delivery" lists the
+  newest ten open orders with the pairs still to deliver, shown in sets.
+- **Inventory** — from `stock_records`: products managed, physical stock, available (physical less
+  committed), committed (allocated to orders), incoming (at supplier + in transit) and customer
+  backlog (pairs still owed), the pipeline flow, physical stock by location, and available /
+  committed / incoming by product group. Quantities are shown in sets (1 set = 6 pairs).
+
+Numbers are shown without a currency prefix ("103.8M"); each tab's footer says values are in MMK. The Summary's revenue and factory bars are the Revenue tab's own figures for the chosen period (`GET /api/wholesale/monitoring/summary` accepts the same `period`/`month`/`date_from`/`date_to`). Operations is live and Inventory is a point in time, so neither has a period. Location is not a filter on these three tabs: revenue and customers have no per-location figures,
+and Inventory always shows every location. The Summary and Operations views keep their selector.
 
 ## Export all wholesale data
 

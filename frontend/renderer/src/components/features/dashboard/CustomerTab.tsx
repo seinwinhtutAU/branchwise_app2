@@ -73,7 +73,9 @@ function ItemsPerBasketHistogram({
   const total = buckets.reduce((sum, b) => sum + b.count, 0);
   if (total === 0) {
     return (
-      <p className="text-xs text-text-muted py-4 text-center">No transactions in this period.</p>
+      <p className="text-xs text-text-muted py-4 text-center">
+        No transactions in this period.
+      </p>
     );
   }
   const maxCount = Math.max(...buckets.map((b) => b.count), 0);
@@ -89,7 +91,9 @@ function ItemsPerBasketHistogram({
               className="h-full rounded-full bg-brand transition-all duration-500"
               style={{
                 width:
-                  maxCount > 0 ? `${Math.max((bucket.count / maxCount) * 100, 1.5)}%` : "0%",
+                  maxCount > 0
+                    ? `${Math.max((bucket.count / maxCount) * 100, 1.5)}%`
+                    : "0%",
               }}
             />
           </div>
@@ -129,8 +133,12 @@ export function CustomerTab({
   const url = canLoad
     ? dashboardUrl("customer", branchId, { period, dateFrom, dateTo, month })
     : null;
-  const { data: fetched, isRefreshing, failed, reload } =
-    useUrlQuery<CustomerDashboardData>(url, session, "Customer dashboard");
+  const {
+    data: fetched,
+    isRefreshing,
+    failed,
+    reload,
+  } = useUrlQuery<CustomerDashboardData>(url, session, "Customer dashboard");
   const data = fetched ?? null;
 
   if (!canLoad) return <></>;
@@ -169,18 +177,26 @@ export function CustomerTab({
     <div className="flex flex-col gap-3">
       <RefreshingHint show={isRefreshing} />
       <p className="text-xs text-text-muted">
-        Shopping patterns, not customer identity — POS data tracks transactions and visits rather than individuals.
+        Shopping patterns, not customer identity — POS data tracks transactions
+        and visits rather than individuals.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
         <StatTile
           label="Total Transactions"
+          description="Number of completed sales slips."
           value={formatCount(data.total_transactions.value)}
           deltaPct={data.total_transactions.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
+          previousLabel={previousPeriodLabel(
+            period,
+            dateFrom,
+            dateTo,
+            "year_ago",
+          )}
         />
         <StatTile
           label="Conversion Rate"
+          description="Completed sales slips divided by all recorded visits."
           value={
             data.conversion_rate.value === null
               ? "—"
@@ -192,10 +208,16 @@ export function CustomerTab({
               : "Sales ÷ (sales + visits that did not buy)"
           }
           deltaPct={data.conversion_rate.delta_pct}
-          previousLabel={previousPeriodLabel(period, dateFrom, dateTo, "year_ago")}
+          previousLabel={previousPeriodLabel(
+            period,
+            dateFrom,
+            dateTo,
+            "year_ago",
+          )}
         />
         <StatTile
           label="Peak Hour"
+          description="Time period with the most completed sales slips."
           value={
             busiest
               ? `${WEEKDAY_LABELS[busiest.weekday]} ${formatHourBand(busiest.hour_band)}`

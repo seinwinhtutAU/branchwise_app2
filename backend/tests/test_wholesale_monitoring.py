@@ -142,3 +142,17 @@ def test_monitoring_surfaces_only_needs_attention_rows_and_admin_sees_all_branch
     }
     assert zero_stock_rows == {"ZERO": "not_arrived", "DEPLETED": "out_of_stock"}
     assert {row["type"] for row in body["recent_activity"]} >= {"receiving", "delivery", "payment"}
+
+    summary_resp = authed_client.get("/api/wholesale/monitoring/summary")
+    assert summary_resp.status_code == 200
+    summary = summary_resp.json()
+    assert "physical_stock_sets" in summary
+    assert "available_sets" in summary
+    assert "committed_sets" in summary
+    assert "incoming_stock_sets" in summary
+    assert "pipeline" in summary
+    assert "locations" in summary
+    assert "fulfillment" in summary
+    assert "revenue_this_period" in summary
+    assert "factories" in summary
+

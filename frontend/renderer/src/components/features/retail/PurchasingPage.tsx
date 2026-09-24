@@ -34,10 +34,10 @@ import {
 } from "@renderer/components/ui/Table";
 import { Pagination } from "@renderer/components/ui/Pagination";
 import { CopyButton } from "@renderer/components/ui/CopyButton";
+import { InfoLabel } from "@renderer/components/ui/InfoTooltip";
 import {
   ClipboardIcon,
   DownloadIcon,
-  HelpCircleIcon,
   SearchIcon,
   WarningIcon,
 } from "@renderer/components/ui/icons";
@@ -87,7 +87,9 @@ function AbcHelpPopover({
         )}
         aria-label="ABC Analysis Info"
       >
-        <HelpCircleIcon className="w-3.5 h-3.5" />
+        <span aria-hidden="true" className="text-[13px] leading-none">
+          ⓘ
+        </span>
       </button>
 
       {isOpen && (
@@ -96,84 +98,9 @@ function AbcHelpPopover({
             ref={refs.setFloating}
             style={floatingStyles}
             {...getFloatingProps()}
-            className="z-50 w-72 p-3 bg-bg-base border border-border rounded-lg shadow-lg text-xs space-y-2 animate-in fade-in-50 duration-150 text-left"
+            className="z-50 max-w-64 rounded-md border border-border bg-bg-base px-2.5 py-2 text-left text-xs leading-relaxed text-text-secondary shadow-lg"
           >
-            <div className="font-semibold text-text-primary text-xs pb-1 border-b border-border flex items-center justify-between">
-              <span>ABC Revenue Classification</span>
-              <span className="text-[10px] text-text-muted font-normal">
-                80 / 15 / 5 Rule
-              </span>
-            </div>
-
-            <div className="space-y-2 text-[11px]">
-              <div className="flex items-start gap-2">
-                <Badge
-                  variant="brand"
-                  className="px-1.5 py-0 text-[10px] shrink-0 font-bold"
-                >
-                  A
-                </Badge>
-                <div>
-                  <span className="font-semibold text-text-primary">
-                    Top 80% Revenue
-                  </span>
-                  <p className="text-text-muted text-[10px]">
-                    Core best sellers that drive most business volume.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-2">
-                <Badge
-                  variant="info"
-                  className="px-1.5 py-0 text-[10px] shrink-0 font-bold"
-                >
-                  B
-                </Badge>
-                <div>
-                  <span className="font-semibold text-text-primary">
-                    Mid 15% Revenue
-                  </span>
-                  <p className="text-text-muted text-[10px]">
-                    Steady contributors with regular consistent demand.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-2">
-                <Badge
-                  variant="default"
-                  className="px-1.5 py-0 text-[10px] shrink-0 font-bold"
-                >
-                  C
-                </Badge>
-                <div>
-                  <span className="font-semibold text-text-primary">
-                    Tail 5% Revenue
-                  </span>
-                  <p className="text-text-muted text-[10px]">
-                    Slow movers with low sales velocity.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-2">
-                <Badge
-                  variant="default"
-                  className="px-1.5 py-0 text-[10px] shrink-0 font-bold"
-                >
-                  N
-                </Badge>
-                <div>
-                  <span className="font-semibold text-text-primary">
-                    No Sales (0)
-                  </span>
-                  <p className="text-text-muted text-[10px]">
-                    No sales recorded during the selected period.
-                  </p>
-                </div>
-              </div>
-            </div>
+            A ≈ 80% of revenue, B ≈ 15%, C ≈ 5%; N has no sales.
           </div>
         </FloatingPortal>
       )}
@@ -225,7 +152,9 @@ function RecommendationHelpPopover({
         )}
         aria-label="Recommendation Info"
       >
-        <HelpCircleIcon className="w-3.5 h-3.5" />
+        <span aria-hidden="true" className="text-[13px] leading-none">
+          ⓘ
+        </span>
       </button>
 
       {isOpen && (
@@ -234,84 +163,10 @@ function RecommendationHelpPopover({
             ref={refs.setFloating}
             style={floatingStyles}
             {...getFloatingProps()}
-            className="z-50 w-80 p-3 bg-bg-base border border-border rounded-lg shadow-lg text-xs space-y-2 animate-in fade-in-50 duration-150 text-left"
+            className="z-50 max-w-64 rounded-md border border-border bg-bg-base px-2.5 py-2 text-left text-xs leading-relaxed text-text-secondary shadow-lg"
           >
-            <div className="font-semibold text-text-primary text-xs pb-1 border-b border-border flex items-center justify-between">
-              <span>Replenishment Actions</span>
-              <span className="text-[10px] text-text-muted font-normal">
-                Decision Rules
-              </span>
-            </div>
-
-            <div className="space-y-2.5 text-[11px]">
-              <div className="flex items-start gap-2">
-                <Badge
-                  variant="error"
-                  className="px-1.5 py-0 text-[10px] shrink-0 font-bold"
-                >
-                  Urgent
-                </Badge>
-                <div>
-                  <span className="font-semibold text-text-primary">
-                    Urgent Reorder
-                  </span>
-                  <p className="text-text-muted text-[10px]">
-                    Class A core best seller with 0 on-hand stock causing immediate lost revenue. Prioritize purchase order immediately.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-2">
-                <Badge
-                  variant="warning"
-                  className="px-1.5 py-0 text-[10px] shrink-0 font-bold"
-                >
-                  Reorder
-                </Badge>
-                <div>
-                  <span className="font-semibold text-text-primary">
-                    Reorder Needed
-                  </span>
-                  <p className="text-text-muted text-[10px]">
-                    Current stock level is below the target buffer coverage. Replenishment recommended.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-2">
-                <Badge
-                  variant="info"
-                  className="px-1.5 py-0 text-[10px] shrink-0 font-bold"
-                >
-                  Hold
-                </Badge>
-                <div>
-                  <span className="font-semibold text-text-primary">
-                    Hold / Monitor
-                  </span>
-                  <p className="text-text-muted text-[10px]">
-                    Current inventory coverage is sufficient for the target window. No new order needed.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-2">
-                <Badge
-                  variant="default"
-                  className="px-1.5 py-0 text-[10px] shrink-0 font-bold"
-                >
-                  Review
-                </Badge>
-                <div>
-                  <span className="font-semibold text-text-primary">
-                    Review / Do Not Reorder
-                  </span>
-                  <p className="text-text-muted text-[10px]">
-                    No sales recorded in the period. Audit product lifecycle before placing new orders.
-                  </p>
-                </div>
-              </div>
-            </div>
+            Urgent: no stock. Reorder: below target. Hold: enough stock. Review:
+            no recent sales.
           </div>
         </FloatingPortal>
       )}
@@ -339,10 +194,7 @@ export interface PurchasingItem {
   PurchaseNote: string;
   TargetBufferMonths?: number;
   Recommendation:
-    | "Urgent Reorder"
-    | "Reorder"
-    | "Hold / Monitor"
-    | "Review / Do Not Reorder";
+    "Urgent Reorder" | "Reorder" | "Hold / Monitor" | "Review / Do Not Reorder";
 }
 
 interface PurchasingSummary {
@@ -419,19 +271,14 @@ export function PurchasingPage({
     const params = new URLSearchParams();
     if (activeBranchId) params.set("branch_id", activeBranchId);
     if (search.trim()) params.set("search", search.trim());
-    if (activeRecFilter !== "all") params.set("recommendation", activeRecFilter);
+    if (activeRecFilter !== "all")
+      params.set("recommendation", activeRecFilter);
     if (activeAbcFilter !== "all") params.set("abc_class", activeAbcFilter);
     params.set("page", String(page));
     params.set("page_size", String(pageSize));
 
     return `${apiBaseUrl}/api/purchasing/recommendations?${params.toString()}`;
-  }, [
-    activeBranchId,
-    search,
-    activeRecFilter,
-    activeAbcFilter,
-    page,
-  ]);
+  }, [activeBranchId, search, activeRecFilter, activeAbcFilter, page]);
 
   const { data, isRefreshing, failed, reload } =
     useUrlQuery<PurchasingResponse>(
@@ -538,7 +385,9 @@ export function PurchasingPage({
     }
   }
 
-  function renderRecBadge(rec: PurchasingItem["Recommendation"]): React.JSX.Element {
+  function renderRecBadge(
+    rec: PurchasingItem["Recommendation"],
+  ): React.JSX.Element {
     switch (rec) {
       case "Urgent Reorder":
         return <Badge variant="error">Urgent Reorder</Badge>;
@@ -614,35 +463,55 @@ export function PurchasingPage({
       {/* KPI Cards Summary Row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <FigureCard
-          label="Urgent Reorder"
+          label={
+            <InfoLabel description="A-tier products that are out of stock and need immediate attention.">
+              Urgent Reorder
+            </InfoLabel>
+          }
           value={String(summary.urgent_reorder_count)}
           sub="A-tier & out of stock"
           tone="error"
         />
 
         <FigureCard
-          label="Reorder"
+          label={
+            <InfoLabel description="Products below their target stock buffer.">
+              Reorder
+            </InfoLabel>
+          }
           value={String(summary.reorder_count)}
           sub="below target buffer"
           tone="warning"
         />
 
         <FigureCard
-          label="Suggested Units"
+          label={
+            <InfoLabel description="Total units recommended for the current reorder list.">
+              Suggested Units
+            </InfoLabel>
+          }
           value={summary.total_suggested_units.toLocaleString()}
           sub="recommended order volume"
           tone="brand"
         />
 
         <FigureCard
-          label="Hold / Monitor"
+          label={
+            <InfoLabel description="Products with enough stock coverage for now.">
+              Hold / Monitor
+            </InfoLabel>
+          }
           value={String(summary.hold_monitor_count)}
           sub="sufficient coverage"
           tone="success"
         />
 
         <FigureCard
-          label="Review"
+          label={
+            <InfoLabel description="Products that need a manual check because recent sales data is missing.">
+              Review
+            </InfoLabel>
+          }
           value={String(summary.review_count)}
           sub="no recent sales"
           tone="neutral"
@@ -679,17 +548,17 @@ export function PurchasingPage({
                 variant="secondary"
                 size="sm"
                 onClick={() => handleExport(true)}
-                disabled={isExporting || summary.urgent_reorder_count + summary.reorder_count === 0}
+                disabled={
+                  isExporting ||
+                  summary.urgent_reorder_count + summary.reorder_count === 0
+                }
                 className="flex items-center gap-1.5"
               >
                 <DownloadIcon className="w-4 h-4" />
                 Reorder List
               </Button>
 
-              <RefreshButton
-                onClick={reload}
-                refreshing={isRefreshing}
-              />
+              <RefreshButton onClick={reload} refreshing={isRefreshing} />
             </div>
           </div>
 
@@ -870,11 +739,7 @@ export function PurchasingPage({
             title="No matching products found"
             description="Try changing your search keywords or adjusting the filter criteria."
             action={
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={clearFilters}
-              >
+              <Button variant="secondary" size="sm" onClick={clearFilters}>
                 Clear Filters
               </Button>
             }
@@ -898,33 +763,73 @@ export function PurchasingPage({
                       <RecommendationHelpPopover />
                     </div>
                   </Th>
-                  <Th className="w-28">Stock Code</Th>
-                  <Th className="min-w-[14rem]">Description</Th>
-                  <Th className="w-24">Group</Th>
+                  <Th className="w-28">
+                    <InfoLabel description="Unique code used to identify the product.">
+                      Stock Code
+                    </InfoLabel>
+                  </Th>
+                  <Th className="min-w-[14rem]">
+                    <InfoLabel description="Name of the product.">
+                      Description
+                    </InfoLabel>
+                  </Th>
+                  <Th className="w-24">
+                    <InfoLabel description="Product group from the source data.">
+                      Group
+                    </InfoLabel>
+                  </Th>
                   <Th
                     className="w-28 text-right bg-brand-subtle/10 font-semibold text-brand"
                     title="Reorder Qty = (Monthly Sales × ABC Target Buffer) - On Hand (Configurable in Settings)"
                   >
-                    Reorder Qty
+                    <InfoLabel description="Suggested units to order based on sales and the target stock buffer.">
+                      Reorder Qty
+                    </InfoLabel>
                   </Th>
-                  <Th className="w-20 text-right">On Hand</Th>
+                  <Th className="w-20 text-right">
+                    <InfoLabel description="Current quantity available in stock.">
+                      On Hand
+                    </InfoLabel>
+                  </Th>
                   <Th
                     className="w-20 text-right"
                     title="Stock Coverage = On Hand ÷ Monthly Sales (Target buffer configured per ABC tier in Settings)"
                   >
-                    Coverage
+                    <InfoLabel description="How long current stock should last at the recent sales rate.">
+                      Coverage
+                    </InfoLabel>
                   </Th>
-                  <Th className="w-24 text-right">Monthly Sales</Th>
+                  <Th className="w-24 text-right">
+                    <InfoLabel description="Units sold in the current monthly sales period.">
+                      Monthly Sales
+                    </InfoLabel>
+                  </Th>
                   <Th className="w-20 text-center">
                     <div className="inline-flex items-center justify-center gap-1">
                       <span>ABC</span>
                       <AbcHelpPopover />
                     </div>
                   </Th>
-                  <Th className="w-16">Tier</Th>
-                  <Th className="w-24 text-right">Buying Price</Th>
-                  <Th className="w-24 text-right">Selling Price</Th>
-                  <Th className="w-40">Recent Purchase Note</Th>
+                  <Th className="w-16">
+                    <InfoLabel description="Priority tier used for replenishment planning.">
+                      Tier
+                    </InfoLabel>
+                  </Th>
+                  <Th className="w-24 text-right">
+                    <InfoLabel description="Recorded buying price for one unit.">
+                      Buying Price
+                    </InfoLabel>
+                  </Th>
+                  <Th className="w-24 text-right">
+                    <InfoLabel description="Selling price for one unit.">
+                      Selling Price
+                    </InfoLabel>
+                  </Th>
+                  <Th className="w-40">
+                    <InfoLabel description="Latest purchase information available for this product.">
+                      Recent Purchase Note
+                    </InfoLabel>
+                  </Th>
                 </Tr>
               </Thead>
               <Tbody>
@@ -949,7 +854,9 @@ export function PurchasingPage({
                       {/* Stock Code */}
                       <Td>
                         <div className="flex items-center gap-1 whitespace-nowrap">
-                          <span className="font-mono text-xs font-semibold text-brand">{row.StockCode}</span>
+                          <span className="font-mono text-xs font-semibold text-brand">
+                            {row.StockCode}
+                          </span>
                           <CopyButton value={row.StockCode} what="stock code" />
                         </div>
                       </Td>
@@ -972,7 +879,9 @@ export function PurchasingPage({
                       <Td
                         className={cn(
                           "text-right text-sm tabular-nums font-bold bg-brand-subtle/10",
-                          hasSuggested ? "text-brand" : "text-text-muted font-normal",
+                          hasSuggested
+                            ? "text-brand"
+                            : "text-text-muted font-normal",
                         )}
                       >
                         {hasSuggested ? (
@@ -988,7 +897,9 @@ export function PurchasingPage({
                       <Td
                         className={cn(
                           "text-right text-xs tabular-nums font-medium",
-                          isOutOfStock ? "text-error font-bold" : "text-text-primary",
+                          isOutOfStock
+                            ? "text-error font-bold"
+                            : "text-text-primary",
                         )}
                       >
                         {row.OnHandQty}

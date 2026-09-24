@@ -52,6 +52,8 @@ import {
   type DataTableColumn,
   type DataTableFilter,
 } from "@renderer/components/features/SimpleDataTable";
+import { getColumnDescription } from "@renderer/lib/columnDescriptions";
+import { InfoLabel } from "@renderer/components/ui/InfoTooltip";
 import {
   InventoryPage,
   type InventorySubTab,
@@ -452,10 +454,7 @@ function MergedDataOverviewTable({
   );
 
   const hasActiveFilters =
-    search !== "" ||
-    groupFilter !== "" ||
-    dateFrom !== "" ||
-    dateTo !== "";
+    search !== "" || groupFilter !== "" || dateFrom !== "" || dateTo !== "";
 
   function clearFilters(): void {
     setSearch("");
@@ -512,7 +511,9 @@ function MergedDataOverviewTable({
           header: () => (
             <>
               <SourceStrip bands={col.bands} />
-              {col.label}
+              <InfoLabel description={getColumnDescription(col.key, col.label)}>
+                {col.label}
+              </InfoLabel>
             </>
           ),
           cell: isCopyable
@@ -607,7 +608,9 @@ function MergedDataOverviewTable({
   ): string {
     const parts = ["data-overview"];
     if (exportOptions?.branch) {
-      parts.push(exportOptions.branch.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
+      parts.push(
+        exportOptions.branch.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      );
     }
     if (exportOptions?.from && exportOptions?.to) {
       parts.push(`${exportOptions.from}_to_${exportOptions.to}`);
