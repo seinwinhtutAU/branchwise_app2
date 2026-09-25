@@ -431,7 +431,7 @@ export function SummaryTab({
             </span>
           </DrilldownCard>
 
-          {/* 2. Gross Profit */}
+          {/* 2. Profit */}
           <DrilldownCard
             label="Cost dashboard"
             onClick={
@@ -441,9 +441,9 @@ export function SummaryTab({
           >
             <InfoLabel
               className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider"
-              description="Net revenue less estimated product cost, before operating costs."
+              description="Revenue minus total cost."
             >
-              Gross Profit
+              Profit
             </InfoLabel>
             <div className="my-0.5">
               <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
@@ -451,7 +451,7 @@ export function SummaryTab({
               </span>
             </div>
             <span className="text-[10px] sm:text-[11px] text-text-muted truncate">
-              MMK · before op. costs
+              MMK · after operating costs
             </span>
           </DrilldownCard>
 
@@ -465,7 +465,7 @@ export function SummaryTab({
           >
             <InfoLabel
               className="text-[10px] sm:text-[11px] font-semibold text-text-muted uppercase tracking-wider"
-              description="Gross profit as a percentage of net revenue."
+              description="Profit as a percentage of net revenue."
             >
               Profit Margin
             </InfoLabel>

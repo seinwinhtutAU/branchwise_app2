@@ -44,7 +44,7 @@ measurable, and each dimension's `effective_weight` reports what it really contr
 
 Every growth figure (revenue, average sale, quantity sold, transactions) is compared with **the same dates one year earlier**, not with the window right before. This business's sales follow the calendar (festivals, rainy season, school term), so last month is a noisy baseline, and it is the same comparison the Revenue, Cost and Customer tabs use, so the Overview and those pages agree. The Overview header says "vs the same month/dates last year". A window of a week or less (a chosen day or week) is lined up by weekday instead — 52 weeks back — so a Wednesday is not set against a Saturday; see `resolve_period` and `docs/retail/dashboard.md`.
 
-A branch with no sales on those days last year (AungThitSar has data only from December 2025) has no growth to score: those measures are unscored, and their dimension is dropped or re-weighted like any other unmeasured one. It is never quietly compared with the previous month instead, which would put two branches on different yardsticks. Level measures (gross margin, dead stock, aged stock, stockout risk, conversion rate, data quality) do not compare with anything and are unaffected.
+A branch with no sales on those days last year (AungThitSar has data only from December 2025) has no growth to score: those measures are unscored, and their dimension is dropped or re-weighted like any other unmeasured one. It is never quietly compared with the previous month instead, which would put two branches on different yardsticks. Level measures (profit margin, dead stock, aged stock, stockout risk, conversion rate, data quality) do not compare with anything and are unaffected.
 
 ## The scoring table
 
@@ -65,7 +65,7 @@ Each dimension is a weighted average of its sub-metrics:
 | Sales        | Revenue growth %              |    50% | -20→0, -10→40, 0→70, +10→100                    |
 | Sales        | Average sale value growth %   |    30% | -15→0, -5→50, 0→75, +5→100                      |
 | Sales        | Quantity sold growth %        |    20% | -20→0, -10→40, 0→70, +10→100                    |
-| Profit       | Gross margin %                |   100% | 0→0, 10→40, 20→80, 30→100                       |
+| Profit       | Profit margin %               |   100% | 0→0, 10→40, 20→80, 30→100                       |
 | Inventory    | Dead stock %                  |    40% | 20→100, 35→85, 50→60, 65→30, 80→0               |
 | Inventory    | Stockout risk %               |    35% | 0→100, 2→85, 5→60, 10→20, 20→0                  |
 | Inventory    | Aged stock %                  |    25% | 0→100, 10→80, 25→50, 40→20, 60→0                |

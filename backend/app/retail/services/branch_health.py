@@ -218,11 +218,11 @@ DIMENSIONS: tuple[Dimension, ...] = (
         sub_metrics=(
             SubMetric(
                 "gross_margin_pct",
-                "Gross margin",
+                "Profit margin",
                 "pct",
                 1.0,
                 ((0.0, 0.0), (10.0, 40.0), (20.0, 80.0), (30.0, 100.0)),
-                definition="Revenue left after product cost.",
+                definition="Revenue minus total cost, as a percentage of revenue.",
                 calculation=lambda s: (
                     f"{_ks(s.net_revenue - s.estimated_cogs)} kept out of {_ks(s.net_revenue)} sold "
                     f"(goods cost {_ks(s.estimated_cogs)})."

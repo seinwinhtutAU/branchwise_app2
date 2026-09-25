@@ -21,7 +21,6 @@ import {
   ChartViewToggle,
   StatTile,
   TrendChart,
-  TwoLineTrendChart,
   type ChartView,
 } from "./shared";
 import {
@@ -101,12 +100,12 @@ function TopProfitProductsTable({
             </InfoLabel>
           </Th>
           <Th className="text-right">
-            <InfoLabel description="Estimated revenue remaining after product cost.">
+            <InfoLabel description="Estimated profit: net revenue minus the cost of the units sold.">
               Est. Margin
             </InfoLabel>
           </Th>
           <Th className="text-right">
-            <InfoLabel description="Estimated margin as a percentage of net revenue.">
+            <InfoLabel description="Estimated profit as a percentage of net revenue.">
               Margin %
             </InfoLabel>
           </Th>
@@ -163,7 +162,7 @@ export function CostTab({
   month,
   canLoad,
 }: Props): React.JSX.Element {
-  const [marginTrendView, setMarginTrendView] = useState<ChartView>("line");
+  const [profitTrendView, setProfitTrendView] = useState<ChartView>("line");
   // One cached request per (tab, branch, period) — returning to this tab with the same
   // selection shows the numbers it showed last time instead of a skeleton. See
   // lib/queryClient.ts.
@@ -226,8 +225,8 @@ export function CostTab({
           )}
         />
         <StatTile
-          label="Estimated Gross Margin"
-          description="Estimated profit after product cost, as a share of net revenue."
+          label="Estimated Profit Margin"
+          description="Revenue minus total cost, as a percentage of revenue."
           value={formatPercent(data.estimated_gross_margin_pct.value)}
           deltaPct={data.estimated_gross_margin_pct.delta_pct}
           previousLabel={previousPeriodLabel(
@@ -239,7 +238,7 @@ export function CostTab({
         />
         <StatTile
           label="Estimated Margin per Transaction"
-          description="Estimated gross margin divided by completed sales slips."
+          description="Estimated profit divided by completed sales slips."
           value={formatMoney(data.estimated_margin_per_basket.value)}
           deltaPct={data.estimated_margin_per_basket.delta_pct}
           previousLabel={previousPeriodLabel(
@@ -253,37 +252,23 @@ export function CostTab({
 
       <Card className="p-3.5 sm:p-4">
         <CardHeader
-          title="Gross margin trend"
-          description="Estimated gross margin % by day over the selected period."
+          title="Profit per day"
+          description="Estimated Ks earned each day after product cost. A day with no sales, or none we can price, shows 0."
           action={
             <ChartViewToggle
-              view={marginTrendView}
-              onChange={setMarginTrendView}
+              view={profitTrendView}
+              onChange={setProfitTrendView}
             />
           }
         />
         <TrendChart
           points={data.trend}
-          getValue={(p) => p.margin_pct ?? 0}
-          formatValue={formatPercent}
-          ariaLabel="Daily estimated gross margin percentage"
-          view={marginTrendView}
-        />
-      </Card>
-
-      <Card className="p-3.5 sm:p-4">
-        <CardHeader
-          title="Revenue vs. cost per day"
-          description="The gap between the two lines is the day's estimated margin."
-        />
-        <TwoLineTrendChart
-          points={data.trend}
-          getPrimaryValue={(p) => p.net_revenue}
-          getSecondaryValue={(p) => p.estimated_cost ?? 0}
-          primaryLabel="Net Revenue"
-          secondaryLabel="Est. Cost"
+          getValue={(p) =>
+            p.estimated_cost === null ? 0 : p.net_revenue - p.estimated_cost
+          }
           formatValue={formatMoney}
-          ariaLabel="Daily net revenue and estimated cost"
+          ariaLabel="Daily estimated profit"
+          view={profitTrendView}
         />
       </Card>
 
