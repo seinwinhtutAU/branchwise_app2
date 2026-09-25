@@ -315,7 +315,7 @@ def stock_allocation_rule(snapshot: BranchSnapshot) -> list[Alert]:
 
 
 def urgent_reorder_rule(snapshot: BranchSnapshot) -> list[Alert]:
-    """Flag items with three or fewer days of stock cover for urgent purchasing."""
+    """Flag best sellers that are out of stock — the Reorder page's "Urgent Reorder" list."""
     if not snapshot.urgent_reorders:
         return []
 
@@ -324,7 +324,7 @@ def urgent_reorder_rule(snapshot: BranchSnapshot) -> list[Alert]:
         [
             f"{item['stock_code']} · {item['description']}",
             f"{item['on_hand_qty']:,.0f}",
-            f"{item['days_left']} days",
+            f"{item['avg_monthly_sales']:,.1f}",
             f"Order {item['recommended_reorder_qty']:,.0f}",
         ]
         for item in snapshot.urgent_reorders
@@ -336,21 +336,21 @@ def urgent_reorder_rule(snapshot: BranchSnapshot) -> list[Alert]:
             dimension="reorder",
             title=f"Urgent reorder needed for {_count_products(count)}",
             summary=(
-                f"{count} product{'s' if count != 1 else ''} may run out within "
-                "the next 3 days."
+                f"{count} best-selling product{'s are' if count != 1 else ' is'} "
+                "out of stock."
             ),
             what_happened=(
-                "These products are selling faster than current stock can "
-                "support and may sell out soon."
+                "These are among your top sellers and there is none left on the "
+                "shelf, so every day without them is lost sales."
             ),
-            recommended_action="Reorder these products today to avoid stockouts.",
+            recommended_action="Reorder these products at the recommended quantity.",
             link=None,
             measure="urgent_reorder",
             table={
                 "columns": [
                     {"label": "Product", "align": "left"},
                     {"label": "In stock", "align": "right"},
-                    {"label": "Cover left", "align": "right"},
+                    {"label": "Sold per month", "align": "right"},
                     {"label": "Recommended Order", "align": "right"},
                 ],
                 "rows": rows,

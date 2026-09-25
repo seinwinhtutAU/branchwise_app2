@@ -288,10 +288,9 @@ def test_urgent_reorder_alert_fires_with_table():
         {
             "stock_code": "SNK-01",
             "description": "Air Runner Pro",
-            "on_hand_qty": 2,
-            "daily_velocity": 1.5,
-            "days_left": 1.3,
-            "recommended_reorder_qty": 30,
+            "on_hand_qty": 0,
+            "avg_monthly_sales": 45.0,
+            "recommended_reorder_qty": 135,
         },
     )
     snap = _base_snapshot(urgent_reorders=reorders)

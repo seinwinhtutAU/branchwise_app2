@@ -113,6 +113,19 @@ def test_purchasing_recommendations_logic(db_session: Session):
     assert by_code["CODE-N1"]["ABC_Class"] == "N"
     assert by_code["CODE-N1"]["SuggestedReorderQty"] == 0
 
+    # The Business Alerts "Urgent reorder" list is this page's own Urgent Reorder rows,
+    # with the same suggested quantity — the two must never disagree.
+    from app.retail.services.branch_health import _find_urgent_reorders
+
+    page_row = next(
+        r
+        for r in get_purchasing_recommendations(db_session, branch.id)["rows"]
+        if r["StockCode"] == "CODE-A1"
+    )
+    alert_rows = _find_urgent_reorders(db_session, branch.id)
+    assert [r["stock_code"] for r in alert_rows] == ["CODE-A1"]
+    assert alert_rows[0]["recommended_reorder_qty"] == page_row["SuggestedReorderQty"]
+
 
 def test_purchasing_api_endpoints(authed_client: TestClient, db_session: Session):
     db_session.add(

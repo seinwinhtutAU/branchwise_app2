@@ -458,7 +458,7 @@ export function PurchasingPage({
   return (
     <div className="flex flex-col gap-4">
       {/* KPI Cards Summary Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <FigureCard
           label={
             <InfoLabel description="A-tier products that are out of stock and need immediate attention.">
@@ -490,28 +490,6 @@ export function PurchasingPage({
           value={summary.total_suggested_units.toLocaleString()}
           sub="recommended order volume"
           tone="brand"
-        />
-
-        <FigureCard
-          label={
-            <InfoLabel description="Products with enough stock coverage for now.">
-              Hold / Monitor
-            </InfoLabel>
-          }
-          value={String(summary.hold_monitor_count)}
-          sub="sufficient coverage"
-          tone="success"
-        />
-
-        <FigureCard
-          label={
-            <InfoLabel description="Products that need a manual check because recent sales data is missing.">
-              Review
-            </InfoLabel>
-          }
-          value={String(summary.review_count)}
-          sub="no recent sales"
-          tone="neutral"
         />
       </div>
 
@@ -729,7 +707,7 @@ export function PurchasingPage({
             }
           />
         ) : !data && isRefreshing ? (
-          <TableSkeleton rows={10} cols={12} />
+          <TableSkeleton rows={10} cols={10} />
         ) : rows.length === 0 ? (
           <EmptyState
             icon={<ClipboardIcon className="w-6 h-6" />}
@@ -751,9 +729,6 @@ export function PurchasingPage({
             >
               <Thead className="top-0">
                 <Tr>
-                  <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
-                    #
-                  </Th>
                   <Th className="w-36">
                     <div className="inline-flex items-center gap-1">
                       <span>Recommendation</span>
@@ -788,14 +763,6 @@ export function PurchasingPage({
                       On Hand
                     </InfoLabel>
                   </Th>
-                  <Th
-                    className="w-20 text-right"
-                    title="Stock Coverage = On Hand ÷ Monthly Sales (Target buffer configured per ABC tier in Settings)"
-                  >
-                    <InfoLabel description="How long current stock should last at the recent sales rate.">
-                      Coverage
-                    </InfoLabel>
-                  </Th>
                   <Th className="w-24 text-right">
                     <InfoLabel description="Units sold in the current monthly sales period.">
                       Monthly Sales
@@ -806,11 +773,6 @@ export function PurchasingPage({
                       <span>ABC</span>
                       <AbcHelpPopover />
                     </div>
-                  </Th>
-                  <Th className="w-16">
-                    <InfoLabel description="Priority tier used for replenishment planning.">
-                      Tier
-                    </InfoLabel>
                   </Th>
                   <Th className="w-24 text-right">
                     <InfoLabel description="Recorded buying price for one unit.">
@@ -825,17 +787,12 @@ export function PurchasingPage({
                 </Tr>
               </Thead>
               <Tbody>
-                {rows.map((row, index) => {
+                {rows.map((row) => {
                   const isOutOfStock = row.OnHandQty <= 0;
                   const hasSuggested = row.SuggestedReorderQty > 0;
 
                   return (
                     <Tr key={row.StockCode}>
-                      {/* Row Index */}
-                      <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
-                        {(page - 1) * pageSize + index + 1}
-                      </Td>
-
                       {/* Recommendation */}
                       <Td className="whitespace-nowrap">
                         {renderRecBadge(row.Recommendation)}
@@ -895,15 +852,6 @@ export function PurchasingPage({
                         {row.OnHandQty}
                       </Td>
 
-                      {/* Stock Coverage Months */}
-                      <Td className="text-right text-xs tabular-nums text-text-secondary">
-                        {row.StockCoverageMonths > 0
-                          ? `${row.StockCoverageMonths.toFixed(1)} mo`
-                          : isOutOfStock
-                            ? "0 mo"
-                            : "—"}
-                      </Td>
-
                       {/* Avg Monthly Sales */}
                       <Td className="text-right text-xs tabular-nums text-text-secondary">
                         {row.AvgMonthlySales > 0
@@ -913,13 +861,6 @@ export function PurchasingPage({
 
                       {/* ABC */}
                       <Td>{renderAbcBadge(row.ABC_Class)}</Td>
-
-                      {/* Price Tier */}
-                      <Td>
-                        <span className="text-xs font-medium text-text-secondary">
-                          {row.PriceRange}
-                        </span>
-                      </Td>
 
                       {/* Buying Price */}
                       <Td className="text-right text-xs tabular-nums text-text-secondary">

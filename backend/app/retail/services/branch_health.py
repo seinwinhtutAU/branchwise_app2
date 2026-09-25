@@ -39,6 +39,7 @@ from app.retail.models.sale import Sale, SaleLine
 from app.retail.models.stock_level import StockLevel
 from app.retail.services import data_quality
 from app.retail.services.import_common import sql_rule_failure
+from app.retail.services.purchasing import get_purchasing_recommendations
 from app.retail.services.stock import latest_stock_query
 from app.retail.services.pos_import import VALIDATION_RULES as SALES_VALIDATION_RULES
 from app.retail.services.purchase_import import VALIDATION_RULES as PURCHASE_VALIDATION_RULES
@@ -739,31 +740,31 @@ def _find_stock_allocations(
     return tuple(best_per_code.values())
 
 
-def _find_urgent_reorders(low_stock_items: list[dict]) -> tuple[dict, ...]:
-    critical_items = [
-        item
-        for item in low_stock_items
-        if item.get("status") == "Critical" and item.get("daily_velocity", 0) > 0
+def _find_urgent_reorders(
+    db: Session, branch_id: str, limit: int = 10
+) -> tuple[dict, ...]:
+    """Best sellers with nothing left, exactly as the Reorder page lists them.
+
+    This reads the Reorder page's own recommendations (`purchasing.py`: long-run monthly
+    sales, ABC tier, buffer months from Settings) instead of working out a second
+    "days of cover" figure from the last 30 days, so the alert and the page can never
+    disagree about what is urgent or how much to order. That list is already ordered
+    biggest seller first.
+    """
+    recommendations = get_purchasing_recommendations(db, branch_id)
+    urgent = [
+        row for row in recommendations["rows"] if row["Recommendation"] == "Urgent Reorder"
     ]
-    critical_items.sort(
-        key=lambda x: (x.get("days_left", 999), -x.get("daily_velocity", 0))
+    return tuple(
+        {
+            "stock_code": row["StockCode"],
+            "description": row["Description"],
+            "on_hand_qty": round(row["OnHandQty"]),
+            "avg_monthly_sales": row["AvgMonthlySales"],
+            "recommended_reorder_qty": row["SuggestedReorderQty"],
+        }
+        for row in urgent[:limit]
     )
-    result = []
-    for item in critical_items[:10]:
-        v = item.get("daily_velocity", 0)
-        on_hand = item.get("on_hand_qty", 0)
-        reorder_qty = max(1, round(v * 30 - on_hand))
-        result.append(
-            {
-                "stock_code": item["stock_code"],
-                "description": item["description"],
-                "days_left": round(item["days_left"]),
-                "on_hand_qty": round(on_hand),
-                "daily_velocity": v,
-                "recommended_reorder_qty": reorder_qty,
-            }
-        )
-    return tuple(result)
 
 
 def aged_stock_for_branch(
@@ -1213,7 +1214,7 @@ def build_snapshot(
     stock_allocations = _find_stock_allocations(
         db, branch_id, stock.get("dead_stock_items", [])
     )
-    urgent_reorders = _find_urgent_reorders(stock.get("low_stock_items", []))
+    urgent_reorders = _find_urgent_reorders(db, branch_id)
     aged_stock, aged_judged = aged_stock_for_branch(db, branch_id)
     aged_footwear = tuple(aged_stock)
     seasonal_spikes = _find_seasonal_spikes(db, branch_id)

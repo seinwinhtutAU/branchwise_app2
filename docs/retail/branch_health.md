@@ -448,13 +448,13 @@ through `useCachedFetchMany`, which shares the cache with the single-URL hook �
 opening it after the Dashboard is instant, and opening it first warms the Dashboard.
 
 The nav item carries a **count badge**, like Warning's. `App.tsx` fills it from the same
-hook and the same URLs (every retail branch at the default 30-day window), so the badge
+hook and the same URLs (every retail branch at the default 30-day window, the only one the page uses), so the badge
 and the page can never disagree, and the requests it makes are the ones both the Dashboard
 and this page were going to need anyway — a dedicated count endpoint would have done the
 same work and thrown the result away. The badge counts every alert the page lists (critical, warning and normal, data-quality ones included) — the page's headline count — so the two always show the same number. Both follow the left-nav branch switcher: with one branch chosen only that branch's alerts are counted, with "All branches" every branch's are. The badge re-asks every ten minutes, since some alerts depend on the clock (a missing-file
 alert only appears after the daily cutoff) and the long page cache never notices that.
 
-The Business Alerts page no longer sends the user to another section to see an alert's evidence — its actions are buttons inside the alert panel, and `App.tsx` no longer holds a dashboard tab/branch target. Both pages still drive their period control from the same `usePeriodRange` hook and `PeriodControls` component, so the two behave identically without one owning the other's state.
+The Business Alerts page no longer sends the user to another section to see an alert's evidence — its actions are buttons inside the alert panel, and `App.tsx` no longer holds a dashboard tab/branch target. The page has **no period control**: none of its alerts follow a period, so it always requests the default 30-day URL (the same one the nav badge uses) and the two share one cached response. The three alerts that once followed the period now read fixed stretches of days — the two data-quality alerts use the Settings page's Sale / Purchase check windows (the same ones the Warning page uses, and the ones an alert's Warning-page link opens on), and the weekly demand pattern looks at the last 30 days (`WEEKLY_PATTERN_DAYS`). The Health tab's own period control still drives its score.
 
 **Drill-through** is the point of the whole layout: Sales → Revenue, Profit → Cost,
 Inventory → Inventory, Customer → Customer, and Data Quality leaves the dashboard for
