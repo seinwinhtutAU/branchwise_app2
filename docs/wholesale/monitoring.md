@@ -31,8 +31,8 @@ exclude cancelled orders. Dates: orders use `order_date`, deliveries `delivered_
   adds nothing to that side. *Potential gross profit* is the difference. *Revenue by factory*
   attributes each delivery to the factory that supplied most of that product on the latest voucher
   date before the delivery (the same voucher the cost estimate reads); a delivery with no earlier
-  voucher counts under "Unknown factory". The trend is daily, folded into weeks in the browser once
-  the window is longer than 14 days.
+  voucher counts under "Unknown factory". The trend is always daily, whatever the window (a month shows every
+  day, as the retail Revenue tab does).
 - **Cost** — *goods purchased* is the value of supplier vouchers dated in the window;
   *cost* is everything spent getting goods in (`wholesale_receiving_costs`) on receivings that
   arrived in the window, kept as one figure for the batch and never split across products;

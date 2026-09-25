@@ -24,7 +24,7 @@ import {
   DashboardLoading,
   RankedBars,
 } from "./dashboardParts";
-import { bucketForDisplay, formatMmk, formatShare } from "./dashboardFormat";
+import { formatMmk, formatShare } from "./dashboardFormat";
 import {
   dashboardTabUrl,
   type DashboardWindow,
@@ -60,10 +60,10 @@ export function WholesaleRevenueDashboard({
   const delivered = data.delivered_revenue.value;
   const collectedShare =
     delivered > 0 ? (data.collected.value / delivered) * 100 : 0;
-  const points = bucketForDisplay(data.trend, (bucket) =>
-    bucket.reduce((sum, day) => sum + day.delivered_revenue, 0),
-  );
-  const isWeekly = data.trend.length > 14;
+  const points = data.trend.map((day) => ({
+    date: day.date,
+    value: day.delivered_revenue,
+  }));
   const debtors = data.customer_receivables ?? [];
   const topProducts = data.top_products ?? [];
 
@@ -118,11 +118,7 @@ export function WholesaleRevenueDashboard({
       <Card className="p-3.5 sm:p-4">
         <CardHeader
           title="Revenue trend"
-          description={
-            isWeekly
-              ? "Revenue from delivered goods, by week."
-              : "Revenue from delivered goods, by day."
-          }
+          description="Revenue from delivered goods, by day."
           action={<ChartViewToggle view={trendView} onChange={setTrendView} />}
         />
         <TrendChart

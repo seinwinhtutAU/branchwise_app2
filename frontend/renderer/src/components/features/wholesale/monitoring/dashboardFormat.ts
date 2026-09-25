@@ -28,21 +28,3 @@ export const SERIES_COLORS = {
   amber: "#e09f3e",
   green: "#52b788",
 } as const;
-
-/** A trend's daily points, folded into weeks once there are too many days to read: a
- *  30-day window becomes about five points, a week or two stays daily. Each point is
- *  dated by the first day it covers. */
-export function bucketForDisplay<T extends { date: string }>(
-  points: T[],
-  sum: (bucket: T[]) => number,
-): { date: string; value: number }[] {
-  if (points.length <= 14) {
-    return points.map((point) => ({ date: point.date, value: sum([point]) }));
-  }
-  const buckets: { date: string; value: number }[] = [];
-  for (let start = 0; start < points.length; start += 7) {
-    const chunk = points.slice(start, start + 7);
-    buckets.push({ date: chunk[0].date, value: sum(chunk) });
-  }
-  return buckets;
-}
