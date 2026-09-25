@@ -32,6 +32,10 @@ const READ_TIMEOUT_MS = 15_000;
 // response comes back; on a slow link that is minutes, and cutting it off would waste
 // work that may already be half-done.
 const WRITE_TIMEOUT_MS = 5 * 60_000;
+// The first Branch Health / Warning read after the backend starts (or after a new day or
+// import) runs ~80 queries against Neon and takes 10-45s; the answer is then cached
+// server-side. Cutting it off at 15s only made the retries pile on more work.
+const HEAVY_READ_TIMEOUT_MS = 90_000;
 
 // Two extra attempts ride out short mobile dropouts.  The short timeout above bounds the
 // total wait; after that the app shows a cached result when it has one.
@@ -50,6 +54,11 @@ function isImportConfirm(url: string): boolean {
 // normal page read but is still only a read, so it is safe to retry.
 function isWholesaleExport(url: string): boolean {
   return /\/api\/wholesale\/export(?:\?|$)/.test(url);
+}
+
+// Reads the server has to compute from scratch on a cold cache (see response_cache.py).
+function isHeavyRead(url: string): boolean {
+  return /\/api\/(dashboard\/overview|warnings)(?:\?|$)/.test(url);
 }
 
 function addIdempotencyKey(
@@ -211,7 +220,9 @@ export function installNetworkResilience(): () => void {
     const timeoutMs = isImportConfirm(url) || isWholesaleExport(url)
       ? WRITE_TIMEOUT_MS
       : isRead
-        ? READ_TIMEOUT_MS
+        ? isHeavyRead(url)
+          ? HEAVY_READ_TIMEOUT_MS
+          : READ_TIMEOUT_MS
         : WRITE_TIMEOUT_MS;
     const callerSignal =
       requestInit?.signal ?? (input instanceof Request ? input.signal : null);

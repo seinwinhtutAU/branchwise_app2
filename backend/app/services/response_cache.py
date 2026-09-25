@@ -26,10 +26,14 @@ weights, which don't carry their own version — `clear()` is called directly fr
 settings-write endpoint instead, since settings changes are rare and admin-only, a full
 clear costs nothing.
 
-Two requests racing to compute the same missing key can both miss and both compute —
-wasted work, never wrong data, and not worth a lock for the traffic this app sees.
+Two requests racing to compute the same missing key wait on one lock per key, so only the
+first computes and the rest reuse its answer. This matters because a cold Branch Health
+read takes many seconds against a remote database: without it, a client that times out
+and retries (or several screens asking at once) each start the same slow computation,
+which slows the first one further.
 """
 
+import threading
 import time
 from typing import Callable, TypeVar
 
@@ -50,6 +54,8 @@ _TTL_SECONDS = 10 * 60
 _MAX_ENTRIES = 500
 
 _store: dict[tuple, tuple[float, object]] = {}
+_locks: dict[tuple, threading.Lock] = {}
+_locks_guard = threading.Lock()
 
 
 def import_data_version(db: Session, branch_id: str | None) -> str:
@@ -71,15 +77,22 @@ def import_data_version(db: Session, branch_id: str | None) -> str:
 def cached(key: tuple, compute: Callable[[], T]) -> T:
     """Returns the cached value for `key` if present and still within the TTL backstop,
     otherwise computes it, stores it, and returns it."""
-    now = time.monotonic()
     hit = _store.get(key)
-    if hit is not None and now - hit[0] < _TTL_SECONDS:
+    if hit is not None and time.monotonic() - hit[0] < _TTL_SECONDS:
         return hit[1]  # type: ignore[return-value]
-    value = compute()
-    if len(_store) >= _MAX_ENTRIES:
-        _store.clear()
-    _store[key] = (now, value)
-    return value
+    with _locks_guard:
+        lock = _locks.setdefault(key, threading.Lock())
+    with lock:
+        # Someone else may have finished computing this key while we waited for the lock.
+        hit = _store.get(key)
+        if hit is not None and time.monotonic() - hit[0] < _TTL_SECONDS:
+            return hit[1]  # type: ignore[return-value]
+        value = compute()
+        if len(_store) >= _MAX_ENTRIES:
+            _store.clear()
+            _locks.clear()
+        _store[key] = (time.monotonic(), value)
+        return value
 
 
 def clear() -> None:
