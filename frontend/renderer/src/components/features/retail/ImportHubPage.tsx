@@ -125,6 +125,12 @@ export default function ImportHubPage({
         />
       </div>
 
+      {activeTab === "import" && (
+        <h1 className="text-lg font-bold tracking-tight text-text-primary">
+          {importBranchName ?? "Choose a branch in the sidebar"}
+        </h1>
+      )}
+
       <div>
         {/* 1. Import Files */}
         {activeTab === "import" && (

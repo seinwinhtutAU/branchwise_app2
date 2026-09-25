@@ -141,6 +141,10 @@ export function DashboardPage({
     }
   }, [isAdmin, branchId, branchOptions]);
 
+  const branchName =
+    branchOptions.find((branch) => branch.id === branchId)?.name ??
+    profile?.branch_name ??
+    null;
   const waitingOnBranch = isAdmin && branchOptions.length === 0;
   const canLoad = !isAdmin || !!branchId;
 
@@ -175,6 +179,13 @@ export function DashboardPage({
           <PeriodControls range={range} options={DASHBOARD_PERIOD_OPTIONS} />
         )}
       </div>
+
+      {branchName &&
+        ["revenue", "cost", "inventory", "customer"].includes(activeTab) && (
+          <h2 className="text-lg font-bold tracking-tight text-text-primary">
+            {branchName}
+          </h2>
+        )}
 
       {waitingOnBranch && (
         <EmptyState
