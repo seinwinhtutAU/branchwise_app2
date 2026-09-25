@@ -440,7 +440,7 @@ Controls how many days back the Sale and Purchase warning checks look (default: 
 
 ### Daily Check Cutoff Time (Settings → Data checks)
 
-The shop-close time (default 8:00 PM). After it, Business Alerts raises "Daily import missing" if today's Sales or Inventory file has not been imported.
+The shop-close time (default 8:00 PM). After it, the Physical Stock Audit list unlocks once today's Sales and Inventory files are in. It no longer affects "Daily import missing", which checks yesterday's files at any hour.
 
 See:
 

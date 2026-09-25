@@ -654,7 +654,7 @@ export function SettingsPage({
           <Card>
             <CardHeader
               title="Daily check cutoff time (Shop Close)"
-              description="The shop closing time after which daily import checks run and physical stock audit sheets unlock."
+              description="The shop closing time after which physical stock audit sheets unlock."
             />
             <div className="max-w-xs">
               {!settings ? (

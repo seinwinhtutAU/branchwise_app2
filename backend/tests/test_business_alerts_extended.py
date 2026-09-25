@@ -1,4 +1,4 @@
-from datetime import date, datetime as dt
+from datetime import date, datetime as dt, timedelta
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -59,10 +59,8 @@ def _base_snapshot(**overrides) -> BranchSnapshot:
         data_issue_sections=(),
         records_checked=1000,
         period_days=30,
-        has_today_sales=True,
-        has_today_inventory=True,
-        is_after_8pm=False,
-        daily_check_cutoff_time="20:00",
+        has_yesterday_sales=True,
+        has_yesterday_inventory=True,
         stock_allocations=(),
         urgent_reorders=(),
         aged_footwear=(),
@@ -78,44 +76,26 @@ def _base_snapshot(**overrides) -> BranchSnapshot:
 # ---------------------------------------------------------------------------
 
 
-def test_daily_import_no_alert_before_8pm():
-    """Before 8:00 PM, no alert should fire even if today's imports have not arrived yet."""
-    snap = _base_snapshot(
-        is_after_8pm=False,
-        has_today_sales=False,
-        has_today_inventory=False,
-    )
-    alerts = early_warning.evaluate(snap)
-    assert not any(a.id.startswith("daily_import_missing") for a in alerts)
-
-
-def test_daily_import_fires_critical_after_8pm_when_both_missing():
-    """After 8:00 PM, if neither sales nor inventory was imported today, fire one
-    critical alert per missing type — they're two separate imports, not one problem."""
-    snap = _base_snapshot(
-        is_after_8pm=True,
-        has_today_sales=False,
-        has_today_inventory=False,
-    )
+def test_daily_import_fires_critical_when_both_missing():
+    """If neither sales nor inventory was imported for yesterday, fire one critical
+    alert per missing type — they're two separate imports, not one problem. It fires at
+    any hour: there is no shop-close time to wait for, since yesterday is already over."""
+    snap = _base_snapshot(has_yesterday_sales=False, has_yesterday_inventory=False)
     alerts = early_warning.evaluate(snap)
     sales_alert = next(a for a in alerts if a.id == "daily_import_missing_sales")
     inventory_alert = next(a for a in alerts if a.id == "daily_import_missing_inventory")
     assert sales_alert.severity == early_warning.CRITICAL
     assert sales_alert.dimension == "data_quality"
-    assert sales_alert.title == "Today's sales data is missing or out of date"
+    assert sales_alert.title == "Yesterday's sales data is missing"
     assert sales_alert.link == "import"
     assert inventory_alert.severity == early_warning.CRITICAL
     assert inventory_alert.dimension == "data_quality"
-    assert inventory_alert.title == "Today's inventory data is missing or out of date"
+    assert inventory_alert.title == "Yesterday's inventory data is missing"
     assert inventory_alert.link == "import"
 
 
-def test_daily_import_fires_critical_after_8pm_when_only_sales_missing():
-    snap = _base_snapshot(
-        is_after_8pm=True,
-        has_today_sales=False,
-        has_today_inventory=True,
-    )
+def test_daily_import_fires_critical_when_only_sales_missing():
+    snap = _base_snapshot(has_yesterday_sales=False, has_yesterday_inventory=True)
     alerts = early_warning.evaluate(snap)
     assert not any(a.id == "daily_import_missing_inventory" for a in alerts)
     alert = next(a for a in alerts if a.id == "daily_import_missing_sales")
@@ -125,12 +105,8 @@ def test_daily_import_fires_critical_after_8pm_when_only_sales_missing():
     assert "inventory" not in alert.title.lower()
 
 
-def test_daily_import_fires_critical_after_8pm_when_only_inventory_missing():
-    snap = _base_snapshot(
-        is_after_8pm=True,
-        has_today_sales=True,
-        has_today_inventory=False,
-    )
+def test_daily_import_fires_critical_when_only_inventory_missing():
+    snap = _base_snapshot(has_yesterday_sales=True, has_yesterday_inventory=False)
     alerts = early_warning.evaluate(snap)
     assert not any(a.id == "daily_import_missing_sales" for a in alerts)
     alert = next(a for a in alerts if a.id == "daily_import_missing_inventory")
@@ -140,23 +116,18 @@ def test_daily_import_fires_critical_after_8pm_when_only_inventory_missing():
     assert "sales" not in alert.title.lower()
 
 
-def test_daily_import_clears_when_both_today_imports_present():
-    snap = _base_snapshot(
-        is_after_8pm=True,
-        has_today_sales=True,
-        has_today_inventory=True,
-    )
+def test_daily_import_clears_when_both_yesterday_imports_present():
+    snap = _base_snapshot(has_yesterday_sales=True, has_yesterday_inventory=True)
     alerts = early_warning.evaluate(snap)
     assert not any(a.id.startswith("daily_import_missing") for a in alerts)
 
 
-def test_daily_import_alert_identifies_data_uploaded_for_an_older_day():
+def test_daily_import_alert_names_the_day_checked_and_the_latest_data():
     snap = _base_snapshot(
-        is_after_8pm=True,
-        has_today_sales=False,
-        has_today_inventory=False,
+        has_yesterday_sales=False,
+        has_yesterday_inventory=False,
         sales_data_date="2026-09-20",
-        inventory_data_date="2026-09-19",
+        inventory_data_date=None,
     )
 
     alerts = early_warning.evaluate(snap)
@@ -164,10 +135,53 @@ def test_daily_import_alert_identifies_data_uploaded_for_an_older_day():
     inventory_alert = next(a for a in alerts if a.id == "daily_import_missing_inventory")
     sales_facts = {fact["label"]: fact["value"] for fact in sales_alert.facts}
     inventory_facts = {fact["label"]: fact["value"] for fact in inventory_alert.facts}
-    assert sales_facts["Latest Sale Date"] == "2026-09-20 (not today)"
-    assert inventory_facts["Latest Inventory Date"] == "2026-09-19 (not today)"
-    assert "Store Status" in sales_facts
-    assert "Today's Business Day" in sales_facts
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    assert sales_facts["Latest Sale Date"] == "2026-09-20"
+    assert inventory_facts["Latest Inventory Date"] == "No data yet"
+    assert sales_facts["Day Checked"] == yesterday
+    assert yesterday in sales_alert.summary
+    assert "Store Status" not in sales_facts
+
+
+def test_yesterday_import_status_is_read_from_the_imported_records(db_session):
+    from app.models.branch import Branch
+    from app.retail.models.sale import Sale
+    from app.retail.models.stock_level import StockLevel
+    from app.retail.models.product import Product
+    from app.retail.services.branch_health import _check_yesterday_import_status
+
+    today = date(2026, 9, 25)
+    branch = Branch(name="Ashley", phone_number="1", address="x")
+    db_session.add(branch)
+    db_session.flush()
+    product = Product(stock_code="P1", description="Shoe")
+    db_session.add(product)
+    db_session.flush()
+
+    # Nothing yet.
+    assert _check_yesterday_import_status(db_session, branch.id, today) == (False, False)
+
+    # Today's own files do not count as yesterday's.
+    db_session.add(Sale(branch_id=branch.id, slip_id="s0", slip_number="0", sale_date=today))
+    db_session.add(
+        StockLevel(branch_id=branch.id, product_id=product.id, on_hand_qty=1,
+                   snapshot_at=dt(2026, 9, 25, 10, 0))
+    )
+    db_session.commit()
+    assert _check_yesterday_import_status(db_session, branch.id, today) == (False, False)
+
+    db_session.add(
+        Sale(branch_id=branch.id, slip_id="s1", slip_number="1", sale_date=date(2026, 9, 24))
+    )
+    db_session.commit()
+    assert _check_yesterday_import_status(db_session, branch.id, today) == (True, False)
+
+    db_session.add(
+        StockLevel(branch_id=branch.id, product_id=product.id, on_hand_qty=2,
+                   snapshot_at=dt(2026, 9, 24, 21, 0))
+    )
+    db_session.commit()
+    assert _check_yesterday_import_status(db_session, branch.id, today) == (True, True)
 
 
 def test_purchase_number_sequence_gap_fires_critical_alert():
@@ -484,7 +498,7 @@ def test_checking_api_status_and_export(db_session: Session, authed_client: Test
 def test_custom_daily_check_cutoff_time_formats_in_alerts_and_checking(
     db_session: Session, authed_client: TestClient
 ):
-    """Verify that changing daily_check_cutoff_time changes alert copy and checking locking messages."""
+    """Verify that changing daily_check_cutoff_time changes the physical stock audit's locking messages."""
     branch = Branch(
         id="test_br_02",
         name="Cutoff Test Branch",
@@ -504,19 +518,7 @@ def test_custom_daily_check_cutoff_time_formats_in_alerts_and_checking(
     db_session.add(user)
     db_session.commit()
 
-    # 1. Test alert rule with custom cutoff time "19:00"
-    snap = _base_snapshot(
-        has_today_sales=False,
-        has_today_inventory=False,
-        is_after_8pm=True,
-        daily_check_cutoff_time="19:00",
-    )
-    alerts = early_warning.evaluate(snap)
-    import_alerts = [a for a in alerts if a.id.startswith("daily_import_missing")]
-    assert len(import_alerts) == 2
-    assert all("7:00 PM" in alert.summary for alert in import_alerts)
-
-    # 2. Update app_settings with custom cutoff time 21:30
+    # Update app_settings with custom cutoff time 21:30
     res_update = authed_client.put(
         "/api/settings",
         json={"daily_check_cutoff_time": "21:30"},
@@ -524,7 +526,7 @@ def test_custom_daily_check_cutoff_time_formats_in_alerts_and_checking(
     assert res_update.status_code == 200
     assert res_update.json()["daily_check_cutoff_time"] == "21:30"
 
-    # 3. Checking status endpoint reflects new cutoff time and 9:30 PM in reason when locked
+    # 1. Checking status endpoint reflects new cutoff time and 9:30 PM in reason when locked
     with patch(
         "app.retail.routers.checking._check_daily_import_status",
         return_value=(False, False, False),
@@ -536,7 +538,7 @@ def test_custom_daily_check_cutoff_time_formats_in_alerts_and_checking(
         assert data["formatted_cutoff_time"] == "9:30 PM"
         assert "9:30 PM" in data["reason"]
 
-    # 4. Checking export reflects new cutoff time when locked
+    # 2. Checking export reflects new cutoff time when locked
     with patch(
         "app.retail.routers.checking._check_daily_import_status",
         return_value=(False, False, False),

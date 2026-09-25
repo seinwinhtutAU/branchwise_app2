@@ -455,13 +455,12 @@ class BranchSnapshot:
     previous_date_from: str | None = None
     previous_date_to: str | None = None
     # 7 Business Alerts Extensions
-    has_today_sales: bool = True
-    has_today_inventory: bool = True
+    # Whether yesterday's Sale / Inventory data is in (the "Daily import missing" alert).
+    has_yesterday_sales: bool = True
+    has_yesterday_inventory: bool = True
     sales_data_date: str | None = None
     inventory_data_date: str | None = None
     purchase_number_integrity: dict = field(default_factory=dict)
-    is_after_8pm: bool = False
-    daily_check_cutoff_time: str = "20:00"
     stock_allocations: tuple[dict, ...] = ()
     # The products staff must recount on the shelf (stock_code, description,
     # on_hand_qty) — the missing-product and reconciliation warnings, one row per product.
@@ -653,6 +652,34 @@ def _check_daily_import_status(
         is not None
     )
     return has_today_sales, has_today_inventory, is_after_cutoff
+
+
+def _check_yesterday_import_status(
+    db: Session, branch_id: str, today: date | None = None
+) -> tuple[bool, bool]:
+    """`(has_yesterday_sales, has_yesterday_inventory)` for the "Daily import missing" alert.
+
+    Yesterday, not today: by the time anyone opens the app the day before should be
+    complete, so the alert has no shop-close time to wait for and never fires on a day
+    that simply is not over yet. Every day counts, including days the branch was closed.
+    """
+    yesterday = (today or date.today()) - timedelta(days=1)
+    has_sales = (
+        db.query(Sale.id)
+        .filter(Sale.branch_id == branch_id, Sale.sale_date == yesterday)
+        .first()
+        is not None
+    )
+    has_inventory = (
+        db.query(StockLevel.id)
+        .filter(
+            StockLevel.branch_id == branch_id,
+            func.date(StockLevel.snapshot_at) == yesterday,
+        )
+        .first()
+        is not None
+    )
+    return has_sales, has_inventory
 
 
 def _find_stock_allocations(
@@ -1200,14 +1227,12 @@ def build_snapshot(
     )
 
     from app.services.settings import (
-        get_daily_check_cutoff_time,
         get_purchase_warning_window_days,
         get_sale_warning_window_days,
     )
 
-    cutoff_time = get_daily_check_cutoff_time(db)
-    has_today_sales, has_today_inventory, is_after_8pm = _check_daily_import_status(
-        db, branch_id, cutoff_time=cutoff_time
+    has_yesterday_sales, has_yesterday_inventory = _check_yesterday_import_status(
+        db, branch_id
     )
     sales_data_date, inventory_data_date = latest_daily_data_dates(db, branch_id)
     purchase_integrity = purchase_number_integrity(db, branch_id)
@@ -1296,15 +1321,13 @@ def build_snapshot(
         date_to=period_range.end.isoformat(),
         previous_date_from=period_range.previous_start.isoformat(),
         previous_date_to=period_range.previous_end.isoformat(),
-        has_today_sales=has_today_sales,
-        has_today_inventory=has_today_inventory,
+        has_yesterday_sales=has_yesterday_sales,
+        has_yesterday_inventory=has_yesterday_inventory,
         sales_data_date=sales_data_date.isoformat() if sales_data_date else None,
         inventory_data_date=inventory_data_date.isoformat()
         if inventory_data_date
         else None,
         purchase_number_integrity=purchase_integrity,
-        is_after_8pm=is_after_8pm,
-        daily_check_cutoff_time=cutoff_time,
         stock_allocations=stock_allocations,
         checking_items=tuple(
             data_quality.checking_items_from_sections(db, branch_id, warning_sections)

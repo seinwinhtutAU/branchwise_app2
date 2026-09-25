@@ -11,9 +11,9 @@ The Warning page already tells staff *that* a product's stock figures look wrong
 
 ## Eligibility gating
 
-The audit list only unlocks once **all** of these are true, checked by `_check_daily_import_status` (`app/retail/services/branch_health.py`) — the exact same helper that gates Business Alerts' Rule 8, "Daily import missing" (`daily_import_missing_rule` in `app/retail/services/early_warning.py`; see [business-alerts.md](./business-alerts.md)):
+The audit list only unlocks once **all** of these are true, checked by `_check_daily_import_status` (`app/retail/services/branch_health.py`). This is the audit's own helper: Business Alerts' "Daily import missing" alert no longer shares it — that alert checks *yesterday's* files (`_check_yesterday_import_status`) at any hour, while the audit needs *today's* files and the shop-close time (see [business-alerts.md](./business-alerts.md)):
 
-1. The clock is past the business-configurable daily cutoff time (`daily_check_cutoff_time` setting, default `20:00` — Settings → Data checks, same setting Rule 8 uses).
+1. The clock is past the business-configurable daily cutoff time (`daily_check_cutoff_time` setting, default `20:00` — Settings → Data checks; now used only by this audit).
 2. Today's Sale file has been imported for this branch.
 3. Today's Inventory file has been imported for this branch.
 

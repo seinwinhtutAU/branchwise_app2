@@ -412,7 +412,7 @@ function AlertInspector({
                   className="h-8 text-xs font-semibold"
                 >
                   <UploadIcon className="w-3.5 h-3.5 mr-1.5" />
-                  Upload Today's Sales File
+                  Upload Yesterday's Sales File
                 </Button>
               )}
 
@@ -430,7 +430,7 @@ function AlertInspector({
                   className="h-8 text-xs font-semibold"
                 >
                   <UploadIcon className="w-3.5 h-3.5 mr-1.5" />
-                  Upload Today's Inventory File
+                  Upload Yesterday's Inventory File
                 </Button>
               )}
 

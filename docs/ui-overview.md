@@ -224,7 +224,7 @@ Wholesale):
   control backed by `data-theme` + `prefers-color-scheme`), the Sale/Purchase list
   default range (90 days), and the Buying Price Source column toggle.
 - **Reorder Buffer** — target stock buffer months per ABC tier (A/B/C) for replenishment.
-- **Data checks** — the daily check cutoff time (shop close, default 20:00) and how far
+- **Data checks** — the daily check cutoff time (shop close, default 20:00; only the Physical Stock Audit uses it) and how far
   back the Warning page's Sale and Purchase checks look, independently of each other.
   Inventory always checks only the latest snapshot, so there is nothing to configure for it.
 - **Buying price** — the three point-in-time pricing windows (purchase lookback,

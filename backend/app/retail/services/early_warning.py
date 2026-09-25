@@ -6,7 +6,7 @@ stock between branches, managing aging inventory, and preparing for known demand
 """
 
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Callable
 
 from app.retail.services.branch_health import BranchSnapshot
@@ -50,54 +50,29 @@ def _facts(*facts: dict | None) -> tuple[dict, ...]:
     return tuple(fact for fact in facts if fact is not None)
 
 
-def _format_time(cutoff: str) -> str:
-    try:
-        parts = cutoff.split(":")
-        hour = int(parts[0])
-        minute = int(parts[1]) if len(parts) > 1 else 0
-        suffix = "AM" if hour < 12 else "PM"
-        display_hour = 12 if hour in (0, 12) else hour % 12
-        return (
-            f"{display_hour}:00 {suffix}"
-            if minute == 0
-            else f"{display_hour}:{minute:02d} {suffix}"
-        )
-    except (TypeError, ValueError):
-        return cutoff
-
-
 def daily_import_missing_rule(snapshot: BranchSnapshot) -> list[Alert]:
-    """After cutoff, require Sale and Inventory to each be current for today —
-    one alert per missing type, since they're two separate imports/files with
-    their own dimension, not one combined problem."""
-    if not snapshot.is_after_8pm:
-        return []
-
-    cutoff = _format_time(snapshot.daily_check_cutoff_time)
-
-    def data_state(data_date: str | None) -> str:
-        if data_date:
-            return f"{data_date} (not today)"
-        return "No update today"
+    """Yesterday's Sale and Inventory files must each be in — one alert per missing
+    type, since they're two separate imports/files with their own dimension, not one
+    combined problem. Yesterday rather than today: the day before is over and should be
+    complete, so there is no cutoff time to wait for, and a branch that did not open is
+    still expected to upload (every day is checked)."""
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
 
     def alert_for(kind: str, dimension: str, is_current: bool, data_date: str | None) -> Alert | None:
         if is_current:
             return None
         # Checked by data date, not by whether anything was imported today: if an
-        # older file gets confirmed today, this still fires, since today's own
-        # date still has no data. "hasn't been imported" would read as false to
-        # someone who just imported *something* today, so the copy below stays
-        # to what the check actually knows — today's data is missing or dated.
-        # Only name pages that actually exist in the retail nav (Dashboard, Data
-        # Overview) — earlier drafts said "Reports" and "today's business
-        # summary", neither of which is a screen the user can find or check.
+        # older file gets confirmed today, this still fires, since yesterday's own
+        # date still has no data. Only name pages that actually exist in the retail nav
+        # (Dashboard, Data Overview) — earlier drafts said "Reports" and "today's
+        # business summary", neither of which is a screen the user can find or check.
         kind_lower = "sales" if dimension == "sales" else "inventory"
         what_happened = (
-            "Until today's sales file is imported, today's numbers won't show "
+            "Until yesterday's sales file is imported, yesterday's numbers won't show "
             "up on the Dashboard or Data Overview."
             if dimension == "sales"
             else (
-                "Until today's inventory file is imported, today's stock "
+                "Until yesterday's inventory file is imported, yesterday's stock "
                 "levels won't show up on the Dashboard or Data Overview."
             )
         )
@@ -108,30 +83,26 @@ def daily_import_missing_rule(snapshot: BranchSnapshot) -> list[Alert]:
             # Business Alerts page and stays out of the Summary's decisions), even though
             # the id still says which of sales/inventory it is.
             dimension="data_quality",
-            title=f"Today's {kind_lower} data is missing or out of date",
-            summary=(
-                f"The latest {kind_lower} file on record isn't for today "
-                f"(checked after {cutoff})."
-            ),
+            title=f"Yesterday's {kind_lower} data is missing",
+            summary=f"No {kind_lower} file for yesterday ({yesterday}) has been imported.",
             what_happened=what_happened,
             recommended_action=(
-                f"Upload today's {kind_lower} file so today's numbers are complete."
+                f"Upload yesterday's {kind_lower} file so yesterday's numbers are complete."
             ),
             link="import",
             measure="daily_import",
             facts=_facts(
-                _fact("Store Status", f"Closed (after {cutoff})"),
-                _fact(f"Latest {kind} Date", data_state(data_date)),
-                _fact("Today's Business Day", date.today().isoformat()),
+                _fact(f"Latest {kind} Date", data_date or "No data yet"),
+                _fact("Day Checked", yesterday),
             ),
         )
 
     candidates = [
-        alert_for("Sale", "sales", snapshot.has_today_sales, snapshot.sales_data_date),
+        alert_for("Sale", "sales", snapshot.has_yesterday_sales, snapshot.sales_data_date),
         alert_for(
             "Inventory",
             "inventory",
-            snapshot.has_today_inventory,
+            snapshot.has_yesterday_inventory,
             snapshot.inventory_data_date,
         ),
     ]
