@@ -68,7 +68,7 @@ export function receivedColorProblem(
  *  across every package in this receiving — not just the item being typed into, since
  *  the same product often arrives split across several packages and a colour's full count
  *  only exists once every package holding it is added up. */
-export function receivedColorPairs(
+function receivedColorPairs(
   receiving: Receiving,
   stockCode: string,
 ): Map<string, number> {

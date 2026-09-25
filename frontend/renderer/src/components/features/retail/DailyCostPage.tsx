@@ -64,7 +64,6 @@ export default function DailyCostPage({
       endpoint="/api/daily-costs"
       title="Daily General Usage"
       description="One daily record per branch: usage, digital income, returns, and capital expenditure."
-      icon={<div className="h-3.5 w-5 rounded-sm bg-orange-400 shrink-0" />}
       columns={COLUMNS}
       filters={filters}
       branchFilter={branchFilter}

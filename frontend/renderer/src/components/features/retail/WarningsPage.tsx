@@ -26,14 +26,11 @@ import {
   Th,
   Td,
 } from "@renderer/components/ui/Table";
-import { downloadCsv } from "@renderer/lib/csv";
-import { downloadExcel } from "@renderer/lib/excel";
 import {
   WarningIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   SearchIcon,
-  DownloadIcon,
 } from "@renderer/components/ui/icons";
 import type {
   PendingImport,
@@ -86,8 +83,7 @@ interface Props {
   // Hands off a picked-and-parsed file to the app-level confirm flow — used by every
   // "Reimport to fix" button below.
   onFileReady?: (pending: PendingImport) => void;
-  // Lets another page (Business Alerts' "Open Checking") land straight on the Checking tab.
-  initialTab?: "Checking";
+  initialTab?: "Inventory" | "Sale" | "Purchase";
 }
 
 type ImportType = "sales" | "inventory" | "purchase";
@@ -109,17 +105,8 @@ type Category = "Inventory" | "Sale" | "Purchase";
 // Order used by the "All" tab — inventory surfaces first ahead of transaction checks.
 const ALL_TAB_ORDER: Category[] = ["Inventory", "Sale", "Purchase"];
 
-type Tab = "All" | Category | "Checking";
-const TAB_ORDER: Tab[] = ["All", "Inventory", "Sale", "Purchase", "Checking"];
-
-// The checks someone resolves by physically finding and counting the product — the same
-// three the backend's CHECKING_SECTION_IDS uses. A bad number in a sale or purchase row
-// needs a corrected file instead, so those never appear on the Checking list.
-const CHECKING_SECTION_IDS = new Set([
-  "missing_product",
-  "reconciliation_uom",
-  "reconciliation_mismatch",
-]);
+type Tab = "All" | Category;
+const TAB_ORDER: Tab[] = ["All", "Inventory", "Sale", "Purchase"];
 
 // Which broad area each backend check belongs under — purely a display grouping. The
 // backend still returns one row per check (each has its own detail fields), but every
@@ -963,60 +950,7 @@ function WarningsPage({
     Inventory: categoryCount("Inventory"),
     Sale: categoryCount("Sale"),
     Purchase: categoryCount("Purchase"),
-    Checking: 0,
   };
-
-  const recountRows = useMemo(() => {
-    if (!displaySections) return [];
-    const result: { branch: string; stockCode: string; description: string }[] =
-      [];
-    const seen = new Set<string>();
-
-    for (const section of displaySections) {
-      if (!CHECKING_SECTION_IDS.has(section.id)) continue;
-      for (const r of section.rows) {
-        const branch = fieldValue(r.fields, "Branch") || "";
-        const stockCode = fieldValue(r.fields, "Stock Code") || "";
-        const description = fieldValue(r.fields, "Description") || "";
-        if (!stockCode && !description) continue;
-        const key = `${branch}__${stockCode}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          result.push({ branch, stockCode, description });
-        }
-      }
-    }
-    return result;
-  }, [displaySections]);
-
-  tabCounts.Checking = recountRows.length;
-
-  function handleExportRecountCsv(): void {
-    if (recountRows.length === 0) return;
-    const dateStr = new Date().toISOString().slice(0, 10);
-    const branchSuffix = branchFilter
-      ? `-${branchFilter.toLowerCase().replace(/\s+/g, "-")}`
-      : "";
-    downloadCsv(
-      `recount-list${branchSuffix}-${dateStr}.csv`,
-      ["Branch", "Stock Code", "Description", "Actual Count"],
-      recountRows.map((r) => [r.branch, r.stockCode, r.description, ""]),
-    );
-  }
-
-  function handleExportRecountExcel(): void {
-    if (recountRows.length === 0) return;
-    const dateStr = new Date().toISOString().slice(0, 10);
-    const branchSuffix = branchFilter
-      ? `-${branchFilter.toLowerCase().replace(/\s+/g, "-")}`
-      : "";
-    downloadExcel(
-      `recount-list${branchSuffix}-${dateStr}.xlsx`,
-      "Recount List",
-      ["Branch", "Stock Code", "Description", "Actual Count"],
-      recountRows.map((r) => [r.branch, r.stockCode, r.description, ""]),
-    );
-  }
 
   return (
     <div className="flex flex-col" style={containerStyle}>
@@ -1029,37 +963,9 @@ function WarningsPage({
       >
         <CardHeader
           title="Data Quality"
-          description="Sale, inventory, and purchase data discrepancies, missing master links, and recount flags."
+          description="Sale, inventory, and purchase data discrepancies, and missing master links."
           action={
             <div className="flex items-center gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleExportRecountCsv}
-                disabled={recountRows.length === 0}
-                title={
-                  recountRows.length === 0
-                    ? "No items to recount"
-                    : `Export ${recountRows.length} recount items to CSV`
-                }
-              >
-                <DownloadIcon className="w-4 h-4" />
-                CSV
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleExportRecountExcel}
-                disabled={recountRows.length === 0}
-                title={
-                  recountRows.length === 0
-                    ? "No items to recount"
-                    : `Export ${recountRows.length} recount items to Excel`
-                }
-              >
-                <DownloadIcon className="w-4 h-4" />
-                Excel
-              </Button>
               <RefreshButton onClick={reload} refreshing={isRefreshing} />
             </div>
           }
@@ -1144,98 +1050,44 @@ function WarningsPage({
               onSelect={setActiveTab}
               counts={tabCounts}
             />
-            {activeTab === "Checking" ? (
-              <CheckingList rows={recountRows} showBranch={!branchFilter} />
-            ) : (
-              <div className="flex flex-col gap-6">
-                {(activeTab === "All" ? ALL_TAB_ORDER : [activeTab]).map(
-                  (category) => {
-                    const categorySections = (displaySections ?? []).filter(
-                      (s) =>
-                        SECTION_CATEGORY[s.id] === category &&
-                        s.rows.length > 0,
-                    );
-                    if (categorySections.length === 0) {
-                      if (activeTab === "All") return null;
-                      return (
-                        <EmptyState
-                          key={category}
-                          icon={<WarningIcon />}
-                          title="All clear"
-                          description={`No ${category.toLowerCase()} warnings right now.`}
-                        />
-                      );
-                    }
+            <div className="flex flex-col gap-6">
+              {(activeTab === "All" ? ALL_TAB_ORDER : [activeTab]).map(
+                (category) => {
+                  const categorySections = (displaySections ?? []).filter(
+                    (s) =>
+                      SECTION_CATEGORY[s.id] === category &&
+                      s.rows.length > 0,
+                  );
+                  if (categorySections.length === 0) {
+                    if (activeTab === "All") return null;
                     return (
-                      <WarningCategoryCard
+                      <EmptyState
                         key={category}
-                        category={category}
-                        sections={categorySections}
-                        showTitle={activeTab === "All"}
-                        profile={profile}
-                        disabled={picking}
-                        onViewImportBatch={onViewImportBatch}
-                        onImportToFix={handleImportToFix}
+                        icon={<WarningIcon />}
+                        title="All clear"
+                        description={`No ${category.toLowerCase()} warnings right now.`}
                       />
                     );
-                  },
-                )}
-              </div>
-            )}
+                  }
+                  return (
+                    <WarningCategoryCard
+                      key={category}
+                      category={category}
+                      sections={categorySections}
+                      showTitle={activeTab === "All"}
+                      profile={profile}
+                      disabled={picking}
+                      onViewImportBatch={onViewImportBatch}
+                      onImportToFix={handleImportToFix}
+                    />
+                  );
+                },
+              )}
+            </div>
           </div>
         )}
       </div>
     </div>
-  );
-}
-
-// A plain list of what to go and count — no system quantity on purpose, so the person
-// counting isn't nudged toward the figure the system already believes.
-function CheckingList({
-  rows,
-  showBranch,
-}: {
-  rows: { branch: string; stockCode: string; description: string }[];
-  showBranch: boolean;
-}): React.JSX.Element {
-  if (rows.length === 0) {
-    return (
-      <EmptyState
-        icon={<WarningIcon />}
-        title="Nothing to check"
-        description="No products need a physical recount right now."
-      />
-    );
-  }
-  return (
-    <TableContainer>
-      <Thead>
-        <Tr>
-          <Th className="w-10 sm:w-12 text-center text-text-muted font-normal select-none">
-            #
-          </Th>
-          {showBranch && <Th>Branch</Th>}
-          <Th>Stock Code</Th>
-          <Th>Description</Th>
-          <Th className="text-right">Physical Count</Th>
-        </Tr>
-      </Thead>
-      <Tbody>
-        {rows.map((r, i) => (
-          <Tr key={`${r.branch}__${r.stockCode}__${i}`}>
-            <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
-              {i + 1}
-            </Td>
-            {showBranch && <Td>{r.branch || "—"}</Td>}
-            <Td className="font-mono font-medium">{r.stockCode || "—"}</Td>
-            <Td>{r.description || "—"}</Td>
-            <Td className="text-right text-text-muted text-xs italic">
-              Count on shelf
-            </Td>
-          </Tr>
-        ))}
-      </Tbody>
-    </TableContainer>
   );
 }
 

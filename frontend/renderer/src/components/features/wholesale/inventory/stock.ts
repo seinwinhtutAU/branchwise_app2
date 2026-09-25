@@ -16,7 +16,6 @@
 
 import { parseColorQty } from "../shared/shared";
 import {
-  lineRemaining,
   type CustomerOrder,
   type CustomerOrderLine,
 } from "../orders/customerOrders";
@@ -284,62 +283,6 @@ export function stockLines(movements: StockMovement[]): StockLine[] {
   );
 }
 
-export function movementsFor(
-  movements: StockMovement[],
-  stockCode: string,
-  location: string,
-): StockMovement[] {
-  return movements
-    .filter(
-      (movement) =>
-        movement.stock_code === stockCode && movement.location === location,
-    )
-    .sort((a, b) => (a.moved_on < b.moved_on ? 1 : -1));
-}
-
-// Wholesale stock is not a shop shelf, so "running low" is not the question anyone asks
-// of it. The status explains how much of the stock is already promised to customers:
-// none, some, all, or none because the shelf is empty.
-
-export type StockPurpose =
-  | "quantity_available_pairs"
-  | "partly_allocated"
-  | "fully_allocated"
-  | "out_of_stock";
-
-/** The open orders waiting on a product, newest first. Brought to the stock screen so a
- *  delivery can be made where the goods are, without first going to Customer Orders to
- *  find out who is waiting and then coming back. */
-export function ordersWaitingFor(
-  stockCode: string,
-  orders: CustomerOrder[],
-): CustomerOrder[] {
-  return orders
-    .filter(
-      (order) =>
-        order.order_status !== "cancelled" &&
-        // Still owed *this* product, not merely unfinished somewhere else on the order.
-        // An order that has had all its sandals and is waiting on its slippers has no
-        // business appearing under the sandals.
-        owedOf(order, stockCode) > 0,
-    )
-    .sort((a, b) => (a.order_date < b.order_date ? 1 : -1));
-}
-
-/** The pairs of one product a single order is still owed. */
-function owedOf(order: CustomerOrder, stockCode: string): number {
-  return order.lines
-    .filter((line) => line.stock_code === stockCode)
-    .reduce((sum, line) => sum + lineRemaining(line), 0);
-}
-
-/** The pairs customers are still owed of a product, across every open order. */
-export function owedPairs(stockCode: string, orders: CustomerOrder[]): number {
-  return orders
-    .filter((order) => order.order_status !== "cancelled")
-    .reduce((sum, order) => sum + owedOf(order, stockCode), 0);
-}
-
 /** How much of what is on this shelf has been explicitly reserved by a user. Demand is
  *  not allocation: open orders remain unallocated until an order line records a quantity. */
 export function allocatedPairs(
@@ -357,19 +300,6 @@ export function allocatedPairs(
     ),
     Math.max(0, line.quantity_available_pairs),
   );
-}
-
-/** Whether none, some, or all of this stock has an explicit customer allocation, or
- *  whether the stock line is empty. */
-export function stockPurpose(
-  line: StockLine,
-  orders: CustomerOrder[],
-): StockPurpose {
-  if (line.quantity_available_pairs <= 0) return "out_of_stock";
-  const allocated = allocatedPairs(line, orders);
-  if (allocated <= 0) return "quantity_available_pairs";
-  if (allocated >= line.quantity_available_pairs) return "fully_allocated";
-  return "partly_allocated";
 }
 
 // ── Seed rows ────────────────────────────────────────────────────────────────

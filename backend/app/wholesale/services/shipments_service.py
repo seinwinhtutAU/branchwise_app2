@@ -18,7 +18,7 @@ from app.wholesale.services.lifecycle import (
     assert_can_perform_shipment_action,
 )
 from app.wholesale.services.references import allocate_reference, retry_on_reference_collision
-from app.wholesale.services.shipments import LegInput, cargo_remaining, leg_remaining, normalise_flow
+from app.wholesale.services.shipments import LegInput, cargo_remaining, normalise_flow
 
 
 def _load(db: Session, shipment_id: str, branch_id: str | None) -> Shipment:

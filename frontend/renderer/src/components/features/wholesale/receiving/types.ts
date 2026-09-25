@@ -8,8 +8,6 @@ import {
 
 export const RECEIVINGS_QUERY_KEY = ["wholesale", "receivings"] as const;
 export const SHIPMENTS_QUERY_KEY = ["wholesale", "shipments"] as const;
-export const STOCK_QUERY_KEY = ["wholesale", "stock"] as const;
-
 export type View = "list" | "detail" | "new";
 export type StatusFilter = ReceivingStatus | "all";
 
@@ -41,7 +39,7 @@ export const STATUS_STYLES: Record<ReceivingStatus, { bg: string; dot: string }>
 
 export const STEPS = ["Receiving", "Review"] as const;
 
-export const receivingDetailItemSchema = z.object({
+const receivingDetailItemSchema = z.object({
   item_id: z.string(),
   stock_code: z.string(),
   description: z.string(),
@@ -51,7 +49,7 @@ export const receivingDetailItemSchema = z.object({
   unit: z.enum(["pair", "set", "dozen"]),
 });
 
-export const receivingDetailPackageSchema = z.object({
+const receivingDetailPackageSchema = z.object({
   package_id: z.string(),
   package_no: z.number().finite().min(1),
   opened: z.boolean(),
@@ -60,7 +58,7 @@ export const receivingDetailPackageSchema = z.object({
   note: z.string(),
 });
 
-export const receivingDetailCostSchema = z.object({
+const receivingDetailCostSchema = z.object({
   cost_id: z.string(),
   cost_date: z.string().trim().min(1, "Choose a cost date."),
   stage: z.string(),

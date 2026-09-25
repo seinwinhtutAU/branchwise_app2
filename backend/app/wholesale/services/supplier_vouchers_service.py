@@ -18,9 +18,7 @@ from app.wholesale.services.colors import color_qty_pairs, color_qty_problem, co
 from app.wholesale.services.currency import resolve_money
 from app.wholesale.services.lifecycle import (
     VoucherAction,
-    VoucherStatus,
     assert_can_perform_voucher_action,
-    get_allowed_voucher_actions,
     voucher_status,
 )
 from app.wholesale.services.master_data import get_or_create_product
@@ -42,10 +40,6 @@ def list_vouchers(db: Session, branch_id: str | None) -> list[SupplierVoucher]:
     if branch_id is not None:
         query = query.filter(SupplierVoucher.branch_id == branch_id)
     return query.order_by(SupplierVoucher.voucher_date.desc(), SupplierVoucher.voucher_no.desc()).all()
-
-
-def get_voucher(db: Session, voucher_id: str, branch_id: str | None) -> SupplierVoucher:
-    return _load(db, voucher_id, branch_id)
 
 
 def voucher_lifecycle_info(

@@ -18,12 +18,6 @@ def to_pairs(qty: int, unit: WholesaleUnit) -> int:
     return qty * PAIRS_PER[unit]
 
 
-def from_pairs(pairs: int, unit: WholesaleUnit) -> float:
-    """Turns pairs back into a unit. Can come out fractional — 9 pairs is one and a
-    half sets — so the caller decides how to show it."""
-    return pairs / PAIRS_PER[unit]
-
-
 def priced_amount(
     quantity_pairs: int | float,
     unit: WholesaleUnit,

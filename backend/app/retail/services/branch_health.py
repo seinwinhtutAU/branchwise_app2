@@ -50,7 +50,6 @@ from app.services.branches import list_retail_branches
 from app.services.settings import get_branch_health_weights
 from app.services.dashboard import (
     DEAD_STOCK_WINDOW_DAYS,
-    LOW_DAYS_OF_STOCK,
     STOCK_VELOCITY_WINDOW_DAYS,
     PeriodKey,
     PeriodRange,
@@ -80,6 +79,9 @@ MIN_COST_COVERAGE_PCT = 50.0
 # Stock last bought more than this many days ago counts as aged (the Inventory alert and the
 # Inventory score's "Aged stock" both use it).
 AGED_STOCK_DAYS = 180
+
+# The stretch of recent days the "busiest day of the week" alert looks over.
+WEEKLY_PATTERN_DAYS = 30
 
 # How many at-risk products an alert names outright. Five is what fits in the alert panel
 # without turning it into the Inventory tab's low-stock table, which is where the rest of
@@ -473,9 +475,11 @@ class BranchSnapshot:
     conversion_sales_slips: int = 0
     conversion_zero_count: int = 0
     conversion_days_recorded: int = 0
-    # How many days back from today the period reaches — so the Warning page can open on
-    # the same stretch of days an alert's counts came from.
-    warning_window_days: int | None = None
+    # How many days back from today the two data-quality alerts looked (the Settings
+    # page's Sale / Purchase check windows), so the Warning page can open on the same
+    # stretch of days an alert's counts came from.
+    sale_check_days: int | None = None
+    purchase_check_days: int | None = None
     # Every product held past AGED_STOCK_DAYS — the count behind the Inventory score.
     aged_stock_count: int = 0
     # Of the products with stock, how many have a purchase on file and so could be judged.
@@ -829,7 +833,7 @@ def aged_stock_for_branch(
             continue
 
         age = (today - p_date).days
-        batch_label = f"Last purchased: {p_date.strftime('%d %b %Y')}"
+        batch_label = p_date.strftime("%d %b %Y")
         aged_items.append(
             {
                 "stock_code": code,
@@ -954,6 +958,7 @@ def _find_weekly_patterns(
             "weekend_share_pct": round(weekend_share_pct, 1),
             "peak_day_qty": round(peak_qty),
             "weekday_avg_qty": round(weekday_avg, 1),
+            "period_days": (end - start).days + 1,
         }
     return None
 
@@ -1193,7 +1198,11 @@ def build_snapshot(
         if section["severity"] == "critical"
     )
 
-    from app.services.settings import get_daily_check_cutoff_time
+    from app.services.settings import (
+        get_daily_check_cutoff_time,
+        get_purchase_warning_window_days,
+        get_sale_warning_window_days,
+    )
 
     cutoff_time = get_daily_check_cutoff_time(db)
     has_today_sales, has_today_inventory, is_after_8pm = _check_daily_import_status(
@@ -1208,14 +1217,21 @@ def build_snapshot(
     aged_stock, aged_judged = aged_stock_for_branch(db, branch_id)
     aged_footwear = tuple(aged_stock)
     seasonal_spikes = _find_seasonal_spikes(db, branch_id)
+    # None of these alerts follow the period on screen: the Business Alerts page has no
+    # period control, so they always describe the same stretch of days — a fixed recent
+    # month for the weekly pattern, and the Settings page's own check windows for the
+    # two data-quality alerts, exactly as the Warning page uses them.
+    today = date.today()
     weekly_pattern = _find_weekly_patterns(
-        db, branch_id, period_range.start, period_range.end
+        db, branch_id, today - timedelta(days=WEEKLY_PATTERN_DAYS - 1), today
     )
+    sale_check_days = get_sale_warning_window_days(db)
+    purchase_check_days = get_purchase_warning_window_days(db)
     sale_data_quality_issues = _check_sale_data_quality(
-        db, branch_id, period_range.start, period_range.end
+        db, branch_id, today - timedelta(days=sale_check_days - 1), today
     )
     purchase_data_quality_issues = _check_purchase_data_quality(
-        db, branch_id, period_range.start, period_range.end
+        db, branch_id, today - timedelta(days=purchase_check_days - 1), today
     )
     (
         conversion_rate,
@@ -1300,7 +1316,8 @@ def build_snapshot(
         weekly_pattern=weekly_pattern,
         sale_data_quality_issues=sale_data_quality_issues,
         purchase_data_quality_issues=purchase_data_quality_issues,
-        warning_window_days=max((date.today() - period_range.start).days + 1, 1),
+        sale_check_days=sale_check_days,
+        purchase_check_days=purchase_check_days,
         conversion_rate_pct=conversion_rate,
         conversion_sales_slips=conversion_sales,
         conversion_zero_count=conversion_zero,

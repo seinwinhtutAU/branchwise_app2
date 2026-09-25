@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.branch import Branch
 from app.models.user import User, UserRole
-from app.wholesale.models.entities import Receiving, WholesaleAuditLog
+from app.wholesale.models.entities import WholesaleAuditLog
 from app.wholesale.models.master_data import WholesaleProduct
 
 

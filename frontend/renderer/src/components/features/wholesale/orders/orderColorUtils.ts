@@ -17,7 +17,7 @@ import {
   type StockLine,
 } from "@renderer/components/features/wholesale/inventory/stock";
 
-export function mergeColorPairs(target: ColorPairs, source: ColorPairs): ColorPairs {
+function mergeColorPairs(target: ColorPairs, source: ColorPairs): ColorPairs {
   for (const [color, pairs] of Object.entries(source)) {
     target[color] = (target[color] ?? 0) + pairs;
   }

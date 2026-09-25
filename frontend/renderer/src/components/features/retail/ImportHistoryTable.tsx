@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   flexRender,
   getCoreRowModel,
@@ -36,6 +43,7 @@ import {
   MoreVerticalIcon,
   TrashIcon,
   UploadIcon,
+  UserIcon,
   WarningIcon,
 } from "@renderer/components/ui/icons";
 import {
@@ -125,6 +133,44 @@ function statusBadgeVariant(status: string): "success" | "info" | "default" {
 function importTypeLabel(importType: string): string {
   if (importType === "general") return "General File";
   return importType.charAt(0).toUpperCase() + importType.slice(1);
+}
+
+function parseImportTimestamp(value: string): Date {
+  return new Date(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value}Z`);
+}
+
+function localImportDateKey(value: string): string {
+  const date = parseImportTimestamp(value);
+  if (Number.isNaN(date.getTime())) return "unknown";
+  return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+    .map((part, index) =>
+      index === 0 ? String(part) : String(part).padStart(2, "0"),
+    )
+    .join("-");
+}
+
+function importDateGroupLabel(dateKey: string): string {
+  if (dateKey === "unknown") return "Date unavailable";
+
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  const today = new Date();
+  const todayStart = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+  );
+  const dayDifference = Math.round(
+    (todayStart.getTime() - date.getTime()) / 86_400_000,
+  );
+  const shortDate = new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+  }).format(date);
+
+  if (dayDifference === 0) return `Today (${shortDate})`;
+  if (dayDifference === 1) return `Yesterday (${shortDate})`;
+  return shortDate;
 }
 
 interface ImportHistoryActionsProps {
@@ -246,7 +292,6 @@ function ImportHistoryActions({
 function ImportHistoryTable({
   session,
   onViewBatch,
-  branchOptions: _branchOptions,
   branchFilter: branchFilterProp = "",
   profile,
   highlightBatchId,
@@ -449,8 +494,9 @@ function ImportHistoryTable({
             <div>
               <div>{row.branch_name ?? "All branches"}</div>
               {row.uploaded_by_name && (
-                <div className="text-[11px] text-text-muted">
-                  by {row.uploaded_by_name}
+                <div className="inline-flex items-center gap-1 text-[11px] text-text-muted">
+                  <UserIcon className="w-3 h-3" />
+                  {row.uploaded_by_name}
                 </div>
               )}
             </div>
@@ -579,8 +625,8 @@ function ImportHistoryTable({
                 Import History
               </h2>
               <span className="text-xs text-text-muted hidden sm:inline">
-                Includes general files stored unchanged, alongside
-                your confirmed retail imports.
+                Includes general files stored unchanged, alongside your
+                confirmed retail imports.
               </span>
             </div>
 
@@ -733,49 +779,72 @@ function ImportHistoryTable({
                 ))}
               </Thead>
               <Tbody>
-                {table.getRowModel().rows.map((row, idx) => (
-                  <Tr
-                    key={row.original.id}
-                    ref={
-                      row.original.id === highlightBatchId
-                        ? highlightRowRef
-                        : undefined
-                    }
-                    onClick={() => onViewBatch(row.original.id)}
-                    className={cn(
-                      "cursor-pointer hover:bg-bg-subtle/50 transition-colors",
-                      row.original.id === highlightBatchId &&
-                        "ring-2 ring-inset ring-brand bg-brand-subtle",
-                    )}
-                  >
-                    <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
-                      {(currentPage - 1) * pageSize + idx + 1}
-                    </Td>
-                    {row.getVisibleCells().map((cell) => (
-                      <Td
-                        key={cell.id}
-                        className={cn(
-                          cell.column.id === "type" &&
-                            "max-w-[16rem] sm:max-w-[20rem]",
-                          cell.column.id === "created" &&
-                            "text-text-muted whitespace-nowrap text-xs",
-                          cell.column.columnDef.meta?.align === "right" &&
-                            "text-right tabular-nums",
+                {(() => {
+                  let previousDateKey: string | null = null;
+                  return table.getRowModel().rows.map((row, idx) => {
+                    const dateKey = localImportDateKey(row.original.created_at);
+                    const showDateGroup = dateKey !== previousDateKey;
+                    previousDateKey = dateKey;
+                    return (
+                      <Fragment key={row.original.id}>
+                        {showDateGroup && (
+                          <Tr className="bg-bg-subtle/70 border-t border-border">
+                            <Td
+                              colSpan={table.getVisibleLeafColumns().length + 1}
+                              className="py-2.5 text-xs font-semibold text-text-secondary"
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <span className="h-px w-5 bg-border" />
+                                {importDateGroupLabel(dateKey)}
+                                <span className="h-px w-5 bg-border" />
+                              </span>
+                            </Td>
+                          </Tr>
                         )}
-                        onClick={
-                          cell.column.id === "actions"
-                            ? (event) => event.stopPropagation()
-                            : undefined
-                        }
-                      >
-                        {flexRender(
-                          cell.column.columnDef.cell,
-                          cell.getContext(),
-                        )}
-                      </Td>
-                    ))}
-                  </Tr>
-                ))}
+                        <Tr
+                          ref={
+                            row.original.id === highlightBatchId
+                              ? highlightRowRef
+                              : undefined
+                          }
+                          onClick={() => onViewBatch(row.original.id)}
+                          className={cn(
+                            "cursor-pointer hover:bg-bg-subtle/50 transition-colors",
+                            row.original.id === highlightBatchId &&
+                              "ring-2 ring-inset ring-brand bg-brand-subtle",
+                          )}
+                        >
+                          <Td className="text-center text-xs font-mono text-text-muted tabular-nums select-none">
+                            {(currentPage - 1) * pageSize + idx + 1}
+                          </Td>
+                          {row.getVisibleCells().map((cell) => (
+                            <Td
+                              key={cell.id}
+                              className={cn(
+                                cell.column.id === "type" &&
+                                  "max-w-[16rem] sm:max-w-[20rem]",
+                                cell.column.id === "created" &&
+                                  "text-text-muted whitespace-nowrap text-xs",
+                                cell.column.columnDef.meta?.align === "right" &&
+                                  "text-right tabular-nums",
+                              )}
+                              onClick={
+                                cell.column.id === "actions"
+                                  ? (event) => event.stopPropagation()
+                                  : undefined
+                              }
+                            >
+                              {flexRender(
+                                cell.column.columnDef.cell,
+                                cell.getContext(),
+                              )}
+                            </Td>
+                          ))}
+                        </Tr>
+                      </Fragment>
+                    );
+                  });
+                })()}
               </Tbody>
             </TableContainer>
 

@@ -4,7 +4,7 @@
 
 - Node.js + npm
 - Python 3.11+ and [`uv`](https://docs.astral.sh/uv/)
-- A Supabase project (Auth + Postgres database)
+- A Neon project (Postgres database + Neon Auth)
 
 ## Install
 
@@ -30,6 +30,12 @@ PORT=8000
 DATABASE_URL=postgresql://...   # Neon Postgres connection string (the pooled endpoint, with sslmode=require)
 NEON_AUTH_BASE_URL=https://<endpoint>.neonauth.<region>.aws.neon.tech/<db>/auth   # Neon console → branch → Auth
 NEON_AUTH_JWKS_URL=<the JWKS URL shown beside it>
+OPENAI_API_KEY=            # optional — powers the retail chat assistant; blank disables it
+OPENAI_CHAT_MODEL=         # optional — the model the chat assistant uses
+R2_ACCOUNT_ID=             # optional — Cloudflare R2, stores the original import files;
+R2_ACCESS_KEY_ID=          #   leave all four blank and storage is silently skipped
+R2_SECRET_ACCESS_KEY=
+R2_BUCKET=
 ```
 
 Both the database and the auth values come from the Neon console: the connection string under the project's **Connect** button (use the pooled endpoint, `sslmode=require`), and the two auth URLs under **branch → Auth**.

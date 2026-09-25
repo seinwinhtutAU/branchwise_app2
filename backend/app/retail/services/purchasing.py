@@ -15,15 +15,12 @@ Translates sales, inventory, and purchase data into actionable purchasing recomm
    - Review / Do Not Reorder: Products with no sales recorded.
 """
 
-from datetime import date
 import math
 from typing import Any
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.branch import Branch
-from app.retail.models.product import Product
 from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.models.sale import Sale, SaleLine
 from app.retail.services.stock import latest_stock_query

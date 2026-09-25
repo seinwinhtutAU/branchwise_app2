@@ -6,6 +6,7 @@ stock between branches, managing aging inventory, and preparing for known demand
 """
 
 from dataclasses import asdict, dataclass
+from datetime import date
 from typing import Callable
 
 from app.retail.services.branch_health import BranchSnapshot
@@ -26,7 +27,8 @@ class Alert:
     summary: str
     what_happened: str
     recommended_action: str
-    link: str
+    # None for an alert whose action is done off-screen (e.g. urgent reorder): no button.
+    link: str | None
     measure: str
     context: str | None = None
     facts: tuple[dict, ...] = ()
@@ -73,9 +75,7 @@ def daily_import_missing_rule(snapshot: BranchSnapshot) -> list[Alert]:
 
     cutoff = _format_time(snapshot.daily_check_cutoff_time)
 
-    def data_state(is_current: bool, data_date: str | None) -> str:
-        if is_current:
-            return "Today"
+    def data_state(data_date: str | None) -> str:
         if data_date:
             return f"{data_date} (not today)"
         return "No update today"
@@ -114,12 +114,15 @@ def daily_import_missing_rule(snapshot: BranchSnapshot) -> list[Alert]:
                 f"(checked after {cutoff})."
             ),
             what_happened=what_happened,
-            recommended_action=f"Upload and confirm today's POS {kind_lower} file.",
+            recommended_action=(
+                f"Upload today's {kind_lower} file so today's numbers are complete."
+            ),
             link="import",
             measure="daily_import",
             facts=_facts(
-                _fact("Shop Status", f"Closed (after {cutoff})"),
-                _fact(f"{kind} Day", data_state(is_current, data_date)),
+                _fact("Store Status", f"Closed (after {cutoff})"),
+                _fact(f"Latest {kind} Date", data_state(data_date)),
+                _fact("Today's Business Day", date.today().isoformat()),
             ),
         )
 
@@ -145,10 +148,16 @@ def purchase_number_sequence_rule(snapshot: BranchSnapshot) -> list[Alert]:
     missing_count = integrity.get("missing_number_count", 0)
     gap_count = integrity.get("gap_count", len(gaps))
     sample = gaps[0]
-    range_label = f"{sample['start_number']}–{sample['end_number']}"
+
+    def range_label_for(gap: dict) -> str:
+        start = str(gap["start_number"])
+        end = str(gap["end_number"])
+        return start if start == end else f"{start}–{end}"
+
+    range_label = range_label_for(sample)
     rows = [
         [
-            f"{gap['start_number']}–{gap['end_number']}",
+            range_label_for(gap),
             str(gap["missing_count"]),
         ]
         for gap in gaps[:5]
@@ -171,25 +180,21 @@ def purchase_number_sequence_rule(snapshot: BranchSnapshot) -> list[Alert]:
                 f"Purchase numbers skip {range_label}. A Purchase Orders file "
                 "covering that range may still need to be imported."
             ),
-            recommended_action="Find the missing Purchase Orders file and import it.",
+            recommended_action=(
+                "Find and import the missing purchase file so the sequence is complete."
+            ),
             link="import",
             measure="purchase_number_sequence",
-            facts=_facts(
-                _fact(
-                    "Numbered Purchases Checked",
-                    str(integrity.get("numbered_purchase_count", 0)),
-                ),
-                _fact("Missing Numbers", str(missing_count)),
-                _fact("First Missing Range", range_label),
-            ),
+            facts=(),
             table={
                 "columns": [
-                    {"label": "Missing purchase-number range", "align": "left"},
+                    {"label": "Missing purchase number or range", "align": "left"},
                     {"label": "Records", "align": "right"},
                 ],
                 "rows": rows,
+                "total_count": missing_count,
                 "note": (
-                    f"Showing {len(rows)} of {gap_count} sequence gaps."
+                    f"Showing {len(rows)} of {gap_count} missing ranges."
                     if gap_count > len(rows)
                     else None
                 ),
@@ -235,8 +240,7 @@ def physical_stock_audit_rule(snapshot: BranchSnapshot) -> list[Alert]:
                 "inventory."
             ),
             recommended_action=(
-                "Count these products in the shop, write the counts in the Excel "
-                "sheet, and re-import the updated inventory file."
+                "Count these products and upload the file to match actual stock."
             ),
             link="checking",
             measure="physical_stock_audit",
@@ -291,26 +295,20 @@ def stock_allocation_rule(snapshot: BranchSnapshot) -> list[Alert]:
                 "selling the same items."
             ),
             recommended_action=(
-                f"Transfer the recommended quantities below to "
-                f"{', '.join(target_branches)} instead of ordering new units."
+                f"Move the suggested units to {', '.join(target_branches)} to use stock that sells."
             ),
             link="inventory",
             measure="stock_allocation",
             table={
                 "columns": [
                     {"label": "Product", "align": "left"},
-                    {"label": "On hand here", "align": "right"},
+                    {"label": "In stock", "align": "right"},
                     {"label": "Selling branch", "align": "left"},
                     {"label": "Sales (90d)", "align": "right"},
                     {"label": "Recommendation", "align": "right"},
                 ],
-                "rows": rows[:5],
+                "rows": rows,
                 "export_rows": rows,
-                "note": (
-                    f"Showing top 5 of {count} transfer opportunities."
-                    if count > 5
-                    else None
-                ),
             },
         )
     ]
@@ -345,23 +343,18 @@ def urgent_reorder_rule(snapshot: BranchSnapshot) -> list[Alert]:
                 "These products are selling faster than current stock can "
                 "support and may sell out soon."
             ),
-            recommended_action="Create purchase orders for the recommended products today.",
-            link="inventory",
+            recommended_action="Reorder these products today to avoid stockouts.",
+            link=None,
             measure="urgent_reorder",
             table={
                 "columns": [
                     {"label": "Product", "align": "left"},
-                    {"label": "In shop", "align": "right"},
+                    {"label": "In stock", "align": "right"},
                     {"label": "Cover left", "align": "right"},
                     {"label": "Recommended Order", "align": "right"},
                 ],
-                "rows": rows[:5],
+                "rows": rows,
                 "export_rows": rows,
-                "note": (
-                    f"Showing top 5 of {count} urgent reorder items."
-                    if count > 5
-                    else None
-                ),
             },
         )
     ]
@@ -399,23 +392,18 @@ def footwear_aging_rule(snapshot: BranchSnapshot) -> list[Alert]:
                 "value if it stays in storage too long. The oldest item has been "
                 f"in stock for {oldest['age_days']} days."
             ),
-            recommended_action="Review these products for clearance, promotion, or bundle sales.",
+            recommended_action="Put these products on promotion or clearance to help them sell.",
             link="agedStock",
             measure="aging_stock",
             table={
                 "columns": [
                     {"label": "Product", "align": "left"},
-                    {"label": "In shop", "align": "right"},
+                    {"label": "In stock", "align": "right"},
                     {"label": "Age", "align": "right"},
-                    {"label": "Purchase Origin", "align": "left"},
+                    {"label": "Last Purchased", "align": "left"},
                 ],
-                "rows": rows[:5],
+                "rows": rows,
                 "export_rows": rows,
-                "note": (
-                    f"Showing top 5 of {count} aged items."
-                    if count > 5
-                    else None
-                ),
             },
         )
     ]
@@ -426,7 +414,6 @@ def seasonal_demand_spike_rule(snapshot: BranchSnapshot) -> list[Alert]:
     if not snapshot.seasonal_spikes:
         return []
 
-    count = len(snapshot.seasonal_spikes)
     month_name = snapshot.seasonal_spikes[0]["month_name"]
     rows = [
         [
@@ -449,7 +436,7 @@ def seasonal_demand_spike_rule(snapshot: BranchSnapshot) -> list[Alert]:
                 "isn't ordered ahead of time."
             ),
             recommended_action=(
-                f"Check stock now and place supplier orders before {month_name}."
+                f"Check stock and order before {month_name} to prepare for demand."
             ),
             link="revenue",
             measure="seasonal_demand",
@@ -459,26 +446,38 @@ def seasonal_demand_spike_rule(snapshot: BranchSnapshot) -> list[Alert]:
                     {"label": "Prior-Year Sales", "align": "right"},
                     {"label": "Seasonality", "align": "left"},
                 ],
-                "rows": rows[:5],
+                "rows": rows,
                 "export_rows": rows,
-                "note": (
-                    f"Showing top 5 of {count} seasonal items."
-                    if count > 5
-                    else None
-                ),
             },
         )
     ]
 
 
 def weekly_pattern_demand_rule(snapshot: BranchSnapshot) -> list[Alert]:
-    """Highlight a strong Saturday/Sunday or peak-day demand pattern."""
+    """Highlight a strong weekend or peak-day demand pattern."""
     if not snapshot.weekly_pattern:
         return []
 
     pattern = snapshot.weekly_pattern
     peak_day = pattern["peak_day"]
-    share = pattern["weekend_share_pct"]
+    peak_qty = float(pattern["peak_day_qty"])
+    weekday_avg = float(pattern["weekday_avg_qty"])
+    above_weekday_pct = (
+        ((peak_qty - weekday_avg) / weekday_avg) * 100
+        if weekday_avg > 0
+        else None
+    )
+    comparison = (
+        f"{above_weekday_pct:.0f}% higher than weekdays"
+        if above_weekday_pct is not None
+        else "higher than weekdays"
+    )
+    facts = [
+        _fact("Busiest Day", peak_day),
+        _fact("Peak Day Sales", f"{peak_qty:,.0f} pairs"),
+        _fact("Weekday Average", f"{weekday_avg:,.1f} pairs"),
+    ]
+
     return [
         Alert(
             id="weekly_pattern_demand",
@@ -490,25 +489,16 @@ def weekly_pattern_demand_rule(snapshot: BranchSnapshot) -> list[Alert]:
             # which is not always a weekend day even when the alert fires from the
             # weekend-share condition. So the copy names that day rather than
             # assuming "weekend", which would misdescribe a weekday-peak case.
-            title=f"{peak_day} is your busiest sales day",
-            summary=f"Sales on {peak_day} run well above a typical weekday.",
+            title=f"{peak_day} is your busiest day",
+            summary=f"{peak_day} sales are {comparison}.",
             what_happened=(
-                f"{peak_day} brings in about {pattern['peak_day_qty']:,.0f} pairs, "
-                f"compared to a weekday average of {pattern['weekday_avg_qty']:,.1f}. "
-                "Shelves risk running low if they aren't restocked beforehand."
+                f"{peak_day}: {peak_qty:,.0f} pairs vs {weekday_avg:,.1f} on a "
+                "typical weekday."
             ),
-            recommended_action=f"Refill display shelves before the store opens on {peak_day}.",
+            recommended_action=f"Restock before {peak_day} to avoid running out.",
             link="customer",
             measure="weekly_pattern",
-            facts=_facts(
-                _fact("Peak Day", peak_day),
-                _fact("Weekend Share", f"{share:.1f}%"),
-                _fact("Peak Day Sales", f"{pattern['peak_day_qty']:,.0f} pairs"),
-                _fact(
-                    "Weekday Average",
-                    f"{pattern['weekday_avg_qty']:,.1f} pairs",
-                ),
-            ),
+            facts=_facts(*facts),
         )
     ]
 
@@ -528,12 +518,50 @@ def sale_data_quality_rule(snapshot: BranchSnapshot) -> list[Alert]:
     if description_count:
         details.append(f"{description_count} with missing description")
     detail = " and ".join(details)
+
+    rows = []
+    for item in issues.get("sample_numeric", []):
+        qty_val = item.get("qty")
+        price_val = item.get("selling_price")
+        issue_detail = []
+        if qty_val is not None and qty_val <= 0:
+            issue_detail.append(f"Qty: {qty_val:,.0f}")
+        if price_val is not None and price_val <= 0:
+            issue_detail.append(f"Price: {price_val:,.0f}")
+        reason = ", ".join(issue_detail) if issue_detail else "Invalid numeric value"
+        rows.append([
+            str(item.get("slip_number") or item.get("slip_id") or "—"),
+            str(item.get("stock_code") or "—"),
+            "Invalid Number",
+            reason,
+        ])
+    for item in issues.get("sample_missing_desc", []):
+        rows.append([
+            str(item.get("slip_number") or item.get("slip_id") or "—"),
+            str(item.get("stock_code") or "—"),
+            "Missing Description",
+            "Description is blank",
+        ])
+
+    table = None
+    if rows:
+        table = {
+            "columns": [
+                {"label": "Slip #", "align": "left"},
+                {"label": "Stock Code", "align": "left"},
+                {"label": "Issue", "align": "left"},
+                {"label": "Details", "align": "left"},
+            ],
+            "rows": rows,
+            "export_rows": rows,
+        }
+
     return [
         Alert(
             id="sale_data_quality",
             severity=CRITICAL,
             dimension="data_quality",
-            title="Sales data needs attention",
+            title="Sales data needs to be fixed",
             summary=(
                 f"{total} sales {'line' if total == 1 else 'lines'} "
                 f"{'contains' if total == 1 else 'contain'} invalid values ({detail})."
@@ -544,16 +572,13 @@ def sale_data_quality_rule(snapshot: BranchSnapshot) -> list[Alert]:
                 "the numbers on the Dashboard and Data Overview wrong."
             ),
             recommended_action=(
-                "Review the affected sales records and re-import the corrected sales file."
+                "Fix these sales records and upload the file again so numbers are accurate."
             ),
-            link="warnings",
+            link=None,
             measure="critical_data_issue_count",
-            evidence_days=snapshot.warning_window_days,
-            facts=_facts(
-                _fact("Invalid Numeric Lines", str(numeric_count)),
-                _fact("Missing Descriptions", str(description_count)),
-                _fact("Total Flawed Lines", str(total)),
-            ),
+            evidence_days=snapshot.sale_check_days,
+            facts=(),
+            table=table,
         )
     ]
 
@@ -592,11 +617,11 @@ def purchase_data_quality_rule(snapshot: BranchSnapshot) -> list[Alert]:
                 "costs and stock value on the Dashboard wrong."
             ),
             recommended_action=(
-                "Review the affected purchase records and re-import the corrected purchase file."
+                "Fix these purchase records and upload the file again so costs stay accurate."
             ),
             link="warnings",
             measure="critical_data_issue_count",
-            evidence_days=snapshot.warning_window_days,
+            evidence_days=snapshot.purchase_check_days,
             facts=_facts(
                 _fact("Invalid Qty / Cost Lines", str(numeric_count)),
                 _fact("Missing Descriptions", str(description_count)),

@@ -11,12 +11,9 @@ import {
 } from "@floating-ui/react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@renderer/lib/utils";
+import { copyText } from "@renderer/lib/clipboard";
 import { InfoLabel } from "@renderer/components/ui/InfoTooltip";
 import { CheckIcon, CopyIcon } from "@renderer/components/ui/icons";
-import {
-  GROUP_LABELS,
-  type ProductGroup,
-} from "@renderer/components/features/wholesale/shared/products";
 
 // The pieces every wholesale screen is built from. They lived in four copies, one per
 // page, which is exactly how the four screens kept drifting apart: a fix to one never
@@ -43,7 +40,7 @@ export const SOFT_BLUE =
 /** Red in the text only, so a form full of rows does not become a wall of red blocks. */
 export const SOFT_RED = "text-error hover:bg-error-subtle hover:text-error";
 
-export type Tone = "brand" | "neutral" | "warning" | "success" | "error";
+type Tone = "brand" | "neutral" | "warning" | "success" | "error";
 
 /** A field name with the red star that marks it as one that has to be filled in. */
 export function Required({
@@ -56,26 +53,6 @@ export function Required({
       {children} <span className="text-error">*</span>
     </>
   );
-}
-
-/** Puts a reference on the clipboard. The renderer is not always a secure context — a
- *  packaged app is served from file:// — where `navigator.clipboard` is missing, so the
- *  old hidden-textarea trick is kept as the fallback rather than the copy silently doing
- *  nothing. */
-async function copyText(text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return;
-  } catch {
-    const box = document.createElement("textarea");
-    box.value = text;
-    box.style.position = "fixed";
-    box.style.opacity = "0";
-    document.body.appendChild(box);
-    box.select();
-    document.execCommand("copy");
-    document.body.removeChild(box);
-  }
 }
 
 /** The small copy button beside a reference number or a stock code. These are the strings
@@ -383,26 +360,6 @@ export function RowProgress({
   );
 }
 
-/** A filled status pill. The words and colors belong to each screen; the shape does not. */
-export function StatusPill({
-  label,
-  className,
-}: {
-  label: string;
-  className: string;
-}): React.JSX.Element {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap",
-        className,
-      )}
-    >
-      {label}
-    </span>
-  );
-}
-
 /** The same pill as StatusPill, with a leading colour dot — the shape every order/
  *  voucher status and payment badge across the wholesale screens actually uses. The
  *  words, background and dot colour still belong to each screen. */
@@ -425,45 +382,6 @@ export function DotPill({
       <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", dotClassName)} />
       {label}
     </span>
-  );
-}
-
-/** The product's range — man, lady or child — as a quiet tag beside its description. Kept
- *  grey rather than colour-coded: it is a label, not a status, and colour on this screen
- *  already means "good" or "still owed". */
-export function GroupTag({
-  product_group,
-}: {
-  product_group: ProductGroup;
-}): React.JSX.Element {
-  return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-bg-subtle border border-border text-text-secondary whitespace-nowrap">
-      {GROUP_LABELS[product_group]}
-    </span>
-  );
-}
-
-/** A product value on one table line: description first, product_group underneath.
- *
- *  The stock code is rendered by the surrounding table because it may also need a copy
- *  action. Keeping the remaining values as plain stacked text makes the Product column
- *  read like one compact three-line value instead of a nested badge. */
-export function ProductCell({
-  description,
-  product_group,
-}: {
-  description: string;
-  product_group: ProductGroup;
-}): React.JSX.Element {
-  return (
-    <div className="flex min-w-[9rem] flex-col items-start gap-0.5">
-      <span className="break-words text-text-primary leading-snug">
-        {description || "—"}
-      </span>
-      <span className="text-xs text-text-muted">
-        {GROUP_LABELS[product_group]}
-      </span>
-    </div>
   );
 }
 
@@ -634,4 +552,3 @@ export function FloatingLayer({
 export * from "./formFields";
 export * from "./journeyVisuals";
 export * from "./paymentsTable";
-export * from "./drawers";

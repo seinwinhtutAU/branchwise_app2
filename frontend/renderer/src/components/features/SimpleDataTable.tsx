@@ -37,7 +37,11 @@ import {
   Td,
 } from "@renderer/components/ui/Table";
 import { Pagination } from "@renderer/components/ui/Pagination";
-import { DownloadIcon, SearchIcon } from "@renderer/components/ui/icons";
+import {
+  DownloadIcon,
+  OverviewIcon,
+  SearchIcon,
+} from "@renderer/components/ui/icons";
 import {
   ExportDateRangeDialog,
   type ExportOptions,
@@ -98,7 +102,7 @@ interface Props<T extends object> {
   endpoint: string;
   title: string;
   description: string;
-  icon: ReactNode;
+  icon?: ReactNode;
   columns: DataTableColumn<T>[];
   filters?: DataTableFilter<T>[];
   rowKey: (row: T, index: number) => string;
@@ -855,7 +859,7 @@ export function SimpleDataTable<T extends object>({
 
         {rows === null && failed && (
           <EmptyState
-            icon={icon}
+            icon={icon ?? <OverviewIcon className="w-5 h-5 text-text-muted" />}
             title={`Couldn't load ${title.toLowerCase()}`}
             description="Something went wrong reaching the backend."
             action={
@@ -868,7 +872,7 @@ export function SimpleDataTable<T extends object>({
 
         {rows !== null && totalItems === 0 && !hasActiveFilters && (
           <EmptyState
-            icon={icon}
+            icon={icon ?? <OverviewIcon className="w-5 h-5 text-text-muted" />}
             title={emptyTitle}
             description={emptyDescription}
           />
@@ -876,7 +880,7 @@ export function SimpleDataTable<T extends object>({
 
         {rows !== null && totalItems === 0 && hasActiveFilters && (
           <EmptyState
-            icon={icon}
+            icon={icon ?? <OverviewIcon className="w-5 h-5 text-text-muted" />}
             title="No rows match your filters"
             description="Try widening the date range or clearing a filter."
             action={

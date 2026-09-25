@@ -22,7 +22,7 @@ const dotColors: Record<BadgeVariant, string> = {
   brand: "bg-brand",
 };
 
-export interface BadgeProps {
+interface BadgeProps {
   variant?: BadgeVariant;
   dot?: boolean;
   children: ReactNode;

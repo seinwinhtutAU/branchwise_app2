@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@renderer/lib/utils";
 import { CalendarIcon } from "./icons";
 
-export interface DateInputProps {
+interface DateInputProps {
   label?: ReactNode;
   value: string;
   onChange: (value: string) => void;
@@ -13,7 +13,7 @@ export interface DateInputProps {
   size?: "sm" | "md";
 }
 
-export function normalizeDateInput(raw: string): string {
+function normalizeDateInput(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return "";
 

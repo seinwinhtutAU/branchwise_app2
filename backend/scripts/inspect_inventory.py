@@ -16,7 +16,6 @@ Features:
 
 import argparse
 import datetime as dt
-import io
 from pathlib import Path
 import sys
 

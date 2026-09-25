@@ -1,5 +1,4 @@
-import datetime
-from datetime import date, datetime as dt, time
+from datetime import date, datetime as dt
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -14,7 +13,6 @@ from app.retail.models.purchase import Purchase, PurchaseLine
 from app.retail.services import early_warning
 from app.retail.services.branch_health import (
     BranchSnapshot,
-    _check_daily_import_status,
 )
 
 
@@ -166,8 +164,10 @@ def test_daily_import_alert_identifies_data_uploaded_for_an_older_day():
     inventory_alert = next(a for a in alerts if a.id == "daily_import_missing_inventory")
     sales_facts = {fact["label"]: fact["value"] for fact in sales_alert.facts}
     inventory_facts = {fact["label"]: fact["value"] for fact in inventory_alert.facts}
-    assert sales_facts["Sale Day"] == "2026-09-20 (not today)"
-    assert inventory_facts["Inventory Day"] == "2026-09-19 (not today)"
+    assert sales_facts["Latest Sale Date"] == "2026-09-20 (not today)"
+    assert inventory_facts["Latest Inventory Date"] == "2026-09-19 (not today)"
+    assert "Store Status" in sales_facts
+    assert "Today's Business Day" in sales_facts
 
 
 def test_purchase_number_sequence_gap_fires_critical_alert():
@@ -194,6 +194,32 @@ def test_purchase_number_sequence_gap_fires_critical_alert():
     assert alert.severity == early_warning.CRITICAL
     assert alert.link == "import"
     assert "STR00050–STR00110" in alert.what_happened
+    assert alert.table["rows"][0][0] == "STR00050–STR00110"
+    assert alert.table["total_count"] == 61
+
+
+def test_purchase_number_sequence_gap_shows_single_missing_number_once():
+    snap = _base_snapshot(
+        purchase_number_integrity={
+            "numbered_purchase_count": 2,
+            "gap_count": 1,
+            "missing_number_count": 1,
+            "gaps": [
+                {
+                    "start_number": "STR-001156",
+                    "end_number": "STR-001156",
+                    "missing_count": 1,
+                }
+            ],
+        }
+    )
+
+    alert = next(
+        alert
+        for alert in early_warning.evaluate(snap)
+        if alert.id == "purchase_number_sequence_gap"
+    )
+    assert alert.table["rows"][0][0] == "STR-001156"
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +299,7 @@ def test_urgent_reorder_alert_fires_with_table():
     alert = next(a for a in alerts if a.id == "urgent_reorder")
     assert alert.severity == early_warning.CRITICAL
     assert alert.dimension == "reorder"
-    assert alert.link == "inventory"
+    assert alert.link is None
     assert "SNK-01" in alert.table["rows"][0][0]
 
 
@@ -289,7 +315,7 @@ def test_footwear_aging_alert_fires_with_purchase_labels():
             "description": "Winter Hiking Boot",
             "on_hand_qty": 12,
             "purchase_date": "2026-01-10",
-            "batch_label": "Purchased: Batch #PO-2026-001 · 10 Jan 2026",
+            "batch_label": "10 Jan 2026",
             "age_days": 240,
         },
     )
@@ -299,7 +325,8 @@ def test_footwear_aging_alert_fires_with_purchase_labels():
     assert alert.severity == early_warning.WARNING
     assert alert.link == "agedStock"
     assert "BOOT-99" in alert.table["rows"][0][0]
-    assert "PO-2026-001" in alert.table["rows"][0][3]
+    assert alert.table["columns"][-1]["label"] == "Last Purchased"
+    assert "10 Jan 2026" in alert.table["rows"][0][3]
     assert "240 days" in alert.table["rows"][0][2]
 
 
@@ -343,7 +370,9 @@ def test_weekly_pattern_alert():
     assert alert.severity == early_warning.NORMAL
     assert alert.link == "customer"
     assert "Saturday" in alert.what_happened
-    assert alert.title == "Saturday is your busiest sales day"
+    assert alert.title == "Saturday is your busiest day"
+    assert "195% higher than weekdays" in alert.summary
+    assert len(alert.facts) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -536,9 +565,9 @@ def test_sale_data_quality_fires_critical_on_negative_or_zero_values():
     alert = next(a for a in alerts if a.id == "sale_data_quality")
     assert alert.severity == early_warning.CRITICAL
     assert alert.dimension == "data_quality"
-    assert alert.title == "Sales data needs attention"
+    assert alert.title == "Sales data needs to be fixed"
     assert "3 with zero/negative/invalid numbers" in alert.summary
-    assert alert.link == "warnings"
+    assert alert.link is None
 
 
 def test_sale_data_quality_fires_critical_on_missing_description():

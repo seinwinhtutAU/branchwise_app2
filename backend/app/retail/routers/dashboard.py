@@ -11,6 +11,7 @@ from app.models.user import User
 from app.retail.services import branch_health as branch_health_service
 from app.services import dashboard as dashboard_service
 from app.services import response_cache
+from app.services.settings import get_purchase_warning_window_days, get_sale_warning_window_days
 from app.services.branches import list_retail_branches, resolve_branch_id
 from app.retail.routers.common import require_advanced_dashboard, require_retail
 
@@ -74,9 +75,8 @@ def get_overview_dashboard(
     # keep their today default because they report levels, not movement.
     #
     # "7d"/"30d" still work here even though the Dashboard's own picker no longer
-    # offers them (see dashboard/usePeriodRange.ts) — Business Alerts fetches this same
-    # endpoint and still uses them, since its own period control wasn't part of this
-    # change.
+    # offers them (see dashboard/usePeriodRange.ts) — the Business Alerts page and its nav
+    # badge request "30d" by default. The alerts themselves ignore the period.
     period: str = Query("30d", description="today | yesterday | 7d | 30d | monthly"),
     date_from: date | None = Query(None, description=DATE_FROM_DESCRIPTION),
     date_to: date | None = Query(None, description=DATE_TO_DESCRIPTION),
@@ -102,6 +102,10 @@ def get_overview_dashboard(
         month,
         date.today(),
         response_cache.import_data_version(db, branch.id),
+        # The alerts' data-quality checks use these two Settings windows, which can change
+        # without any import happening.
+        get_sale_warning_window_days(db),
+        get_purchase_warning_window_days(db),
     )
     return response_cache.cached(
         cache_key,

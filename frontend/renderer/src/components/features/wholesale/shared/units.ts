@@ -9,19 +9,11 @@
 export type Unit = "pair" | "set" | "dozen";
 export type UnitConversions = Record<Unit, number>;
 
-export const UNITS: Unit[] = ["pair", "set", "dozen"];
-
 /** Legacy/default rate used only where a record has no explicit snapshot. */
 export const PAIRS_PER: UnitConversions = {
   pair: 1,
   set: 6,
   dozen: 12,
-};
-
-export const UNIT_LABELS: Record<Unit, string> = {
-  pair: "Pairs",
-  set: "Sets",
-  dozen: "Dozens",
 };
 
 /** One of something, for a sentence: "1 set", "3 sets". */
@@ -68,15 +60,6 @@ export function formatIn(pairs: number, unit: Unit, conversions: UnitConversions
   return `${NUMBER.format(whole)} ${unitName(unit, whole)} ${NUMBER.format(leftover)} ${unitName("pair", leftover)}`;
 }
 
-/** A quantity displayed in its requested unit. Retained for existing display callers. */
-export function formatWithPairs(
-  pairs: number,
-  unit: Unit,
-  conversions: UnitConversions = PAIRS_PER,
-): string {
-  return formatIn(pairs, unit, conversions);
-}
-
 /** The way this business reads a quantity: whole sets with any leftover pairs, e.g.
  *  "1 Set 3 Pairs". Use this for every figure that isn't tied to one document's own
  *  unit — stock on hand, availability, report totals — instead of writing raw pairs. */
@@ -88,9 +71,3 @@ export function formatSets(pairs: number, conversions: UnitConversions = PAIRS_P
   return formatIn(safePairs, "set", conversions);
 }
 
-/** What a price is quoted per, for a line that was not saved in sets. Prices are per set
- *  now, so the common case needs no note; a record written before that rule keeps its own
- *  basis and has to say so, or its amount cannot be checked by eye. */
-export function priceBasisNote(unit: Unit): string | null {
-  return unit === "set" ? null : `per ${unitName(unit, 1)}`;
-}

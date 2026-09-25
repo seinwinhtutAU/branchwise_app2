@@ -1212,6 +1212,24 @@ export function UsersIcon({
   );
 }
 
+export function UserIcon({
+  className = "w-3.5 h-3.5",
+}: {
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="12" cy="8" r="3.5" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d="M5 21a7 7 0 0114 0"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function ShieldCheckIcon({
   className = "w-5 h-5",
 }: {

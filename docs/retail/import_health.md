@@ -48,9 +48,9 @@ A batch's flag comes from `ImportBatch.summary`, a frozen snapshot from confirm 
 
 ## Frontend
 
-`frontend/renderer/src/components/features/retail/ImportHealthPage.tsx` renders one card per branch. The card header shows the branch name, an overall `All caught up` / `N to check` pill, and an `Ignored (N)` link. Sales, Inventory, and Purchase are displayed as three responsive columns. Sales and Inventory reuse the existing Today / Yesterday / `N days ago` freshness grading; missing-day chips are shown only when their open count is non-zero. Purchase keeps neutral occasional-upload wording and shows number-gap details instead of missing days.
+`frontend/renderer/src/components/features/retail/ImportHealthPage.tsx` renders one card per branch. The header shows the branch name, a status badge ("Up to date", or "Review ignored days" when only ignored days remain) and an `N ignored` link. A **Data range** block lists the earliest–latest date held for Sales, Inventory and Purchase, then each open issue is one row with a category tag, plain text ("3 missing sales days", "2 missing purchase numbers") and a **Check missing** button. All three category tags use the brand colour rather than three different ones.
 
-Clicking a missing-day chip expands the relevant date selector below that card. Clicking `Ignored (N)` expands the branch's closed dates for restoration. The shared `DaySection` control and the existing close/reopen request flow live in `ImportCompletenessControls.tsx`, so date selection, optional notes, role checks, toasts, and refresh behavior remain consistent with the previous screen. The old `ImportOverviewPage.tsx` table and `ImportCompletenessPage.tsx` page-level display have been removed.
+Clicking **Check missing** expands the relevant date selector below that card. Clicking `Ignored (N)` expands the branch's closed dates for restoration. The shared `DaySection` control and the existing close/reopen request flow live in `ImportCompletenessControls.tsx`, so date selection, optional notes, role checks, toasts, and refresh behavior remain consistent with the previous screen. The old `ImportOverviewPage.tsx` table and `ImportCompletenessPage.tsx` page-level display have been removed.
 
 ## Tests
 

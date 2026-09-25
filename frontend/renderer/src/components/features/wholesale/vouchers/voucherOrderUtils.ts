@@ -113,7 +113,7 @@ export function openOrderLines(
   return rows.sort((a, b) => (a.order_no < b.order_no ? 1 : -1));
 }
 
-export function colorQtyFromPairs(pairs: ColorPairs): string {
+function colorQtyFromPairs(pairs: ColorPairs): string {
   return Object.entries(pairs)
     .filter(([, qty]) => qty > 0)
     .map(([color, qty]) =>

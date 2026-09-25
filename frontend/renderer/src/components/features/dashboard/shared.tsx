@@ -1,7 +1,5 @@
 import { Fragment, useState } from "react";
 import { cn } from "@renderer/lib/utils";
-import { downloadExcel } from "@renderer/lib/excel";
-import { DownloadIcon } from "@renderer/components/ui/icons";
 import { Badge } from "@renderer/components/ui/Badge";
 import { Button } from "@renderer/components/ui/Button";
 import { Card } from "@renderer/components/ui/Card";
@@ -40,8 +38,6 @@ import {
   toLocalIso,
   weekLabel,
   type AlertFact,
-  type AlertTable,
-  type HealthAlert,
   type PeriodKey,
   type SubMetric,
 } from "./helpers";
@@ -270,139 +266,13 @@ function AlertValues({ facts }: { facts: AlertFact[] }): React.JSX.Element {
  * Most alerts produce only one of the two. Single-item baskets is the one that produces
  * both, and there the movements lead — they are what the alert is claiming.
  */
-function AlertFacts({ facts }: { facts: AlertFact[] }): React.JSX.Element {
+export function AlertFacts({ facts }: { facts: AlertFact[] }): React.JSX.Element {
   const movements = facts.filter((fact) => fact.value === undefined);
   const values = facts.filter((fact) => fact.value !== undefined);
   return (
     <div className="flex flex-col gap-3">
       {movements.length > 0 && <AlertMovements facts={movements} />}
       {values.length > 0 && <AlertValues facts={values} />}
-    </div>
-  );
-}
-
-/**
- * The products behind an alert that is about a list rather than a number.
- *
- * A count of eighty low products is unactionable on its own — nobody reorders eighty lines
- * off one sentence. These are the few with the least cover left, each with the two figures
- * the shop can verify by walking to the shelf (how many are there, how many sold) and the
- * one it cannot (how long that lasts). The note says how many were left out, so five rows
- * under a count of eighty never read as the whole list.
- */
-function AlertTableBlock({
-  table,
-  filename,
-}: {
-  table: AlertTable;
-  filename: string;
-}): React.JSX.Element {
-  const exportRows = table.export_rows;
-  return (
-    <div className="flex flex-col gap-1">
-      <AlertTableShell>
-        <Thead className="top-0">
-          <Tr>
-            {table.columns.map((column) => (
-              <Th
-                key={column.label}
-                className={column.align === "right" ? "text-right" : undefined}
-              >
-                {column.label}
-              </Th>
-            ))}
-          </Tr>
-        </Thead>
-        <Tbody>
-          {table.rows.map((row) => (
-            <Tr key={row[0]}>
-              {row.map((cell, index) => (
-                <Td
-                  key={table.columns[index]?.label ?? index}
-                  className={cn(
-                    "whitespace-nowrap",
-                    table.columns[index]?.align === "right" &&
-                      "text-right tabular-nums",
-                  )}
-                >
-                  {cell}
-                </Td>
-              ))}
-            </Tr>
-          ))}
-        </Tbody>
-      </AlertTableShell>
-      {(table.note || exportRows) && (
-        <div className="flex items-center justify-between gap-3 max-w-3xl">
-          <span className="text-xs text-text-muted">{table.note}</span>
-          {exportRows && (
-            <Button
-              variant="secondary"
-              size="sm"
-              title={`Download all ${exportRows.length} items to Excel`}
-              onClick={() =>
-                downloadExcel(
-                  `${filename}-${new Date().toISOString().slice(0, 10)}.xlsx`,
-                  "Alert",
-                  table.columns.map((column) => column.label),
-                  exportRows,
-                )
-              }
-            >
-              <DownloadIcon className="w-4 h-4" />
-              Excel
-            </Button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * The body of an alert: which days it covers, the figures, the products behind them,
- * and the one thing to do about it.
- *
- * The order is the order the question is actually asked in. The figures lead, laid out as
- * labelled rows rather than buried in prose, because the business asked to *see the data*
- * — a sentence saying the margin fell is a claim, and four rows showing sales, cost of
- * goods, what was kept and the margin is that claim with its working attached. The dates
- * sit above them, since every one of those movements is "against" something, and the stock
- * rules in particular ignore the period control entirely (they read the latest count and a
- * fixed sales window) — this line is where a reader can see that rather than assume
- * otherwise.
- *
- * The revenue split ("Where the Ks 1,312,950 went", drawn as bars) is gone: the same
- * movement is already in the figures above, so the bars restated what the panel had
- * already said.
- *
- * `what_happened` is deliberately not shown here: it's a prose restatement of the same
- * figures sitting in the rows above (or, for alerts with no facts/table, the same claim
- * the alert's own summary already makes), and showing both reads as the panel saying
- * everything twice. It stays on the payload — nothing in the frontend reads it today, but
- * it's what a future compact context (a card, a digest) without room for a full figure
- * table would use instead.
- *
- * The action itself (what to do, and the button to go do it) lives beside the row this
- * panel expands from, not in here — it needs to be visible without a click, since it is
- * the thing the whole alert exists to produce. This panel is the supporting evidence for it.
- */
-export function AlertExplanation({
-  alert,
-}: {
-  alert: HealthAlert;
-}): React.JSX.Element {
-  return (
-    <div className="flex flex-col gap-4 py-1">
-      {alert.context && (
-        <span className="text-xs text-text-muted">{alert.context}</span>
-      )}
-
-      {(alert.facts ?? []).length > 0 && <AlertFacts facts={alert.facts} />}
-
-      {alert.table && (
-        <AlertTableBlock table={alert.table} filename={alert.id} />
-      )}
     </div>
   );
 }
@@ -771,7 +641,7 @@ export function PeriodControls({
   );
 }
 
-export function DeltaBadge({
+function DeltaBadge({
   deltaPct,
 }: {
   deltaPct: number | null;

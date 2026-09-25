@@ -37,7 +37,6 @@ from app.wholesale.services.receivings_service import (
     update_package,
     update_receiving,
 )
-from app.wholesale.services.units import from_pairs
 from app.wholesale.routers.common import paginate, require_wholesale
 
 router = APIRouter(prefix="/api/wholesale/receivings", tags=["wholesale"])

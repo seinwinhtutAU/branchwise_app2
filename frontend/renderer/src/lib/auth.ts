@@ -59,7 +59,7 @@ function toSession(body: AuthResponse, fallbackEmail: string): Session {
  * person has to sign in again; the other just means the internet is down, and signing
  * someone out for that would be the app punishing them for their connection.
  */
-export class AuthRejectedError extends Error {
+class AuthRejectedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "AuthRejectedError";
@@ -89,7 +89,7 @@ async function post(path: string, payload: unknown): Promise<AuthResponse> {
   return body as AuthResponse;
 }
 
-export function storeSession(session: Session | null): void {
+function storeSession(session: Session | null): void {
   try {
     if (session) localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
     else localStorage.removeItem(STORAGE_KEY);
@@ -157,7 +157,7 @@ export async function signOut(session: Session | null): Promise<void> {
  * too, since that needs the network as well. Keeping the session lets the app open on
  * its saved data and pick the connection up when it returns.
  */
-export async function refreshSession(
+async function refreshSession(
   current: Session,
 ): Promise<Session | null> {
   try {

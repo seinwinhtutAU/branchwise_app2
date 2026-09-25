@@ -5,7 +5,7 @@ import { onlyDigits } from "./shared";
 import { PencilIcon } from "@renderer/components/ui/icons";
 import { type ColorPairs } from "../inventory/stock";
 
-export interface ColorQtyPickerProps {
+interface ColorQtyPickerProps {
   available: ColorPairs;
   setSize: number;
   value: ColorPairs;

@@ -32,12 +32,3 @@ export interface Product {
   default_unit_conversions?: UnitConversions;
 }
 
-/** A product on one line, short enough for a table cell: "Men's slipper · Man". */
-export function describeProduct(
-  description: string,
-  product_group: ProductGroup,
-): string {
-  return description
-    ? `${description} · ${GROUP_LABELS[product_group]}`
-    : GROUP_LABELS[product_group];
-}

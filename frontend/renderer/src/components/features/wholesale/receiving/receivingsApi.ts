@@ -84,7 +84,7 @@ function packageFromWire(wire: ReceivingPackageWire): ReceivingPackage {
   };
 }
 
-export function receivingFromWire(wire: ReceivingWire): Receiving {
+function receivingFromWire(wire: ReceivingWire): Receiving {
   return {
     receiving_id: wire.receiving_id,
     receiving_no: wire.receiving_no,

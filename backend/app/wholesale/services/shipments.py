@@ -8,11 +8,8 @@ and forwarded all 7 correctly shows 3 still owed rather than reading as finished
 
 from dataclasses import dataclass
 
-from app.wholesale.models.entities import Shipment, ShipmentLeg, WholesaleUnit
+from app.wholesale.models.entities import Shipment
 from app.wholesale.services.shared import share_pct
-from app.wholesale.services.units import to_pairs
-
-SHIPMENT_STATUSES = ["waiting_at_cargo", "in_transit", "partly_delivered", "completed"]
 
 
 @dataclass

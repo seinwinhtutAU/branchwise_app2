@@ -7,7 +7,7 @@ import {
   type PeriodKey,
 } from "@renderer/components/features/dashboard/helpers";
 
-export const WHOLESALE_DASHBOARD_URL = `${apiBaseUrl}/api/wholesale/dashboard`;
+const WHOLESALE_DASHBOARD_URL = `${apiBaseUrl}/api/wholesale/dashboard`;
 
 export interface DashboardKpi {
   value: number;

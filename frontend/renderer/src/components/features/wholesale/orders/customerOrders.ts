@@ -67,30 +67,6 @@ export interface CustomerOrderLine {
   exchange_rate?: number | null;
 }
 
-/** One change made to a customer-order line's allocation, logged by the server whenever
- *  the reserved colour/quantity actually changes. `allocated_quantity_pairs`/
- *  `allocated_color_breakdown` on the order line only ever hold the current reservation
- *  (they get overwritten in place); this is the append-only log behind them, the data
- *  the Allocation Record screen reads. */
-export interface AllocationEvent {
-  event_id: string;
-  order_id: string;
-  order_line_id: string;
-  order_no: string;
-  customer_name: string;
-  stock_code: string;
-  description: string;
-  product_group: ProductGroup;
-  unit: Unit;
-  unit_conversions?: UnitConversions;
-  previous_color_breakdown: string;
-  previous_quantity_pairs: number;
-  color_breakdown: string;
-  quantity_pairs: number;
-  recorded_by_user_id: string;
-  created_at: string;
-}
-
 /** One payment taken against an order — a customer pays in instalments, and "how much
  *  has been paid" is the sum of them rather than a figure somebody keeps adjusting. Each
  *  one says when it came in, so a question about last week's money has an answer. */

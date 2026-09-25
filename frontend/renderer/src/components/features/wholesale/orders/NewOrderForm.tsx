@@ -80,7 +80,7 @@ import { CurrencyNote } from "./OrderBadges";
 // theme entirely and came up as a black OS menu. This is plain markup, so it follows the
 // same tokens as every other dropdown, and it can show a name that is not on the list as
 // a new customer rather than silently offering nothing.
-export function CustomerPicker({
+function CustomerPicker({
   value,
   onChange,
   onBlur,

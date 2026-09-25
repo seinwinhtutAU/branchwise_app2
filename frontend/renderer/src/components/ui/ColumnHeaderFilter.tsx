@@ -13,7 +13,7 @@ import {
 import { cn } from "@renderer/lib/utils";
 import { FilterIcon } from "@renderer/components/ui/icons";
 
-export interface ColumnHeaderFilterProps {
+interface ColumnHeaderFilterProps {
   label: ReactNode;
   isActive?: boolean;
   children: (close: () => void) => ReactNode;

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@renderer/lib/auth";
+import { apiBaseUrl } from "@renderer/lib/auth";
 import { cn } from "@renderer/lib/utils";
 import { useUrlQueries } from "@renderer/lib/queryClient";
 import type { BranchOption } from "@renderer/lib/useBranches";
@@ -10,33 +11,40 @@ import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Skeleton } from "@renderer/components/ui/Skeleton";
 import { Panel } from "@renderer/components/ui/Panel";
 import {
+  TableContainer,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
+} from "@renderer/components/ui/Table";
+import { useToast } from "@renderer/lib/useToast";
+import { useImportFilePicker } from "@renderer/lib/useImportFilePicker";
+import { downloadExcel } from "@renderer/lib/excel";
+import {
   CheckIcon,
   CloseIcon,
   WarningIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  UploadIcon,
+  DownloadIcon,
 } from "@renderer/components/ui/icons";
+import { AlertFacts } from "@renderer/components/features/dashboard/shared";
 import {
-  AlertExplanation,
-  PeriodControls,
-} from "@renderer/components/features/dashboard/shared";
-import { usePeriodRange } from "@renderer/components/features/dashboard/usePeriodRange";
-import {
-  EVIDENCE_LABEL,
   SEVERITY_META,
   dashboardUrl,
   type AlertSeverity,
-  type EvidenceTarget,
   type HealthAlert,
   type OverviewData,
 } from "@renderer/components/features/dashboard/helpers";
-import type { Profile } from "@renderer/components/features/types";
+import type {
+  PendingImport,
+  Profile,
+} from "@renderer/components/features/types";
 
 type Tab =
-  | "all"
-  | "sales"
-  | "inventory"
-  | "reorder"
-  | "customer"
-  | "data_quality";
+  "all" | "sales" | "inventory" | "reorder" | "customer" | "data_quality";
 type SeverityFilter = "all" | AlertSeverity;
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -53,28 +61,28 @@ const CATEGORY_META: Record<
 > = {
   sales: {
     label: "Sales",
-    variant: "default",
-    className: "bg-info-subtle text-info border-info/20",
+    variant: "brand",
+    className: "bg-brand-subtle text-brand border-brand/20",
   },
   inventory: {
     label: "Inventory",
     variant: "brand",
-    className: "bg-brand-subtle text-brand border-brand/40",
+    className: "bg-brand-subtle text-brand border-brand/20",
   },
   reorder: {
     label: "Reorder",
-    variant: "error",
-    className: "bg-error-subtle text-error border-error/20",
+    variant: "brand",
+    className: "bg-brand-subtle text-brand border-brand/20",
   },
   customer: {
     label: "Customer",
-    variant: "success",
-    className: "bg-success-subtle text-success border-success-pill",
+    variant: "brand",
+    className: "bg-brand-subtle text-brand border-brand/20",
   },
   data_quality: {
     label: "Data quality",
-    variant: "warning",
-    className: "bg-warning-subtle text-warning border-warning-pill",
+    variant: "brand",
+    className: "bg-brand-subtle text-brand border-brand/20",
   },
 };
 
@@ -86,7 +94,6 @@ const CATEGORY_ORDER = [
   "data_quality",
 ] as const;
 
-// Worst first. `normal` alerts sit at the end of a branch's rows.
 const SEVERITY_RANK: Record<AlertSeverity, number> = {
   critical: 0,
   warning: 1,
@@ -98,12 +105,10 @@ interface BranchAlert extends HealthAlert {
   branchName: string;
 }
 
-/** An alert's id is only unique within a branch — every branch can raise the same rule —
- * so selection has to be keyed by branch too, or two branches' rows select together. */
 const alertKey = (alert: BranchAlert): string =>
   `${alert.branchId}:${alert.id}`;
 
-/** One alert in the master list — a single compact row, selectable. */
+/** One alert in the master list — compact row. */
 function AlertListRow({
   alert,
   active,
@@ -118,6 +123,7 @@ function AlertListRow({
   const meta = SEVERITY_META[alert.severity];
   return (
     <button
+      id={`alert-row-${alertKey(alert)}`}
       type="button"
       onClick={onSelect}
       aria-current={active}
@@ -150,23 +156,15 @@ function AlertListRow({
               alert.dimension}
           </Badge>
         </div>
-        <div
-          className={cn(
-            "text-xs font-medium mt-0.5 truncate",
-            active ? "text-text-primary" : "text-text-primary",
-          )}
-        >
+        <div className="text-xs font-medium mt-0.5 truncate text-text-primary">
           {alert.title}
-        </div>
-        <div className="text-xs mt-0.5 truncate text-text-muted">
-          {alert.summary}
         </div>
       </div>
     </button>
   );
 }
 
-/** The branch name banding the rows beneath it in the master list. */
+/** The branch name header in master list. */
 function BranchListHeader({
   name,
   count,
@@ -184,33 +182,137 @@ function BranchListHeader({
           {count}
         </Badge>
       ) : (
-        <span className="text-[11px] text-text-muted shrink-0">
-          All clear
-        </span>
+        <span className="text-[11px] text-text-muted shrink-0">All clear</span>
       )}
     </div>
   );
 }
 
-/** The right-hand panel: the selected alert's action, then its supporting evidence. */
+function getSection4Title(alert: BranchAlert): string {
+  if (alert.id === "urgent_reorder") {
+    return "Suggested products to reorder";
+  }
+  if (alert.id === "stock_allocation") {
+    return "Suggested products to transfer";
+  }
+  if (alert.id === "physical_stock_audit") {
+    return "Products requiring count";
+  }
+  if (alert.id === "footwear_aging") {
+    return "Aged products to review";
+  }
+  if (alert.id === "seasonal_demand_spike") {
+    return "Upcoming demand surge products";
+  }
+  if (alert.id === "sale_data_quality") {
+    return "Sales records to fix";
+  }
+  if (alert.id === "purchase_data_quality") {
+    return "Purchase records to fix";
+  }
+  if (alert.id === "purchase_number_sequence_gap") {
+    const total = alert.table?.total_count;
+    return total !== undefined
+      ? `Missing purchase numbers (${total})`
+      : "Missing purchase numbers";
+  }
+  if (alert.id === "weekly_pattern_demand") {
+    return "Sales pattern";
+  }
+  return "Supporting Info";
+}
+
+/**
+ * Standard 4-section Alert Inspector:
+ * 1. Title
+ * 2. Description
+ * 3. Recommended actions
+ * 4. Supporting info / item breakdown (capped to prevent data overload)
+ */
 function AlertInspector({
   alert,
   showBranch,
-  onOpenEvidence,
+  currentIndex,
+  totalCount,
+  onNavigate,
+  session,
+  onFileReady,
+  onReloadAlerts,
 }: {
   alert: BranchAlert;
   showBranch: boolean;
-  onOpenEvidence: (
-    target: EvidenceTarget,
-    branchId: string,
-    evidenceDays?: number | null,
-  ) => void;
+  currentIndex: number;
+  totalCount: number;
+  onNavigate: (delta: number) => void;
+  session: Session;
+  onFileReady?: (pending: PendingImport) => void;
+  onReloadAlerts?: () => void;
 }): React.JSX.Element {
+  const showToast = useToast();
   const meta = SEVERITY_META[alert.severity];
+
+  const [isVerifying, setIsVerifying] = useState(false);
+
+  // In-place file picker for uploads and re-imports
+  const {
+    trigger: triggerFilePicker,
+    input: filePickerInput,
+    picking,
+  } = useImportFilePicker(session, onFileReady);
+
+  // Export table to Excel
+  function handleExportTable(): void {
+    if (!alert.table) return;
+    const rows = alert.table.export_rows ?? alert.table.rows;
+    downloadExcel(
+      `${alert.id}_${alert.branchName}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      "Alert Data",
+      alert.table.columns.map((c) => c.label),
+      rows,
+    );
+    showToast("success", `Exported ${rows.length} rows to Excel`);
+  }
+
+  // Stock audit verification
+  async function handleVerifyStockAudit(): Promise<void> {
+    setIsVerifying(true);
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/checking/verify`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showToast(
+          data.success ? "success" : "info",
+          data.message || "Recount verification complete",
+        );
+        onReloadAlerts?.();
+      } else {
+        showToast("error", "Verification check failed");
+      }
+    } catch {
+      showToast("error", "Failed to connect to verification service");
+    } finally {
+      setIsVerifying(false);
+    }
+  }
+
+  const tableRows = alert.table?.rows ?? [];
+  const hasActionButtons =
+    alert.id === "daily_import_missing_sales" ||
+    alert.id === "daily_import_missing_inventory" ||
+    alert.id === "sale_data_quality" ||
+    alert.id === "purchase_data_quality" ||
+    alert.id === "purchase_number_sequence_gap" ||
+    alert.id === "physical_stock_audit";
+
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-y-auto h-full">
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-2 flex-wrap">
+    <div className="flex flex-col h-full overflow-hidden bg-bg-base">
+      {filePickerInput}
+
+      {/* Header Bar with In-Inspector Stepper */}
+      <div className="px-4 py-2.5 border-b border-border bg-bg-subtle/50 flex flex-wrap items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
           <Badge variant={meta.badge} dot>
             {meta.label}
           </Badge>
@@ -226,45 +328,279 @@ function AlertInspector({
               alert.dimension}
           </Badge>
           {showBranch && (
-            <span className="text-xs text-text-muted">
+            <span className="text-xs font-semibold text-text-secondary truncate">
               · {alert.branchName}
             </span>
           )}
         </div>
-        <h3 className="text-base font-semibold text-text-primary">
+
+        {/* Stepper controls */}
+        <div className="flex items-center gap-1 bg-bg-base border border-border rounded p-0.5 shadow-2xs">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={currentIndex <= 0}
+            onClick={() => onNavigate(-1)}
+            title="Previous alert"
+            className="h-6 px-1.5 text-xs gap-0.5"
+          >
+            <ChevronLeftIcon className="w-3.5 h-3.5" />
+            <span>Prev</span>
+          </Button>
+          <span className="text-xs font-mono font-medium text-text-muted px-1.5 select-none border-x border-border/60">
+            {currentIndex + 1} of {totalCount}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={currentIndex >= totalCount - 1}
+            onClick={() => onNavigate(1)}
+            title="Next alert"
+            className="h-6 px-1.5 text-xs gap-0.5"
+          >
+            <span>Next</span>
+            <ChevronRightIcon className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Body: Title -> Description -> Recommended Actions -> Table / Breakdown */}
+      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto p-5 space-y-3.5">
+        {/* 1. Title */}
+        <h2 className="text-base font-bold text-text-primary tracking-tight leading-snug shrink-0">
           {alert.title}
-        </h3>
-        <p className="text-sm text-text-secondary">{alert.summary}</p>
-      </div>
+        </h2>
 
-      {/* The recommended action lives at the top of the panel — it's the thing
-          this whole page exists to produce, so it must be visible without
-          scrolling past the evidence first. */}
-      <div className="rounded-lg border border-brand-pill bg-brand-subtle p-3 flex flex-col gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-brand">
-          Recommended Action
-        </span>
-        <p className="text-sm text-text-primary">{alert.recommended_action}</p>
-        <Button
-          variant="secondary"
-          size="sm"
-          className="self-start h-7 px-2.5 text-xs"
-          onClick={() =>
-            onOpenEvidence(alert.link, alert.branchId, alert.evidence_days)
-          }
-        >
-          {EVIDENCE_LABEL[alert.link]} →
-        </Button>
-      </div>
+        {/* 2. Description */}
+        <p className="text-xs text-text-secondary leading-relaxed shrink-0">
+          {alert.summary}
+        </p>
 
-      <div className="border-t border-border pt-4">
-        <AlertExplanation alert={alert} />
+        {/* 3. Why this alert */}
+        <div className="rounded-lg border border-border bg-bg-subtle/60 p-3 shrink-0">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-text-muted">
+            Why this alert
+          </span>
+          <p className="mt-1 text-xs text-text-secondary leading-relaxed">
+            {alert.what_happened}
+          </p>
+        </div>
+
+        {/* 4. Recommended Actions */}
+        <div className="rounded-lg border border-brand-pill bg-brand-subtle p-3.5 space-y-2.5 shadow-2xs shrink-0">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-brand">
+            Recommended Action
+          </span>
+          <p className="text-xs font-medium text-text-primary leading-relaxed">
+            {alert.recommended_action}
+          </p>
+
+          {/* Action buttons (only when interactive actions exist) */}
+          {hasActionButtons && (
+            <div className="pt-2 border-t border-brand-pill/60 flex flex-wrap items-center gap-2">
+              {alert.id === "daily_import_missing_sales" && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={picking}
+                  onClick={() =>
+                    triggerFilePicker({
+                      endpoint: "/api/imports/sales",
+                      importLabel: "Sales",
+                    })
+                  }
+                  className="h-8 text-xs font-semibold"
+                >
+                  <UploadIcon className="w-3.5 h-3.5 mr-1.5" />
+                  Upload Today's Sales File
+                </Button>
+              )}
+
+              {alert.id === "daily_import_missing_inventory" && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={picking}
+                  onClick={() =>
+                    triggerFilePicker({
+                      endpoint: "/api/imports/inventory",
+                      importLabel: "Inventory",
+                    })
+                  }
+                  className="h-8 text-xs font-semibold"
+                >
+                  <UploadIcon className="w-3.5 h-3.5 mr-1.5" />
+                  Upload Today's Inventory File
+                </Button>
+              )}
+
+              {alert.id === "sale_data_quality" && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={picking}
+                  onClick={() =>
+                    triggerFilePicker({
+                      endpoint: "/api/imports/sales",
+                      importLabel: "Sales",
+                    })
+                  }
+                  className="h-8 text-xs font-semibold"
+                >
+                  <UploadIcon className="w-3.5 h-3.5 mr-1.5" />
+                  Re-import Sales File to Fix
+                </Button>
+              )}
+
+              {alert.id === "purchase_data_quality" && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={picking}
+                  onClick={() =>
+                    triggerFilePicker({
+                      endpoint: "/api/imports/purchase",
+                      importLabel: "Purchase",
+                    })
+                  }
+                  className="h-8 text-xs font-semibold"
+                >
+                  <UploadIcon className="w-3.5 h-3.5 mr-1.5" />
+                  Re-import Purchase File to Fix
+                </Button>
+              )}
+
+              {alert.id === "physical_stock_audit" && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={isVerifying}
+                  onClick={handleVerifyStockAudit}
+                  className="h-8 text-xs font-semibold"
+                >
+                  <CheckIcon className="w-3.5 h-3.5 mr-1.5 text-success" />
+                  {isVerifying ? "Verifying..." : "Verify Recount"}
+                </Button>
+              )}
+
+              {alert.id === "purchase_number_sequence_gap" && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={picking}
+                  onClick={() =>
+                    triggerFilePicker({
+                      endpoint: "/api/imports/purchase",
+                      importLabel: "Purchase",
+                    })
+                  }
+                  className="h-8 text-xs font-semibold"
+                >
+                  <UploadIcon className="w-3.5 h-3.5 mr-1.5" />
+                  Import Missing Purchases
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 4. Table / Item Breakdown */}
+        {(alert.context ||
+          (alert.facts && alert.facts.length > 0) ||
+          (alert.table && tableRows.length > 0)) && (
+          <div className="flex-1 flex flex-col min-h-0 space-y-2.5 pt-1">
+            <div className="flex items-center justify-between gap-2 shrink-0">
+              <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+                {getSection4Title(alert)}
+                {tableRows.length > 0 &&
+                  alert.id !== "purchase_number_sequence_gap" && (
+                  <span className="ml-1 font-normal text-text-muted/70">
+                    ({tableRows.length})
+                  </span>
+                )}
+              </span>
+
+              {/* Download Excel button right next to the table title */}
+              {alert.table && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleExportTable}
+                  title="Export to Excel"
+                  className="h-6 px-1.5 text-xs text-text-secondary hover:text-brand gap-1"
+                >
+                  <DownloadIcon className="w-3.5 h-3.5" />
+                  <span className="text-[11px] font-medium">Excel</span>
+                </Button>
+              )}
+            </div>
+
+            {/* Context note */}
+            {alert.context && (
+              <p className="text-xs text-text-muted shrink-0">
+                {alert.context}
+              </p>
+            )}
+
+            {/* Key figures / Facts */}
+            {(alert.facts ?? []).length > 0 && (
+              <div className="shrink-0">
+                <AlertFacts facts={alert.facts!} />
+              </div>
+            )}
+
+            {/* Scrollable Table (expands to fill all remaining vertical height) */}
+            {alert.table && tableRows.length > 0 && (
+              <TableContainer className="flex-1 min-h-[220px] overflow-y-auto">
+                <Thead className="top-0">
+                  <Tr>
+                    {alert.table.columns.map((column) => (
+                      <Th
+                        key={column.label}
+                        className={
+                          column.align === "right" ? "text-right" : undefined
+                        }
+                      >
+                        {column.label}
+                      </Th>
+                    ))}
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {tableRows.map((row, idx) => (
+                    <Tr key={`row-${idx}`}>
+                      {row.map((cell, cellIdx) => (
+                        <Td
+                          key={alert.table!.columns[cellIdx]?.label ?? cellIdx}
+                          className={cn(
+                            "whitespace-nowrap text-xs",
+                            alert.table!.columns[cellIdx]?.align === "right" &&
+                              "text-right tabular-nums",
+                            String(cell).includes("Order") &&
+                              "font-semibold text-brand",
+                            String(cell).includes("Transfer") &&
+                              "font-semibold text-brand",
+                            String(cell).includes("days") &&
+                              parseFloat(String(cell)) < 2 &&
+                              "font-bold text-error",
+                          )}
+                        >
+                          {cell}
+                        </Td>
+                      ))}
+                    </Tr>
+                  ))}
+                </Tbody>
+              </TableContainer>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-/** The right-hand panel when nothing needs a decision. */
+/** Right-hand panel when nothing is selected or all clear. */
 function InspectorAllClear(): React.JSX.Element {
   return (
     <div className="flex h-full items-center justify-center p-8">
@@ -281,14 +617,8 @@ interface Props {
   session: Session;
   profile: Profile | null;
   branchOptions: BranchOption[];
-  // The left-nav branch switcher's current choice ("" = All branches) — this page's own
-  // branch filter dropdown was removed in favour of that one control (see AppShell).
   branchFilter: string;
-  onOpenEvidence: (
-    target: EvidenceTarget,
-    branchId: string,
-    evidenceDays?: number | null,
-  ) => void;
+  onFileReady?: (pending: PendingImport) => void;
 }
 
 export function BusinessAlertsPage({
@@ -296,10 +626,9 @@ export function BusinessAlertsPage({
   profile,
   branchOptions,
   branchFilter,
-  onOpenEvidence,
+  onFileReady,
 }: Props): React.JSX.Element {
   const isAdmin = profile !== null && profile.branch_id === null;
-  const range = usePeriodRange("30d");
   const [activeTab, setActiveTab] = useState<Tab>("all");
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -310,11 +639,9 @@ export function BusinessAlertsPage({
       ? [profile.branch_id]
       : [];
   const urls = branchIds.map((id) =>
-    dashboardUrl("overview", id, {
-      period: range.period,
-      dateFrom: range.applied.from,
-      dateTo: range.applied.to,
-    }),
+    // Same URL the nav badge in App.tsx requests, so the badge and this page share one
+    // cached response. No period control: the alerts don't depend on one.
+    dashboardUrl("overview", id, { period: "30d", dateFrom: "", dateTo: "" }),
   );
   const { data, isLoading, isRefreshing, failedCount, reload } =
     useUrlQueries<OverviewData>(urls, session, "alerts");
@@ -421,9 +748,7 @@ export function BusinessAlertsPage({
       );
   }, [branches, branchFilter, shown, category, severityFilter, allAlerts]);
 
-  // Keep a selection alive across refetches/filters: stay on the same alert while it's
-  // still in view, otherwise fall back to the first row so the inspector is never blank
-  // while rows are actually on screen.
+  // Keep a selection alive across refetches/filters
   useEffect(() => {
     if (shown.length === 0) {
       setSelectedId(null);
@@ -434,14 +759,52 @@ export function BusinessAlertsPage({
     }
   }, [shown, selectedId]);
 
-  const selectedAlert =
-    shown.find((alert) => alertKey(alert) === selectedId) ?? null;
+  const currentIndex = shown.findIndex(
+    (alert) => alertKey(alert) === selectedId,
+  );
+  const selectedAlert = currentIndex !== -1 ? shown[currentIndex] : null;
 
-  // The master-detail grid gets an explicit pixel height rather than a fixed
-  // max-height guess: measured from wherever the filter bar actually ends (which
-  // moves with window width, since the category/severity pills wrap at narrower
-  // widths) down to the bottom of the window, so the panel always fills the space
-  // instead of stopping early and leaving blank page background beneath it.
+  // In-Inspector sequential navigation
+  const handleNavigate = (delta: number): void => {
+    if (shown.length === 0) return;
+    const cur = shown.findIndex((alert) => alertKey(alert) === selectedId);
+    const nextIdx = Math.max(
+      0,
+      Math.min(shown.length - 1, (cur === -1 ? 0 : cur) + delta),
+    );
+    setSelectedId(alertKey(shown[nextIdx]));
+  };
+
+  // Keyboard navigation: J/K or Up/Down arrows to step through alerts
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent): void {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+      if (e.key === "ArrowDown" || e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        handleNavigate(1);
+      } else if (e.key === "ArrowUp" || e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        handleNavigate(-1);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  });
+
+  // Smooth scroll active row into view
+  useEffect(() => {
+    if (selectedId) {
+      const el = document.getElementById(`alert-row-${selectedId}`);
+      el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [selectedId]);
+
   const filterBarRef = useRef<HTMLDivElement>(null);
   const [gridHeight, setGridHeight] = useState<number | null>(null);
 
@@ -449,8 +812,9 @@ export function BusinessAlertsPage({
     function measure(): void {
       const el = filterBarRef.current;
       if (!el) return;
-      const bottomGap = 14; // matches main's own bottom padding (py-3.5)
-      const available = window.innerHeight - el.getBoundingClientRect().bottom - bottomGap;
+      const bottomGap = 14;
+      const available =
+        window.innerHeight - el.getBoundingClientRect().bottom - bottomGap;
       setGridHeight(Math.max(320, available));
     }
     measure();
@@ -493,7 +857,6 @@ export function BusinessAlertsPage({
             </div>
 
             <div className="flex items-center gap-2 flex-wrap shrink-0">
-              <PeriodControls range={range} />
               <RefreshButton onClick={reload} refreshing={isRefreshing} />
             </div>
           </div>
@@ -635,11 +998,8 @@ export function BusinessAlertsPage({
                 />
               </div>
             ) : (
-              // Master-detail split: a narrow scrollable list of every alert on the
-              // left, and one wide inspector panel on the right showing the selected
-              // alert's action and evidence — so reading an alert never means
-              // navigating away from the list of the others.
               <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,22rem)_1fr] divide-y lg:divide-y-0 lg:divide-x divide-border">
+                {/* Left: Master Alert List */}
                 <div
                   className="overflow-y-auto"
                   style={{ height: gridHeight ?? undefined }}
@@ -670,15 +1030,22 @@ export function BusinessAlertsPage({
                     </div>
                   ))}
                 </div>
+
+                {/* Right: Clean 4-Section Inspector */}
                 <div
-                  className="overflow-y-auto"
+                  className="overflow-hidden"
                   style={{ height: gridHeight ?? undefined }}
                 >
                   {selectedAlert ? (
                     <AlertInspector
                       alert={selectedAlert}
                       showBranch={showBranch}
-                      onOpenEvidence={onOpenEvidence}
+                      currentIndex={currentIndex >= 0 ? currentIndex : 0}
+                      totalCount={shown.length}
+                      onNavigate={handleNavigate}
+                      session={session}
+                      onFileReady={onFileReady}
+                      onReloadAlerts={reload}
                     />
                   ) : (
                     <InspectorAllClear />

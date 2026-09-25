@@ -123,7 +123,6 @@ def parse_inventory_export_from_grid(
             continue
 
         # Check for grand total or metadata banners
-        first_cell = row[0].strip() if row else ""
         if any(cell.strip().startswith("Grand Total") for cell in row[:3]):
             continue
         if any("stock listing report" in cell.strip().lower() for cell in row[:5]):

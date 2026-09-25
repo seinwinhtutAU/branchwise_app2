@@ -401,13 +401,8 @@ function App(): React.JSX.Element {
   // Notices imports and reverts done by other accounts on other machines, so their
   // work invalidates this browser's cached pages too (see useImportedDataWatch).
   useImportedDataWatch(session);
-  // Which Dashboard tab and branch to open when another section sends the user there.
-  const [dashboardTarget, setDashboardTarget] = useState<{
-    tab: "revenue" | "cost" | "inventory" | "customer";
-    branchId: string;
-  } | null>(null);
   // Which Inventory sub-tab to open when the dashboard's "view all" links send the user
-  // there — read once on mount by InventoryPage, same pattern as dashboardTarget above.
+  // there — read once on mount by InventoryPage.
   const [inventoryTarget, setInventoryTarget] =
     useState<InventorySubTab | null>(null);
   // Receiving number to open when Inventory sends someone directly to the receiving
@@ -434,7 +429,7 @@ function App(): React.JSX.Element {
     readLastKnown<Profile>("profile"),
   );
   const [profileLoading, setProfileLoading] = useState(false);
-  const [rawSection, setSection] = useState<Section>("import");
+  const [rawSection, setSection] = useState<Section>("dashboard");
   const [workspace, setWorkspace] = useState<Workspace>(() => {
     const stored = window.localStorage.getItem(WORKSPACE_STORAGE_KEY);
     return stored === "wholesale" ? "wholesale" : "retail";
@@ -470,9 +465,9 @@ function App(): React.JSX.Element {
   // page's own setting, so its "see the records" link opens the Warning page on the
   // alert's days instead — otherwise the alert says there is a problem the page can't
   // show. Cleared again whenever the section changes.
-  // "Open Checking" (Business Alerts, Dashboard) lands on the Data Quality page's Checking
-  // tab. Read once on mount by WarningsPage, so it is cleared on every section change.
-  const [warningsTab, setWarningsTab] = useState<"Checking" | null>(null);
+  const [warningsTab, setWarningsTab] = useState<
+    "Inventory" | "Sale" | "Purchase" | null
+  >(null);
   const [warningWindowOverride, setWarningWindowOverride] = useState<
     number | null
   >(null);
@@ -1078,11 +1073,8 @@ function App(): React.JSX.Element {
                   overviewBranchId={overviewBranchId}
                   onOverviewBranchChange={setOverviewBranchId}
                   showAdvancedTabs
-                  initialTab={dashboardTarget?.tab}
-                  initialBranchId={dashboardTarget?.branchId}
                   onViewChecking={() => {
                     handleSectionChange("warnings");
-                    setWarningsTab("Checking");
                   }}
                   onViewImport={() => handleSectionChange("import")}
                 />
@@ -1093,33 +1085,7 @@ function App(): React.JSX.Element {
                   profile={profile}
                   branchOptions={retailBranchOptions}
                   branchFilter={selectedBranchId}
-                  onOpenEvidence={(target, branchId, evidenceDays) => {
-                    if (target === "warnings") {
-                      handleSectionChange("warnings");
-                      // After the change above, which clears it.
-                      setWarningWindowOverride(evidenceDays ?? null);
-                      return;
-                    }
-                    if (target === "checking") {
-                      handleSectionChange("warnings");
-                      setWarningsTab("Checking");
-                      return;
-                    }
-                    if (target === "import") {
-                      handleSectionChange("import");
-                      return;
-                    }
-                    if (target === "agedStock") {
-                      setSelectedBranchId(branchId);
-                      setInventoryTarget("agedStock");
-                      handleSectionChange("inventory");
-                      return;
-                    }
-                    // DashboardPage reads these once, on mount — which is exactly what a
-                    // section switch does, so the tab and branch survive the jump.
-                    setDashboardTarget({ tab: target, branchId });
-                    handleSectionChange("dashboard");
-                  }}
+                  onFileReady={handleFileReady}
                 />
               )}
 

@@ -1,8 +1,5 @@
 // Types, query keys, and shared constants for the Inventory feature.
 
-export type View = "list" | "detail";
-export type InventorySection = "overview" | "locations" | "movement";
-export type StockDetailTab = "overview" | "orders" | "movement" | "pipeline";
 export type InventoryHealth =
   "Healthy" | "Low Stock" | "Out of Stock" | "Overstock" | "Not arrived yet";
 
@@ -17,7 +14,7 @@ export const ON_ORDER_PLACE = "On customer order";
 export const LOW_STOCK_THRESHOLD = 20;
 export const OVERSTOCK_THRESHOLD = 150;
 
-export interface DotPillStyle {
+interface DotPillStyle {
   bg: string;
   dot: string;
 }

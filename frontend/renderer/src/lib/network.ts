@@ -155,19 +155,19 @@ export function installNetworkResilience(): () => void {
           // A backend that answers but can't reach Neon is still offline as far as
           // every page in this app is concerned.
           if (response.ok && body?.database === "ok") {
-            // eslint-disable-next-line no-console -- diagnostic trail for intermittent
+             
             // "no connection" reports; see connection.ts for the resulting status change.
             console.log(`[connection] probe succeeded after ${Date.now() - startedAt}ms — reconnected`);
             reportRequestSuccess(Date.now() - startedAt);
             stopProbing();
           } else {
-            // eslint-disable-next-line no-console
+             
             console.debug(`[connection] probe answered but database is not ok:`, body);
           }
         })
         .catch((error) => {
           // Still down. The next tick tries again; no toast, the banner already says so.
-          // eslint-disable-next-line no-console
+           
           console.debug(`[connection] probe still failing: ${(error as Error)?.message ?? error}`);
         })
         .finally(() => {
@@ -242,7 +242,7 @@ export function installNetworkResilience(): () => void {
         lastError = timeout.timedOut() ? new RequestTimeoutError(url) : error;
         const isLastAttempt = attempt === attempts - 1;
         if (!isLastAttempt) reportRequestRetry();
-        // eslint-disable-next-line no-console -- diagnostic trail for intermittent "no
+         
         // connection" reports: exactly which request failed, how, and after how long.
         console.warn(
           `[connection] ${method} ${url} failed on attempt ${attempt + 1}/${attempts} after ${
@@ -263,7 +263,7 @@ export function installNetworkResilience(): () => void {
     if (isRead) {
       const cached = await readOfflineRead(url);
       if (cached) {
-        // eslint-disable-next-line no-console -- confirms an intentional local fallback.
+         
         console.info(`[connection] serving cached response while offline: ${url}`);
         return cached;
       }

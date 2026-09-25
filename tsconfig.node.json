@@ -10,6 +10,8 @@
     // Typecheck-only, same as tsconfig.web.json — see the note there for why emitting
     // next to the sources is actively harmful rather than merely untidy.
     "noEmit": true,
+    // Same reason as tsconfig.web.json: the base config's "node" resolver is deprecated.
+    "moduleResolution": "bundler",
     "types": ["electron-vite/node"]
   }
 }

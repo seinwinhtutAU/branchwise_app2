@@ -5,11 +5,6 @@ import { Button } from "@renderer/components/ui/Button";
 import { DateInput } from "@renderer/components/ui/DateInput";
 import { Select } from "@renderer/components/ui/Select";
 
-export interface ExportDateRange {
-  from: string;
-  to: string;
-}
-
 export interface ExportOptions {
   from?: string;
   to?: string;

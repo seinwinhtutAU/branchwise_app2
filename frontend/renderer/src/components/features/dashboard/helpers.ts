@@ -343,7 +343,7 @@ export interface HealthAlert {
   summary: string;
   what_happened: string;
   recommended_action: string;
-  link: EvidenceTarget;
+  link: EvidenceTarget | null;
   /** The `SubMetric.key` this alert is about — see the Overview branch page. */
   measure: string;
   /** The days behind the alert: "9 Aug – 7 Sep 2026 vs 10 Jul – 8 Aug 2026", or, for the
@@ -389,6 +389,8 @@ export interface AlertTable {
   rows: string[][];
   /** Every row, when `rows` is only the top few — what the table's Excel button saves. */
   export_rows?: string[][];
+  /** Total number represented by the table, when it differs from visible rows. */
+  total_count?: number;
   /** "78 more on the Inventory tab", when the list was capped. */
   note: string | null;
 }
@@ -488,13 +490,13 @@ export interface InventoryConditionData {
   risk_alert: string;
 }
 
-export interface HourlyDemandPoint {
+interface HourlyDemandPoint {
   hour: string;
   count: number;
   net_revenue: number;
 }
 
-export interface FootfallCell {
+interface FootfallCell {
   weekday: number;
   hour_band: string;
   transaction_count: number;

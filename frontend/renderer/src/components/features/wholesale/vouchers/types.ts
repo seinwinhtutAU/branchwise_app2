@@ -148,7 +148,7 @@ export const EMPTY_LINE: DraftLine = {
 
 export const STEPS = ["Supplier", "Products", "Review"] as const;
 
-export const voucherDraftLineSchema = z
+const voucherDraftLineSchema = z
   .object({
     stock_code: z.string(),
     description: z.string(),
@@ -245,7 +245,7 @@ export interface SupplierVoucherFormValues {
   lines: DraftLine[];
 }
 
-export const supplierVoucherDetailLineSchema = z.object({
+const supplierVoucherDetailLineSchema = z.object({
   voucher_line_id: z.string(),
   stock_code: z.string(),
   description: z.string(),

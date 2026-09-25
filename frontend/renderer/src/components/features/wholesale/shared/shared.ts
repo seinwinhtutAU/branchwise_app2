@@ -8,7 +8,7 @@ import { fromPairs, PAIRS_PER, toPairs, type Unit, type UnitConversions } from "
 
 export type PaymentStatus = "unpaid" | "partial" | "paid";
 
-export const WRITE_OFF_REASON_LABELS: Record<string, string> = {
+const WRITE_OFF_REASON_LABELS: Record<string, string> = {
   lost_in_transit: "lost in transit",
   damaged: "damaged",
   short_shipped: "short-shipped",
@@ -39,7 +39,7 @@ export function paymentStatusOf(total: number, paid: number): PaymentStatus {
 // than asked for separately — two fields that must agree are two fields that can disagree,
 // and the unit letter is what stops ten sets being read as ten pairs.
 
-export interface ColorQty {
+interface ColorQty {
   color: string;
   qty: number;
   /** The unit letter the colour carried — "black2p" is two pairs whatever the rest of
@@ -50,7 +50,7 @@ export interface ColorQty {
 
 /** The letter a colour — or, below, a plain quantity — can carry to say what it is
  *  counted in. */
-export const UNIT_LETTERS: Record<string, Unit> = {
+const UNIT_LETTERS: Record<string, Unit> = {
   p: "pair",
   s: "set",
   d: "dozen",
@@ -121,7 +121,7 @@ export function colorQtyProblem(text: string): string | null {
 // colour shorthand, pieces don't need a comma between them ("1s3p" and "1s+3p" read the
 // same) since there's no colour name for a run-together number to be confused with.
 
-export interface QuantityShorthandPiece {
+interface QuantityShorthandPiece {
   qty: number;
   /** Missing only when the whole box is a single bare number — it then reads in the
    *  field's own unit, same as before this shorthand existed. */

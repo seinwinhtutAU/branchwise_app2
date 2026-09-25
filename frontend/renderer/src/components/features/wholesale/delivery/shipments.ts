@@ -167,13 +167,6 @@ export function normaliseFlow(shipment: Shipment): Shipment {
   };
 }
 
-/** Every place the packages arrive at on the way here: the cargo company, each stop in
- *  between, and our own place at the end. The supplier is not counted — that is where
- *  the goods start out, not somewhere they are delivered to. */
-export function destinationCount(shipment: Shipment): number {
-  return shipment.legs.length + 2;
-}
-
 export function arrivedPct(shipment: Shipment): number {
   return sharePct(
     shipment.final_received_packages + (shipment.lost_packages ?? 0),

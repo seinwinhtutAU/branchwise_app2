@@ -6,7 +6,7 @@ import { CloseIcon } from "@renderer/components/ui/icons";
 
 export type ImportKind = "sales" | "inventory";
 
-export interface CompletenessDay {
+interface CompletenessDay {
   date: string;
   status: "open" | "closed";
   note: string | null;
@@ -37,9 +37,9 @@ export interface CompletenessResponse {
   branches: CompletenessBranch[];
 }
 
-export type DayListMode = "missing" | "ignored";
+type DayListMode = "missing" | "ignored";
 
-export interface DaySectionActions {
+interface DaySectionActions {
   onIgnore: (
     branchId: string,
     importType: ImportKind,
@@ -53,7 +53,7 @@ export interface DaySectionActions {
   ) => Promise<void>;
 }
 
-export interface DaySectionProps extends DaySectionActions {
+interface DaySectionProps extends DaySectionActions {
   title: string;
   branchId: string;
   importType: ImportKind;
@@ -94,7 +94,7 @@ function groupDaysByMonth(days: CompletenessDay[]): DayMonthGroup[] {
   return [...groups.values()];
 }
 
-export function DaySection({
+function DaySection({
   title,
   branchId,
   importType,
@@ -263,7 +263,7 @@ export function DaySection({
 /** Which branch/panel the Import Health drawer is open on, or closed when null. */
 export type DrawerPanel = "sales" | "inventory" | "purchase" | "ignored";
 
-export interface ImportHealthDrawerTarget {
+interface ImportHealthDrawerTarget {
   branchId: string;
   panel: DrawerPanel;
 }

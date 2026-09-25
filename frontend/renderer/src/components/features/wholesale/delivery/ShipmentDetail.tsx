@@ -141,7 +141,7 @@ export function ShipmentDetail({
 
   // Keyboard shortcut: Ctrl+S or Cmd+S to save changes
   useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
+    function handleKeyDown(e: KeyboardEvent): void {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
         if (isDirty && !saving) {

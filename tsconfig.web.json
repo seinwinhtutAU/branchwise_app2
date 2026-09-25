@@ -14,9 +14,12 @@
     // cost a debugging session once already; the npm typecheck scripts pass --noEmit
     // explicitly, but nothing stopped someone running tsc by hand.
     "noEmit": true,
-    "baseUrl": ".",
+    // The shared base config still says "node" (the old node10 resolver), which newer
+    // TypeScript versions flag as deprecated; Vite resolves like "bundler" anyway.
+    "moduleResolution": "bundler",
+    // No `baseUrl` (deprecated): `paths` entries resolve relative to this file without it.
     "paths": {
-      "@renderer/*": ["frontend/renderer/src/*"]
+      "@renderer/*": ["./frontend/renderer/src/*"]
     }
   }
 }

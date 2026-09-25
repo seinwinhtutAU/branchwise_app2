@@ -1,32 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import { cn } from "@renderer/lib/utils";
+import { copyText } from "@renderer/lib/clipboard";
 import { CheckIcon, CopyIcon } from "@renderer/components/ui/icons";
 
-/** Puts text on the clipboard with fallback for non-secure contexts. */
-export async function copyText(text: string): Promise<void> {
-  try {
-    if (navigator?.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return;
-    }
-  } catch {
-    // fallback below
-  }
-  try {
-    const box = document.createElement("textarea");
-    box.value = text;
-    box.style.position = "fixed";
-    box.style.opacity = "0";
-    document.body.appendChild(box);
-    box.select();
-    document.execCommand("copy");
-    document.body.removeChild(box);
-  } catch (err) {
-    console.error("Failed to copy text:", err);
-  }
-}
-
-export interface CopyButtonProps {
+interface CopyButtonProps {
   /** The value/text to copy to clipboard */
   value?: string;
   text?: string;

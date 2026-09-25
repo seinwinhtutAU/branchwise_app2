@@ -20,7 +20,7 @@ Docs are split the same way the codebase is: shared docs here at the top level, 
 - [Business alerts](./retail/business-alerts.md) — every alert condition in plain language, with a worked example for each
 - [Branch health score](./retail/branch_health.md) — the Overview tab's 0-100 score per dimension, its weight/band table, and how it handles data it can't measure
 - [Import health](./retail/import_health.md) — checks on whether an import's cleaning/confirm step behaved correctly
-- [Checking](./retail/checking.md) — the physical stock audit screen (built, currently hidden from the nav)
+- [Checking](./retail/checking.md) — the physical stock audit — now shown as an alert on Business Alerts; the standalone page is no longer in the app
 - [User guide](./retail/help.md) — the plain-language reference for staff (written for the in-app Help page, which has since been removed; kept as documentation and as the source material for the chat assistant)
 
 ## Wholesale
@@ -32,7 +32,7 @@ Docs are split the same way the codebase is: shared docs here at the top level, 
 - [Customer Orders](./wholesale/customer-orders.md) — allocation, delivery, and the caps that keep both honest
 - [Inventory / Stock Records](./wholesale/inventory.md) — the whole pipeline, including stock that hasn't arrived yet
 - [Finance](./wholesale/finance.md) — receivables, payables, shipment costs
-- [Monitoring](./wholesale/monitoring.md) — a live operational status board (built, hidden from the nav)
+- [Monitoring](./wholesale/monitoring.md) — the wholesale Dashboard (Summary, Revenue, Cost, Customer, Inventory) and Excel/CSV export
 - [Master Data](./wholesale/master-data.md) — products, suppliers, customers, and the other reference lists
 - [Write-offs](./wholesale/write-offs.md) — the shared "explain the mismatch" mechanism used by Shipments, Vouchers, and Orders
 

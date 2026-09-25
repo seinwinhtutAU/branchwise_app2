@@ -20,7 +20,7 @@ import { useSyncExternalStore } from "react";
  */
 export type ConnectionStatus = "online" | "slow" | "poor" | "offline";
 
-export interface ConnectionSnapshot {
+interface ConnectionSnapshot {
   status: ConnectionStatus;
   /** Most recent successful round-trip through the local API to cloud data. */
   latencyMs: number | null;
@@ -48,7 +48,7 @@ function set(next: ConnectionStatus, latencyMs = snapshot.latencyMs): void {
     listeners.forEach((listener) => listener());
     return;
   }
-  // eslint-disable-next-line no-console -- deliberate diagnostic trail; see network.ts's
+   
   // per-attempt logging for the failure this transition followed from.
   console.log(`[connection] ${previous} -> ${next} at ${new Date().toISOString()}`);
   listeners.forEach((listener) => listener());
@@ -94,20 +94,6 @@ export function useConnectionStatus(): ConnectionStatus {
 /** React's view of the status plus the last observed end-to-end latency. */
 export function useConnectionSnapshot(): ConnectionSnapshot {
   return useSyncExternalStore(subscribe, getConnectionSnapshot);
-}
-
-/**
- * Runs `callback` the next time the connection looks usable again — what the import
- * screen waits on before retrying a file that couldn't be sent. Returns an unsubscribe.
- */
-export function onConnectionRestored(callback: () => void): () => void {
-  const unsubscribe = subscribe(() => {
-    if (snapshot.status !== "offline") {
-      unsubscribe();
-      callback();
-    }
-  });
-  return unsubscribe;
 }
 
 /** The browser saying the adapter went down is worth believing immediately. */

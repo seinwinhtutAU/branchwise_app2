@@ -441,10 +441,7 @@ under a chip "everything normal" would be a claim about one category worded as a
 about the branch. `normal` alerts themselves sort to the end of a branch's rows, so a
 notice that asks for nothing can never push a decision off the top of the list.
 
-**Data-quality alerts are excluded.** They are about the imported data being wrong
-rather than the business going wrong, and the Warning page already lists them row by row
-with the tools to fix them; a summary of them here would split one job across two
-screens.
+**Data-quality alerts are listed here too**, under their own **Data quality** tab. They are about the imported data being wrong rather than the business going wrong, but the alert panel gives the fix in place: the offending records, plus a re-import button (see `business-alerts.md`). The Warning page still lists every row.
 
 It issues **no requests of its own**: it reads the same per-branch overview payloads
 through `useCachedFetchMany`, which shares the cache with the single-URL hook — so
@@ -457,11 +454,7 @@ and this page were going to need anyway — a dedicated count endpoint would hav
 same work and thrown the result away. The badge counts every alert the page lists (critical, warning and normal, data-quality ones included) — the page's headline count — so the two always show the same number. Both follow the left-nav branch switcher: with one branch chosen only that branch's alerts are counted, with "All branches" every branch's are. The badge re-asks every ten minutes, since some alerts depend on the clock (a missing-file
 alert only appears after the daily cutoff) and the long page cache never notices that.
 
-Following an alert's evidence link crosses sections, so `App.tsx` holds the target and
-passes it to `DashboardPage` as `initialTab`/`initialBranchId`; the page reads them on
-mount, which is exactly what a section switch causes. Both pages drive their period
-control from the same `usePeriodRange` hook and `PeriodControls` component, so the two
-behave identically without one owning the other's state.
+The Business Alerts page no longer sends the user to another section to see an alert's evidence — its actions are buttons inside the alert panel, and `App.tsx` no longer holds a dashboard tab/branch target. Both pages still drive their period control from the same `usePeriodRange` hook and `PeriodControls` component, so the two behave identically without one owning the other's state.
 
 **Drill-through** is the point of the whole layout: Sales → Revenue, Profit → Cost,
 Inventory → Inventory, Customer → Customer, and Data Quality leaves the dashboard for
@@ -475,12 +468,6 @@ weights and the thresholds described under **Tuning**.
 Overview is the landing tab and growth against a single previous day is noise.
 Switching to another tab keeps whatever period is selected, exactly as before — so
 Revenue opens on 30 days unless the user changes it.
-
-## Not yet built
-
-- **Early Warning engine** (`app/retail/services/early_warning.py`) — declarative rules over
-  the same `BranchSnapshot`, producing severity-ranked alerts. The data-integrity rules
-  will delegate to `data_quality.py` rather than reimplement it.
 
 ## Tests
 

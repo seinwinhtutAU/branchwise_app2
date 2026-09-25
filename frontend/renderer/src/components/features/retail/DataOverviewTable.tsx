@@ -329,30 +329,15 @@ const SUB_TABS: TabItem<DataOverviewSubTab>[] = [
   },
   {
     id: "salary",
-    label: (
-      <span className="flex items-center gap-1.5">
-        <span className="inline-block h-3 w-5 rounded-sm bg-amber-400 shrink-0" />
-        <span>Salary</span>
-      </span>
-    ),
+    label: "Salary",
   },
   {
     id: "zeroSelling",
-    label: (
-      <span className="flex items-center gap-1.5">
-        <span className="inline-block h-3 w-5 rounded-sm bg-violet-400 shrink-0" />
-        <span>Zero Selling</span>
-      </span>
-    ),
+    label: "Zero Selling",
   },
   {
     id: "dailyCost",
-    label: (
-      <span className="flex items-center gap-1.5">
-        <span className="inline-block h-3 w-5 rounded-sm bg-orange-400 shrink-0" />
-        <span>Daily Usage</span>
-      </span>
-    ),
+    label: "Daily Usage",
   },
 ];
 
@@ -1056,7 +1041,6 @@ export default function DataOverviewTable({
           endpoint="/api/salaries"
           title="Salary"
           description="Employee salary and bonus records from General File uploads."
-          icon={<div className="h-3.5 w-5 rounded-sm bg-amber-400 shrink-0" />}
           columns={SALARY_COLUMNS}
           filters={salaryFilters}
           branchFilter={branchFilter}

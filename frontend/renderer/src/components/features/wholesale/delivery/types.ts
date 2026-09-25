@@ -39,7 +39,7 @@ export const STATUS_STYLES: Record<ShipmentStatus, { bg: string; dot: string }> 
   },
 };
 
-export const shipmentDetailLegSchema = z.object({
+const shipmentDetailLegSchema = z.object({
   leg_id: z.string(),
   leg_order: z.number().finite().min(0),
   stop_name: z.string(),

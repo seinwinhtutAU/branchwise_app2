@@ -16,7 +16,6 @@ from app.wholesale.services.supplier_vouchers_service import (
     create_voucher,
     delete_payment,
     delete_voucher,
-    get_voucher,
     list_vouchers,
     received_pairs_by_voucher_no,
     received_pairs_by_voucher_stock,

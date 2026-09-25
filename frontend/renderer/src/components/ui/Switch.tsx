@@ -1,7 +1,7 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { cn } from "@renderer/lib/utils";
 
-export interface SwitchProps
+interface SwitchProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onChange"> {
   checked: boolean;
   onChange?: (checked: boolean) => void;

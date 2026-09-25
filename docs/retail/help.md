@@ -338,7 +338,7 @@ These pricing settings are business-wide and apply to everyone.
 
 ## What Each Warning Tab Checks
 
-The Warning section helps identify possible data problems.
+The Warning page (named **Data Quality** in the sidebar) helps identify possible data problems. It has four tabs: **All**, **Inventory**, **Sale** and **Purchase**.
 
 ### Sale
 
@@ -361,9 +361,9 @@ The Inventory warning does not use a single calendar range for the latest invent
 
 Checks Purchase records for obviously incorrect values, similar to the Sale warning.
 
-### Daily Check
+### Daily Check (shown under the Inventory tab)
 
-Compares the latest inventory count with the stock that BranchWise expects based on previous inventory, purchases, and sales.
+There is no separate Daily Check tab: this check's rows appear under **Inventory**. It compares the latest inventory count with the stock that BranchWise expects based on previous inventory, purchases, and sales.
 
 The basic calculation is:
 
@@ -399,7 +399,7 @@ If you are checking older data and the warning tab is empty, the problem may sim
 
 Go to:
 
-**Settings → Daily Check Windows**
+**Settings → Data checks → Daily check windows**
 
 and increase the relevant window.
 
@@ -434,15 +434,19 @@ Controls the application theme:
 - Dark.
 - Match device/system setting.
 
-### Daily Check Windows
+### Daily Check Windows (Settings → Data checks)
 
-Controls how many days back the Sale and Purchase warning checks look.
+Controls how many days back the Sale and Purchase warning checks look (default: today only).
+
+### Daily Check Cutoff Time (Settings → Data checks)
+
+The shop-close time (default 8:00 PM). After it, Business Alerts raises "Daily import missing" if today's Sales or Inventory file has not been imported.
 
 See:
 
 **What Each Warning Tab Checks**
 
-### Sale & Purchase List Default Range
+### Sale & Purchase List Default Range (Settings → General)
 
 Controls how many days of Sale and Purchase data are loaded by default before the user changes the date filter.
 
@@ -472,6 +476,14 @@ Controls how many days after a sale BranchWise can use a later inventory recount
 See:
 
 **Inventory Price Forward Days**
+
+### ABC Inventory Buffer Months (Settings → Reorder Buffer)
+
+How many months of stock the reorder calculations aim to keep, per ABC tier (A core fast-movers, B mid-tier, C slow-moving).
+
+### Branch Health Weights (Settings → Branch health)
+
+How much each dimension counts toward the Overview score, plus the firing point of each alert rule. See `docs/retail/branch_health.md`.
 
 ### Branch Date Formats
 

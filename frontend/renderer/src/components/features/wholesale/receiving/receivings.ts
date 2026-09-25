@@ -11,7 +11,6 @@
 // The Receiving page now reads and writes the authoritative API. The seed rows remain
 // only as a fallback for the wholesale screens that have not yet moved off the store.
 
-import { sharePct } from "../shared/shared";
 import { PAIRS_PER, toPairs, type Unit, type UnitConversions } from "../shared/units";
 import { type ProductGroup } from "../shared/products";
 
@@ -166,27 +165,6 @@ export function emptyCost(
   };
 }
 
-/** What each stage of the journey has cost, in the order the packages passed through it.
- *  Stages with nothing spent on them are left out — an empty row says nothing. */
-export function costByStage(
-  receiving: Receiving,
-  stages: string[],
-): { stage: string; amount: number }[] {
-  const totals = new Map<string, number>();
-  for (const cost of receiving.costs) {
-    const stage = cost.stage.trim() === "" ? "Not said where" : cost.stage;
-    totals.set(stage, (totals.get(stage) ?? 0) + cost.amount);
-  }
-  const ordered = [...stages, "Not said where"].filter((stage) =>
-    totals.has(stage),
-  );
-  const extras = [...totals.keys()].filter((stage) => !ordered.includes(stage));
-  return [...ordered, ...extras].map((stage) => ({
-    stage,
-    amount: totals.get(stage) ?? 0,
-  }));
-}
-
 export function openedCount(receiving: Receiving): number {
   return receiving.packages.filter((entry) => entry.opened).length;
 }
@@ -206,10 +184,6 @@ export function expectedPairs(receiving: Receiving): number {
 
 export function pairsDifference(receiving: Receiving): number {
   return countedPairs(receiving) - expectedPairs(receiving);
-}
-
-export function checkedPct(receiving: Receiving): number {
-  return sharePct(openedCount(receiving), receiving.packages.length);
 }
 
 /** expectedPackages is the shipment's own total_packages, when known — a receiving can
@@ -234,7 +208,7 @@ export function receivingStatus(
 
 /** Builds the empty package rows an receiving starts with — one per box off the truck,
  *  numbered, with nothing inside them yet. */
-export function emptyPackages(count: number, seed: string): ReceivingPackage[] {
+function emptyPackages(count: number, seed: string): ReceivingPackage[] {
   return Array.from({ length: Math.max(0, count) }, (_, index) => ({
     package_id: `ap-${seed}-${index + 1}`,
     package_no: index + 1,

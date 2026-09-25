@@ -43,7 +43,7 @@ import {
 
 // Memoized: this is rendered once per order line, and a table of many lines should not
 // re-render every other line when one line's allocation changes.
-export const AllocationLineRow = memo(function AllocationLineRow({
+const AllocationLineRow = memo(function AllocationLineRow({
   index,
   line,
   order,

@@ -105,7 +105,7 @@ Main content area: `padding: 32px 16–24px`, vertical stack (`gap-8`) of a page
 **Navigation items are role-dependent**, all implemented (no more "Coming soon" placeholders):
 
 - **Admin and development** see both workspaces and all operational screens. **Retail management** sees the full retail nav; a plain **retail** account sees only Import and Import History.
-- **Wholesale** accounts see the wholesale nav — this was an empty placeholder as of 2026-09-11 while the workflow was being redesigned from scratch, but it has since been rebuilt into a real multi-screen workflow (Customer Orders, Supplier Vouchers, Shipment, Receiving, Inventory, Finance, Master Data, plus Dashboard/Reports currently hidden pending release) — see [wholesale/](./wholesale/) rather than trusting the "empty placeholder" description, which is stale.
+- **Wholesale** accounts see the wholesale nav — this was an empty placeholder as of 2026-09-11 while the workflow was being redesigned from scratch, but it has since been rebuilt into a real multi-screen workflow (Customer Orders, Supplier Vouchers, Shipment, Receiving, Inventory, Finance, Master Data, plus a Dashboard with Summary, Revenue, Cost, Customer and Inventory tabs) — see [wholesale/](./wholesale/) rather than trusting the "empty placeholder" description, which is stale.
 - **Admin** has all settings and operational access, but its Dashboard shows only Summary and Health; Revenue, Cost, Inventory, and Customer are hidden and rejected by the API.
 - **Development** can additionally assign and manage every role, including development.
 
@@ -123,7 +123,9 @@ Shown instead of the app shell whenever there's no active session. Centered card
 
 No password-reset / forgot-password flow exists yet. Sign-up success (no immediate session, i.e. email confirmation required) shows a toast and flips back to the sign-in tab rather than showing a dedicated confirmation screen.
 
-### 3.2 Import ("Import data") — landing section, default on login
+### 3.2 Import ("Import data")
+
+> After login the app opens on **Dashboard** for admin, development and retail-management accounts (`App.tsx` starts with `section = "dashboard"`). A plain `retail` account has no Dashboard in its nav, so it falls back to Import; a wholesale account falls back to the first item in the wholesale nav (its Dashboard).
 
 Page description: "Upload a POS export to preview the cleaned data before saving it."
 
@@ -146,6 +148,7 @@ List of every confirmed import batch, each row clickable to drill into detail.
 - Header: title + description ("Every confirmed upload, with the option to revert a mistaken one.") + a "Refresh" secondary button (top-right).
 - States: loading → 4-row table skeleton; load failure → empty-state illustration + "Couldn't load import history" + Try again button; zero rows → empty-state "No imports yet"; otherwise a data table.
 - Table columns: **Type** (capitalized: sale/inventory/purchase), **Filename** (truncated), **Branch**, **Uploaded by**, **Status** (badge — green "completed", gray otherwise, e.g. "reverted"), **Created** (localized date+time), and a trailing action column with a **Revert** destructive-red button (only shown for completed batches; confirms via a native `window.confirm` dialog, then deletes the batch's data rows server-side while keeping the batch record itself as an audit trail marked reverted).
+- Rows are grouped under a date divider ("Today (25 Sep)", "Yesterday (24 Sep)", then the date), and **Uploaded by** shows a small person icon before the name.
 - Clicking anywhere on a row (other than the Revert button) opens the Import History Detail page for that batch.
 
 ### 3.5 Import History Detail (`ImportHistoryDetailPage`)
@@ -199,40 +202,40 @@ The Import Hub exposes one branch-card view backed by the existing `GET /api/imp
 
 Data-quality issues found in already-imported retail data, backed by `GET /api/warnings`. Retail/admin only — not shown to wholesale accounts (no sale/inventory/purchase data to check).
 
-- Header + description, a 5-tab segmented control (**All** / **Daily check** / **Sale** / **Inventory** / **Purchase**) grouping the backend's individual checks into broader categories, and a sidebar nav badge (red pill, count of all open rows across every check) that updates on load and after any import is confirmed.
+- Header + description, a 4-tab segmented control (**All** / **Inventory** / **Sale** / **Purchase**) grouping the backend's individual checks into broader categories, and a sidebar nav badge (red pill, count of all open rows across every check) that updates on load and after any import is confirmed.
 - Each row: a severity badge (amber "Warning" or red "Critical" — the daily reconciliation mismatch check is the only critical one), Branch, Date (where applicable), Stock Code, Description, and a plain-English note describing the problem (e.g. "Buying Price can't be a negative number (currently -500.00)").
 - A row can expand (chevron toggle) into a bordered **Details** grid of every other field the check returned, with the offending field(s) visually called out; if the row is traceable to one confirmed import, the grid includes a "Source Import" link that jumps to Import History with that batch's row highlighted, ready to revert.
 - Checks covered: bad numeric values on sale/inventory/purchase lines; stock codes sold or purchased with no inventory record yet; and the daily inventory reconciliation (latest snapshot vs. previous snapshot + purchases − sales since then), split into a "recount these" (mismatch) and a separate "verify by hand" (mixed-unit, can't reliably auto-check) group.
 
-### 3.11 Wholesale (`WholesalePlaceholder` in `App.tsx`)
+### 3.11 Wholesale
 
-An empty state, nothing more: an icon, "Wholesale is being rebuilt", and a line saying
-the old screens were taken out while the new workflow is designed. It exists so a
-wholesale account still lands somewhere and the workspace tab does not vanish.
+The wholesale workspace is a full set of screens (Dashboard, Customer Orders, Supplier Vouchers, Shipments, Receiving, Inventory, Finance, Master Data). `App.tsx` still contains a leftover `WholesalePlaceholder` ("Wholesale is being rebuilt") for a `wholesale` section, but no nav item leads to it, so nobody sees it. See [wholesale/](./wholesale/) for each screen.
 
 ### 3.12 Settings (`SettingsPage`)
 
 Business-wide preferences — the same for every account and device. Every role reaches
 the page; only an admin account sees anything editable (the server enforces this too).
 
-Settings are grouped into **five tabs**, using the same pill tab bar as the Dashboard
-and Import Overview. This replaced a single column of ten stacked cards, which had grown
-past the point where anyone could find anything in it:
+Settings are grouped into **seven tabs**, using the same pill tab bar as the Dashboard
+and Import Overview (a wholesale account sees only General, Buying price, Branches and
+Wholesale):
 
 - **General** — Appearance (the `ThemeSwitcher`: a 3-way Light / Dark / System segmented
   control backed by `data-theme` + `prefers-color-scheme`), the Sale/Purchase list
-  default range, and the Buying Price Source column toggle.
-- **Data checks** — how far back the Warning page's Sale and Purchase checks look,
-  independently of each other. Inventory always checks only the latest snapshot, so
-  there is nothing to configure for it.
+  default range (90 days), and the Buying Price Source column toggle.
+- **Reorder Buffer** — target stock buffer months per ABC tier (A/B/C) for replenishment.
+- **Data checks** — the daily check cutoff time (shop close, default 20:00) and how far
+  back the Warning page's Sale and Purchase checks look, independently of each other.
+  Inventory always checks only the latest snapshot, so there is nothing to configure for it.
 - **Buying price** — the three point-in-time pricing windows (purchase lookback,
   inventory lookback, inventory forward fallback).
 - **Branch health** — the Overview score's dimension weights, with a running total, and
   every Early Warning rule's firing point. See `docs/retail/branch_health.md`.
 - **Branches** — per-branch Sale/Inventory date formats. Per branch, not business-wide.
+- **Wholesale** — the MMK exchange rates that prefill new foreign-currency transactions.
 
-The two retail-only tabs (Data checks, Branch health) are hidden from a wholesale
-account, which has no Warning page or retail dashboard.
+The retail-only tabs (Reorder Buffer, Data checks, Branch health) are hidden from a
+wholesale account, which has no Warning page or retail dashboard.
 
 ## 3b. Wording: one name per thing
 
@@ -276,10 +279,10 @@ mapping is one line of vocabulary, not a second meaning.
 ## 5. Cross-cutting UX notes worth flagging to a design collaborator
 
 - **No true drag-and-drop** on the file upload cards despite the dashed-border "drop zone" visual convention — currently click-to-browse only.
-- **No pagination/search/filter** anywhere data tables appear (Import preview, History detail, Data Overview) — every table renders its full result set at once.
+- **Pagination is uneven**: Import History, Data Overview, Purchasing and the import preview tables page their rows; other tables (for example the Warning page) still render their full result set at once. Search/filter exist only on some screens.
 - **Density is very high** by default — every table is a dense spreadsheet grid; there's no "card list" or summarized alternative view.
 - **Sale/Inventory/Purchase are functional first passes, not finished** — same dense unfiltered table pattern as Data Overview, so they're fair game for a real redesign rather than a from-scratch build.
 - **Dark mode has a visible in-app toggle now** — the Settings page's Appearance card (Light/Dark/System), on top of the existing token-level support (`data-theme="dark"` + `prefers-color-scheme`).
 - **Role-based branch context** is a persistent bit of state (shown in the sidebar footer, and drives the branch-picker requirement on import) — any new layout should keep "who am I / which branch am I acting as" visible.
-- **There's still no home/dashboard screen for retail/admin** — first thing a retail/admin user sees after login is the Import upload cards. Wholesale accounts have no Import section at all (their nav has no `import` entry), so they land on the empty Wholesale placeholder instead.
-- **Wholesale is being rebuilt from nothing** — its screens are gone and only an empty placeholder remains. When it returns it will be a second, mostly-disjoint app inside the same shell: its own data model (`diagram/wholesale/erd.mmd`) and its own nav, sharing only the visual language. Treat it as its own flow rather than assuming every screen is reachable from every role.
+- **Landing screen depends on role**: admin/development/retail-management land on the Dashboard, a plain `retail` account on Import, and a wholesale account on the wholesale Dashboard (their nav has no `import` entry).
+- **Wholesale is its own workspace inside the same shell** — its own nav, screens and data model (see `docs/wholesale/`), sharing only the visual language and login. Treat it as its own flow rather than assuming every screen is reachable from every role.

@@ -3,18 +3,12 @@
 
 import { apiBaseUrl, type Session } from "@renderer/lib/auth";
 import { request } from "../shared/apiClient";
-import { type AllocationEvent, type CustomerOrder } from "./customerOrders";
+import { type CustomerOrder } from "./customerOrders";
 import { type WriteOffInput, type WriteOffWire } from "../delivery/shipmentsApi";
 import { PAIRS_PER } from "../shared/units";
 
 export const CUSTOMER_ORDERS_URL = `${apiBaseUrl}/api/wholesale/orders`;
 export const WHOLESALE_FINANCE_CUSTOMERS_URL = `${apiBaseUrl}/api/wholesale/finance/customers`;
-export const ALLOCATION_EVENTS_URL = `${apiBaseUrl}/api/wholesale/orders/allocations`;
-export function allocationEventsFromWire(
-  wires: AllocationEvent[],
-): AllocationEvent[] {
-  return wires;
-}
 export interface NewCustomerOrderInput {
   customer_name: string;
   customer_phone: string;
@@ -100,15 +94,6 @@ export async function updateCustomerOrder(
   return request<CustomerOrder>(session, `/api/wholesale/orders/${orderId}`, {
     method: "PUT",
     body: orderBody(input),
-  });
-}
-
-export async function deleteCustomerOrder(
-  session: Session,
-  orderId: string,
-): Promise<void> {
-  await request<void>(session, `/api/wholesale/orders/${orderId}`, {
-    method: "DELETE",
   });
 }
 

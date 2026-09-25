@@ -26,7 +26,7 @@ import {
  *  that names these, so a version of it older or newer than this screen would otherwise
  *  paint a pill with a dot and no word in it — which tells the reader nothing at all and
  *  looks like a rendering fault rather than a mismatch. */
-export function statusLabel(status: OrderStatus): string {
+function statusLabel(status: OrderStatus): string {
   const known = STATUS_LABELS[status];
   if (known) return known;
   const words = String(status).replace(/_/g, " ").trim();

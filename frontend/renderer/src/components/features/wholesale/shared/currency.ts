@@ -20,15 +20,6 @@ export function isForeignCurrency(code: string): code is ForeignCurrency {
   return (FOREIGN_CURRENCIES as readonly string[]).includes(code);
 }
 
-/** A money field's full state, as carried on an order line / voucher line / receiving
- *  cost. `amount` is always the Kyat figure, the one every total/report reads; the rest
- *  is only present for a non-MMK currency, and is a fixed snapshot once saved. */
-export interface MoneySnapshot {
-  currency_code: string;
-  original_amount: number | null;
-  exchange_rate: number | null;
-}
-
 /** original_amount x exchange_rate, rounded to the nearest Kyat the same way the
  *  server rounds it — two decimal places, half rounds up. A client-side preview only;
  *  the server recomputes this from the same two numbers and is authoritative. */

@@ -5,8 +5,8 @@ ordered from a supplier) → **Shipment** (the freight journey from supplier to 
 cargo company and any number of stops) → **Receiving** (counted into packages at the gate,
 opened into real stock) → allocated and delivered against **Customer Orders**. **Inventory /
 Stock Records** is the read-only lens over all of that; **Finance** is receivables/payables
-over the same data; **Monitoring** and **Reports** are dashboards, currently built but hidden
-from the nav; **Master Data** manages the reference lists (products, suppliers, customers,
+over the same data; **Monitoring** is the wholesale Dashboard (Summary, Revenue, Cost, Customer and Inventory
+tabs) and is in the nav; **Master Data** manages the reference lists (products, suppliers, customers,
 cargo companies, carriers, destinations, receiving gates) everything else picks from.
 
 This mirrors `CLAUDE.md`'s "Wholesale: rebuilt screen by screen, source-first" section, which
@@ -22,7 +22,7 @@ Customer Orders → Inventory) and what the old, deleted workflow looked like. T
 - [Customer Orders](./customer-orders.md) — allocation, delivery, and the caps that keep both honest
 - [Inventory / Stock Records](./inventory.md) — the whole pipeline, including stock that hasn't arrived yet
 - [Finance](./finance.md) — receivables, payables, shipment costs
-- [Monitoring](./monitoring.md) — a live operational status board (hidden from the nav)
+- [Monitoring](./monitoring.md) — the wholesale Dashboard tabs and Excel/CSV export
 - [Master Data](./master-data.md) — products, suppliers, customers, and the other reference lists
 - [Write-offs](./write-offs.md) — the shared "explain the mismatch" mechanism used by Shipments, Vouchers, and Orders
 
@@ -33,8 +33,7 @@ regardless of what unit a screen displays it in. `WholesaleUnit` is `pair` / `se
 with `PAIRS_PER = {pair: 1, set: 6, dozen: 12}` (`app/wholesale/services/units.py`). A line
 usually also carries its own `unit_conversions` JSON snapshot (default the same 1/6/12) rather
 than trusting a global constant, so a rate that's later changed doesn't retroactively reprice
-old lines. `to_pairs`/`from_pairs` convert between a typed quantity and pairs (the latter can
-be fractional — "9 pairs is one and a half sets"); `priced_amount(quantity_pairs, unit, price,
+old lines. `to_pairs` turns a typed quantity into pairs; `priced_amount(quantity_pairs, unit, price,
 conversions)` converts pairs back to a line's own priced unit before multiplying by its
 per-unit price — every total (voucher, order) routes through this so a line quoted per-dozen
 is priced as dozens, not silently as pairs.

@@ -148,7 +148,6 @@ function GeneralFileImportCard({
             General File
           </span>
         }
-        description="Store files unchanged; recognised records are added to the relevant data tables"
       />
 
       <input

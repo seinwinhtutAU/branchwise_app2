@@ -17,7 +17,7 @@ import {
 } from "../shared/api";
 import { type Product } from "../shared/products";
 
-export interface MasterDataCustomer {
+interface MasterDataCustomer {
   name: string;
   phone: string;
   address: string;
@@ -74,7 +74,7 @@ const initialProducts: Product[] = [
   },
 ];
 
-export const SEED_PRODUCTS: Product[] = [...initialProducts];
+const SEED_PRODUCTS: Product[] = [...initialProducts];
 export const STOCK_CODES: string[] = initialProducts.map(
   (product) => product.stock_code,
 );
@@ -138,7 +138,7 @@ export const RECEIVING_GATES = [
   "Anawrahta Rd, Yangon",
 ];
 
-export interface MasterDataState {
+interface MasterDataState {
   products: Product[];
   suppliers: string[];
   customers: MasterDataCustomer[];
@@ -173,7 +173,7 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-export function useMasterData(): MasterDataState {
+function useMasterData(): MasterDataState {
   return useSyncExternalStore(subscribe, () => state);
 }
 
@@ -182,7 +182,7 @@ export function productOf(stockCode: string): Product | undefined {
   return SEED_PRODUCTS.find((product) => product.stock_code === code);
 }
 
-export function hydrateProducts(wires: WholesaleProductWire[]): void {
+function hydrateProducts(wires: WholesaleProductWire[]): void {
   const products = productsFromWire(wires);
   replace(SEED_PRODUCTS, products);
   replace(
@@ -202,23 +202,23 @@ function hydrateNames(
   publish({ [key]: target } as Partial<MasterDataState>);
 }
 
-export function hydrateSuppliers(wires: WholesaleNamedEntityWire[]): void {
+function hydrateSuppliers(wires: WholesaleNamedEntityWire[]): void {
   hydrateNames(SUPPLIER_NAMES, wires, "suppliers");
 }
-export function hydrateCargoCompanies(wires: WholesaleNamedEntityWire[]): void {
+function hydrateCargoCompanies(wires: WholesaleNamedEntityWire[]): void {
   hydrateNames(CARGO_NAMES, wires, "cargoCompanies");
 }
-export function hydrateCarriers(wires: WholesaleNamedEntityWire[]): void {
+function hydrateCarriers(wires: WholesaleNamedEntityWire[]): void {
   hydrateNames(CARRIER_NAMES, wires, "carriers");
 }
-export function hydrateDestinations(wires: WholesaleNamedEntityWire[]): void {
+function hydrateDestinations(wires: WholesaleNamedEntityWire[]): void {
   hydrateNames(DESTINATION_NAMES, wires, "destinations");
 }
-export function hydrateReceivingGates(wires: WholesaleNamedEntityWire[]): void {
+function hydrateReceivingGates(wires: WholesaleNamedEntityWire[]): void {
   hydrateNames(RECEIVING_GATES, wires, "receivingGates");
 }
 
-export function hydrateCustomers(wires: WholesaleCustomerWire[]): void {
+function hydrateCustomers(wires: WholesaleCustomerWire[]): void {
   const customers = wires.map(({ name, phone, address }) => ({
     name,
     phone,

@@ -103,7 +103,6 @@ export default function ZeroSellingPage({
           endpoint="/api/zero-selling/conversion"
           title="Conversion rate"
           description="Sales slips ÷ (sales slips + zero-selling records), grouped by date and branch."
-          icon={<div className="h-3.5 w-5 rounded-sm bg-violet-400 shrink-0" />}
           columns={CONVERSION_COLUMNS}
           filters={dateRangeFilter<ConversionRow>()}
           branchFilter={branchFilter}
@@ -120,7 +119,6 @@ export default function ZeroSellingPage({
           endpoint="/api/zero-selling"
           title="Zero-selling records"
           description="Customer visits that did not become a sales slip."
-          icon={<div className="h-3.5 w-5 rounded-sm bg-violet-400 shrink-0" />}
           columns={ZERO_SELLING_COLUMNS}
           filters={[
             {

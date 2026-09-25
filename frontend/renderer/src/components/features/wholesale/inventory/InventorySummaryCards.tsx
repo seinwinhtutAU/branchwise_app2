@@ -7,7 +7,7 @@ import { formatQty } from "@renderer/components/features/wholesale/shared/shared
 import { cn } from "@renderer/lib/utils";
 import { type StockRecord } from "@renderer/components/features/wholesale/inventory/stock";
 import { inventoryHealth } from "./inventoryUtils";
-import { type InventorySummaryRow, HEALTH_STYLES, type InventoryHealth } from "./types";
+import { type InventorySummaryRow, type InventoryHealth } from "./types";
 
 // ── Summary Card ──────────────────────────────────────────────────────────────
 
@@ -235,5 +235,3 @@ export function InventorySummaryCards({
     </div>
   );
 }
-
-export { HEALTH_STYLES };

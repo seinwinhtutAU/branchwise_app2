@@ -37,7 +37,7 @@ export function PaymentBadge({
   return <DotPill label={PAYMENT_LABELS[status]} className={style.bg} dotClassName={style.dot} />;
 }
 
-export function ThinBar({
+function ThinBar({
   pct,
   label,
   warn = false,

@@ -111,11 +111,11 @@ export function useLoadErrorToast(isError: boolean, label: string): void {
  *  one cache entry instead of fetching it twice. Pages with several distinct queries of
  *  their own shape (the wholesale ones) use their own semantic keys instead; this is
  *  for the many single-URL pages migrating straight off useCachedFetch. */
-export function urlQueryKey(url: string | null): readonly [string, string | null] {
+function urlQueryKey(url: string | null): readonly [string, string | null] {
   return ["fetchJson", url] as const;
 }
 
-export interface UrlQueryResult<T> {
+interface UrlQueryResult<T> {
   data: T | undefined;
   isRefreshing: boolean;
   failed: boolean;
@@ -143,7 +143,7 @@ export function useUrlQuery<T>(
   return { data, isRefreshing: isFetching, failed: isError, reload };
 }
 
-export interface UrlQueriesResult<T> {
+interface UrlQueriesResult<T> {
   /** Keyed by URL, so the caller keeps whatever it already knows about each one. */
   data: Record<string, T>;
   /** URLs with no cached data yet, still fetching for the first time. */

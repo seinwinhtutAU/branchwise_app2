@@ -6,7 +6,6 @@ import pandas as pd
 
 from app.retail.services.import_common import (
     NumericRule,
-    SUPPORTED_EXTENSIONS,
     clean_description,
     clean_text,
     parse_number,

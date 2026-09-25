@@ -91,17 +91,17 @@ export async function updateWholesaleProduct(
   );
 }
 
-export interface NewWholesaleSupplierInput {
+interface NewWholesaleSupplierInput {
   name: string;
   phone: string;
   address: string;
 }
-export interface NewWholesaleCustomerInput {
+interface NewWholesaleCustomerInput {
   name: string;
   phone: string;
   address: string;
 }
-export interface NewWholesaleNamedEntityInput {
+interface NewWholesaleNamedEntityInput {
   name: string;
 }
 

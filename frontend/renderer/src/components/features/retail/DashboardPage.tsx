@@ -105,7 +105,7 @@ export function DashboardPage({
 }: Props): React.JSX.Element {
   // Admin has no fixed branch_id — same convention used everywhere else in the app.
   const isAdmin = profile !== null && profile.branch_id === null;
-  const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? "overview");
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? "summary");
   const [branchId, setBranchId] = useState(
     initialBranchId ?? selectedBranchId ?? "",
   );
@@ -118,7 +118,7 @@ export function DashboardPage({
 
   useEffect(() => {
     if (!showAdvancedTabs && !["summary", "overview"].includes(activeTab)) {
-      setActiveTab("overview");
+      setActiveTab("summary");
     }
   }, [activeTab, showAdvancedTabs]);
 

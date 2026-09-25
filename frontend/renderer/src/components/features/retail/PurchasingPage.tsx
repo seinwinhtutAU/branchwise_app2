@@ -189,9 +189,6 @@ export interface PurchasingItem {
   StockCoverageMonths: number;
   StockStatus: string;
   SuggestedReorderQty: number;
-  RecentPurchaseQty: number;
-  LastPurchaseDate: string | null;
-  PurchaseNote: string;
   TargetBufferMonths?: number;
   Recommendation:
     "Urgent Reorder" | "Reorder" | "Hold / Monitor" | "Review / Do Not Reorder";
@@ -825,19 +822,12 @@ export function PurchasingPage({
                       Selling Price
                     </InfoLabel>
                   </Th>
-                  <Th className="w-40">
-                    <InfoLabel description="Latest purchase information available for this product.">
-                      Recent Purchase Note
-                    </InfoLabel>
-                  </Th>
                 </Tr>
               </Thead>
               <Tbody>
                 {rows.map((row, index) => {
                   const isOutOfStock = row.OnHandQty <= 0;
                   const hasSuggested = row.SuggestedReorderQty > 0;
-                  const hasRecentPurchase =
-                    row.PurchaseNote === "Recent Purchase Exists";
 
                   return (
                     <Tr key={row.StockCode}>
@@ -943,20 +933,6 @@ export function PurchasingPage({
                         {row.SellingPrice != null
                           ? row.SellingPrice.toLocaleString()
                           : "—"}
-                      </Td>
-
-                      {/* Recent Purchase Alert */}
-                      <Td>
-                        {hasRecentPurchase ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20 whitespace-nowrap">
-                              <WarningIcon className="w-3 h-3 text-amber-600 shrink-0" />
-                              Order Pending ({row.RecentPurchaseQty})
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-[11px] text-text-muted">—</span>
-                        )}
                       </Td>
                     </Tr>
                   );

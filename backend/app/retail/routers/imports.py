@@ -30,7 +30,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, defer, joinedload
 from starlette.concurrency import run_in_threadpool
 
-from app.core.security import get_current_app_user, get_current_user
+from app.core.security import get_current_app_user
 from app.core.timestamps import utc_now, utc_timestamp
 from app.db.session import get_db
 from app.models.branch import Branch

@@ -82,16 +82,3 @@ export function useRetailBranchOptions(
   );
 }
 
-// Full list of branches (both retail and wholesale) with id and name, for pickers
-// like the Dashboard that support viewing any branch. Pass `null` to skip fetching.
-export function useAllBranchOptions(
-  session: Session | null,
-): BranchOption[] {
-  return useRememberedBranches<BranchOption[]>(
-    "branches-all",
-    `${apiBaseUrl}/api/branches?kind=all`,
-    session,
-    (branches) => branches,
-    [],
-  );
-}

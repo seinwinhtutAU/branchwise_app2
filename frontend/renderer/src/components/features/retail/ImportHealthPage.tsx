@@ -11,11 +11,7 @@ import { Button } from "@renderer/components/ui/Button";
 import { RefreshButton } from "@renderer/components/ui/RefreshButton";
 import { EmptyState } from "@renderer/components/ui/EmptyState";
 import { Skeleton } from "@renderer/components/ui/Skeleton";
-import {
-  CalendarIcon,
-  CheckIcon,
-  HeartPulseIcon,
-} from "@renderer/components/ui/icons";
+import { CalendarIcon, HeartPulseIcon } from "@renderer/components/ui/icons";
 import {
   ImportHealthDrawer,
   type CompletenessBranch,
@@ -112,14 +108,14 @@ function hasAnyDataRange(freshness: FreshnessRow | null): boolean {
       freshness?.sales_earliest_data_date ?? null,
       freshness?.sales_latest_data_date ?? null,
     ) ||
-      dataRangeLabel(
-        freshness?.inventory_earliest_data_date ?? null,
-        freshness?.inventory_latest_data_date ?? null,
-      ) ||
-      dataRangeLabel(
-        freshness?.purchase_earliest_data_date ?? null,
-        freshness?.purchase_latest_data_date ?? null,
-      ),
+    dataRangeLabel(
+      freshness?.inventory_earliest_data_date ?? null,
+      freshness?.inventory_latest_data_date ?? null,
+    ) ||
+    dataRangeLabel(
+      freshness?.purchase_earliest_data_date ?? null,
+      freshness?.purchase_latest_data_date ?? null,
+    ),
   );
 }
 
@@ -135,10 +131,12 @@ function DataRangeNote({
   const range = dataRangeLabel(earliest, latest);
   if (!range) return null;
   return (
-    <span className="inline-flex items-center gap-1.5 text-[11px]">
+    <>
       <CategoryTag category={category} />
-      <span className="text-brand">{range}</span>
-    </span>
+      <span className="pl-2 text-left text-[11px] text-text-secondary">
+        {range}
+      </span>
+    </>
   );
 }
 
@@ -155,22 +153,33 @@ function branchNeedsAttention(branch: MergedBranch): boolean {
   return salesMissing > 0 || inventoryMissing > 0 || purchaseMissing > 0;
 }
 
+function branchStatus(branch: MergedBranch): "error" | "warning" | "success" {
+  if (branchNeedsAttention(branch)) return "error";
+  if (branch.completeness && countIgnoredDays(branch.completeness) > 0) {
+    return "warning";
+  }
+  return "success";
+}
+
 type IssueCategory = "Sales" | "Inventory" | "Purchase";
 
-// The same Sales/Inventory/Purchase colours the Import tab's own file cards use
-// (ImportConfirmModal's getFileIcon) — so a tag here points back to the same file
-// type wherever else it's shown in the app, rather than inventing a second palette.
+// Keep all import categories on the logo colour so a branch card stays calm and
+// consistent; the category name carries the distinction without adding more colours.
 const CATEGORY_TAG_STYLE: Record<IssueCategory, string> = {
-  Sales: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  Inventory: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
-  Purchase: "bg-pink-500/15 text-pink-600 dark:text-pink-400",
+  Sales: "bg-brand-subtle text-brand border border-brand/15",
+  Inventory: "bg-brand-subtle text-brand border border-brand/15",
+  Purchase: "bg-brand-subtle text-brand border border-brand/15",
 };
 
-function CategoryTag({ category }: { category: IssueCategory }): React.JSX.Element {
+function CategoryTag({
+  category,
+}: {
+  category: IssueCategory;
+}): React.JSX.Element {
   return (
     <span
       className={cn(
-        "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+        "shrink-0 justify-self-start rounded px-1.5 py-0.5 text-left text-[10px] font-semibold uppercase tracking-wide",
         CATEGORY_TAG_STYLE[category],
       )}
     >
@@ -198,11 +207,9 @@ function IssueRow({
   onClick?: () => void;
 }): React.JSX.Element {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md bg-error-subtle/50 px-2.5 py-1.5">
-      <div className="flex min-w-0 items-center gap-2">
-        <CategoryTag category={category} />
-        <span className="text-xs text-text-primary">{text}</span>
-      </div>
+    <div className="col-span-3 grid grid-cols-[subgrid] items-center gap-x-2 rounded-md bg-error-subtle/50 px-2.5 py-1.5">
+      <CategoryTag category={category} />
+      <span className="min-w-0 text-left text-xs text-warning">{text}</span>
       {actionLabel && onClick && (
         <button
           type="button"
@@ -248,76 +255,83 @@ function NeedsAttentionCard({
   const freshness = branch.freshness;
 
   return (
-    <div className="border-b border-border bg-bg-base p-3.5 last:border-b-0">
-      <div className="mb-2 flex items-center justify-between gap-2 border-b border-border/60 pb-2">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-          <h3 className="text-sm font-semibold text-text-primary">
-            {branch.branch_name}
-          </h3>
-          {hasAnyDataRange(freshness) && (
-            <span className="h-3.5 w-px bg-border" aria-hidden="true" />
+    <div className="relative overflow-hidden rounded-lg border border-brand/20 bg-bg-base text-left shadow-xs">
+      <div className="p-4">
+        <div className="mb-3 flex items-start justify-between gap-3 border-b border-border/60 pb-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold text-text-primary">
+              {branch.branch_name}
+            </h3>
+          </div>
+          {ignoredCount > 0 && (
+            <button
+              type="button"
+              onClick={() => onOpenPanel(branch.branch_id, "ignored")}
+              className="shrink-0 text-[11px] text-text-muted hover:text-brand hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded"
+            >
+              {ignoredCount} ignored
+            </button>
           )}
-          <DataRangeNote
-            category="Sales"
-            earliest={freshness?.sales_earliest_data_date ?? null}
-            latest={freshness?.sales_latest_data_date ?? null}
-          />
-          <DataRangeNote
-            category="Inventory"
-            earliest={freshness?.inventory_earliest_data_date ?? null}
-            latest={freshness?.inventory_latest_data_date ?? null}
-          />
-          <DataRangeNote
-            category="Purchase"
-            earliest={freshness?.purchase_earliest_data_date ?? null}
-            latest={freshness?.purchase_latest_data_date ?? null}
-          />
         </div>
-        {ignoredCount > 0 && (
-          <button
-            type="button"
-            onClick={() => onOpenPanel(branch.branch_id, "ignored")}
-            className="shrink-0 text-[11px] text-text-muted hover:text-brand hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded"
-          >
-            {ignoredCount} ignored
-          </button>
+        {hasAnyDataRange(freshness) && (
+          <div className="mb-3 border-b border-border/60 pb-3">
+            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+              Data range
+            </div>
+            <div className="grid grid-cols-[max-content_1fr] items-center gap-y-1.5">
+              <DataRangeNote
+                category="Sales"
+                earliest={freshness?.sales_earliest_data_date ?? null}
+                latest={freshness?.sales_latest_data_date ?? null}
+              />
+              <DataRangeNote
+                category="Inventory"
+                earliest={freshness?.inventory_earliest_data_date ?? null}
+                latest={freshness?.inventory_latest_data_date ?? null}
+              />
+              <DataRangeNote
+                category="Purchase"
+                earliest={freshness?.purchase_earliest_data_date ?? null}
+                latest={freshness?.purchase_latest_data_date ?? null}
+              />
+            </div>
+          </div>
         )}
-      </div>
-      <div className="flex flex-col gap-1.5">
-        {salesMissing > 0 && (
-          <IssueRow
-            category="Sales"
-            text={`${salesMissing} day${salesMissing === 1 ? "" : "s"} of sales data ${salesMissing === 1 ? "hasn't" : "haven't"} been imported yet.`}
-            actionLabel="Fix"
-            isActive={activePanel === "sales"}
-            onClick={() => onOpenPanel(branch.branch_id, "sales")}
-          />
-        )}
-        {inventoryMissing > 0 && (
-          <IssueRow
-            category="Inventory"
-            text={`${inventoryMissing} day${inventoryMissing === 1 ? "" : "s"} of inventory counts ${inventoryMissing === 1 ? "hasn't" : "haven't"} been imported yet.`}
-            actionLabel="Fix"
-            isActive={activePanel === "inventory"}
-            onClick={() => onOpenPanel(branch.branch_id, "inventory")}
-          />
-        )}
-        {firstGap && (integrity?.missing_number_count ?? 0) > 0 && (
-          <IssueRow
-            category="Purchase"
-            actionLabel="View"
-            isActive={activePanel === "purchase"}
-            onClick={() => onOpenPanel(branch.branch_id, "purchase")}
-            text={`${integrity.missing_number_count} purchase number${integrity.missing_number_count === 1 ? "" : "s"} ${integrity.missing_number_count === 1 ? "is" : "are"} missing, between ${firstGap.start_number} and ${firstGap.end_number}.`}
-          />
-        )}
+        <div className="grid grid-cols-[max-content_minmax(0,1fr)_max-content] gap-y-1.5">
+          {salesMissing > 0 && (
+            <IssueRow
+              category="Sales"
+              text={`${salesMissing} missing sales day${salesMissing === 1 ? "" : "s"}`}
+              actionLabel="Check missing"
+              isActive={activePanel === "sales"}
+              onClick={() => onOpenPanel(branch.branch_id, "sales")}
+            />
+          )}
+          {inventoryMissing > 0 && (
+            <IssueRow
+              category="Inventory"
+              text={`${inventoryMissing} missing inventory day${inventoryMissing === 1 ? "" : "s"}`}
+              actionLabel="Check missing"
+              isActive={activePanel === "inventory"}
+              onClick={() => onOpenPanel(branch.branch_id, "inventory")}
+            />
+          )}
+          {firstGap && (integrity?.missing_number_count ?? 0) > 0 && (
+            <IssueRow
+              category="Purchase"
+              actionLabel="Check missing"
+              isActive={activePanel === "purchase"}
+              onClick={() => onOpenPanel(branch.branch_id, "purchase")}
+              text={`${integrity.missing_number_count} missing purchase number${integrity.missing_number_count === 1 ? "" : "s"}`}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-/** A branch with nothing to do — named, not detailed. There's nothing here worth
- * spending a reader's attention on, so it gets one quiet line rather than a card. */
+/** A branch with no open import issue, shown as a compact status card. */
 function UpToDateRow({
   branch,
   onOpenIgnored,
@@ -329,44 +343,56 @@ function UpToDateRow({
     ? countIgnoredDays(branch.completeness)
     : 0;
   const freshness = branch.freshness;
+  const status = branchStatus(branch);
+  const statusLabel =
+    status === "warning" ? "Review ignored days" : "Up to date";
   return (
-    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-border/60 px-3.5 py-2 last:border-b-0">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <div className="flex items-center gap-2 text-xs text-text-secondary">
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
-          <span className="font-medium text-text-primary">
-            {branch.branch_name}
-          </span>
-          {hasAnyDataRange(freshness) && (
-            <span className="h-3.5 w-px bg-border" aria-hidden="true" />
+    <div className="relative overflow-hidden rounded-lg border border-brand/20 bg-bg-base text-left shadow-xs">
+      <div className="p-4">
+        <div className="mb-3 flex items-start justify-between gap-3 border-b border-border/60 pb-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold text-text-primary">
+              {branch.branch_name}
+            </h3>
+            <Badge variant={status} dot>
+              {statusLabel}
+            </Badge>
+          </div>
+          {ignoredCount > 0 && (
+            <button
+              type="button"
+              onClick={onOpenIgnored}
+              className="shrink-0 text-[11px] text-text-muted hover:text-brand hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded"
+            >
+              {ignoredCount} ignored
+            </button>
           )}
-          <DataRangeNote
-            category="Sales"
-            earliest={freshness?.sales_earliest_data_date ?? null}
-            latest={freshness?.sales_latest_data_date ?? null}
-          />
-          <DataRangeNote
-            category="Inventory"
-            earliest={freshness?.inventory_earliest_data_date ?? null}
-            latest={freshness?.inventory_latest_data_date ?? null}
-          />
-          <DataRangeNote
-            category="Purchase"
-            earliest={freshness?.purchase_earliest_data_date ?? null}
-            latest={freshness?.purchase_latest_data_date ?? null}
-          />
-          <span className="text-text-muted">— up to date</span>
         </div>
+        {hasAnyDataRange(freshness) && (
+          <>
+            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+              Data range
+            </div>
+            <div className="grid grid-cols-[max-content_1fr] items-center gap-y-1.5">
+              <DataRangeNote
+                category="Sales"
+                earliest={freshness?.sales_earliest_data_date ?? null}
+                latest={freshness?.sales_latest_data_date ?? null}
+              />
+              <DataRangeNote
+                category="Inventory"
+                earliest={freshness?.inventory_earliest_data_date ?? null}
+                latest={freshness?.inventory_latest_data_date ?? null}
+              />
+              <DataRangeNote
+                category="Purchase"
+                earliest={freshness?.purchase_earliest_data_date ?? null}
+                latest={freshness?.purchase_latest_data_date ?? null}
+              />
+            </div>
+          </>
+        )}
       </div>
-      {ignoredCount > 0 && (
-        <button
-          type="button"
-          onClick={onOpenIgnored}
-          className="shrink-0 text-[11px] text-text-muted hover:text-brand hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded"
-        >
-          {ignoredCount} ignored
-        </button>
-      )}
     </div>
   );
 }
@@ -529,18 +555,6 @@ export default function ImportHealthPage({
               <span className="hidden text-xs text-text-muted sm:inline">
                 Which branches are missing sales, inventory or purchase data.
               </span>
-              {!isLoading &&
-                !failed &&
-                (needingAttention.length > 0 ? (
-                  <Badge variant="error" dot>
-                    {needingAttention.length} branch
-                    {needingAttention.length === 1 ? "" : "es"} need attention
-                  </Badge>
-                ) : (
-                  <Badge variant="success" dot>
-                    All branches are up to date
-                  </Badge>
-                ))}
             </div>
             <RefreshButton onClick={reloadAll} refreshing={isRefreshing} />
           </div>
@@ -575,48 +589,29 @@ export default function ImportHealthPage({
         )}
 
         {!isLoading && !failed && branches.length > 0 && (
-          <div className="max-h-[calc(100vh-15rem)] overflow-y-auto">
-            {needingAttention.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
-                <CheckIcon className="h-6 w-6 text-success" />
-                <p className="text-sm font-medium text-text-primary">
-                  Everything's imported.
-                </p>
-                <p className="text-xs text-text-muted">
-                  No sales, inventory or purchase data is missing right now.
-                </p>
-              </div>
-            ) : (
-              needingAttention.map((branch) => (
-                <NeedsAttentionCard
-                  key={branch.branch_id}
-                  branch={branch}
-                  activePanel={
-                    drawerTarget?.branchId === branch.branch_id
-                      ? drawerTarget.panel
-                      : null
-                  }
-                  onOpenPanel={openPanel}
-                />
-              ))
-            )}
-
-            {upToDate.length > 0 && (
-              <div>
-                {needingAttention.length > 0 && (
-                  <div className="bg-bg-subtle px-3.5 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
-                    Up to date
-                  </div>
-                )}
-                {upToDate.map((branch) => (
+          <div className="max-h-[calc(100vh-15rem)] overflow-y-auto p-3">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {[...needingAttention, ...upToDate].map((branch) =>
+                branchNeedsAttention(branch) ? (
+                  <NeedsAttentionCard
+                    key={branch.branch_id}
+                    branch={branch}
+                    activePanel={
+                      drawerTarget?.branchId === branch.branch_id
+                        ? drawerTarget.panel
+                        : null
+                    }
+                    onOpenPanel={openPanel}
+                  />
+                ) : (
                   <UpToDateRow
                     key={branch.branch_id}
                     branch={branch}
                     onOpenIgnored={() => openPanel(branch.branch_id, "ignored")}
                   />
-                ))}
-              </div>
-            )}
+                ),
+              )}
+            </div>
           </div>
         )}
       </div>

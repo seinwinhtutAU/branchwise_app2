@@ -5,7 +5,7 @@ import { RefreshIcon } from "./icons";
 type Variant = "primary" | "secondary" | "ghost";
 type Size = "sm" | "md" | "lg";
 
-export interface RefreshButtonProps
+interface RefreshButtonProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
   /** True while a network fetch or refetch is in flight. Spins the refresh icon and disables clicks. */
   refreshing?: boolean;

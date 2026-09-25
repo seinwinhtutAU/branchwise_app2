@@ -107,9 +107,7 @@ def _check_no_duplicate_stock_codes(lines) -> None:
 from app.wholesale.services.audit import record_audit_log
 from app.wholesale.services.lifecycle import (
     OrderAction,
-    OrderStatus,
     assert_can_perform_order_action,
-    get_allowed_order_actions,
 )
 
 

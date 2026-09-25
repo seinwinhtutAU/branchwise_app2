@@ -33,7 +33,7 @@ import { SEED_SHIPMENTS, type Shipment } from "../delivery/shipments";
 import { SEED_RECEIVINGS, type Receiving } from "../receiving/receivings";
 import { SEED_OUTGOING, type StockMovement } from "../inventory/stock";
 
-export interface WholesaleState {
+interface WholesaleState {
   orders: CustomerOrder[];
   vouchers: SupplierVoucher[];
   shipments: Shipment[];

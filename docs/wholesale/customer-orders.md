@@ -192,7 +192,7 @@ Visibility: a branch-scoped account always sees only its own branch; an admin wi
   `orderAmount`, `orderBalance`, `orderAllocatedPairs`, `needsAllocation`, `nextAction`), and
   `SEED_ORDERS` (offline/demo fallback).
 - **`customerOrdersApi.ts`** — the write calls: `createCustomerOrder`, `updateCustomerOrder`,
-  `cancelCustomerOrder`, `deleteCustomerOrder`, `updateCustomerOrderLineAllocation`,
+  `cancelCustomerOrder`, `updateCustomerOrderLineAllocation`,
   `writeOffCustomerOrderLine`, `addCustomerOrderPayment`, `removeCustomerOrderPayment`.
 - **`orderColorUtils.ts`** — the client-side mirror of the server's allocation/delivery
   validation described above.

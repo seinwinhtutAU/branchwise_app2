@@ -9,8 +9,6 @@ from dataclasses import dataclass, field
 
 from app.wholesale.services.shared import share_pct
 
-RECEIVING_STATUSES = ["recorded", "checking", "checked", "issue"]
-
 
 @dataclass
 class ItemLike:

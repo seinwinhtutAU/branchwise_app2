@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { cn } from "@renderer/lib/utils";
 import { ChevronDownIcon, ChevronUpIcon } from "@renderer/components/ui/icons";
 
-export interface CollapsibleKpiSummaryProps {
+interface CollapsibleKpiSummaryProps {
   children: ReactNode;
   storageKey?: string;
   defaultExpanded?: boolean;

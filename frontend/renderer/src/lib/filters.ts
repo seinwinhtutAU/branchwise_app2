@@ -1,4 +1,4 @@
-export interface DateRange {
+interface DateRange {
   from: string;
   to: string;
 }

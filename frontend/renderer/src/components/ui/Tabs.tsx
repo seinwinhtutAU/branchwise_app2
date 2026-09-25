@@ -9,7 +9,7 @@ export interface TabItem<T extends string = string> {
   badge?: ReactNode;
 }
 
-export interface TabBarProps<T extends string = string> {
+interface TabBarProps<T extends string = string> {
   tabs: readonly TabItem<T>[] | TabItem<T>[];
   activeTab: T;
   onSelect: (tabId: T) => void;

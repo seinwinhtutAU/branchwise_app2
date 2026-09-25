@@ -264,6 +264,24 @@ Five simple reference tables share one shape (`id`, `name`, `active`, timestamps
 here is soft (`active = False`); nothing is ever hard-deleted. See
 [wholesale/master-data.md](./wholesale/master-data.md).
 
+## `app_settings`
+
+A key/value store for business-wide settings: one row per key (`key` string PK, `value` JSON), so a new setting is added by giving it an entry in `DEFAULT_SETTINGS` (`app/models/app_settings.py`) rather than a migration. A key with no saved row returns its default. Covers the pricing windows, theme, Warning/list windows, the daily check cutoff time, Branch Health weights, the ABC reorder buffer months and the wholesale exchange rates.
+
+## `branch_closures`
+
+Marks a day a branch was genuinely closed, so the Import Health missing-day scan stops listing it. One row per (`branch_id`, `closure_type` — sales or inventory only, `closure_date`); `note` is optional. Reopening a mistaken mark nulls `closed_at`/`closed_by` instead of deleting the row.
+
+## `daily_cost_records`, `salary_records`, `zero_selling_records`
+
+Three logs read out of "general" file uploads (see [data-import.md](./retail/data-import.md#general-file-upload)). Each row carries `import_batch_id` (FK → import_batches), a nullable `branch_id` (FK → branches, resolved from the branch name in the file) and the original `branch` name, `source_sheet`, and for the row-based two, `source_row`.
+
+- `daily_cost_records`: one row per date sheet — `cost_date`, and a text list plus a `Numeric` total for each of `usage`, `digital_income`, `return_items` and `capital_expenditure`. Unique per (`import_batch_id`, `source_sheet`).
+- `salary_records`: one employee per row — `name`, `salary`, nullable `bonus`.
+- `zero_selling_records`: a customer visit that did not become a sale slip — `sale_date`, `sale_time`, `category`, `reason`.
+
+Reverting the batch that created them is how they are removed.
+
 ## `import_batches`
 
 One row per confirmed upload (regardless of type) — what makes import history and revert possible. See [data-import.md](./retail/data-import.md#import-history--revert) for the full behavior.
@@ -271,7 +289,7 @@ One row per confirmed upload (regardless of type) — what makes import history 
 | column       | type               | notes                                                                                                                                                                                                                                                                              |
 | ------------ | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | id                   | uuid               | PK                                                                                                                                                                                                                                                                                 |
-| import_type          | enum               | `sales` \| `inventory` \| `purchase`                                                                                                                                                                                                                                               |
+| import_type          | enum               | `sales` \| `inventory` \| `purchase` \| `general` (a file kept as uploaded; see [data-import.md](./retail/data-import.md#general-file-upload))                                                                                                                                                                                                                                               |
 | branch_id            | uuid, nullable     | FK → branches                                                                                                                                                                                                                                                                      |
 | uploaded_by          | uuid, nullable     | FK → users. Nulled out (not cascade-deleted) if the uploading account is later deleted — see [auth-and-accounts.md](./auth-and-accounts.md)                                                                                                                                      |
 | filename             | string, nullable   |                                                                                                                                                                                                                                                                                    |
@@ -294,6 +312,8 @@ Branch ──< Sale ──< SaleLine >── Product
 Branch ──< Purchase ──< PurchaseLine >── Product
 Branch ──< StockLevel >── Product
 Branch ──< ImportBatch >── Sale / Purchase / StockLevel   (one batch, many rows of one type)
+ImportBatch ──< DailyCostRecord / SalaryRecord / ZeroSellingRecord   (general-file uploads)
+Branch ──< BranchClosure
 
 Branch ──< Shipment ──< ShipmentLeg
 Shipment ──< Receiving (via shipment_id) ──< ReceivingPackage ──< ReceivingItem

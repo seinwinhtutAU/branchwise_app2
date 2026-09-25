@@ -44,7 +44,7 @@ export const SHIPMENTS_URL = `${apiBaseUrl}/api/wholesale/shipments`;
 /** The wire shape uses total_quantity_pairs (what the server actually stores); the screens still
  *  say total_quantity_pairs (what it was written in), converted here at the one seam rather than
  *  renamed through every call site. */
-export function shipmentFromWire(wire: ShipmentWire): Shipment {
+function shipmentFromWire(wire: ShipmentWire): Shipment {
   return {
     shipment_id: wire.shipment_id,
     shipment_no: wire.shipment_no,
@@ -219,7 +219,7 @@ export async function writeOffShipment(
   );
 }
 
-export interface SplitShipmentInput {
+interface SplitShipmentInput {
   packages: number;
   /** Real pairs, already converted — same convention as NewShipmentInput.total_quantity_pairs.
    *  Optional: what's actually inside a box isn't known for certain until it's opened
@@ -235,7 +235,7 @@ export interface SplitShipmentInput {
   split_leg_order?: number;
 }
 
-export interface SplitShipmentResult {
+interface SplitShipmentResult {
   original: Shipment;
   newShipment: Shipment;
 }

@@ -28,7 +28,6 @@ from app.wholesale.services.receivings import (
     receiving_status,
 )
 from app.wholesale.services.references import allocate_reference, retry_on_reference_collision
-from app.wholesale.services.units import from_pairs, to_pairs
 from app.wholesale.services.shipments_service import get_shipment
 
 _LOAD_OPTIONS = (

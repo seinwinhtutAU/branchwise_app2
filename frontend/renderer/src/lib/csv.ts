@@ -2,7 +2,7 @@ function escapeCsvField(value: string): string {
   return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
-export function toCsv(headers: string[], rows: string[][]): string {
+function toCsv(headers: string[], rows: string[][]): string {
   return [headers, ...rows]
     .map((row) => row.map(escapeCsvField).join(","))
     .join("\r\n");

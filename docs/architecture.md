@@ -4,7 +4,7 @@
 
 ```
 ┌─────────────────────────────┐         ┌──────────────────────────┐
-│  Electron app                │         │  Supabase                │
+│  Electron app                │         │  Neon                    │
 │  ┌────────────┐  ┌─────────┐ │  HTTPS  │  ┌────────┐  ┌─────────┐ │
 │  │  main       │  │renderer │─┼────────▶│  │  Auth  │  │Postgres │ │
 │  │ (Node)      │  │ (React) │ │         │  └────────┘  └─────────┘ │
@@ -30,17 +30,19 @@ frontend/
   preload/         contextBridge — exposes a safe API surface to the renderer
   renderer/         React app (Vite)
     src/
-      lib/          Supabase client setup, theme, warning-window preference
-      components/   one component per screen (import, history, warnings, settings, ...)
+      lib/          Neon Auth session/client, network + cache helpers, theme, settings
+      components/   features/{shell,chat,settings,retail,wholesale,dashboard}, ui/ primitives
 backend/
   app/
     main.py         FastAPI app factory, mounts routers
     config.py       Settings (env vars)
     core/security.py   JWT verification, app-user resolution
     db/             SQLAlchemy engine/session
-    models/         ORM models (one file per entity)
-    routers/        HTTP endpoints, one file per resource
-    services/        Business logic — CSV parsing/cleaning, DB persistence
+    models/         shared ORM models (Branch, User, AppSetting)
+    routers/        shared endpoints (auth, users, branches, settings, health)
+    services/       shared services (branches, settings, storage)
+    retail/         {routers,services,models} — POS import, dashboard, alerts, warnings
+    wholesale/      {routers,services,models,schemas} — shipments, receiving, vouchers, orders, ...
   alembic/          Migrations
   scripts/          Standalone CLI scripts (CSV cleaning without the app)
   tests/
@@ -69,7 +71,7 @@ from opened receiving packages, and all stock/order figures are derived on reque
 
 ## Frontend structure
 
-`App.tsx` handles auth state (sign in/up, demo login buttons in dev) and, once signed in, renders a role-dependent sidebar nav (`AppShell`) plus one component per section. Retail/admin accounts see Import, Import History, Import Overview, Data Overview, Sale, Inventory, Purchase, and Warning; wholesale accounts see Customer Orders, Supplier Vouchers, Delivery, Receiving, and Inventory; admin sees both sets. Every role also sees Settings. Sign-out clears both the in-memory and persisted GET cache before another account can see a prior branch's pages.
+`App.tsx` handles auth state (sign in/up, demo login buttons in dev) and, once signed in, renders a role-dependent sidebar nav (`AppShell`) plus one component per section. The nav lists live in `App.tsx` (`RETAIL_NAV_ITEMS`, `WHOLESALE_NAV_ITEMS`, `RETAIL_ROLE_NAV_ITEMS`). Admin, development and retail-management accounts see the retail nav — Dashboard, Business Alerts, Import (with Import History and Import Health under it), Data Overview, Reorder Items and Data Quality (the Warning page) — and wholesale accounts see Dashboard, Customer Orders, Supplier Vouchers, Shipment, Receiving, Inventory, Finance and Master Data; admin and development switch between the two workspaces. A plain `retail` account sees only Import and Import History. Every role also sees Settings. Sign-out clears both the in-memory and persisted GET cache before another account can see a prior branch's pages.
 
 The retail Import section renders `FileImportCard` — one per import type (sales/inventory/purchase), parameterized by `endpoint` and `label` — which hands off to `ImportReviewPage` for the actual upload → preview → confirm flow, including the branch picker shown when the signed-in account has no assigned branch.
 

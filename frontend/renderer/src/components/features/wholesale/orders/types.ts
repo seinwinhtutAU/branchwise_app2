@@ -95,7 +95,7 @@ export function nextOrderNo(orders: CustomerOrder[]): string {
 
 // ── Detail Schemas ──────────────────────────────────────────────────────────
 
-export const customerOrderDetailLineSchema = z.object({
+const customerOrderDetailLineSchema = z.object({
   order_line_id: z.string(),
   stock_code: z.string(),
   description: z.string(),
@@ -165,7 +165,7 @@ export interface DraftLine {
   exchange_rate: string;
 }
 
-export const draftLineSchema = z
+const draftLineSchema = z
   .object({
     stock_code: z.string(),
     description: z.string(),
